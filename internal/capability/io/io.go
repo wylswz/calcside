@@ -116,13 +116,13 @@ func (factory) Validate(raw json.RawMessage, limits capability.ServerLimits) (an
 	return cfg, nil
 }
 
-func (factory) New(cfgAny any, gate *capability.Gate) (starlark.Value, io.Closer, error) {
+func (factory) New(cfgAny any, env capability.InstanceEnv) (starlark.Value, io.Closer, error) {
 	cfg, ok := cfgAny.(Config)
 	if !ok {
 		return nil, nil, fmt.Errorf("io: bad config type %T", cfgAny)
 	}
 	buf := NewBuffer(cfg.MaxOutputBytes)
-	return bindModule(buf, gate), &Closer{B: buf}, nil
+	return bindModule(buf, env.Gate), &Closer{B: buf}, nil
 }
 
 // Closer exposes the output Buffer to the engine.

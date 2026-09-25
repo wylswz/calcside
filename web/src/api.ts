@@ -130,4 +130,13 @@ export interface APIKey {
 export interface AuthConfig {
   google: boolean
   dev_login: boolean
+  secrets: boolean
+}
+
+export interface Secret {
+  id: string
+  name: string
+  allowed_domains: string[]
+  created_at: string
+  updated_at: string
 }

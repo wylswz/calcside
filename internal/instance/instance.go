@@ -19,7 +19,9 @@ import (
 	"calcside/internal/capability"
 	capio "calcside/internal/capability/io"
 	"calcside/internal/engine"
+	"calcside/internal/hostmatch"
 	"calcside/internal/policy"
+	"calcside/internal/secrets"
 	"calcside/internal/store"
 )
 
@@ -29,6 +31,17 @@ type Spec struct {
 	Labels       map[string]string          `json:"labels"`
 	Capabilities map[string]json.RawMessage `json:"capabilities"`
 	Limits       Limits                     `json:"limits"`
+	Env          map[string]string          `json:"env"`
+	Secrets      map[string]SecretSpec      `json:"secrets"`
+}
+
+// SecretSpec is one entry of spec.secrets: either a vault ref (name of a
+// vault secret owned by the instance owner) or an inline value.
+type SecretSpec struct {
+	Ref            string   `json:"ref,omitempty"`
+	Value          string   `json:"value,omitempty"`
+	AllowedDomains []string `json:"allowed_domains,omitempty"`
+	Inline         bool     `json:"inline,omitempty"`
 }
 
 // Limits requested per instance (clamped by server limits).
@@ -43,6 +56,9 @@ const (
 	defaultExecTimeoutMs = 30000
 	defaultMaxSteps      = 10000000
 	defaultMaxOutput     = 1 << 20
+
+	maxEnvEntries   = 64
+	maxEnvValueByte = 4 << 10
 )
 
 // ServerLimits bound what specs may request.
@@ -56,6 +72,7 @@ type ServerLimits struct {
 	MaxOutputBytes      int64
 	NetAllowPrivate     bool
 	MaxNetResponseBytes int64
+	SecretsAllowHTTP    bool
 }
 
 // Snapshotter persists instance state (placeholder wiring: only Delete is
@@ -100,6 +117,7 @@ type inst struct {
 	limits   Limits
 	userID   string
 	userMail string
+	secrets  *secrets.Set
 	metaMu   sync.Mutex // guards meta timestamp/status updates
 }
 
@@ -113,6 +131,7 @@ type Manager struct {
 	evalTimeout time.Duration
 	limits      ServerLimits
 	snap        Snapshotter
+	cipher      *secrets.Cipher // nil = vault secrets disabled
 	now         func() time.Time
 
 	mu    sync.Mutex
@@ -125,7 +144,7 @@ type Manager struct {
 
 // New builds the manager. MarkRunningAsLost must be invoked by caller after
 // store recovery decisions are made.
-func New(st store.Store, eng *engine.Engine, reg *capability.Registry, obs capability.Observer, policyDir string, evalTimeout time.Duration, limits ServerLimits, snap Snapshotter, now func() time.Time, reapInterval time.Duration) *Manager {
+func New(st store.Store, eng *engine.Engine, reg *capability.Registry, obs capability.Observer, policyDir string, evalTimeout time.Duration, limits ServerLimits, snap Snapshotter, cipher *secrets.Cipher, now func() time.Time, reapInterval time.Duration) *Manager {
 	if snap == nil {
 		snap = NoopSnapshotter{}
 	}
@@ -137,7 +156,7 @@ func New(st store.Store, eng *engine.Engine, reg *capability.Registry, obs capab
 	}
 	m := &Manager{
 		st: st, eng: eng, reg: reg, obs: obs, policyDir: policyDir,
-		evalTimeout: evalTimeout, limits: limits, snap: snap, now: now,
+		evalTimeout: evalTimeout, limits: limits, snap: snap, cipher: cipher, now: now,
 		insts: map[string]*inst{}, reapInterval: reapInterval,
 		stop: make(chan struct{}),
 	}
@@ -229,6 +248,7 @@ func (m *Manager) ParseSpec(raw []byte) (*Spec, map[string]any, error) {
 		MaxOutputBytes:      m.limits.MaxOutputBytes,
 		NetAllowPrivate:     m.limits.NetAllowPrivate,
 		MaxNetResponseBytes: m.limits.MaxNetResponseBytes,
+		SecretsAllowHTTP:    m.limits.SecretsAllowHTTP,
 	}
 	typed := map[string]any{}
 	for name, rawCfg := range spec.Capabilities {
@@ -242,7 +262,118 @@ func (m *Manager) ParseSpec(raw []byte) (*Spec, map[string]any, error) {
 		}
 		typed[name] = cfg
 	}
+	// env validation
+	if len(spec.Env) > maxEnvEntries {
+		return nil, nil, fmt.Errorf("env: more than %d entries", maxEnvEntries)
+	}
+	for k, v := range spec.Env {
+		if !secrets.ValidName(k) {
+			return nil, nil, fmt.Errorf("env: invalid name %q", k)
+		}
+		if len(v) > maxEnvValueByte {
+			return nil, nil, fmt.Errorf("env: value for %s exceeds %d bytes", k, maxEnvValueByte)
+		}
+	}
+	// secret name validation (resolution happens in Create, needs user ctx)
+	for name := range spec.Secrets {
+		if !secrets.ValidName(name) {
+			return nil, nil, fmt.Errorf("secrets: invalid name %q", name)
+		}
+		if _, isEnv := spec.Env[name]; isEnv {
+			return nil, nil, fmt.Errorf("secrets: name %q also used by env", name)
+		}
+	}
 	return &spec, typed, nil
+}
+
+// resolveSecrets decrypts vault refs / accepts inline values into a
+// secrets.Set, and returns the sanitized spec.secrets map for persistence
+// (inline values stripped, refs carrying effective allowed_domains).
+func (m *Manager) resolveSecrets(ctx context.Context, userID string, spec *Spec) (*secrets.Set, map[string]SecretSpec, error) {
+	set := secrets.NewSet()
+	sanitized := map[string]SecretSpec{}
+	for name, ss := range spec.Secrets {
+		if ss.Ref != "" && ss.Value != "" {
+			return nil, nil, fmt.Errorf("secret %s: exactly one of ref or value", name)
+		}
+		var value []byte
+		var rules []hostmatch.Rule
+		var effDomains []string
+		if ss.Ref != "" {
+			if m.cipher == nil {
+				return nil, nil, fmt.Errorf("secret %s: vault secrets disabled (no --secret-key)", name)
+			}
+			rec, err := m.st.GetSecretByName(ctx, userID, ss.Ref)
+			if err != nil {
+				return nil, nil, fmt.Errorf("secret %s: unknown vault ref %q", name, ss.Ref)
+			}
+			value, err = m.cipher.Open(rec.Ciphertext, userID+"/"+rec.Name)
+			if err != nil {
+				return nil, nil, fmt.Errorf("secret %s: vault decrypt failed", name)
+			}
+			vaultRules, err := hostmatch.ParseAll(rec.AllowedDomains)
+			if err != nil {
+				return nil, nil, fmt.Errorf("secret %s: bad vault domains", name)
+			}
+			if len(ss.AllowedDomains) == 0 {
+				rules = vaultRules
+				effDomains = rec.AllowedDomains
+			} else {
+				narrowed, err := hostmatch.ParseAll(ss.AllowedDomains)
+				if err != nil {
+					return nil, nil, fmt.Errorf("secret %s: %w", name, err)
+				}
+				for _, nr := range narrowed {
+					covered := false
+					for _, vr := range vaultRules {
+						if hostmatch.Covers(vr, nr) {
+							covered = true
+							break
+						}
+					}
+					if !covered {
+						entry := nr.Host
+						if nr.Port != "" {
+							entry += ":" + nr.Port
+						}
+						return nil, nil, fmt.Errorf("secret %s: domain %q not covered by vault allowlist", name, entry)
+					}
+				}
+				rules = narrowed
+				effDomains = ss.AllowedDomains
+			}
+			sanitized[name] = SecretSpec{Ref: ss.Ref, AllowedDomains: effDomains}
+		} else if ss.Value != "" {
+			if len(ss.Value) > secrets.MaxValueBytes {
+				return nil, nil, fmt.Errorf("secret %s: value exceeds %d bytes", name, secrets.MaxValueBytes)
+			}
+			var err error
+			rules, err = secrets.ValidateDomains(ss.AllowedDomains)
+			if err != nil {
+				return nil, nil, fmt.Errorf("secret %s: %w", name, err)
+			}
+			value = []byte(ss.Value)
+			sanitized[name] = SecretSpec{Inline: true, AllowedDomains: ss.AllowedDomains}
+		} else {
+			return nil, nil, fmt.Errorf("secret %s: exactly one of ref or value", name)
+		}
+		set.Add(name, value, rules)
+	}
+	return set, sanitized, nil
+}
+
+// sanitizeSpec returns the spec JSON persisted for the instance: env and
+// structure intact, inline secret values replaced by {"inline": true}.
+func sanitizeSpec(spec *Spec, sanitized map[string]SecretSpec) json.RawMessage {
+	out := *spec
+	if len(spec.Secrets) > 0 {
+		out.Secrets = sanitized
+	}
+	b, err := json.Marshal(&out)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return b
 }
 
 // Create instantiates bindings + policies and registers the instance.
@@ -280,11 +411,19 @@ func (m *Manager) Create(ctx context.Context, user *store.User, rawSpec []byte) 
 		return nil, err
 	}
 
+	// Resolve secrets (decrypt vault refs / accept inline values) at
+	// creation — snapshot semantics like policies. The persisted spec is
+	// sanitized: inline values are stripped.
+	secSet, sanitizedSecrets, err := m.resolveSecrets(ctx, user.ID, spec)
+	if err != nil {
+		return nil, err
+	}
+
 	now := m.now().UTC()
 	meta := &store.Instance{
 		ID:           store.NewID(store.PrefixInstance),
 		UserID:       user.ID,
-		Spec:         rawSpec,
+		Spec:         sanitizeSpec(spec, sanitizedSecrets),
 		Labels:       spec.Labels,
 		Status:       store.StatusRunning,
 		CreatedAt:    now,
@@ -306,6 +445,16 @@ func (m *Manager) Create(ctx context.Context, user *store.User, rawSpec []byte) 
 		"json": starjson.Module,
 		"math": math.Module,
 	}
+
+	// env: frozen dict (env.get / env["X"] / env.keys()); secrets: names
+	// only. Neither goes through the gate.
+	envDict := starlark.NewDict(len(spec.Env))
+	for k, v := range spec.Env {
+		_ = envDict.SetKey(starlark.String(k), starlark.String(v))
+	}
+	envDict.Freeze()
+	predeclared["env"] = envDict
+	predeclared["secrets"] = secretsStruct{set: secSet}
 	var closers []io.Closer
 	var outBuf *capio.Buffer
 	var vfs interface{ Files() map[string][]byte }
@@ -333,7 +482,7 @@ func (m *Manager) Create(ctx context.Context, user *store.User, rawSpec []byte) 
 	sort.Strings(names)
 	for _, name := range names {
 		f, _ := m.reg.Get(name)
-		val, closer, err := f.New(typed[name], gate)
+		val, closer, err := f.New(typed[name], capability.InstanceEnv{Gate: gate, Secrets: secSet})
 		if err != nil {
 			for _, c := range closers {
 				_ = c.Close()
@@ -376,6 +525,7 @@ func (m *Manager) Create(ctx context.Context, user *store.User, rawSpec []byte) 
 		limits:   spec.Limits,
 		userID:   user.ID,
 		userMail: user.Email,
+		secrets:  secSet,
 	}
 	in.sess = &engine.Session{
 		Gate:        gate,
@@ -457,6 +607,12 @@ func (m *Manager) Exec(ctx context.Context, id, code string, timeoutOverride tim
 	execID := store.NewID(store.PrefixExecution)
 	in.out.Reset()
 	res := m.eng.Exec(ctx, in.sess, execID, code, timeout, in.limits.MaxSteps, in.out.String)
+	// Defense in depth: scrub any secret value that escaped into output.
+	res.Output = in.secrets.Redact(res.Output)
+	if res.Error != nil {
+		res.Error.Message = in.secrets.Redact(res.Error.Message)
+		res.Error.Backtrace = in.secrets.Redact(res.Error.Backtrace)
+	}
 	// Exec bumps the sliding TTL regardless of outcome.
 	bumpTTL(ctx, m, in)
 	if record != nil {
@@ -510,8 +666,20 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// Redact scrubs secret values out of a string destined for the caller
+// (used by the files API on file contents).
+func (m *Manager) Redact(id, s string) string {
+	if in, ok := m.get(id); ok && in.secrets != nil {
+		return in.secrets.Redact(s)
+	}
+	return s
+}
+
 func (m *Manager) end(ctx context.Context, in *inst, status string) {
 	in.gate.Revoke()
+	if in.secrets != nil {
+		in.secrets.Wipe()
+	}
 	for _, c := range in.closers {
 		_ = c.Close()
 	}
@@ -549,3 +717,36 @@ func (m *Manager) Count() int {
 	defer m.mu.Unlock()
 	return len(m.insts)
 }
+
+// secretsStruct is the predeclared `secrets` global: exposes only
+// names() — values are never reachable from Starlark.
+type secretsStruct struct{ set *secrets.Set }
+
+func (s secretsStruct) String() string        { return "<secrets>" }
+func (s secretsStruct) Type() string          { return "secrets" }
+func (s secretsStruct) Freeze()               {}
+func (s secretsStruct) Truth() starlark.Bool  { return true }
+func (s secretsStruct) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable: secrets") }
+
+func (s secretsStruct) Attr(name string) (starlark.Value, error) {
+	if name == "names" {
+		set := s.set
+		return starlark.NewBuiltin("secrets.names", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			if err := starlark.UnpackArgs("secrets.names", args, kwargs); err != nil {
+				return nil, err
+			}
+			var names []string
+			if set != nil {
+				names = set.Names()
+			}
+			l := starlark.NewList(make([]starlark.Value, len(names)))
+			for i, n := range names {
+				l.SetIndex(i, starlark.String(n))
+			}
+			return l, nil
+		}), nil
+	}
+	return nil, nil
+}
+
+func (s secretsStruct) AttrNames() []string { return []string{"names"} }

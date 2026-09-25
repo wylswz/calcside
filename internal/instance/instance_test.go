@@ -25,7 +25,7 @@ func testMgr(t *testing.T, now *time.Time, limits ServerLimits) (*Manager, store
 	reg := capability.NewRegistry()
 	reg.Register(capfs.Factory())
 	reg.Register(capio.Factory())
-	m := New(st, engine.New(8), reg, nil, "", time.Second, limits, nil,
+	m := New(st, engine.New(8), reg, nil, "", time.Second, limits, nil, nil,
 		func() time.Time { return *now }, time.Hour)
 	u, err := st.UpsertUserByEmail(context.Background(), "u@x.com", "", "")
 	if err != nil {
@@ -158,7 +158,7 @@ func testMgr2(t *testing.T, now *time.Time, limits ServerLimits, st store.Store)
 	reg := capability.NewRegistry()
 	reg.Register(capfs.Factory())
 	reg.Register(capio.Factory())
-	m := New(st, engine.New(8), reg, nil, "", time.Second, limits, nil,
+	m := New(st, engine.New(8), reg, nil, "", time.Second, limits, nil, nil,
 		func() time.Time { return *now }, time.Hour)
 	u, _ := st.UpsertUserByEmail(context.Background(), "u@x.com", "", "")
 	return m, st, u

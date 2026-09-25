@@ -223,4 +223,57 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 			t.Fatalf("expected ErrNotFound, got %v", err)
 		}
 	})
+
+	t.Run("secrets", func(t *testing.T) {
+		s := newStore(t)
+		u, _ := s.UpsertUserByEmail(ctx, "sec@x.com", "", "")
+		u2, _ := s.UpsertUserByEmail(ctx, "sec2@x.com", "", "")
+		sec := &store.Secret{UserID: u.ID, Name: "TOKEN", Ciphertext: []byte("sealed"), AllowedDomains: []string{"api.x.com"}}
+		if err := s.CreateSecret(ctx, sec); err != nil {
+			t.Fatal(err)
+		}
+		if sec.ID == "" {
+			t.Fatal("expected generated id")
+		}
+		// duplicate name for same user -> ErrConflict
+		dup := &store.Secret{UserID: u.ID, Name: "TOKEN", Ciphertext: []byte("x"), AllowedDomains: []string{"a.com"}}
+		if err := s.CreateSecret(ctx, dup); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("expected ErrConflict, got %v", err)
+		}
+		// same name for another user is fine
+		other := &store.Secret{UserID: u2.ID, Name: "TOKEN", Ciphertext: []byte("y"), AllowedDomains: []string{"b.com"}}
+		if err := s.CreateSecret(ctx, other); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.GetSecret(ctx, sec.ID)
+		if err != nil || got.Name != "TOKEN" || string(got.Ciphertext) != "sealed" {
+			t.Fatalf("GetSecret: %v %+v", err, got)
+		}
+		got, err = s.GetSecretByName(ctx, u.ID, "TOKEN")
+		if err != nil || got.ID != sec.ID {
+			t.Fatalf("GetSecretByName: %v %+v", err, got)
+		}
+		if _, err := s.GetSecretByName(ctx, u2.ID, "TOKEN"); err != nil {
+			t.Fatalf("per-user GetSecretByName: %v", err)
+		}
+		lst, _ := s.ListSecrets(ctx, u.ID)
+		if len(lst) != 1 || lst[0].Name != "TOKEN" {
+			t.Fatalf("ListSecrets: %+v", lst)
+		}
+		sec.AllowedDomains = []string{"api.x.com", "*.x.com"}
+		sec.Ciphertext = []byte("rotated")
+		if err := s.UpdateSecret(ctx, sec); err != nil {
+			t.Fatal(err)
+		}
+		got, _ = s.GetSecret(ctx, sec.ID)
+		if string(got.Ciphertext) != "rotated" || len(got.AllowedDomains) != 2 {
+			t.Fatalf("UpdateSecret: %+v", got)
+		}
+		if err := s.DeleteSecret(ctx, sec.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.GetSecret(ctx, sec.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("expected ErrNotFound, got %v", err)
+		}
+	})
 }

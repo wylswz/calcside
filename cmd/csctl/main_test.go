@@ -46,7 +46,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		MaxTTL: 24 * time.Hour, MaxExecTimeout: 5 * time.Minute,
 		MaxFSQuotaBytes: 256 << 20, NetAllowPrivate: true,
 	}
-	mgr := instance.New(st, engine.New(8), reg, rec, "", time.Second, limits, nil, nil, time.Hour)
+	mgr := instance.New(st, engine.New(8), reg, rec, "", time.Second, limits, nil, nil, nil, time.Hour)
 	svc := auth.NewService(st, false, true)
 	h := api.Handler(api.Deps{Store: st, Manager: mgr, Registry: reg, Auth: svc})
 	srv := httptest.NewServer(h)

@@ -397,13 +397,13 @@ func (factory) Validate(raw json.RawMessage, limits capability.ServerLimits) (an
 	return cfg, nil
 }
 
-func (factory) New(cfgAny any, gate *capability.Gate) (starlark.Value, io.Closer, error) {
+func (factory) New(cfgAny any, env capability.InstanceEnv) (starlark.Value, io.Closer, error) {
 	cfg, ok := cfgAny.(Config)
 	if !ok {
 		return nil, nil, fmt.Errorf("fs: bad config type %T", cfgAny)
 	}
 	v := NewVFS(cfg)
-	return bindFS(v, gate), &Closer{V: v}, nil
+	return bindFS(v, env.Gate), &Closer{V: v}, nil
 }
 
 // Closer is returned by New; it exposes the VFS so the files API and

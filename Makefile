@@ -21,8 +21,11 @@ lint:
 	pnpm -C web typecheck
 	pnpm -C web lint
 
+# DEV ONLY — fixed throwaway key so `make dev` enables the secrets vault.
+CALCSIDE_SECRET_KEY ?= MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+
 dev run-dev:
-	go run ./cmd/calcside serve --dev-login --policy-dir policies/examples
+	go run ./cmd/calcside serve --dev-login --policy-dir policies/examples --secret-key $(CALCSIDE_SECRET_KEY)
 
 tidy:
 	go mod tidy

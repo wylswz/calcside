@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"mime"
@@ -22,6 +23,7 @@ import (
 	"calcside/internal/engine"
 	"calcside/internal/instance"
 	"calcside/internal/policy"
+	"calcside/internal/secrets"
 	"calcside/internal/store"
 )
 
@@ -37,8 +39,9 @@ type Deps struct {
 	Manager       *instance.Manager
 	Registry      *capability.Registry
 	Auth          *auth.Service
-	Web           fs.FS // static files served at /; nil for now
-	GoogleEnabled bool  // reported by /api/v1/auth/config
+	Web           fs.FS           // static files served at /; nil for now
+	GoogleEnabled bool            // reported by /api/v1/auth/config
+	Cipher        *secrets.Cipher // nil = vault secrets disabled
 	Now           func() time.Time
 }
 
@@ -70,6 +73,7 @@ func Handler(d Deps) http.Handler {
 		writeJSON(w, 200, map[string]any{
 			"google":    d.GoogleEnabled,
 			"dev_login": d.Auth.DevLoginEnabled(),
+			"secrets":   d.Cipher != nil,
 		})
 	})
 
@@ -94,6 +98,11 @@ func Handler(d Deps) http.Handler {
 	api.HandleFunc("POST /api/v1/instances/{id}/exec", a.exec)
 	api.HandleFunc("GET /api/v1/instances/{id}/files", a.files)
 	api.HandleFunc("GET /api/v1/instances/{id}/executions", a.executions)
+
+	api.HandleFunc("GET /api/v1/secrets", a.listSecrets)
+	api.HandleFunc("POST /api/v1/secrets", a.createSecret)
+	api.HandleFunc("PUT /api/v1/secrets/{id}", a.updateSecret)
+	api.HandleFunc("DELETE /api/v1/secrets/{id}", a.deleteSecret)
 
 	api.HandleFunc("GET /api/v1/audit", a.auditEvents)
 
@@ -157,12 +166,15 @@ func spaHandler(web fs.FS) http.Handler {
 	})
 }
 
-// sessionGate enforces RequireSession only for /api/v1/keys*.
+// sessionGate enforces RequireSession for /api/v1/keys* and
+// /api/v1/secrets* (API-key auth must not manage keys or widen secrets).
 func sessionGate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/keys" || len(r.URL.Path) > len("/api/v1/keys/") && r.URL.Path[:len("/api/v1/keys/")] == "/api/v1/keys/" {
-			auth.RequireSession(next).ServeHTTP(w, r)
-			return
+		for _, prefix := range []string{"/api/v1/keys", "/api/v1/secrets"} {
+			if r.URL.Path == prefix || strings.HasPrefix(r.URL.Path, prefix+"/") {
+				auth.RequireSession(next).ServeHTTP(w, r)
+				return
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -491,7 +503,7 @@ func (a *api) files(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"entries": listing})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"path": stat["path"], "content": content})
+	writeJSON(w, 200, map[string]any{"path": stat["path"], "content": a.d.Manager.Redact(in.ID, content)})
 }
 
 // toGo converts starlark dict/list primitives to Go values.
@@ -699,4 +711,150 @@ func (a *api) validatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"valid": true})
+}
+
+// --- secrets vault (session-only; see sessionGate) ---
+
+func (a *api) secretsEnabled(w http.ResponseWriter) bool {
+	if a.d.Cipher == nil {
+		writeErr(w, 503, "secrets_disabled", "secrets vault disabled (no --secret-key)")
+		return false
+	}
+	return true
+}
+
+func (a *api) listSecrets(w http.ResponseWriter, r *http.Request) {
+	if !a.secretsEnabled(w) {
+		return
+	}
+	p := principal(r)
+	lst, err := a.d.Store.ListSecrets(r.Context(), p.User.ID)
+	if err != nil {
+		writeErr(w, 500, "internal", err.Error())
+		return
+	}
+	if lst == nil {
+		lst = []*store.Secret{}
+	}
+	writeJSON(w, 200, map[string]any{"secrets": lst})
+}
+
+func validateSecretInput(name, value string, domains []string) error {
+	if !secrets.ValidName(name) {
+		return fmt.Errorf("invalid secret name %q (want [A-Z_][A-Z0-9_])", name)
+	}
+	if len(value) == 0 {
+		return fmt.Errorf("value required")
+	}
+	if len(value) > secrets.MaxValueBytes {
+		return fmt.Errorf("value exceeds %d bytes", secrets.MaxValueBytes)
+	}
+	if _, err := secrets.ValidateDomains(domains); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *api) createSecret(w http.ResponseWriter, r *http.Request) {
+	if !a.secretsEnabled(w) {
+		return
+	}
+	p := principal(r)
+	var body struct {
+		Name           string   `json:"name"`
+		Value          string   `json:"value"`
+		AllowedDomains []string `json:"allowed_domains"`
+	}
+	if err := decode(w, r, &body, maxBodyBytes); err != nil {
+		writeErr(w, 400, "bad_request", "invalid JSON body")
+		return
+	}
+	if err := validateSecretInput(body.Name, body.Value, body.AllowedDomains); err != nil {
+		writeErr(w, 400, "bad_secret", err.Error())
+		return
+	}
+	ct, err := a.d.Cipher.Seal([]byte(body.Value), p.User.ID+"/"+body.Name)
+	if err != nil {
+		writeErr(w, 500, "internal", err.Error())
+		return
+	}
+	s := &store.Secret{UserID: p.User.ID, Name: body.Name, Ciphertext: ct, AllowedDomains: body.AllowedDomains}
+	if err := a.d.Store.CreateSecret(r.Context(), s); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			writeErr(w, 409, "conflict", "secret with that name already exists")
+			return
+		}
+		writeErr(w, 500, "internal", err.Error())
+		return
+	}
+	writeJSON(w, 201, map[string]any{"secret": s})
+}
+
+// ownedSecret fetches a secret enforcing ownership (other users ⇒ 404).
+func (a *api) ownedSecret(w http.ResponseWriter, r *http.Request) (*store.Secret, bool) {
+	p := principal(r)
+	s, err := a.d.Store.GetSecret(r.Context(), r.PathValue("id"))
+	if err != nil || s.UserID != p.User.ID {
+		writeErr(w, 404, "not_found", "secret not found")
+		return nil, false
+	}
+	return s, true
+}
+
+func (a *api) updateSecret(w http.ResponseWriter, r *http.Request) {
+	if !a.secretsEnabled(w) {
+		return
+	}
+	s, ok := a.ownedSecret(w, r)
+	if !ok {
+		return
+	}
+	p := principal(r)
+	var body struct {
+		Value          *string  `json:"value"`
+		AllowedDomains []string `json:"allowed_domains"`
+	}
+	if err := decode(w, r, &body, maxBodyBytes); err != nil {
+		writeErr(w, 400, "bad_request", "invalid JSON body")
+		return
+	}
+	if body.Value != nil {
+		if len(*body.Value) == 0 || len(*body.Value) > secrets.MaxValueBytes {
+			writeErr(w, 400, "bad_secret", "value must be 1..16KiB")
+			return
+		}
+		ct, err := a.d.Cipher.Seal([]byte(*body.Value), p.User.ID+"/"+s.Name)
+		if err != nil {
+			writeErr(w, 500, "internal", err.Error())
+			return
+		}
+		s.Ciphertext = ct
+	}
+	if body.AllowedDomains != nil {
+		if _, err := secrets.ValidateDomains(body.AllowedDomains); err != nil {
+			writeErr(w, 400, "bad_secret", err.Error())
+			return
+		}
+		s.AllowedDomains = body.AllowedDomains
+	}
+	if err := a.d.Store.UpdateSecret(r.Context(), s); err != nil {
+		writeErr(w, 500, "internal", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"secret": s})
+}
+
+func (a *api) deleteSecret(w http.ResponseWriter, r *http.Request) {
+	if !a.secretsEnabled(w) {
+		return
+	}
+	s, ok := a.ownedSecret(w, r)
+	if !ok {
+		return
+	}
+	if err := a.d.Store.DeleteSecret(r.Context(), s.ID); err != nil {
+		writeErr(w, 500, "internal", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
 }

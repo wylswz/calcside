@@ -37,7 +37,7 @@ func newSession(t *testing.T, hooks []capability.Hook, fsQuota int64) (*Session,
 	if err != nil {
 		t.Fatal(err)
 	}
-	fsv, _, err := fsF.New(cfg, gate)
+	fsv, _, err := fsF.New(cfg, capability.InstanceEnv{Gate: gate})
 	if err != nil {
 		t.Fatal(err)
 	}

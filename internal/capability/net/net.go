@@ -1,23 +1,30 @@
 // Package net implements the "net" capability: HTTP requests gated by a
 // host allowlist, with DNS resolution done in-process and connections
-// pinned to vetted IPs to resist SSRF and DNS-rebinding.
+// pinned to vetted IPs to resist SSRF and DNS-rebinding. It also
+// substitutes {{secrets.NAME}} placeholders at send time; plaintext
+// secret values never reach the script, audit, or policy input.
 package net
 
 import (
 	"context"
-	gocrypto "crypto/tls"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	gonet "net"
 	"net/http"
 	"net/url"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
 	"go.starlark.net/starlark"
 
 	"calcside/internal/capability"
+	"calcside/internal/hostmatch"
+	"calcside/internal/secrets"
 )
 
 // Config configures one instance's net capability.
@@ -26,6 +33,8 @@ type Config struct {
 	Methods          []string `json:"methods"`
 	MaxResponseBytes int64    `json:"max_response_bytes"`
 	TimeoutMs        int64    `json:"timeout_ms"`
+	// RootCAs optionally overrides the TLS trust store (tests only).
+	RootCAs *x509.CertPool `json:"-"`
 }
 
 const (
@@ -34,71 +43,44 @@ const (
 	maxRedirects       = 5
 )
 
-// hostRule is one parsed allowlist entry: exact host or "*.suffix",
-// optionally restricted/extended to a specific port.
-type hostRule struct {
-	host     string // exact, "*.example.com", or IP literal
-	port     string // "" means default ports only (80/443)
-	wildcard bool
-	isIP     bool
-}
+var placeholderRe = regexp.MustCompile(`\{\{\s*secrets\.[A-Z_][A-Z0-9_]{0,63}\s*\}\}`)
 
 type client struct {
 	cfg          Config
-	rules        []hostRule
+	rules        []hostmatch.Rule
 	allowPrivate bool
+	allowHTTP    bool
+	secrets      *secrets.Set
 	hc           *http.Client
 }
 
-func parseRule(entry string) (hostRule, error) {
-	r := hostRule{}
-	host := entry
-	if h, p, err := gonet.SplitHostPort(entry); err == nil {
-		host, r.port = h, p
-		if p == "" {
-			return r, fmt.Errorf("net config: bad port in %q", entry)
-		}
-	} else if strings.Count(entry, ":") > 1 {
-		// bare IPv6 literal
-		host = entry
-	}
-	r.host = strings.ToLower(strings.TrimSpace(host))
-	if r.host == "" {
-		return r, fmt.Errorf("net config: empty allow_hosts entry")
-	}
-	if strings.HasPrefix(r.host, "*.") {
-		r.wildcard = true
-	}
-	if gonet.ParseIP(strings.Trim(r.host, "[]")) != nil {
-		r.isIP = true
-	}
-	return r, nil
-}
+// injectedKey carries the names of secrets injected into a request so the
+// redirect checker can verify the next hop still satisfies their rules.
+type injectedKeyT struct{}
 
-func (r hostRule) matches(host string) bool {
-	host = strings.ToLower(host)
-	if r.wildcard {
-		suffix := strings.TrimPrefix(r.host, "*.")
-		// "*.example.com" matches sub.example.com but NOT example.com.
-		return strings.HasSuffix(host, "."+suffix)
-	}
-	return host == r.host
-}
+var injectedKey injectedKeyT
 
 // authorize checks method + host + port against config.
-func (c *client) authorize(method, rawURL string) (host, port string, rule *hostRule, err error) {
+func (c *client) authorize(method, rawURL string) (host, effPort string, err error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return "", "", nil, fmt.Errorf("net: invalid URL %q: %w", rawURL, err)
+		return "", "", fmt.Errorf("net: invalid URL %q: %w", rawURL, err)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", "", nil, fmt.Errorf("net: unsupported scheme in URL %q", rawURL)
+		return "", "", fmt.Errorf("net: unsupported scheme in URL %q", rawURL)
 	}
 	host = u.Hostname()
 	if host == "" {
-		return "", "", nil, fmt.Errorf("net: empty host in URL %q", rawURL)
+		return "", "", fmt.Errorf("net: empty host in URL %q", rawURL)
 	}
-	port = u.Port()
+	effPort = u.Port()
+	if effPort == "" {
+		if u.Scheme == "https" {
+			effPort = "443"
+		} else {
+			effPort = "80"
+		}
+	}
 
 	ok := false
 	for _, m := range c.cfg.Methods {
@@ -108,36 +90,17 @@ func (c *client) authorize(method, rawURL string) (host, port string, rule *host
 		}
 	}
 	if !ok {
-		return "", "", nil, fmt.Errorf("net: method %s not in methods %v", method, c.cfg.Methods)
+		return "", "", fmt.Errorf("net: method %s not in methods %v", method, c.cfg.Methods)
 	}
 	if len(c.rules) == 0 {
-		return "", "", nil, fmt.Errorf("net: no hosts permitted (empty allow_hosts)")
+		return "", "", fmt.Errorf("net: no hosts permitted (empty allow_hosts)")
 	}
 	for i := range c.rules {
-		if c.rules[i].matches(host) {
-			rule = &c.rules[i]
-			break
+		if c.rules[i].Matches(host, effPort) {
+			return host, effPort, nil
 		}
 	}
-	if rule == nil {
-		return "", "", nil, fmt.Errorf("net: host %q not in allow_hosts", host)
-	}
-	effPort := port
-	if effPort == "" {
-		if u.Scheme == "https" {
-			effPort = "443"
-		} else {
-			effPort = "80"
-		}
-	}
-	if rule.port != "" {
-		if effPort != rule.port {
-			return "", "", nil, fmt.Errorf("net: port %s not permitted for %q (allowlist entry pins port %s)", effPort, host, rule.port)
-		}
-	} else if effPort != "80" && effPort != "443" {
-		return "", "", nil, fmt.Errorf("net: non-default port %s not permitted for %q", effPort, host)
-	}
-	return host, port, rule, nil
+	return "", "", fmt.Errorf("net: host %q (port %s) not in allow_hosts", host, effPort)
 }
 
 // blockedCIDRs are IPv4 ranges never dialed unless explicitly allowed.
@@ -221,7 +184,7 @@ func (c *client) transport() *http.Transport {
 			}
 			return nil, lastErr
 		},
-		TLSClientConfig: &gocrypto.Config{MinVersion: gocrypto.VersionTLS12},
+		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: c.cfg.RootCAs},
 	}
 }
 
@@ -247,8 +210,30 @@ func (c *client) newHTTPClient() *http.Client {
 			if len(via) >= maxRedirects {
 				return fmt.Errorf("net: too many redirects (max %d)", maxRedirects)
 			}
-			if _, _, _, err := c.authorize(req.Method, req.URL.String()); err != nil {
+			if _, _, err := c.authorize(req.Method, req.URL.String()); err != nil {
 				return fmt.Errorf("net: redirect blocked: %w", err)
+			}
+			// If any secret was injected into the original request, the
+			// redirect target must satisfy every secret's rules or we
+			// would leak it to an arbitrary host.
+			if names, ok := via[0].Context().Value(injectedKey).([]string); ok && len(names) > 0 {
+				host := req.URL.Hostname()
+				eff := req.URL.Port()
+				if eff == "" {
+					if req.URL.Scheme == "https" {
+						eff = "443"
+					} else {
+						eff = "80"
+					}
+				}
+				for _, n := range names {
+					sec := c.secrets.Lookup(n)
+					ok := sec != nil && sec.Allows(host, eff) &&
+						(req.URL.Scheme == "https" || c.allowHTTP)
+					if !ok {
+						return fmt.Errorf("net: redirect blocked: would forward secrets to %s", host)
+					}
+				}
 			}
 			return nil
 		},
@@ -262,19 +247,168 @@ type response struct {
 	Body    string
 }
 
+func (c *client) redact(s string) string {
+	if c.secrets == nil {
+		return s
+	}
+	return c.secrets.Redact(s)
+}
+
+// hasPlaceholder reports whether s contains any {{secrets.X}} template.
+func hasPlaceholder(s string) bool { return placeholderRe.MatchString(s) }
+
+// urlAuthority extracts the scheme+authority part of a raw URL template.
+func urlAuthority(raw string) string {
+	i := strings.Index(raw, "://")
+	if i < 0 {
+		return raw
+	}
+	rest := raw[i+3:]
+	if j := strings.IndexAny(rest, "/?#"); j >= 0 {
+		rest = rest[:j]
+	}
+	return raw[:i] + "://" + rest
+}
+
+// expand resolves secret placeholders in url/headers/body, validates the
+// injection policy, and returns the expanded request parts plus the names
+// injected. All returned errors are value-free.
+func (c *client) expand(rawURL string, headers map[string]string, body string) (string, map[string]string, string, []string, error) {
+	set := c.secrets
+	if set == nil {
+		set = secrets.NewSet()
+	}
+	needExpand := hasPlaceholder(rawURL) || hasPlaceholder(body)
+	if !needExpand {
+		for _, v := range headers {
+			if hasPlaceholder(v) {
+				needExpand = true
+				break
+			}
+		}
+	}
+	if !needExpand {
+		return rawURL, headers, body, nil, nil
+	}
+
+	for k := range headers {
+		if hasPlaceholder(k) {
+			return "", nil, "", nil, fmt.Errorf("net: secret placeholders are not allowed in header names")
+		}
+	}
+
+	// Template URL: placeholders replaced by "x" for parsing.
+	tmpl := placeholderRe.ReplaceAllString(rawURL, "x")
+	if hasPlaceholder(urlAuthority(rawURL)) {
+		return "", nil, "", nil, fmt.Errorf("net: secret placeholders are not allowed in scheme/host/port")
+	}
+	tu, err := url.Parse(tmpl)
+	if err != nil {
+		return "", nil, "", nil, fmt.Errorf("net: invalid URL template: %w", err)
+	}
+
+	expURL, _, err := set.Expand(rawURL)
+	if err != nil {
+		return "", nil, "", nil, fmt.Errorf("net: %w", err)
+	}
+	eu, err := url.Parse(expURL)
+	if err != nil {
+		return "", nil, "", nil, fmt.Errorf("net: invalid URL after secret expansion")
+	}
+	// Expansion must not change the endpoint.
+	if eu.Scheme != tu.Scheme || eu.Hostname() != tu.Hostname() || eu.Port() != tu.Port() {
+		return "", nil, "", nil, fmt.Errorf("net: secret expansion changed URL scheme/host/port")
+	}
+
+	expHeaders := make(map[string]string, len(headers))
+	for k, v := range headers {
+		ev, _, err := set.Expand(v)
+		if err != nil {
+			return "", nil, "", nil, fmt.Errorf("net: %w", err)
+		}
+		expHeaders[k] = ev
+	}
+	expBody, _, err := set.Expand(body)
+	if err != nil {
+		return "", nil, "", nil, fmt.Errorf("net: %w", err)
+	}
+
+	// Union of referenced names across URL + header values + body.
+	nameSet := map[string]bool{}
+	pieces := append([]string{rawURL, body}, mapVals(headers)...)
+	for _, s := range pieces {
+		for _, n := range secrets.Refs(s) {
+			nameSet[n] = true
+		}
+	}
+	names := make([]string, 0, len(nameSet))
+	for n := range nameSet {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	// per-secret target check
+	host := eu.Hostname()
+	effPort := eu.Port()
+	if effPort == "" {
+		if eu.Scheme == "https" {
+			effPort = "443"
+		} else {
+			effPort = "80"
+		}
+	}
+	for _, n := range names {
+		sec := set.Lookup(n)
+		if sec == nil {
+			return "", nil, "", nil, fmt.Errorf("net: unknown secret %q", n)
+		}
+		if !sec.Allows(host, effPort) {
+			return "", nil, "", nil, fmt.Errorf("net: secret %s not allowed for host %s", n, host)
+		}
+		if eu.Scheme != "https" && !c.allowHTTP {
+			return "", nil, "", nil, fmt.Errorf("net: secret %s requires https (http URL)", n)
+		}
+	}
+	return expURL, expHeaders, expBody, names, nil
+}
+
+func mapVals(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for _, v := range m {
+		out = append(out, v)
+	}
+	return out
+}
+
 func (c *client) do(ctx context.Context, method, rawURL, body string, headers map[string]string, contentType string) (*response, error) {
-	if _, _, _, err := c.authorize(method, rawURL); err != nil {
+	resp, err := c.doInner(ctx, method, rawURL, body, headers, contentType)
+	if err != nil {
+		// Every error path is scrubbed: transport errors embed the
+		// expanded URL (which may contain an injected secret).
+		return nil, fmt.Errorf("%s", c.redact(err.Error()))
+	}
+	return resp, nil
+}
+
+func (c *client) doInner(ctx context.Context, method, rawURL, body string, headers map[string]string, contentType string) (*response, error) {
+	expURL, expHeaders, expBody, injected, err := c.expand(rawURL, headers, body)
+	if err != nil {
 		return nil, err
 	}
-	var rdr io.Reader
-	if body != "" {
-		rdr = strings.NewReader(body)
+	if _, _, err := c.authorize(method, expURL); err != nil {
+		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, method, rawURL, rdr)
+	if len(injected) > 0 {
+		ctx = context.WithValue(ctx, injectedKey, injected)
+	}
+	var rdr io.Reader
+	if expBody != "" {
+		rdr = strings.NewReader(expBody)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, expURL, rdr)
 	if err != nil {
 		return nil, fmt.Errorf("net: %w", err)
 	}
-	for k, v := range headers {
+	for k, v := range expHeaders {
 		req.Header.Set(k, v)
 	}
 	if contentType != "" {
@@ -298,9 +432,9 @@ func (c *client) do(ctx context.Context, method, rawURL, body string, headers ma
 	}
 	hdrs := map[string]string{}
 	for k := range resp.Header {
-		hdrs[k] = resp.Header.Get(k)
+		hdrs[k] = c.redact(resp.Header.Get(k))
 	}
-	return &response{Status: resp.StatusCode, Headers: hdrs, Body: string(data)}, nil
+	return &response{Status: resp.StatusCode, Headers: hdrs, Body: c.redact(string(data))}, nil
 }
 
 // --- factory + binding ---
@@ -314,7 +448,7 @@ func (factory) Name() string { return "net" }
 
 func (factory) Ops() []capability.OpInfo {
 	return []capability.OpInfo{
-		{Name: "get", Doc: "HTTP GET; returns {status,headers,body}", Params: []string{"url", "headers"}},
+		{Name: "get", Doc: "HTTP GET; returns {status,headers,body}; supports {{secrets.NAME}} placeholders; Accept-Encoding/Range/If-Range/TE headers are rejected", Params: []string{"url", "headers"}},
 		{Name: "post", Doc: "HTTP POST; returns {status,headers,body}", Params: []string{"url", "body", "headers", "content_type"}},
 		{Name: "request", Doc: "HTTP request with arbitrary method", Params: []string{"method", "url", "body", "headers"}},
 	}
@@ -337,14 +471,14 @@ func (factory) Validate(raw json.RawMessage, limits capability.ServerLimits) (an
 		}
 	}
 	for _, h := range cfg.AllowHosts {
-		r, err := parseRule(h)
+		r, err := hostmatch.Parse(h)
 		if err != nil {
 			return nil, err
 		}
 		// IP-literal entries are only meaningful when private addresses are
 		// allowed (tests, internal services); reject blocked literals.
-		if r.isIP && !limits.NetAllowPrivate {
-			if ip := gonet.ParseIP(strings.Trim(r.host, "[]")); ip != nil && isBlockedIP(ip) {
+		if r.IsIP && !limits.NetAllowPrivate {
+			if ip := gonet.ParseIP(r.Host); ip != nil && isBlockedIP(ip) {
 				return nil, fmt.Errorf("net config: IP-literal allow_hosts entry %q in a blocked range (set --net-allow-private to permit)", h)
 			}
 		}
@@ -367,30 +501,29 @@ func (factory) Validate(raw json.RawMessage, limits capability.ServerLimits) (an
 	if limits.MaxExecTimeout > 0 && cfg.TimeoutMs > limits.MaxExecTimeout.Milliseconds() {
 		cfg.TimeoutMs = limits.MaxExecTimeout.Milliseconds()
 	}
-	return validated{Config: cfg, allowPrivate: limits.NetAllowPrivate}, nil
+	return validated{Config: cfg, allowPrivate: limits.NetAllowPrivate, allowHTTP: limits.SecretsAllowHTTP}, nil
 }
 
 // validated carries the parsed config plus server policy the binding needs.
 type validated struct {
 	Config
 	allowPrivate bool
+	allowHTTP    bool
 }
 
-func (factory) New(cfgAny any, gate *capability.Gate) (starlark.Value, io.Closer, error) {
+func (factory) New(cfgAny any, env capability.InstanceEnv) (starlark.Value, io.Closer, error) {
 	v, ok := cfgAny.(validated)
 	if !ok {
 		return nil, nil, fmt.Errorf("net: config must come from Validate")
 	}
-	c := &client{cfg: v.Config, allowPrivate: v.allowPrivate}
-	for _, h := range v.AllowHosts {
-		r, err := parseRule(h)
-		if err != nil {
-			return nil, nil, err
-		}
-		c.rules = append(c.rules, r)
+	c := &client{cfg: v.Config, allowPrivate: v.allowPrivate, allowHTTP: v.allowHTTP, secrets: env.Secrets}
+	rules, err := hostmatch.ParseAll(v.AllowHosts)
+	if err != nil {
+		return nil, nil, err
 	}
+	c.rules = rules
 	c.hc = c.newHTTPClient()
-	return bind(c, gate), closer{c}, nil
+	return bind(c, env.Gate), closer{c}, nil
 }
 
 type closer struct{ c *client }
@@ -398,6 +531,17 @@ type closer struct{ c *client }
 func (cl closer) Close() error {
 	cl.c.hc.CloseIdleConnections()
 	return nil
+}
+
+// forbiddenHeaders are rejected in script-supplied request headers.
+// Accept-Encoding would disable transparent gunzip and Range/If-Range/TE
+// would let a script fetch a reflected secret in slices — both bypass
+// whole-value redaction of echoed secrets.
+var forbiddenHeaders = map[string]bool{
+	"accept-encoding": true,
+	"range":           true,
+	"if-range":        true,
+	"te":              true,
 }
 
 func unpackStringDict(v starlark.Value) (map[string]string, error) {
@@ -414,6 +558,9 @@ func unpackStringDict(v starlark.Value) (map[string]string, error) {
 		vv, ok2 := item[1].(starlark.String)
 		if !ok1 || !ok2 {
 			return nil, fmt.Errorf("headers must map strings to strings")
+		}
+		if forbiddenHeaders[strings.ToLower(string(k))] {
+			return nil, fmt.Errorf("net: header %q is not allowed", string(k))
 		}
 		out[string(k)] = string(vv)
 	}
@@ -432,14 +579,38 @@ func respValue(r *response) starlark.Value {
 	return d
 }
 
-func respMeta(r *response) map[string]any {
-	return map[string]any{"status": r.Status, "bytes": len(r.Body)}
+func respMeta(r *response, nSecrets int) map[string]any {
+	return map[string]any{"status": r.Status, "bytes": len(r.Body), "secrets_injected": nSecrets}
+}
+
+// secretRefs returns sorted secret names referenced by placeholders in
+// url, header values, and body — for Call.Args (template is logged, never
+// expanded values).
+func secretRefs(rawURL string, headers map[string]string, body string) []string {
+	set := map[string]bool{}
+	for _, n := range secrets.Refs(rawURL) {
+		set[n] = true
+	}
+	for _, n := range secrets.Refs(body) {
+		set[n] = true
+	}
+	for _, v := range headers {
+		for _, n := range secrets.Refs(v) {
+			set[n] = true
+		}
+	}
+	out := make([]string, 0, len(set))
+	for n := range set {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // extractHostPort parses a URL enough to fill Call.Args; full allowlist
 // authorization happens inside the gated op so denied calls are recorded.
 func extractHostPort(rawURL string) (host, port string, err error) {
-	u, err := url.Parse(rawURL)
+	u, err := url.Parse(placeholderRe.ReplaceAllString(rawURL, "x"))
 	if err != nil {
 		return "", "", fmt.Errorf("net: invalid URL %q: %w", rawURL, err)
 	}
@@ -447,6 +618,21 @@ func extractHostPort(rawURL string) (host, port string, err error) {
 }
 
 func bind(c *client, gate *capability.Gate) starlark.Value {
+	call := func(method, rawURL, body string, headers map[string]string, contentType string) (map[string]any, capability.OpBody, error) {
+		host, port, err := extractHostPort(rawURL)
+		if err != nil {
+			return nil, nil, err
+		}
+		args := netCallArgs(method, rawURL, host, port)
+		args["secrets"] = secretRefs(rawURL, headers, body)
+		return args, func(ctx context.Context) (starlark.Value, map[string]any, error) {
+			r, err := c.do(ctx, method, rawURL, body, headers, contentType)
+			if err != nil {
+				return nil, nil, err
+			}
+			return respValue(r), respMeta(r, len(secretRefs(rawURL, headers, body))), nil
+		}, nil
+	}
 	return capability.Bind("net", gate, map[string]capability.Method{
 		"get": func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
 			var rawURL string
@@ -458,17 +644,7 @@ func bind(c *client, gate *capability.Gate) starlark.Value {
 			if err != nil {
 				return nil, nil, err
 			}
-			host, port, err := extractHostPort(rawURL)
-			if err != nil {
-				return nil, nil, err
-			}
-			return netCallArgs("GET", rawURL, host, port), func(ctx context.Context) (starlark.Value, map[string]any, error) {
-				r, err := c.do(ctx, "GET", rawURL, "", headers, "")
-				if err != nil {
-					return nil, nil, err
-				}
-				return respValue(r), respMeta(r), nil
-			}, nil
+			return call("GET", rawURL, "", headers, "")
 		},
 		"post": func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
 			var rawURL, body, contentType string
@@ -481,17 +657,7 @@ func bind(c *client, gate *capability.Gate) starlark.Value {
 			if err != nil {
 				return nil, nil, err
 			}
-			host, port, err := extractHostPort(rawURL)
-			if err != nil {
-				return nil, nil, err
-			}
-			return netCallArgs("POST", rawURL, host, port), func(ctx context.Context) (starlark.Value, map[string]any, error) {
-				r, err := c.do(ctx, "POST", rawURL, body, headers, contentType)
-				if err != nil {
-					return nil, nil, err
-				}
-				return respValue(r), respMeta(r), nil
-			}, nil
+			return call("POST", rawURL, body, headers, contentType)
 		},
 		"request": func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
 			var method, rawURL, body string
@@ -504,17 +670,7 @@ func bind(c *client, gate *capability.Gate) starlark.Value {
 			if err != nil {
 				return nil, nil, err
 			}
-			host, port, err := extractHostPort(rawURL)
-			if err != nil {
-				return nil, nil, err
-			}
-			return netCallArgs(method, rawURL, host, port), func(ctx context.Context) (starlark.Value, map[string]any, error) {
-				r, err := c.do(ctx, method, rawURL, body, headers, "")
-				if err != nil {
-					return nil, nil, err
-				}
-				return respValue(r), respMeta(r), nil
-			}, nil
+			return call(method, rawURL, body, headers, "")
 		},
 	})
 }

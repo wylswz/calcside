@@ -12,6 +12,8 @@ A lightweight code-execution sandbox for AI agents, built on Starlark. There are
   - `net`: HTTP with a host allowlist (exact, `*.suffix`, or `host:port`). Self-resolved DNS, IP pinning, blocking of internal addresses, and redirect re-checks. Private addresses are rejected by default (`--net-allow-private`).
   - `io`: `print` / `io.println`, with bounded output.
   - `json` and `math` are pure modules and are always available.
+- **Env**: `spec.env` is a map of non-sensitive `SCREAMING_SNAKE` values readable via the frozen `env` dict (`env.get("X")`, `env["X"]`, `env.keys()`).
+- **Secret**: a value scripts can never read. Use `{{secrets.NAME}}` in net URLs, header values, or bodies — the net capability injects the plaintext at send time only when the target host matches the secret's domain allowlist (https required unless `--secrets-allow-http`), and scrubs it from responses, errors, audit, and policy input. The `secrets` global exposes only `secrets.names()`. Secrets are either per-instance **inline** (`value` + `allowed_domains` in the spec, memory only, never persisted — stored spec shows `"inline": true`) or **vault refs** (`{"ref": "NAME", "allowed_domains": [narrowed]}`) resolved at creation from the user vault. Vault secrets are encrypted at rest with `--secret-key` (AES-256-GCM, base64 32-byte key), write-only via the session-only `/api/v1/secrets` endpoints, and instance refs may only *narrow* the vault allowlist. Response redaction is best-effort defense in depth — it catches raw, base64, URL- and JSON-escaped reflections, not arbitrary server-side transforms — so a secret's `allowed_domains` must only list hosts trusted with it.
 - **Hook**: every op of every capability goes through the instance's Gate: `before hooks -> op -> after hooks -> audit`. Once an exec ends, the Gate is disarmed; once the instance is deleted, it is revoked. Any capability reference that leaks out of an exec then fails with `out_of_scope`.
 - **Policy**: OPA/Rego, `package calcside.hooks`, `deny contains msg if {...}`.
   - Global policies come from `--policy-dir`.
@@ -23,11 +25,11 @@ Policy input:
 ```json
 {"phase": "before|after", "user": {"id", "email"}, "instance": {"id", "labels"},
  "exec_id": "...", "capability": "net", "op": "get",
- "args": {"method", "url", "host", "port", "scheme"},
+ "args": {"method", "url", "host", "port", "scheme", "secrets": ["NAME"]},
  "result": {"error": null, "meta": {"status": 200, "bytes": 123}}}
 ```
 
-`result` is only present in the after phase. It never contains file contents or response bodies. See `policies/examples/`.
+`args.url` is the placeholder template (e.g. containing `{{secrets.NAME}}`), never an expanded value; `args.secrets` lists the referenced secret names. `result` is only present in the after phase. It never contains file contents or response bodies. See `policies/examples/`.
 
 ## Quick start
 

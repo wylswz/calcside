@@ -7,6 +7,7 @@ import InstanceDetail from './pages/InstanceDetail'
 import Keys from './pages/Keys'
 import Policies from './pages/Policies'
 import Audit from './pages/Audit'
+import Secrets from './pages/Secrets'
 
 function useMe() {
   return useQuery({
@@ -51,6 +52,7 @@ export default function App() {
             <NavLink to="/" end className={navCls}>Instances</NavLink>
             <NavLink to="/policies" className={navCls}>Policies</NavLink>
             <NavLink to="/keys" className={navCls}>API Keys</NavLink>
+            <NavLink to="/secrets" className={navCls}>Secrets</NavLink>
             <NavLink to="/audit" className={navCls}>Audit</NavLink>
           </nav>
           <span className="text-xs text-gray-500 dark:text-gray-400">{user.email}</span>
@@ -65,6 +67,7 @@ export default function App() {
           <Route path="/instances/:id" element={<InstanceDetail />} />
           <Route path="/keys" element={<Keys />} />
           <Route path="/policies" element={<Policies />} />
+          <Route path="/secrets" element={<Secrets />} />
           <Route path="/audit" element={<Audit />} />
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />

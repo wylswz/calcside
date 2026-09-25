@@ -341,6 +341,46 @@ func (c *Client) DeleteKey(ctx context.Context, id string) error {
 	return c.do(ctx, "DELETE", "/api/v1/keys/"+id, nil, nil)
 }
 
+// Secrets vault (session-auth only server-side; ListSecrets never
+// returns values).
+func (c *Client) ListSecrets(ctx context.Context) ([]*store.Secret, error) {
+	var m struct {
+		Secrets []*store.Secret `json:"secrets"`
+	}
+	if err := c.do(ctx, "GET", "/api/v1/secrets", nil, &m); err != nil {
+		return nil, err
+	}
+	return m.Secrets, nil
+}
+
+func (c *Client) CreateSecret(ctx context.Context, name, value string, domains []string) (*store.Secret, error) {
+	var m struct {
+		Secret *store.Secret `json:"secret"`
+	}
+	err := c.do(ctx, "POST", "/api/v1/secrets",
+		map[string]any{"name": name, "value": value, "allowed_domains": domains}, &m)
+	return m.Secret, err
+}
+
+func (c *Client) UpdateSecret(ctx context.Context, id string, value *string, domains []string) (*store.Secret, error) {
+	var m struct {
+		Secret *store.Secret `json:"secret"`
+	}
+	body := map[string]any{}
+	if value != nil {
+		body["value"] = *value
+	}
+	if domains != nil {
+		body["allowed_domains"] = domains
+	}
+	err := c.do(ctx, "PUT", "/api/v1/secrets/"+id, body, &m)
+	return m.Secret, err
+}
+
+func (c *Client) DeleteSecret(ctx context.Context, id string) error {
+	return c.do(ctx, "DELETE", "/api/v1/secrets/"+id, nil, nil)
+}
+
 // Capabilities documents the registry.
 func (c *Client) Capabilities(ctx context.Context) ([]map[string]any, error) {
 	var m struct {

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -543,5 +544,110 @@ func (d *db) UpdatePolicy(ctx context.Context, p *store.Policy) error {
 
 func (d *db) DeletePolicy(ctx context.Context, id string) error {
 	_, err := d.q.ExecContext(ctx, `DELETE FROM policies WHERE id=?`, id)
+	return err
+}
+
+// --- secrets ---
+
+func isUniqueErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
+
+func (d *db) CreateSecret(ctx context.Context, s *store.Secret) error {
+	if s.ID == "" {
+		s.ID = store.NewID(store.PrefixSecret)
+	}
+	now := time.Now().UTC()
+	if s.CreatedAt.IsZero() {
+		s.CreatedAt = now
+	}
+	s.UpdatedAt = now
+	domains, err := json.Marshal(s.AllowedDomains)
+	if err != nil {
+		return err
+	}
+	_, err = d.q.ExecContext(ctx,
+		`INSERT INTO secrets(id,user_id,name,ciphertext,allowed_domains,created_at,updated_at)
+		 VALUES(?,?,?,?,?,?,?)`,
+		s.ID, s.UserID, s.Name, s.Ciphertext, string(domains), ns(s.CreatedAt), ns(s.UpdatedAt))
+	if isUniqueErr(err) {
+		return store.ErrConflict
+	}
+	return err
+}
+
+func scanSecret(row interface{ Scan(...any) error }) (*store.Secret, error) {
+	var s store.Secret
+	var domains string
+	var ca, ua int64
+	err := row.Scan(&s.ID, &s.UserID, &s.Name, &s.Ciphertext, &domains, &ca, &ua)
+	if err != nil {
+		return nil, err
+	}
+	s.CreatedAt, s.UpdatedAt = tm(ca), tm(ua)
+	if err := json.Unmarshal([]byte(domains), &s.AllowedDomains); err != nil {
+		s.AllowedDomains = []string{}
+	}
+	return &s, nil
+}
+
+const secretCols = `id,user_id,name,ciphertext,allowed_domains,created_at,updated_at`
+
+func (d *db) GetSecret(ctx context.Context, id string) (*store.Secret, error) {
+	s, err := scanSecret(d.q.QueryRowContext(ctx, `SELECT `+secretCols+` FROM secrets WHERE id=?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	return s, err
+}
+
+func (d *db) GetSecretByName(ctx context.Context, userID, name string) (*store.Secret, error) {
+	s, err := scanSecret(d.q.QueryRowContext(ctx,
+		`SELECT `+secretCols+` FROM secrets WHERE user_id=? AND name=?`, userID, name))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, store.ErrNotFound
+	}
+	return s, err
+}
+
+func (d *db) ListSecrets(ctx context.Context, userID string) ([]*store.Secret, error) {
+	rows, err := d.q.QueryContext(ctx,
+		`SELECT `+secretCols+` FROM secrets WHERE user_id=? ORDER BY name`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*store.Secret
+	for rows.Next() {
+		s, err := scanSecret(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func (d *db) UpdateSecret(ctx context.Context, s *store.Secret) error {
+	s.UpdatedAt = time.Now().UTC()
+	domains, err := json.Marshal(s.AllowedDomains)
+	if err != nil {
+		return err
+	}
+	res, err := d.q.ExecContext(ctx,
+		`UPDATE secrets SET ciphertext=?,allowed_domains=?,updated_at=? WHERE id=?`,
+		s.Ciphertext, string(domains), ns(s.UpdatedAt), s.ID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (d *db) DeleteSecret(ctx context.Context, id string) error {
+	_, err := d.q.ExecContext(ctx, `DELETE FROM secrets WHERE id=?`, id)
 	return err
 }

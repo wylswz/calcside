@@ -22,6 +22,7 @@ import (
 	"calcside/internal/config"
 	"calcside/internal/engine"
 	"calcside/internal/instance"
+	"calcside/internal/secrets"
 	"calcside/internal/store"
 	_ "calcside/internal/store/sqlite"
 	webpkg "calcside/web"
@@ -73,9 +74,19 @@ func serve(cfg config.Config) error {
 		MaxOutputBytes:      cfg.MaxOutputBytes,
 		NetAllowPrivate:     cfg.NetAllowPrivate,
 		MaxNetResponseBytes: cfg.MaxNetResponseBytes,
+		SecretsAllowHTTP:    cfg.SecretsAllowHTTP,
+	}
+	var cipher *secrets.Cipher
+	if cfg.SecretKey != "" {
+		cipher, err = secrets.NewCipher(cfg.SecretKey)
+		if err != nil {
+			return fmt.Errorf("--secret-key: %w", err)
+		}
+	} else {
+		slog.Warn("secrets vault disabled (no --secret-key)")
 	}
 	mgr := instance.New(st, eng, reg, rec, cfg.PolicyDir, cfg.PolicyEvalTimeout,
-		limits, nil, nil, cfg.ReaperInterval)
+		limits, nil, cipher, nil, cfg.ReaperInterval)
 	if n, err := mgr.Recover(ctx); err != nil {
 		return fmt.Errorf("recover: %w", err)
 	} else if n > 0 {
@@ -103,7 +114,7 @@ func serve(cfg config.Config) error {
 	}
 	mux := api.Handler(api.Deps{
 		Store: st, Manager: mgr, Registry: reg, Auth: svc,
-		Web: webFS, GoogleEnabled: flow != nil,
+		Web: webFS, GoogleEnabled: flow != nil, Cipher: cipher,
 	})
 	if flow != nil {
 		flow.Bind(svc)

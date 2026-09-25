@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"calcside/internal/capability"
+	"calcside/internal/hostmatch"
 )
 
 func newClient(t *testing.T, cfg Config) *client {
@@ -33,22 +34,18 @@ func mustJSON(t *testing.T, cfg Config) []byte {
 	return b
 }
 
-func mustRules(t *testing.T, cfg Config) []hostRule {
+func mustRules(t *testing.T, cfg Config) []hostmatch.Rule {
 	t.Helper()
-	var out []hostRule
-	for _, h := range cfg.AllowHosts {
-		r, err := parseRule(h)
-		if err != nil {
-			t.Fatal(err)
-		}
-		out = append(out, r)
+	out, err := hostmatch.ParseAll(cfg.AllowHosts)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return out
 }
 
 func hostPort(ts *httptest.Server) (host, port string) {
-	// ts.URL like http://127.0.0.1:PORT
-	s := strings.TrimPrefix(ts.URL, "http://")
+	// ts.URL like http://127.0.0.1:PORT or https://...
+	s := strings.TrimPrefix(strings.TrimPrefix(ts.URL, "http://"), "https://")
 	i := strings.LastIndex(s, ":")
 	return s[:i], s[i+1:]
 }
@@ -101,13 +98,13 @@ func TestHostNotInAllowlistDenied(t *testing.T) {
 func TestWildcardMatch(t *testing.T) {
 	c := newClient(t, Config{AllowHosts: []string{"*.example.com"}})
 	rule := c.rules[0]
-	if !rule.matches("api.example.com") || !rule.matches("a.b.example.com") {
+	if !rule.MatchesHost("api.example.com") || !rule.MatchesHost("a.b.example.com") {
 		t.Fatal("wildcard should match subdomains")
 	}
-	if rule.matches("example.com") {
+	if rule.MatchesHost("example.com") {
 		t.Fatal("wildcard must not match bare domain")
 	}
-	if rule.matches("notexample.com") {
+	if rule.MatchesHost("notexample.com") {
 		t.Fatal("wildcard must not match unrelated domain")
 	}
 }

@@ -104,6 +104,9 @@ func run(args []string) int {
 	case "keys":
 		fmt.Fprintln(stderr, "API keys cannot be managed via key authentication; use the web console (session login) to create or revoke keys.")
 		return 2
+	case "secrets":
+		fmt.Fprintln(stderr, "Secrets are session-only (write-only vault): manage them in the web console. Reference them in instances via --secret NAME[=domains].")
+		return 2
 	default:
 		usage()
 		return 2
@@ -182,6 +185,8 @@ type createFlags struct {
 	netAllow  string
 	netMethod string
 	labels    strList
+	envs      strList
+	secrets   strList
 	spec      string
 	output    string
 }
@@ -201,6 +206,8 @@ func registerCreateFlags(fs *flag.FlagSet, f *createFlags) {
 	fs.StringVar(&f.netAllow, "net-allow", "", "comma-separated allow_hosts")
 	fs.StringVar(&f.netMethod, "net-methods", "", "comma-separated HTTP methods")
 	fs.Var(&f.labels, "label", "k=v label (repeatable)")
+	fs.Var(&f.envs, "env", "K=V env var visible to the script (repeatable)")
+	fs.Var(&f.secrets, "secret", "NAME[=dom1,dom2] vault secret ref, optionally narrowing its domains (repeatable)")
 	fs.StringVar(&f.spec, "spec", "", "raw spec JSON file")
 	fs.StringVar(&f.output, "o", "", "output format (json)")
 }
@@ -271,6 +278,29 @@ func buildSpec(f *createFlags) (client.InstanceSpec, error) {
 			labels[k] = v
 		}
 		spec["labels"] = labels
+	}
+	if len(f.envs) > 0 {
+		env := map[string]string{}
+		for _, kv := range f.envs {
+			k, v, ok := strings.Cut(kv, "=")
+			if !ok {
+				return nil, fmt.Errorf("bad --env %q (want K=V)", kv)
+			}
+			env[k] = v
+		}
+		spec["env"] = env
+	}
+	if len(f.secrets) > 0 {
+		secs := map[string]any{}
+		for _, s := range f.secrets {
+			name, doms, _ := strings.Cut(s, "=")
+			entry := map[string]any{"ref": name}
+			if doms != "" {
+				entry["allowed_domains"] = strings.Split(doms, ",")
+			}
+			secs[name] = entry
+		}
+		spec["secrets"] = secs
 	}
 	return spec, nil
 }

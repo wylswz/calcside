@@ -221,9 +221,27 @@ export default function InstanceDetail() {
           {tab === 'audit' && <AuditTab id={id} />}
         </div>
 
-        <div>
-          <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">Files</h3>
-          <FileBrowser id={id} />
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">Files</h3>
+            <FileBrowser id={id} />
+          </div>
+          {(Object.keys(inst.spec?.env ?? {}).length > 0 || Object.keys(inst.spec?.secrets ?? {}).length > 0) && (
+            <div>
+              <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">Env & Secrets</h3>
+              <div className="rounded border border-gray-200 dark:border-gray-800 p-2 text-xs font-mono space-y-1">
+                {Object.entries(inst.spec.env ?? {}).map(([k, v]) => (
+                  <div key={k}><span className="text-gray-500">{k}</span>={v as string}</div>
+                ))}
+                {Object.entries(inst.spec.secrets ?? {}).map(([k, v]: [string, any]) => (
+                  <div key={k}>
+                    <span className="text-gray-500">{k}</span>
+                    <span className="text-gray-400"> {v.ref ? `→vault:${v.ref}` : '(inline)'} {(v.allowed_domains ?? []).join(', ')}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

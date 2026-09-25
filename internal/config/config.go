@@ -34,6 +34,8 @@ type Config struct {
 	ExecMemoryLimit      uint64
 	NetAllowPrivate      bool
 	MaxNetResponseBytes  int64
+	SecretKey            string
+	SecretsAllowHTTP     bool
 }
 
 func envOr(key, def string) string {
@@ -98,6 +100,8 @@ func Parse(args []string) (Config, error) {
 	fs.Uint64Var(&c.ExecMemoryLimit, "exec-memory-limit", uint64(envInt("EXEC_MEMORY_LIMIT", 2<<30)), "heap watchdog limit in bytes (0 disables)")
 	fs.BoolVar(&c.NetAllowPrivate, "net-allow-private", envBool("NET_ALLOW_PRIVATE", false), "allow private/reserved IPs in net allowlists")
 	fs.Int64Var(&c.MaxNetResponseBytes, "max-net-response-bytes", int64(envInt("MAX_NET_RESPONSE_BYTES", 32<<20)), "clamp for net.max_response_bytes")
+	fs.StringVar(&c.SecretKey, "secret-key", envOr("SECRET_KEY", ""), "base64-encoded 32-byte key encrypting vault secrets")
+	fs.BoolVar(&c.SecretsAllowHTTP, "secrets-allow-http", envBool("SECRETS_ALLOW_HTTP", false), "allow secret injection into http:// URLs (INSECURE)")
 	if err := fs.Parse(args); err != nil {
 		return c, err
 	}

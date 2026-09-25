@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, Instance } from '../api'
+import { api, Instance, Secret } from '../api'
 import { Badge, Button, Field, Modal, StatusBadge, fmtCountdown, fmtTime, inputCls } from '../components/ui'
 
 interface SpecDraft {
@@ -9,6 +9,16 @@ interface SpecDraft {
   labels: Record<string, string>
   capabilities: Record<string, any>
   limits: { exec_timeout_ms?: number; max_steps?: number; max_output_bytes?: number }
+  env?: Record<string, string>
+  secrets?: Record<string, any>
+}
+
+interface EnvRow { k: string; v: string }
+interface SecretRow {
+  name: string
+  kind: 'vault' | 'inline'
+  value: string      // inline only
+  domains: string    // comma/space separated; optional for vault (narrows)
 }
 
 function NewInstanceDialog({ onClose }: { onClose: () => void }) {
@@ -20,9 +30,16 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
   const [netHosts, setNetHosts] = useState('')
   const [netMethods, setNetMethods] = useState('GET,POST')
   const [labelsText, setLabelsText] = useState('')
+  const [envRows, setEnvRows] = useState<EnvRow[]>([])
+  const [secretRows, setSecretRows] = useState<SecretRow[]>([])
   const [err, setErr] = useState('')
   const [jsonText, setJsonText] = useState('')
   const [jsonDirty, setJsonDirty] = useState(false)
+  const { data: vault } = useQuery({
+    queryKey: ['secrets'],
+    queryFn: () => api.get<{ secrets: Secret[] }>('/api/v1/secrets'),
+    retry: false,
+  })
 
   const specFromForm = (): SpecDraft => {
     const labels: Record<string, string> = {}
@@ -38,14 +55,29 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
         methods: netMethods.split(',').map((s) => s.trim()).filter(Boolean),
       }
     }
-    return { ttl_seconds: ttlMin * 60, labels, capabilities: caps, limits: {} }
+    const draft: SpecDraft = { ttl_seconds: ttlMin * 60, labels, capabilities: caps, limits: {} }
+    const env: Record<string, string> = {}
+    for (const r of envRows) if (r.k) env[r.k] = r.v
+    if (Object.keys(env).length) draft.env = env
+    const secs: Record<string, any> = {}
+    for (const r of secretRows) {
+      if (!r.name) continue
+      const doms = r.domains.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean)
+      if (r.kind === 'vault') {
+        secs[r.name] = doms.length ? { ref: r.name, allowed_domains: doms } : { ref: r.name }
+      } else {
+        secs[r.name] = { value: r.value, allowed_domains: doms }
+      }
+    }
+    if (Object.keys(secs).length) draft.secrets = secs
+    return draft
   }
 
   const jsonShown = useMemo(() => {
     if (jsonDirty) return jsonText
     return JSON.stringify(specFromForm(), null, 2)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jsonDirty, ttlMin, fsOn, fsQuota, netOn, netHosts, netMethods, labelsText])
+  }, [jsonDirty, ttlMin, fsOn, fsQuota, netOn, netHosts, netMethods, labelsText, envRows, secretRows])
 
   const create = useMutation({
     mutationFn: (spec: any) => api.post<{ instance: Instance }>('/api/v1/instances', spec),
@@ -105,6 +137,61 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
           <Field label="labels (k=v, comma separated)">
             <input className={inputCls} value={labelsText} onChange={(e) => { setJsonDirty(false); setLabelsText(e.target.value) }} placeholder="team=agents, env=dev" />
           </Field>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-medium text-gray-600 dark:text-gray-400">env</span>
+              <button type="button" className="text-xs text-blue-600 dark:text-blue-400"
+                onClick={() => { setJsonDirty(false); setEnvRows([...envRows, { k: '', v: '' }]) }}>+ add</button>
+            </div>
+            {envRows.map((r, i) => (
+              <div key={i} className="flex gap-1 mb-1">
+                <input className={inputCls + ' !w-28 font-mono text-xs'} placeholder="NAME" value={r.k}
+                  onChange={(e) => { setJsonDirty(false); const rs = [...envRows]; rs[i] = { ...r, k: e.target.value }; setEnvRows(rs) }} />
+                <input className={inputCls + ' font-mono text-xs'} placeholder="value" value={r.v}
+                  onChange={(e) => { setJsonDirty(false); const rs = [...envRows]; rs[i] = { ...r, v: e.target.value }; setEnvRows(rs) }} />
+                <button className="text-xs text-gray-400" onClick={() => { setJsonDirty(false); setEnvRows(envRows.filter((_, j) => j !== i)) }}>×</button>
+              </div>
+            ))}
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-medium text-gray-600 dark:text-gray-400">secrets</span>
+              <button type="button" className="text-xs text-blue-600 dark:text-blue-400"
+                onClick={() => { setJsonDirty(false); setSecretRows([...secretRows, { name: '', kind: 'vault', value: '', domains: '' }]) }}>+ add</button>
+            </div>
+            {secretRows.map((r, i) => {
+              const set = (patch: Partial<SecretRow>) => {
+                setJsonDirty(false)
+                const rs = [...secretRows]
+                rs[i] = { ...r, ...patch }
+                setSecretRows(rs)
+              }
+              return (
+                <div key={i} className="mb-2 rounded border border-gray-200 dark:border-gray-800 p-2 space-y-1">
+                  <div className="flex gap-1 items-center">
+                    <select className={inputCls + ' !w-20 text-xs'} value={r.kind} onChange={(e) => set({ kind: e.target.value as 'vault' | 'inline' })}>
+                      <option value="vault">vault</option>
+                      <option value="inline">inline</option>
+                    </select>
+                    {r.kind === 'vault' ? (
+                      <select className={inputCls + ' font-mono text-xs'} value={r.name} onChange={(e) => set({ name: e.target.value })}>
+                        <option value="">pick…</option>
+                        {(vault?.secrets ?? []).map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
+                      </select>
+                    ) : (
+                      <input className={inputCls + ' font-mono text-xs'} placeholder="NAME" value={r.name} onChange={(e) => set({ name: e.target.value })} />
+                    )}
+                    <button className="ml-auto text-xs text-gray-400" onClick={() => { setJsonDirty(false); setSecretRows(secretRows.filter((_, j) => j !== i)) }}>×</button>
+                  </div>
+                  {r.kind === 'inline' && (
+                    <input type="password" className={inputCls + ' font-mono text-xs'} placeholder="value (never persisted)" value={r.value} onChange={(e) => set({ value: e.target.value })} autoComplete="new-password" />
+                  )}
+                  <input className={inputCls + ' font-mono text-xs'} value={r.domains} onChange={(e) => set({ domains: e.target.value })}
+                    placeholder={r.kind === 'vault' ? 'narrow domains (optional)' : 'allowed domains (required)'} />
+                </div>
+              )
+            })}
+          </div>
         </div>
         <div>
           <Field label="spec (advanced JSON — editable)">

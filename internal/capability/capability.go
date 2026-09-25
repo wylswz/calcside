@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"go.starlark.net/starlark"
+
+	"calcside/internal/secrets"
 )
 
 // ErrOutOfScope is returned by any capability op invoked while its gate is
@@ -248,9 +250,18 @@ type Factory interface {
 	// Validate parses and validates raw JSON config, applying defaults and
 	// clamping against server limits. Returns the typed config for New.
 	Validate(cfg json.RawMessage, limits ServerLimits) (any, error)
-	// New builds the starlark value bound to the given gate. The returned
-	// io.Closer (may be nil) is closed when the instance ends.
-	New(cfg any, gate *Gate) (starlark.Value, io.Closer, error)
+	// New builds the starlark value bound to the instance environment
+	// (gate + resolved secrets). The returned io.Closer (may be nil) is
+	// closed when the instance ends.
+	New(cfg any, env InstanceEnv) (starlark.Value, io.Closer, error)
+}
+
+// InstanceEnv carries per-instance resources capability bindings need
+// beyond their config: the gate, and the resolved secret set (may be nil,
+// treated as empty).
+type InstanceEnv struct {
+	Gate    *Gate
+	Secrets *secrets.Set
 }
 
 // ServerLimits bounds what instance specs may request.
@@ -263,6 +274,7 @@ type ServerLimits struct {
 	MaxOutputBytes      int64
 	NetAllowPrivate     bool  // allow private/reserved IPs in net allowlists
 	MaxNetResponseBytes int64 // clamp for net.max_response_bytes
+	SecretsAllowHTTP    bool  // allow secret injection into plain http:// URLs
 }
 
 // Registry holds capability factories by name.

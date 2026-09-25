@@ -14,6 +14,9 @@ import (
 // ErrNotFound is returned when a requested row does not exist.
 var ErrNotFound = errors.New("store: not found")
 
+// ErrConflict is returned when a uniqueness constraint is violated.
+var ErrConflict = errors.New("store: conflict")
+
 // ID prefixes.
 const (
 	PrefixUser      = "usr_"
@@ -22,6 +25,7 @@ const (
 	PrefixExecution = "exe_"
 	PrefixPolicy    = "pol_"
 	PrefixAudit     = "aud_"
+	PrefixSecret    = "sec_"
 )
 
 const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -145,6 +149,17 @@ type Policy struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// Secret is a vault secret. Ciphertext is never serialized by the API.
+type Secret struct {
+	ID             string    `json:"id"`
+	UserID         string    `json:"user_id"`
+	Name           string    `json:"name"`
+	Ciphertext     []byte    `json:"-"`
+	AllowedDomains []string  `json:"allowed_domains"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
 type Store interface {
 	UpsertUserByEmail(ctx context.Context, email, name, googleSub string) (*User, error)
 	GetUser(ctx context.Context, id string) (*User, error)
@@ -177,6 +192,13 @@ type Store interface {
 	ListPolicies(ctx context.Context, userID string) ([]*Policy, error)
 	UpdatePolicy(ctx context.Context, p *Policy) error
 	DeletePolicy(ctx context.Context, id string) error
+
+	CreateSecret(ctx context.Context, s *Secret) error
+	GetSecret(ctx context.Context, id string) (*Secret, error)
+	GetSecretByName(ctx context.Context, userID, name string) (*Secret, error)
+	ListSecrets(ctx context.Context, userID string) ([]*Secret, error)
+	UpdateSecret(ctx context.Context, s *Secret) error
+	DeleteSecret(ctx context.Context, id string) error
 
 	Close() error
 }
