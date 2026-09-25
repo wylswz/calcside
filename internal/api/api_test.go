@@ -22,7 +22,7 @@ import (
 	"calcside/internal/instance"
 	"calcside/internal/secrets"
 	"calcside/internal/store"
-	_ "calcside/internal/store/sqlite"
+	_ "calcside/internal/store/gormstore"
 )
 
 type env struct {
@@ -67,7 +67,7 @@ func newEnvWith(t *testing.T, cipher *secrets.Cipher) *env {
 	}
 	mgr := instance.New(st, engine.New(8), reg, rec, "", time.Second, limits, nil, cipher, nil, time.Hour)
 	e.mgr = mgr
-	svc := auth.NewService(st, false, true)
+	svc := auth.NewService(st, false)
 	h := Handler(Deps{Store: st, Manager: mgr, Registry: reg, Auth: svc, Cipher: cipher})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -104,18 +104,25 @@ func (e *env) req(method, path, body string, hdrs map[string]string, cookies []*
 	return resp.StatusCode, m, resp.Cookies()
 }
 
-func devLogin(e *env, email string) []*http.Cookie {
+// login creates a user + session programmatically and returns the
+// session cookie (replaces the old dev-login endpoint in tests).
+func login(e *env, email string) []*http.Cookie {
 	e.t.Helper()
-	code, m, cookies := e.req("POST", "/auth/dev/login", `{"email":"`+email+`"}`, nil, nil)
-	if code != 200 {
-		e.t.Fatalf("dev login: %d %v", code, m)
+	u, err := e.st.UpsertUserByEmail(context.Background(), email, "", "")
+	if err != nil {
+		e.t.Fatal(err)
 	}
-	return cookies
+	svc := auth.NewService(e.st, false)
+	raw, err := svc.CreateSession(context.Background(), u.ID)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return []*http.Cookie{{Name: auth.SessionCookie, Value: raw}}
 }
 
 func TestEndToEnd(t *testing.T) {
 	e := newEnv(t)
-	cookies := devLogin(e, "a@x.com")
+	cookies := login(e, "a@x.com")
 
 	// create API key via session
 	csrf := map[string]string{"X-Requested-With": "calcside"}
@@ -199,7 +206,7 @@ func TestEndToEnd(t *testing.T) {
 
 func TestExecOnEndedInstance409(t *testing.T) {
 	e := newEnv(t)
-	cookies := devLogin(e, "a@x.com")
+	cookies := login(e, "a@x.com")
 	csrf := map[string]string{"X-Requested-With": "calcside"}
 	_, m, _ := e.req("POST", "/api/v1/keys", `{"name":"k"}`, csrf, cookies)
 	bearer := map[string]string{"Authorization": "Bearer " + m["secret"].(string)}
@@ -225,14 +232,14 @@ func TestUnauth401(t *testing.T) {
 
 func TestOtherUser404(t *testing.T) {
 	e := newEnv(t)
-	cookiesA := devLogin(e, "a@x.com")
+	cookiesA := login(e, "a@x.com")
 	csrf := map[string]string{"X-Requested-With": "calcside"}
 	_, m, _ := e.req("POST", "/api/v1/keys", `{"name":"k"}`, csrf, cookiesA)
 	bearerA := map[string]string{"Authorization": "Bearer " + m["secret"].(string)}
 	_, m, _ = e.req("POST", "/api/v1/instances", `{}`, bearerA, nil)
 	instID := m["instance"].(map[string]any)["id"].(string)
 
-	cookiesB := devLogin(e, "b@x.com")
+	cookiesB := login(e, "b@x.com")
 	_, m, _ = e.req("POST", "/api/v1/keys", `{"name":"k"}`, csrf, cookiesB)
 	bearerB := map[string]string{"Authorization": "Bearer " + m["secret"].(string)}
 	code, _, _ := e.req("GET", "/api/v1/instances/"+instID, "", bearerB, nil)
@@ -243,7 +250,7 @@ func TestOtherUser404(t *testing.T) {
 
 func TestCookiePostWithoutCSRF403(t *testing.T) {
 	e := newEnv(t)
-	cookies := devLogin(e, "a@x.com")
+	cookies := login(e, "a@x.com")
 	code, _, _ := e.req("POST", "/api/v1/keys", `{"name":"k"}`, nil, cookies)
 	if code != 403 {
 		t.Fatalf("expected 403, got %d", code)
@@ -257,7 +264,7 @@ func TestCookiePostWithoutCSRF403(t *testing.T) {
 
 func TestBearerKeyCannotManageKeys(t *testing.T) {
 	e := newEnv(t)
-	cookies := devLogin(e, "a@x.com")
+	cookies := login(e, "a@x.com")
 	csrf := map[string]string{"X-Requested-With": "calcside"}
 	_, m, _ := e.req("POST", "/api/v1/keys", `{"name":"k"}`, csrf, cookies)
 	bearer := map[string]string{"Authorization": "Bearer " + m["secret"].(string)}
@@ -273,7 +280,7 @@ func TestBearerKeyCannotManageKeys(t *testing.T) {
 
 func TestPolicyEndpoints(t *testing.T) {
 	e := newEnv(t)
-	cookies := devLogin(e, "a@x.com")
+	cookies := login(e, "a@x.com")
 	csrf := map[string]string{"X-Requested-With": "calcside"}
 	valid := `package calcside.hooks
 deny contains "x" if { input.op == "read" }`
@@ -314,7 +321,7 @@ func apiCipher(t *testing.T) *secrets.Cipher {
 
 func TestSecretsDisabled503(t *testing.T) {
 	e := newEnv(t) // no cipher
-	cookies := devLogin(e, "a@x.com")
+	cookies := login(e, "a@x.com")
 	csrf := map[string]string{"X-Requested-With": "calcside"}
 	code, m, _ := e.req("GET", "/api/v1/secrets", "", nil, cookies)
 	if code != 503 || m["error"].(map[string]any)["code"] != "secrets_disabled" {
@@ -340,7 +347,7 @@ func TestSecretsDisabled503(t *testing.T) {
 
 func TestSecretsAPI(t *testing.T) {
 	e := newEnvWith(t, apiCipher(t))
-	cookies := devLogin(e, "a@x.com")
+	cookies := login(e, "a@x.com")
 	csrf := map[string]string{"X-Requested-With": "calcside"}
 
 	code, m, _ := e.req("GET", "/api/v1/auth/config", "", nil, nil)
@@ -402,7 +409,7 @@ func TestSecretsAPI(t *testing.T) {
 		t.Fatalf("bearer secrets list: expected 403, got %d", code)
 	}
 	// other user's secret -> 404
-	cookiesB := devLogin(e, "b@x.com")
+	cookiesB := login(e, "b@x.com")
 	code, _, _ = e.req("PUT", "/api/v1/secrets/"+secID, `{"value":"x"}`, csrf, cookiesB)
 	if code != 404 {
 		t.Fatalf("other user secret: expected 404, got %d", code)
@@ -417,7 +424,7 @@ func TestSecretsAPI(t *testing.T) {
 // literal printing, and a net round-trip through an echo server.
 func TestEnvSecretsEndToEnd(t *testing.T) {
 	e := newEnvWith(t, apiCipher(t))
-	cookies := devLogin(e, "a@x.com")
+	cookies := login(e, "a@x.com")
 	csrf := map[string]string{"X-Requested-With": "calcside"}
 	_, m, _ := e.req("POST", "/api/v1/keys", `{"name":"k"}`, csrf, cookies)
 	bearer := map[string]string{"Authorization": "Bearer " + m["secret"].(string)}

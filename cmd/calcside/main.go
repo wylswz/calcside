@@ -24,7 +24,7 @@ import (
 	"calcside/internal/instance"
 	"calcside/internal/secrets"
 	"calcside/internal/store"
-	_ "calcside/internal/store/sqlite"
+	_ "calcside/internal/store/gormstore"
 	webpkg "calcside/web"
 )
 
@@ -94,9 +94,20 @@ func serve(cfg config.Config) error {
 	}
 	mgr.StartReaper()
 
-	svc := auth.NewService(st, cfg.CookieSecure, cfg.DevLogin)
-	if cfg.DevLogin {
-		slog.Warn("dev login ENABLED — do not use in production")
+	svc := auth.NewService(st, cfg.CookieSecure)
+	var anon *store.User
+	if cfg.Dev {
+		if !cfg.AddrExplicit {
+			cfg.Addr = "127.0.0.1:8080"
+		}
+		if err := config.CheckDevAddr(cfg.Addr, cfg.DevAllowRemote); err != nil {
+			return err
+		}
+		slog.Warn("DEV MODE ENABLED — no login required; all API requests run as anonymous — do not use in production")
+		anon, err = st.UpsertUserByEmail(ctx, "anonymous@localhost", "anonymous", "")
+		if err != nil {
+			return fmt.Errorf("dev anonymous user: %w", err)
+		}
 	}
 	flow, err := auth.InitGoogle(ctx, auth.GoogleConfig{
 		ClientID:       cfg.GoogleClientID,
@@ -115,6 +126,7 @@ func serve(cfg config.Config) error {
 	mux := api.Handler(api.Deps{
 		Store: st, Manager: mgr, Registry: reg, Auth: svc,
 		Web: webFS, GoogleEnabled: flow != nil, Cipher: cipher,
+		Dev: cfg.Dev, Anonymous: anon,
 	})
 	if flow != nil {
 		flow.Bind(svc)

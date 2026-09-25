@@ -6,6 +6,7 @@ import (
 
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -15,6 +16,9 @@ import (
 // Config is the server configuration.
 type Config struct {
 	Addr                 string
+	AddrExplicit         bool // --addr flag or CALCSIDE_ADDR set
+	Dev                  bool
+	DevAllowRemote       bool
 	Store                types.StoreDriver
 	DSN                  string
 	PolicyDir            string
@@ -23,7 +27,6 @@ type Config struct {
 	GoogleClientSecret   string
 	GoogleAllowedDomains []string
 	CookieSecure         bool
-	DevLogin             bool
 	MaxInstancesPerUser  int
 	DefaultTTL           time.Duration
 	MaxTTL               time.Duration
@@ -89,7 +92,8 @@ func Parse(args []string) (Config, error) {
 	var domains string
 	fs.StringVar(&domains, "google-allowed-domains", envOr("GOOGLE_ALLOWED_DOMAINS", ""), "comma-separated allowed email domains")
 	fs.BoolVar(&c.CookieSecure, "cookie-secure", envBool("COOKIE_SECURE", false), "set Secure on cookies")
-	fs.BoolVar(&c.DevLogin, "dev-login", envBool("DEV_LOGIN", false), "enable POST /auth/dev/login (INSECURE)")
+	fs.BoolVar(&c.Dev, "dev", envBool("DEV", false), "dev mode: no login, anonymous principal (INSECURE)")
+	fs.BoolVar(&c.DevAllowRemote, "dev-allow-remote", envBool("DEV_ALLOW_REMOTE", false), "allow --dev on non-loopback addr (INSECURE)")
 	fs.IntVar(&c.MaxInstancesPerUser, "max-instances-per-user", envInt("MAX_INSTANCES_PER_USER", 10), "max live instances per user")
 	fs.DurationVar(&c.DefaultTTL, "default-ttl", envDur("DEFAULT_TTL", 15*time.Minute), "default instance TTL")
 	fs.DurationVar(&c.MaxTTL, "max-ttl", envDur("MAX_TTL", 24*time.Hour), "max instance TTL")
@@ -107,6 +111,13 @@ func Parse(args []string) (Config, error) {
 	if err := fs.Parse(args); err != nil {
 		return c, err
 	}
+	addrSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "addr" {
+			addrSet = true
+		}
+	})
+	c.AddrExplicit = addrSet || os.Getenv("CALCSIDE_ADDR") != ""
 	for _, d := range strings.Split(domains, ",") {
 		d = strings.TrimSpace(d)
 		if d != "" {
@@ -117,4 +128,28 @@ func Parse(args []string) (Config, error) {
 		return c, fmt.Errorf("TTLs must be positive")
 	}
 	return c, nil
+}
+
+// CheckDevAddr refuses non-loopback listen addresses in dev mode unless
+// --dev-allow-remote was passed.
+func CheckDevAddr(addr string, allowRemote bool) error {
+	if allowRemote {
+		return nil
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		// Bare ":8080" or "8080"-style values: SplitHostPort handles ":8080";
+		// anything else treat as unsafe rather than guessing.
+		return fmt.Errorf("dev mode: cannot parse --addr %q", addr)
+	}
+	if host == "" {
+		host = "0.0.0.0" // ":8080" binds all interfaces — not loopback
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	if strings.EqualFold(host, "localhost") {
+		return nil
+	}
+	return fmt.Errorf("dev mode refuses non-loopback --addr %q (pass --dev-allow-remote to override)", addr)
 }

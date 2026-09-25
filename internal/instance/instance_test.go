@@ -12,7 +12,7 @@ import (
 	capio "calcside/internal/capability/io"
 	"calcside/internal/engine"
 	"calcside/internal/store"
-	_ "calcside/internal/store/sqlite"
+	_ "calcside/internal/store/gormstore"
 	"calcside/internal/types"
 )
 

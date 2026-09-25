@@ -1,5 +1,5 @@
 import React from 'react'
-import type { Decision, InstanceStatus } from '../enums'
+import type { Decision, InstanceStatus } from '../api'
 
 type Tone = 'green' | 'red' | 'gray' | 'yellow' | 'blue'
 

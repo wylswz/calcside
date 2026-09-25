@@ -325,11 +325,12 @@ func (d *StoreDriver) UnmarshalText(b []byte) error {
 type AuthKind string
 
 const (
-	AuthSession AuthKind = "session"
-	AuthAPIKey  AuthKind = "api_key"
+	AuthSession   AuthKind = "session"
+	AuthAPIKey    AuthKind = "api_key"
+	AuthAnonymous AuthKind = "anonymous"
 )
 
-func AllAuthKinds() []AuthKind { return []AuthKind{AuthSession, AuthAPIKey} }
+func AllAuthKinds() []AuthKind { return []AuthKind{AuthSession, AuthAPIKey, AuthAnonymous} }
 
 func (k AuthKind) Valid() bool { return valid(k, AllAuthKinds()) }
 

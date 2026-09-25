@@ -1,13 +1,37 @@
-// Typed API client for the calcside console.
-import type {
-  ApiErrorCode,
-  CapabilityName,
-  Decision,
-  ExecErrorType,
-  ExecStatus,
-  InstanceStatus,
-  Phase,
-} from './enums'
+// API client for the calcside console, generated from api/openapi.yaml:
+// `src/api/schema.ts` is produced by openapi-typescript (`pnpm gen`) —
+// never edit it by hand. Request/response shapes come from the schema.
+import createClient from 'openapi-fetch'
+import type { paths, components } from './api/schema'
+
+// --- generated types (aliases keep page imports tidy) ---
+
+export type User = components['schemas']['User']
+export type Instance = components['schemas']['Instance']
+export type InstanceSpec = components['schemas']['InstanceSpec']
+export type ExecResult = components['schemas']['ExecResult']
+export type ExecError = components['schemas']['ExecError']
+export type Execution = components['schemas']['Execution']
+export type FileEntry = components['schemas']['FileEntry']
+export type AuditEvent = components['schemas']['AuditEvent']
+export type Policy = components['schemas']['Policy']
+export type APIKey = components['schemas']['APIKey']
+export type AuthConfig = components['schemas']['AuthConfig']
+export type Secret = components['schemas']['Secret']
+
+// --- enum types (values live in schema.ts *Values consts) ---
+
+export type InstanceStatus = components['schemas']['InstanceStatus']
+export type ExecStatus = components['schemas']['ExecStatus']
+export type ExecErrorType = components['schemas']['ExecErrorType']
+export type Decision = components['schemas']['Decision']
+export type Phase = components['schemas']['Phase']
+export type CapabilityName = components['schemas']['CapabilityName']
+export type HttpMethod = components['schemas']['HTTPMethod']
+export type SecretSource = components['schemas']['SecretSource']
+export type ApiErrorCode = components['schemas']['APIErrorCode']
+export type FieldType = components['schemas']['FieldType']
+export type AuthKind = components['schemas']['AuthKind']
 
 export class ApiError extends Error {
   status: number
@@ -19,135 +43,58 @@ export class ApiError extends Error {
   }
 }
 
-async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = {}
-  if (method !== 'GET' && method !== 'HEAD') {
-    headers['X-Requested-With'] = 'calcside'
-    if (body !== undefined) headers['Content-Type'] = 'application/json'
+// devMode is populated by loadAuthConfig at app start; when the server
+// is in dev mode we never redirect to /login.
+let devMode = false
+
+export function isDevMode(): boolean {
+  return devMode
+}
+
+export async function loadAuthConfig(): Promise<AuthConfig> {
+  const cfg = await api.get<AuthConfig>('/api/v1/auth/config')
+  devMode = cfg.dev_mode ?? false
+  return cfg
+}
+
+const raw = createClient<paths>({ credentials: 'same-origin' })
+
+raw.use({
+  async onRequest({ request }) {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      request.headers.set('X-Requested-With', 'calcside')
+    }
+    return request
+  },
+  async onResponse({ response }) {
+    const url = new URL(response.url)
+    if (response.status === 401 && !devMode && !url.pathname.startsWith('/api/v1/auth/config')) {
+      window.location.assign('/login')
+    }
+    return response
+  },
+})
+
+// api keeps the old { get, post, put, del } surface but is backed by
+// the generated openapi-fetch client.
+export const api = {
+  get: async <T>(path: string): Promise<T> => call<T>('get', path),
+  post: async <T>(path: string, body?: unknown): Promise<T> => call<T>('post', path, body ?? {}),
+  put: async <T>(path: string, body: unknown): Promise<T> => call<T>('put', path, body),
+  del: async <T>(path: string): Promise<T> => call<T>('delete', path),
+}
+
+async function call<T>(method: 'get' | 'post' | 'put' | 'delete', path: string, body?: unknown): Promise<T> {
+  // openapi-fetch is typed per-path; the console's dynamic paths are
+  // handled via the untyped escape hatch.
+  const fn = (raw as any)[method.toUpperCase()].bind(raw)
+  const { data, error, response } = await fn(path as never, method === 'get' || method === 'delete' ? undefined : { body })
+  if (error !== undefined && error !== null) {
+    const e = (error as any)?.error
+    throw new ApiError(response.status, (e?.code ?? '') as ApiErrorCode | '', e?.message ?? response.statusText)
   }
-  const res = await fetch(path, {
-    method,
-    headers,
-    credentials: 'same-origin',
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  if (res.status === 401 && !path.startsWith('/api/v1/auth/config')) {
-    window.location.assign('/login')
-    throw new ApiError(401, 'unauthorized', 'redirecting to login')
-  }
-  const data = res.status === 204 ? null : await res.json().catch(() => null)
-  if (!res.ok) {
-    const e = data?.error
-    const code = (e?.code ?? '') as ApiErrorCode | ''
-    throw new ApiError(res.status, code, e?.message ?? res.statusText)
+  if (!response.ok) {
+    throw new ApiError(response.status, '', response.statusText)
   }
   return data as T
-}
-
-export const api = {
-  get: <T>(path: string) => req<T>('GET', path),
-  post: <T>(path: string, body?: unknown) => req<T>('POST', path, body ?? {}),
-  put: <T>(path: string, body: unknown) => req<T>('PUT', path, body),
-  del: <T>(path: string) => req<T>('DELETE', path),
-}
-
-// --- types mirroring the backend ---
-
-export interface User {
-  id: string
-  email: string
-  name: string
-}
-
-export interface Instance {
-  id: string
-  user_id: string
-  spec: Record<string, any>
-  labels: Record<string, string>
-  status: InstanceStatus
-  created_at: string
-  last_active_at: string
-  expires_at: string
-  ended_at?: string
-}
-
-export interface ExecError {
-  type: ExecErrorType
-  message: string
-  backtrace?: string
-}
-
-export interface ExecResult {
-  exec_id: string
-  output: string
-  error: ExecError | null
-  duration_ms: number
-  steps: number
-}
-
-export interface Execution {
-  id: string
-  status: ExecStatus
-  error_type?: ExecErrorType
-  duration_ms: number
-  steps: number
-  output_bytes: number
-  created_at: string
-  code_snippet: string
-}
-
-export interface FileEntry {
-  name: string
-  path: string
-  is_dir: boolean
-  size: number
-  mtime: number
-}
-
-export interface AuditEvent {
-  id: string
-  ts: string
-  instance_id: string
-  exec_id: string
-  capability: CapabilityName
-  op: string
-  args: string
-  phase: Phase
-  decision: Decision
-  reason: string
-  error: string
-  duration_ms: number
-}
-
-export interface Policy {
-  id: string
-  name: string
-  rego: string
-  enabled: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface APIKey {
-  id: string
-  name: string
-  prefix: string
-  created_at: string
-  last_used_at?: string
-  expires_at?: string
-  revoked_at?: string
-}
-
-export interface AuthConfig {
-  google: boolean
-  dev_login: boolean
-  secrets: boolean
-}
-
-export interface Secret {
-  id: string
-  name: string
-  allowed_domains: string[]
-  created_at: string
-  updated_at: string
 }

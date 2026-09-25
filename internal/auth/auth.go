@@ -1,6 +1,6 @@
 // Package auth implements principals: Google OIDC sessions (cookie),
-// API keys (bearer), a dev-login escape hatch, and middleware with CSRF
-// protection for cookie-authenticated requests.
+// API keys (bearer), and CSRF protection for cookie-authenticated
+// requests.
 package auth
 
 import (
@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -48,9 +47,12 @@ func withPrincipal(ctx context.Context, p *Principal) context.Context {
 	return context.WithValue(ctx, principalKey, p)
 }
 
+// SessionCookie is the name of the session cookie.
+const SessionCookie = "cs_session"
+
 const (
 	apiKeyPrefix    = "cs_"
-	sessionCookie   = "cs_session"
+	sessionCookie   = SessionCookie
 	sessionDuration = 7 * 24 * time.Hour
 	csrfHeader      = "X-Requested-With"
 	csrfValue       = "calcside"
@@ -60,11 +62,10 @@ const (
 type Service struct {
 	st           store.Store
 	cookieSecure bool
-	devLogin     bool
 }
 
-func NewService(st store.Store, cookieSecure, devLogin bool) *Service {
-	return &Service{st: st, cookieSecure: cookieSecure, devLogin: devLogin}
+func NewService(st store.Store, cookieSecure bool) *Service {
+	return &Service{st: st, cookieSecure: cookieSecure}
 }
 
 func randBytes(n int) []byte {
@@ -184,53 +185,19 @@ func (s *Service) Resolve(ctx context.Context, r *http.Request) (*Principal, err
 	return nil, nil
 }
 
-// Middleware resolves the principal and enforces CSRF on cookie-auth
-// mutations.
-func (s *Service) Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p, err := s.Resolve(r.Context(), r)
-		if err != nil {
-			writeErr(w, http.StatusUnauthorized, types.ErrCodeUnauthorized, err.Error())
-			return
-		}
-		if p != nil && !p.ViaKey() && r.Method != http.MethodGet && r.Method != http.MethodHead {
-			if r.Header.Get(csrfHeader) != csrfValue {
-				writeErr(w, http.StatusForbidden, types.ErrCodeCSRF, "missing "+csrfHeader+" header")
-				return
-			}
-		}
-		if p != nil {
-			r = r.WithContext(withPrincipal(r.Context(), p))
-		}
-		next.ServeHTTP(w, r)
-	})
+// NeedsCSRF reports whether a principal authenticated by cookie or
+// dev-mode anonymity must present the CSRF header on mutations.
+func NeedsCSRF(p *Principal) bool { return p != nil && !p.ViaKey() }
+
+// CSRFHeaderOK reports whether the request carries the required
+// anti-CSRF header.
+func CSRFHeaderOK(r *http.Request) bool {
+	return r.Header.Get(csrfHeader) == csrfValue
 }
 
-// RequireAuth rejects unauthenticated requests.
-func RequireAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if FromContext(r.Context()) == nil {
-			writeErr(w, http.StatusUnauthorized, types.ErrCodeUnauthorized, "authentication required")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// RequireSession rejects API-key-authenticated requests (key management).
-func RequireSession(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := FromContext(r.Context())
-		if p == nil {
-			writeErr(w, http.StatusUnauthorized, types.ErrCodeUnauthorized, "authentication required")
-			return
-		}
-		if p.ViaKey() {
-			writeErr(w, http.StatusForbidden, types.ErrCodeForbidden, "session required to manage API keys")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+// WithPrincipal stores the principal on a context.
+func WithPrincipal(ctx context.Context, p *Principal) context.Context {
+	return withPrincipal(ctx, p)
 }
 
 func writeErr(w http.ResponseWriter, status int, code types.APIErrorCode, msg string) {
@@ -238,41 +205,6 @@ func writeErr(w http.ResponseWriter, status int, code types.APIErrorCode, msg st
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"error": map[string]string{"code": string(code), "message": msg},
-	})
-}
-
-// DevLoginEnabled reports whether the dev login endpoint is active.
-func (s *Service) DevLoginEnabled() bool { return s.devLogin }
-
-// DevLoginHandler creates a session for {"email": ...} — dev only.
-func (s *Service) DevLoginHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.devLogin {
-			writeErr(w, http.StatusNotFound, types.ErrCodeNotFound, "dev login disabled")
-			return
-		}
-		var body struct {
-			Email string `json:"email"`
-			Name  string `json:"name"`
-		}
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil || body.Email == "" {
-			writeErr(w, http.StatusBadRequest, types.ErrCodeBadRequest, "email required")
-			return
-		}
-		u, err := s.st.UpsertUserByEmail(r.Context(), body.Email, body.Name, "")
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, types.ErrCodeInternal, err.Error())
-			return
-		}
-		raw, err := s.CreateSession(r.Context(), u.ID)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, types.ErrCodeInternal, err.Error())
-			return
-		}
-		s.setSessionCookie(w, raw)
-		slog.Warn("dev login used", "email", body.Email)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"user": u})
 	})
 }
 

@@ -1,6 +1,6 @@
 import { Route, Routes, NavLink, Navigate, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { api, User } from './api'
+import { api, loadAuthConfig, User, AuthConfig, AuthKind } from './api'
 import Login from './pages/Login'
 import Instances from './pages/Instances'
 import InstanceDetail from './pages/InstanceDetail'
@@ -12,7 +12,11 @@ import Secrets from './pages/Secrets'
 function useMe() {
   return useQuery({
     queryKey: ['me'],
-    queryFn: () => api.get<{ user: User }>('/api/v1/me').then((r) => r.user),
+    queryFn: async () => {
+      const cfg = await loadAuthConfig()
+      const r = await api.get<{ user: User; kind: AuthKind }>('/api/v1/me')
+      return { user: r.user, cfg }
+    },
     retry: false,
   })
 }
@@ -21,14 +25,17 @@ const navCls = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-1.5 rounded text-sm ${isActive ? 'bg-gray-200 dark:bg-gray-800 font-medium' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'}`
 
 export default function App() {
-  const { data: user, isLoading, isError } = useMe()
+  const { data, isLoading, isError } = useMe()
   const navigate = useNavigate()
+  const user = data?.user
+  const cfg: AuthConfig | undefined = data?.cfg
+  const dev = cfg?.dev_mode === true
 
   if (isLoading) {
     return <div className="p-8 text-sm text-gray-500">loading…</div>
   }
   const onLoginPage = window.location.pathname === '/login'
-  if (isError || !user) {
+  if ((isError || !user) && !dev) {
     if (!onLoginPage) return <Navigate to="/login" replace />
     return (
       <Routes>
@@ -55,10 +62,17 @@ export default function App() {
             <NavLink to="/secrets" className={navCls}>Secrets</NavLink>
             <NavLink to="/audit" className={navCls}>Audit</NavLink>
           </nav>
-          <span className="text-xs text-gray-500 dark:text-gray-400">{user.email}</span>
-          <button onClick={logout} className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800">
-            Logout
-          </button>
+          {dev && (
+            <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+              dev mode · anonymous
+            </span>
+          )}
+          <span className="text-xs text-gray-500 dark:text-gray-400">{user?.email}</span>
+          {!dev && (
+            <button onClick={logout} className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800">
+              Logout
+            </button>
+          )}
         </div>
       </header>
       <main className="mx-auto max-w-7xl px-4 py-4">

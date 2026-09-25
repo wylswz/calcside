@@ -3,8 +3,9 @@ package types
 import (
 	"os"
 	"reflect"
-	"regexp"
 	"testing"
+
+	yaml "go.yaml.in/yaml/v3"
 )
 
 func strs[T ~string](xs []T) []string {
@@ -15,49 +16,57 @@ func strs[T ~string](xs []T) []string {
 	return out
 }
 
-// TestWebEnumsInSync reads web/src/enums.ts and asserts each exported
-// `as const` array equals the corresponding Go All*() values, so the
-// frontend and backend enum sets cannot drift apart.
-func TestWebEnumsInSync(t *testing.T) {
-	data, err := os.ReadFile("../../web/src/enums.ts")
+// TestOpenAPIEnumsInSync parses api/openapi.yaml — the contract that
+// generated server/client code is produced from — and asserts each
+// enum schema equals the corresponding Go All*() values, so the
+// contract and the domain types cannot drift apart.
+func TestOpenAPIEnumsInSync(t *testing.T) {
+	data, err := os.ReadFile("../../api/openapi.yaml")
 	if err != nil {
-		t.Skip("web/src/enums.ts not found")
+		t.Skip("api/openapi.yaml not found")
 	}
-	constRe := regexp.MustCompile(`export const (\w+) = \[([^\]]*)\] as const`)
-	valRe := regexp.MustCompile(`'([^']*)'`)
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Enum []string `yaml:"enum"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
 	found := map[string][]string{}
-	for _, m := range constRe.FindAllSubmatch(data, -1) {
-		var vals []string
-		for _, v := range valRe.FindAllSubmatch(m[2], -1) {
-			vals = append(vals, string(v[1]))
+	for name, s := range doc.Components.Schemas {
+		if s.Enum != nil {
+			found[name] = s.Enum
 		}
-		found[string(m[1])] = vals
 	}
 
 	want := map[string][]string{
-		"INSTANCE_STATUSES": strs(AllInstanceStatuses()),
-		"EXEC_STATUSES":     strs(AllExecStatuses()),
-		"EXEC_ERROR_TYPES":  strs(AllExecErrorTypes()),
-		"DECISIONS":         strs(AllDecisions()),
-		"PHASES":            append([]string{string(PhaseNone)}, strs(AllPhases())...),
-		"CAPABILITY_NAMES":  strs(AllCapabilityNames()),
-		"HTTP_METHODS":      strs(AllHTTPMethods()),
-		"SECRET_SOURCES":    strs(AllSecretSources()),
-		"API_ERROR_CODES":   strs(AllAPIErrorCodes()),
-		"FIELD_TYPES":       strs(AllFieldTypes()),
+		"InstanceStatus": strs(AllInstanceStatuses()),
+		"ExecStatus":     strs(AllExecStatuses()),
+		"ExecErrorType":  strs(AllExecErrorTypes()),
+		"Decision":       strs(AllDecisions()),
+		"Phase":          append([]string{string(PhaseNone)}, strs(AllPhases())...),
+		"CapabilityName": strs(AllCapabilityNames()),
+		"HTTPMethod":     strs(AllHTTPMethods()),
+		"SecretSource":   strs(AllSecretSources()),
+		"APIErrorCode":   strs(AllAPIErrorCodes()),
+		"FieldType":      strs(AllFieldTypes()),
+		"AuthKind":       strs(AllAuthKinds()),
 	}
 	for name, w := range want {
 		got, ok := found[name]
 		if !ok {
-			t.Fatalf("enums.ts missing export %s", name)
+			t.Fatalf("openapi.yaml missing enum schema %s", name)
 		}
 		if !reflect.DeepEqual(got, w) {
-			t.Fatalf("%s: web=%v go=%v", name, got, w)
+			t.Fatalf("%s: openapi=%v go=%v", name, got, w)
 		}
 	}
 	for name := range found {
 		if _, ok := want[name]; !ok {
-			t.Fatalf("enums.ts has unmapped export %s", name)
+			t.Fatalf("openapi.yaml has unmapped enum schema %s", name)
 		}
 	}
 }

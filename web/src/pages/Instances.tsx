@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Instance, Secret } from '../api'
-import type { SecretSource } from '../enums'
+import type { SecretSource } from '../api'
 import { Badge, Button, Field, Modal, StatusBadge, fmtCountdown, fmtTime, inputCls } from '../components/ui'
 
 interface SpecDraft {

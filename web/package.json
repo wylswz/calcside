@@ -7,18 +7,21 @@
     "dev": "vite",
     "build": "vite build && echo 'placeholder so `go build` works before `pnpm -C web build` generates the real assets' > dist/README.txt",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "gen": "openapi-typescript ../api/openapi.yaml -o src/api/schema.ts --enum-values"
   },
   "dependencies": {
     "@codemirror/lang-python": "6.1.6",
     "@tanstack/react-query": "5.59.16",
     "@uiw/react-codemirror": "4.23.6",
+    "openapi-fetch": "0.17.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-router-dom": "6.28.0"
   },
   "devDependencies": {
     "@eslint/js": "9.14.0",
+    "@types/node": "^26.6.2",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
     "@vitejs/plugin-react": "4.3.3",
@@ -27,6 +30,7 @@
     "eslint-plugin-react-hooks": "5.1.0-rc-fb9a90fa48-20240614",
     "eslint-plugin-react-refresh": "0.4.14",
     "globals": "15.12.0",
+    "openapi-typescript": "7.13.0",
     "postcss": "8.4.49",
     "tailwindcss": "3.4.15",
     "typescript": "5.6.3",

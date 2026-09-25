@@ -1,0 +1,876 @@
+openapi: 3.0.3
+info:
+  title: calcside API
+  version: "1.0.0"
+  description: |
+    REST API for the calcside Starlark sandbox.
+
+    Authentication: `bearerAuth` (API key `cs_…`) or `cookieAuth` (session
+    cookie `cs_session`). Cookie-authenticated mutating requests (any
+    non-GET/HEAD) must send `X-Requested-With: calcside` (CSRF guard).
+    API-key-authenticated requests are forbidden on the session-only
+    endpoints `/api/v1/keys*` and `/api/v1/secrets*` (403).
+
+    In dev mode (`--dev`) requests without credentials authenticate as
+    the `anonymous` user; the same CSRF rule applies.
+servers:
+  - url: /
+tags:
+  - name: auth-raw
+    description: Cookie/redirect auth endpoints (hand-written, not generated)
+  - name: auth
+  - name: meta
+  - name: keys
+  - name: instances
+  - name: audit
+  - name: policies
+  - name: secrets
+paths:
+  /healthz:
+    get:
+      operationId: healthz
+      tags: [meta]
+      security: []
+      responses:
+        '200':
+          description: liveness
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+  /api/v1/auth/config:
+    get:
+      operationId: authConfig
+      tags: [auth]
+      security: []
+      responses:
+        '200':
+          description: which login methods are enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthConfig'
+  /api/v1/me:
+    get:
+      operationId: me
+      tags: [auth]
+      responses:
+        '200':
+          description: current principal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeInfo'
+        '401': { $ref: '#/components/responses/Error' }
+  /api/v1/capabilities:
+    get:
+      operationId: capabilities
+      tags: [meta]
+      responses:
+        '200':
+          description: registered capability factories
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityCatalog'
+        '401': { $ref: '#/components/responses/Error' }
+  /api/v1/keys:
+    get:
+      operationId: listKeys
+      tags: [keys]
+      description: Session or anonymous (dev) auth only — API keys get 403.
+      responses:
+        '200':
+          description: the user's API keys
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KeysResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createKey
+      tags: [keys]
+      description: Session or anonymous (dev) auth only — API keys get 403.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateKeyRequest'
+      responses:
+        '201':
+          description: created key; `secret` is shown only once
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedKey'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /api/v1/keys/{id}:
+    delete:
+      operationId: deleteKey
+      tags: [keys]
+      description: Session or anonymous (dev) auth only — API keys get 403.
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/instances:
+    get:
+      operationId: listInstances
+      tags: [instances]
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/InstanceStatus' }
+      responses:
+        '200':
+          description: the user's instances
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstancesResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createInstance
+      tags: [instances]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstanceSpec'
+      responses:
+        '201':
+          description: created instance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstanceResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /api/v1/instances/{id}:
+    get:
+      operationId: getInstance
+      tags: [instances]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: instance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstanceResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deleteInstance
+      tags: [instances]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/instances/{id}/keepalive:
+    post:
+      operationId: keepalive
+      tags: [instances]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: TTL bumped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstanceResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/instances/{id}/exec:
+    post:
+      operationId: exec
+      tags: [instances]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecRequest'
+      responses:
+        '200':
+          description: execution result (script errors return 200 with error field)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecResult'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
+  /api/v1/instances/{id}/files:
+    get:
+      operationId: files
+      tags: [instances]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: path
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: directory listing or file content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FilesResult'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/instances/{id}/executions:
+    get:
+      operationId: listExecutions
+      tags: [instances]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: limit
+          in: query
+          schema: { type: integer }
+      responses:
+        '200':
+          description: executions for the instance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionsResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/audit:
+    get:
+      operationId: listAudit
+      tags: [audit]
+      parameters:
+        - name: instance_id
+          in: query
+          schema: { type: string }
+        - name: exec_id
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer }
+        - name: before
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: audit events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditResponse'
+        '401': { $ref: '#/components/responses/Error' }
+  /api/v1/policies:
+    get:
+      operationId: listPolicies
+      tags: [policies]
+      responses:
+        '200':
+          description: the user's policies
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PoliciesResponse'
+        '401': { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createPolicy
+      tags: [policies]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PolicyRequest'
+      responses:
+        '201':
+          description: created policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+  /api/v1/policies/validate:
+    post:
+      operationId: validatePolicy
+      tags: [policies]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValidatePolicyRequest'
+      responses:
+        '200':
+          description: validation result (always 200)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationResult'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+  /api/v1/policies/{id}:
+    get:
+      operationId: getPolicy
+      tags: [policies]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    put:
+      operationId: updatePolicy
+      tags: [policies]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PolicyUpdateRequest'
+      responses:
+        '200':
+          description: updated policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deletePolicy
+      tags: [policies]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/secrets:
+    get:
+      operationId: listSecrets
+      tags: [secrets]
+      description: Session or anonymous (dev) auth only — API keys get 403. Never returns values.
+      responses:
+        '200':
+          description: vault secrets (metadata only)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecretsResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createSecret
+      tags: [secrets]
+      description: Session or anonymous (dev) auth only — API keys get 403. Value is write-only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSecretRequest'
+      responses:
+        '201':
+          description: created secret (metadata only)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecretResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /api/v1/secrets/{id}:
+    put:
+      operationId: updateSecret
+      tags: [secrets]
+      description: Session or anonymous (dev) auth only — API keys get 403.
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSecretRequest'
+      responses:
+        '200':
+          description: updated secret (metadata only)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecretResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deleteSecret
+      tags: [secrets]
+      description: Session or anonymous (dev) auth only — API keys get 403.
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth-raw]
+      summary: Clear the session cookie (redirects to /login)
+      responses:
+        '302': { description: redirect to /login }
+  /auth/google/login:
+    get:
+      operationId: googleLogin
+      tags: [auth-raw]
+      summary: Redirect to Google OIDC authorize URL
+      responses:
+        '302': { description: redirect to Google }
+        '404': { $ref: '#/components/responses/Error' }
+  /auth/google/callback:
+    get:
+      operationId: googleCallback
+      tags: [auth-raw]
+      summary: OIDC callback; sets cs_session cookie
+      parameters:
+        - { name: code, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+      responses:
+        '302': { description: redirect to / }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+components:
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    Error:
+      description: error envelope
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: API key `cs_…`
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: cs_session
+      description: "Session cookie; mutating requests need `X-Requested-With: calcside`."
+  schemas:
+    # --- enums (mirror internal/types; drift-checked by a Go test) ---
+    InstanceStatus:
+      type: string
+      enum: [running, deleted, expired, lost]
+    ExecStatus:
+      type: string
+      enum: [ok, error]
+    ExecErrorType:
+      type: string
+      enum: [syntax, runtime, policy_denied, out_of_scope, timeout, step_limit, memory_limit]
+    Decision:
+      type: string
+      enum: [allow, deny]
+    Phase:
+      type: string
+      description: audit event phase; "" = no phase (runtime error / out of scope)
+      enum: ['', before, after]
+    CapabilityName:
+      type: string
+      enum: [fs, net, io]
+    HTTPMethod:
+      type: string
+      enum: [GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS]
+    SecretSource:
+      type: string
+      enum: [vault, inline]
+    APIErrorCode:
+      type: string
+      enum: [auth_failed, bad_capability, bad_policy, bad_request, bad_secret, bad_spec, conflict, csrf, forbidden, fs_error, internal, method_not_allowed, no_fs, not_found, not_running, secrets_disabled, too_large, too_many, unauthorized]
+    FieldType:
+      type: string
+      enum: [int, bool, string, string_list, string_map]
+    AuthKind:
+      type: string
+      enum: [session, api_key, anonymous]
+    # --- models ---
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { $ref: '#/components/schemas/APIErrorCode' }
+            message: { type: string }
+    OkResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+    AuthConfig:
+      type: object
+      required: [google, dev_mode, secrets]
+      properties:
+        google: { type: boolean }
+        dev_mode: { type: boolean, description: dev mode — anonymous login, no credentials needed }
+        secrets: { type: boolean, description: vault secrets enabled (--secret-key set) }
+    User:
+      type: object
+      required: [id, email, name, created_at, last_login_at]
+      properties:
+        id: { type: string }
+        email: { type: string }
+        name: { type: string }
+        google_sub: { type: string }
+        created_at: { type: string, format: date-time }
+        last_login_at: { type: string, format: date-time }
+    MeInfo:
+      type: object
+      required: [user, via_key, kind]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        via_key: { type: boolean }
+        kind: { $ref: '#/components/schemas/AuthKind' }
+    OpDoc:
+      type: object
+      properties:
+        name: { type: string }
+        doc: { type: string }
+        params:
+          type: array
+          items: { type: string }
+    FieldDoc:
+      type: object
+      properties:
+        name: { type: string }
+        type: { $ref: '#/components/schemas/FieldType' }
+        doc: { type: string }
+        default: { }
+    CapabilityDoc:
+      type: object
+      properties:
+        name: { $ref: '#/components/schemas/CapabilityName' }
+        ops:
+          type: array
+          items: { $ref: '#/components/schemas/OpDoc' }
+        config_fields:
+          type: array
+          items: { $ref: '#/components/schemas/FieldDoc' }
+    CapabilityCatalog:
+      type: object
+      properties:
+        capabilities:
+          type: array
+          items: { $ref: '#/components/schemas/CapabilityDoc' }
+    APIKey:
+      type: object
+      required: [id, user_id, name, prefix, created_at]
+      properties:
+        id: { type: string }
+        user_id: { type: string }
+        name: { type: string }
+        prefix: { type: string }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+    CreateKeyRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        expires_in_seconds: { type: integer, format: int64 }
+    CreatedKey:
+      type: object
+      properties:
+        key: { $ref: '#/components/schemas/APIKey' }
+        secret: { type: string, description: full API key, shown only once }
+    KeysResponse:
+      type: object
+      properties:
+        keys:
+          type: array
+          items: { $ref: '#/components/schemas/APIKey' }
+    SecretSpec:
+      type: object
+      properties:
+        ref: { type: string, description: vault secret name (mutually exclusive with value) }
+        value: { type: string, description: inline secret value (never persisted) }
+        allowed_domains:
+          type: array
+          items: { type: string }
+        source: { $ref: '#/components/schemas/SecretSource' }
+    Limits:
+      type: object
+      properties:
+        exec_timeout_ms: { type: integer, format: int64 }
+        max_steps: { type: integer, format: int64 }
+        max_output_bytes: { type: integer, format: int64 }
+    InstanceSpec:
+      type: object
+      properties:
+        ttl_seconds: { type: integer, format: int64 }
+        labels:
+          type: object
+          additionalProperties: { type: string }
+        env:
+          type: object
+          additionalProperties: { type: string }
+        secrets:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/SecretSpec' }
+        capabilities:
+          type: object
+          additionalProperties: true
+        limits: { $ref: '#/components/schemas/Limits' }
+    Instance:
+      type: object
+      required: [id, user_id, spec, labels, status, created_at, last_active_at, expires_at]
+      properties:
+        id: { type: string }
+        user_id: { type: string }
+        spec: { $ref: '#/components/schemas/InstanceSpec' }
+        labels:
+          type: object
+          additionalProperties: { type: string }
+        status: { $ref: '#/components/schemas/InstanceStatus' }
+        created_at: { type: string, format: date-time }
+        last_active_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+    InstanceResponse:
+      type: object
+      properties:
+        instance: { $ref: '#/components/schemas/Instance' }
+    InstancesResponse:
+      type: object
+      properties:
+        instances:
+          type: array
+          items: { $ref: '#/components/schemas/Instance' }
+    ExecRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+        timeout_ms: { type: integer, format: int64 }
+    ExecError:
+      type: object
+      required: [type, message]
+      properties:
+        type: { $ref: '#/components/schemas/ExecErrorType' }
+        message: { type: string }
+        backtrace: { type: string }
+    ExecResult:
+      type: object
+      required: [exec_id, output, error, duration_ms, steps]
+      properties:
+        exec_id: { type: string }
+        output: { type: string }
+        error: { $ref: '#/components/schemas/ExecError', nullable: true }
+        duration_ms: { type: integer, format: int64 }
+        steps: { type: integer, format: int64 }
+    FileEntry:
+      type: object
+      required: [name, path, is_dir, size, mtime]
+      properties:
+        name: { type: string }
+        path: { type: string }
+        is_dir: { type: boolean }
+        size: { type: integer, format: int64 }
+        mtime: { type: integer, format: int64 }
+    FilesResult:
+      type: object
+      description: either a directory listing or a file's path+content
+      properties:
+        entries:
+          type: array
+          items: { $ref: '#/components/schemas/FileEntry' }
+        path: { type: string }
+        content: { type: string }
+    Execution:
+      type: object
+      required: [id, instance_id, user_id, code_sha256, code_snippet, status, duration_ms, steps, output_bytes, created_at]
+      properties:
+        id: { type: string }
+        instance_id: { type: string }
+        user_id: { type: string }
+        code_sha256: { type: string }
+        code_snippet: { type: string }
+        status: { $ref: '#/components/schemas/ExecStatus' }
+        error_type: { $ref: '#/components/schemas/ExecErrorType' }
+        duration_ms: { type: integer, format: int64 }
+        steps: { type: integer, format: int64 }
+        output_bytes: { type: integer, format: int64 }
+        created_at: { type: string, format: date-time }
+    ExecutionsResponse:
+      type: object
+      properties:
+        executions:
+          type: array
+          items: { $ref: '#/components/schemas/Execution' }
+    AuditEvent:
+      type: object
+      required: [id, ts, user_id, instance_id, exec_id, capability, op, args, phase, decision, reason, error, duration_ms]
+      properties:
+        id: { type: string }
+        ts: { type: string, format: date-time }
+        user_id: { type: string }
+        instance_id: { type: string }
+        exec_id: { type: string }
+        capability: { $ref: '#/components/schemas/CapabilityName' }
+        op: { type: string }
+        args: { type: string, description: JSON, truncated }
+        phase: { $ref: '#/components/schemas/Phase' }
+        decision: { $ref: '#/components/schemas/Decision' }
+        reason: { type: string }
+        error: { type: string }
+        duration_ms: { type: integer, format: int64 }
+    AuditResponse:
+      type: object
+      properties:
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/AuditEvent' }
+    Policy:
+      type: object
+      required: [id, user_id, name, rego, enabled, created_at, updated_at]
+      properties:
+        id: { type: string }
+        user_id: { type: string }
+        name: { type: string }
+        rego: { type: string }
+        enabled: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    PolicyRequest:
+      type: object
+      required: [name, rego]
+      properties:
+        name: { type: string }
+        rego: { type: string }
+        enabled: { type: boolean }
+    PolicyUpdateRequest:
+      type: object
+      properties:
+        name: { type: string }
+        rego: { type: string }
+        enabled: { type: boolean }
+    PolicyResponse:
+      type: object
+      properties:
+        policy: { $ref: '#/components/schemas/Policy' }
+    PoliciesResponse:
+      type: object
+      properties:
+        policies:
+          type: array
+          items: { $ref: '#/components/schemas/Policy' }
+    ValidatePolicyRequest:
+      type: object
+      required: [rego]
+      properties:
+        rego: { type: string }
+    ValidationResult:
+      type: object
+      required: [valid]
+      properties:
+        valid: { type: boolean }
+        error: { type: string }
+    Secret:
+      type: object
+      required: [id, user_id, name, allowed_domains, created_at, updated_at]
+      properties:
+        id: { type: string }
+        user_id: { type: string }
+        name: { type: string }
+        allowed_domains:
+          type: array
+          items: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateSecretRequest:
+      type: object
+      required: [name, value, allowed_domains]
+      properties:
+        name: { type: string }
+        value: { type: string, description: write-only; never returned }
+        allowed_domains:
+          type: array
+          items: { type: string }
+    UpdateSecretRequest:
+      type: object
+      properties:
+        value: { type: string }
+        allowed_domains:
+          type: array
+          items: { type: string }
+    SecretResponse:
+      type: object
+      properties:
+        secret: { $ref: '#/components/schemas/Secret' }
+    SecretsResponse:
+      type: object
+      properties:
+        secrets:
+          type: array
+          items: { $ref: '#/components/schemas/Secret' }
+security:
+  - bearerAuth: []
+  - cookieAuth: []

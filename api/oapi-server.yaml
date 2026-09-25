@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/oapi-codegen/oapi-codegen/v2.8.0/configuration-schema.json
+# Run via `go generate` (CWD = internal/api) or `make gen`.
+package: gen
+output: gen/server.gen.go
+generate:
+  models: true
+  gin-server: true
+  strict-server: true
+output-options:
+  exclude-tags:
+    - auth-raw

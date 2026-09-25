@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
 import { api, AuditEvent, ExecResult, Execution, FileEntry, Instance } from '../api'
-import type { SecretSource } from '../enums'
+import type { SecretSource } from '../api'
 
 interface SpecSecret { ref?: string; source?: SecretSource; allowed_domains?: string[] }
 import { Badge, Button, DecisionBadge, StatusBadge, fmtCountdown, fmtTime } from '../components/ui'

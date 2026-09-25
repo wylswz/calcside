@@ -20,7 +20,7 @@ import (
 	"calcside/internal/engine"
 	"calcside/internal/instance"
 	"calcside/internal/store"
-	_ "calcside/internal/store/sqlite"
+	_ "calcside/internal/store/gormstore"
 	"calcside/internal/types"
 )
 
@@ -48,7 +48,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		MaxFSQuotaBytes: 256 << 20, NetAllowPrivate: true,
 	}
 	mgr := instance.New(st, engine.New(8), reg, rec, "", time.Second, limits, nil, nil, nil, time.Hour)
-	svc := auth.NewService(st, false, true)
+	svc := auth.NewService(st, false)
 	h := api.Handler(api.Deps{Store: st, Manager: mgr, Registry: reg, Auth: svc})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)

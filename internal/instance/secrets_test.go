@@ -16,7 +16,7 @@ import (
 	"calcside/internal/engine"
 	"calcside/internal/secrets"
 	"calcside/internal/store"
-	_ "calcside/internal/store/sqlite"
+	_ "calcside/internal/store/gormstore"
 )
 
 func testCipher(t *testing.T) *secrets.Cipher {

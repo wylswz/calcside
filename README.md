@@ -4,7 +4,7 @@ A lightweight code-execution sandbox for AI agents, built on Starlark. There are
 
 ## Concepts
 
-- **User**: signs in with Google SSO (OIDC). A dev login is available with `--dev-login`.
+- **User**: signs in with Google SSO (OIDC). With `--dev`, no login is required: requests without credentials run as the `anonymous` user (loopback-only unless `--dev-allow-remote`).
 - **API Key**: `cs_...`. Only its sha256 hash is stored. Keys can only be managed from a logged-in session; an API key cannot mint new keys.
 - **Instance**: a long-lived Starlark interpreter with its own in-memory VFS and persistent globals. It uses a sliding idle TTL; an exec or keepalive renews it. Lifecycle: create / exec / delete / expire.
 - **Capability**: the globals an instance is granted. A capability that isn't granted simply doesn't exist in the script.
@@ -35,7 +35,7 @@ Policy input:
 
 ```bash
 make build                 # web console + bin/calcside + bin/csctl
-make dev                   # serve with --dev-login and example policies on :8080
+make dev                   # backend (--dev, anonymous) on :8787 + Vite console on :5173 — no login
 bin/csctl login --server http://localhost:8080 --api-key cs_...
 bin/csctl run --fs -c 'fs.write("a.txt", "hi"); print(fs.read("a.txt"))'
 ```
@@ -54,6 +54,13 @@ Instance spec (`POST /api/v1/instances`):
 - CPU is bounded by `max_steps` and the exec timeout. Memory is bounded per call by the fs quota and the net response cap. Starlark itself has no per-exec memory accounting, so a process-wide heap watchdog (`--exec-memory-limit`) cancels all running execs when the limit is exceeded. That is a coarse guard, not per-tenant isolation. For stronger isolation, spread instances across multiple processes or nodes.
 - Instance state lives only in memory. After a restart, instances are marked `lost`. The `Snapshotter` interface is reserved (currently a Noop).
 
-## Layout
+## Stack and layout
 
-`cmd/calcside` server, `cmd/csctl` CLI, `internal/{capability,engine,instance,policy,audit,store,auth,api,client}`, `web/` console (React + Vite, embedded with go:embed).
+- **API framework**: Gin (`github.com/gin-gonic/gin`).
+- **ORM**: GORM (`gorm.io/gorm` + pure-Go `github.com/glebarez/sqlite`; schema via `AutoMigrate` in `internal/store/gormstore`).
+- **API contract**: `api/openapi.yaml` (OpenAPI 3.0.3) is the source of truth. `make gen` regenerates the Gin server + strict interfaces (`internal/api/gen`), the Go client (`internal/client/gen`), and the frontend schema (`web/src/api/schema.ts`) via oapi-codegen and openapi-typescript. **Never hand-edit generated files** — edit `api/openapi.yaml` (or the generator configs `api/oapi-*.yaml`) and rerun `make gen`. `make gen-check` (also run by `make lint`) fails if generated output drifts.
+- **Dev mode**: `--dev` starts the server with no login — every request without credentials gets the `anonymous` principal (`anonymous@localhost`), including session-class endpoints (keys, secrets). CSRF rules still apply to anonymous mutations (`X-Requested-With: calcside`). Dev mode refuses non-loopback `--addr` unless `--dev-allow-remote`.
+- `make dev` runs both the backend (`127.0.0.1:8787`) and the Vite dev server (`127.0.0.1:5173`, proxying `/api` + `/auth`); `make serve-dev` runs the backend alone with the embedded console.
+- **Web console**: React + Vite built to `web/dist`, embedded with `go:embed` and served by the backend.
+
+`cmd/calcside` server, `cmd/csctl` CLI, `internal/{capability,engine,instance,policy,audit,store,auth,api,client}`, `api/openapi.yaml` contract, `web/` console.
