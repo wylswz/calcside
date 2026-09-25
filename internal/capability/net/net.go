@@ -520,6 +520,31 @@ type validated struct {
 	allowHTTP    bool
 }
 
+func (f factory) Prompt(cfgAny any) string {
+	cfg, _ := cfgAny.(validated)
+	var b strings.Builder
+	b.WriteString("#### `net`\n")
+	for _, op := range f.Ops() {
+		b.WriteString(capability.OpLine(types.CapNet, op) + "\n")
+	}
+	if len(cfg.AllowHosts) > 0 {
+		fmt.Fprintf(&b, "- Allowed hosts: %s\n", strings.Join(cfg.AllowHosts, ", "))
+	}
+	if len(cfg.Methods) > 0 {
+		methods := make([]string, len(cfg.Methods))
+		for i, m := range cfg.Methods {
+			methods[i] = string(m)
+		}
+		fmt.Fprintf(&b, "- Allowed methods: %s\n", strings.Join(methods, ", "))
+	}
+	b.WriteString("- Responses are `{status, headers, body}` dicts (access via `r[\"body\"]`).\n")
+	b.WriteString("- Secret placeholders: put the literal `{{secrets.NAME}}` inside the URL, " +
+		"a header value, or the body; the sandbox injects the real value for allowed " +
+		"domains and shows `[REDACTED:NAME]` in responses.\n")
+	b.WriteString("- The request headers Accept-Encoding, Range, If-Range and TE are rejected.\n")
+	return b.String()
+}
+
 func (factory) New(cfgAny any, env capability.InstanceEnv) (starlark.Value, io.Closer, error) {
 	v, ok := cfgAny.(validated)
 	if !ok {

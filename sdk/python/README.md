@@ -43,10 +43,11 @@ agent.invoke({"messages": [{"role": "user", "content": "compute fib(20) and save
 mw = CalcsideMiddleware(instance_id="ins_...")
 ```
 
-The middleware injects a generated system prompt describing the granted
+The middleware fetches a server-generated system prompt
+(`GET /api/v1/instances/{id}/prompt`) describing the granted
 capabilities, Starlark-vs-Python differences, secrets/env usage, and
-limits, and registers `calcside_exec`, `calcside_list_files`, and
-`calcside_read_file` tools.
+limits — clients never assemble it themselves — and registers
+`calcside_exec`, `calcside_list_files`, and `calcside_read_file` tools.
 
 ### Resolution precedence
 
@@ -56,8 +57,9 @@ limits, and registers `calcside_exec`, `calcside_list_files`, and
 
 ### Prompt customization
 
-`system_prompt="extra text"` appends to the generated prompt;
-`system_prompt=lambda info: ...` (a `SandboxInfo` is passed) replaces it.
+`system_prompt="extra text"` appends to the server-generated prompt;
+`system_prompt=lambda prompt, resp: ...` replaces it — the callable
+receives the server prompt and the full `/prompt` response dict.
 
 ### Lifecycle
 

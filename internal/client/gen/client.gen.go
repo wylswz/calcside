@@ -477,6 +477,22 @@ type Instance struct {
 	UserId       string            `json:"user_id"`
 }
 
+// InstancePrompt defines model for InstancePrompt.
+type InstancePrompt struct {
+	Capabilities []CapabilityName `json:"capabilities"`
+	InstanceId   string           `json:"instance_id"`
+
+	// Prompt rendered system prompt (markdown)
+	Prompt string `json:"prompt"`
+
+	// Tools tool names the prompt references (prefix applied)
+	Tools struct {
+		Exec      *string `json:"exec,omitempty"`
+		ListFiles *string `json:"list_files,omitempty"`
+		ReadFile  *string `json:"read_file,omitempty"`
+	} `json:"tools"`
+}
+
 // InstanceResponse defines model for InstanceResponse.
 type InstanceResponse struct {
 	Instance *Instance `json:"instance,omitempty"`
@@ -660,6 +676,12 @@ type FilesParams struct {
 	Path *string `form:"path,omitempty" json:"path,omitempty"`
 }
 
+// InstancePromptParams defines parameters for InstancePrompt.
+type InstancePromptParams struct {
+	// ToolPrefix prefix used for tool names in the prompt (default calcside_)
+	ToolPrefix *string `form:"tool_prefix,omitempty" json:"tool_prefix,omitempty"`
+}
+
 // CreateInstanceJSONRequestBody defines body for CreateInstance for application/json ContentType.
 type CreateInstanceJSONRequestBody = InstanceSpec
 
@@ -800,6 +822,11 @@ type ClientInterface interface {
 
 	// Keepalive performs a POST /api/v1/instances/{id}/keepalive (the `Keepalive` operationId) request.
 	Keepalive(ctx context.Context, id IdPath, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// InstancePrompt performs a GET /api/v1/instances/{id}/prompt (the `InstancePrompt` operationId) request.
+	//
+	// Server-generated agent system prompt describing this instance's granted capabilities, env, secrets (names/domains only) and limits. The instance must be live and running: the prompt describes its effective in-memory config, so a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec).
+	InstancePrompt(ctx context.Context, id IdPath, params *InstancePromptParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListKeys performs a GET /api/v1/keys (the `ListKeys` operationId) request.
 	//
@@ -1060,6 +1087,21 @@ func (c *Client) Files(ctx context.Context, id IdPath, params *FilesParams, reqE
 // Keepalive performs a POST /api/v1/instances/{id}/keepalive (the `Keepalive` operationId) request.
 func (c *Client) Keepalive(ctx context.Context, id IdPath, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewKeepaliveRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// InstancePrompt performs a GET /api/v1/instances/{id}/prompt (the `InstancePrompt` operationId) request.
+//
+// Server-generated agent system prompt describing this instance's granted capabilities, env, secrets (names/domains only) and limits. The instance must be live and running: the prompt describes its effective in-memory config, so a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec).
+func (c *Client) InstancePrompt(ctx context.Context, id IdPath, params *InstancePromptParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInstancePromptRequest(c.Server, id, params)
 	if err != nil {
 		return nil, err
 	}
@@ -1884,6 +1926,67 @@ func NewKeepaliveRequest(server string, id IdPath) (*http.Request, error) {
 	return req, nil
 }
 
+// NewInstancePromptRequest constructs an http.Request for the InstancePrompt method
+func NewInstancePromptRequest(server string, id IdPath, params *InstancePromptParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/instances/%s/prompt", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.ToolPrefix != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "tool_prefix", *params.ToolPrefix, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListKeysRequest constructs an http.Request for the ListKeys method
 func NewListKeysRequest(server string) (*http.Request, error) {
 	var err error
@@ -2517,6 +2620,13 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	KeepaliveWithResponse(ctx context.Context, id IdPath, reqEditors ...RequestEditorFn) (*KeepaliveResponse, error)
+
+	// InstancePromptWithResponse performs a GET /api/v1/instances/{id}/prompt (the `InstancePrompt` operationId) request.
+	//
+	// Server-generated agent system prompt describing this instance's granted capabilities, env, secrets (names/domains only) and limits. The instance must be live and running: the prompt describes its effective in-memory config, so a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec).
+	//
+	// Returns a wrapper object for the known response body format(s).
+	InstancePromptWithResponse(ctx context.Context, id IdPath, params *InstancePromptParams, reqEditors ...RequestEditorFn) (*InstancePromptResponse, error)
 
 	// ListKeysWithResponse performs a GET /api/v1/keys (the `ListKeys` operationId) request.
 	//
@@ -3264,6 +3374,75 @@ func (r KeepaliveResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r KeepaliveResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type InstancePromptResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *InstancePrompt
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r InstancePromptResponse) GetJSON200() *InstancePrompt {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r InstancePromptResponse) GetJSON400() *Error {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r InstancePromptResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r InstancePromptResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r InstancePromptResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r InstancePromptResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r InstancePromptResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InstancePromptResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r InstancePromptResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -4294,6 +4473,19 @@ func (c *ClientWithResponses) KeepaliveWithResponse(ctx context.Context, id IdPa
 	return ParseKeepaliveResponse(rsp)
 }
 
+// InstancePromptWithResponse performs a GET /api/v1/instances/{id}/prompt (the `InstancePrompt` operationId) request.
+//
+// Server-generated agent system prompt describing this instance's granted capabilities, env, secrets (names/domains only) and limits. The instance must be live and running: the prompt describes its effective in-memory config, so a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec).
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) InstancePromptWithResponse(ctx context.Context, id IdPath, params *InstancePromptParams, reqEditors ...RequestEditorFn) (*InstancePromptResponse, error) {
+	rsp, err := c.InstancePrompt(ctx, id, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInstancePromptResponse(rsp)
+}
+
 // ListKeysWithResponse performs a GET /api/v1/keys (the `ListKeys` operationId) request.
 //
 // Session or anonymous (dev) auth only — API keys get 403.
@@ -4979,6 +5171,60 @@ func ParseKeepaliveResponse(rsp *http.Response) (*KeepaliveResponse, error) {
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseInstancePromptResponse parses an HTTP response from a InstancePromptWithResponse call
+func ParseInstancePromptResponse(rsp *http.Response) (*InstancePromptResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InstancePromptResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InstancePrompt
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Error

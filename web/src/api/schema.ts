@@ -183,6 +183,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instances/{id}/prompt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Server-generated agent system prompt describing this instance's granted capabilities, env, secrets (names/domains only) and limits. The instance must be live and running: the prompt describes its effective in-memory config, so a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec). */
+        get: operations["instancePrompt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/executions": {
         parameters: {
             query?: never;
@@ -539,6 +556,18 @@ export interface components {
             size: number;
             /** Format: int64 */
             mtime: number;
+        };
+        InstancePrompt: {
+            instance_id: string;
+            /** @description rendered system prompt (markdown) */
+            prompt: string;
+            capabilities: components["schemas"]["CapabilityName"][];
+            /** @description tool names the prompt references (prefix applied) */
+            tools: {
+                exec?: string;
+                list_files?: string;
+                read_file?: string;
+            };
         };
         /** @description either a directory listing or a file's path+content */
         FilesResult: {
@@ -999,6 +1028,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FilesResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    instancePrompt: {
+        parameters: {
+            query?: {
+                /** @description prefix used for tool names in the prompt (default calcside_) */
+                tool_prefix?: string;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description generated prompt */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstancePrompt"];
                 };
             };
             400: components["responses"]["Error"];

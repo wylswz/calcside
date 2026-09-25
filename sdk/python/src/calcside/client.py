@@ -163,6 +163,15 @@ class Client:
             "GET", f"/api/v1/instances/{instance_id}/files", params={"path": path}
         ).json()
 
+    def prompt(
+        self, instance_id: str, tool_prefix: str | None = None
+    ) -> dict[str, Any]:
+        """Server-generated agent prompt (``prompt``, ``capabilities``, ``tools``)."""
+        params = {"tool_prefix": tool_prefix} if tool_prefix is not None else None
+        return self._req(
+            "GET", f"/api/v1/instances/{instance_id}/prompt", params=params
+        ).json()
+
 
 class AsyncClient:
     """Async calcside API client (same surface as ``Client``)."""
@@ -239,5 +248,15 @@ class AsyncClient:
         return (
             await self._req(
                 "GET", f"/api/v1/instances/{instance_id}/files", params={"path": path}
+            )
+        ).json()
+
+    async def prompt(
+        self, instance_id: str, tool_prefix: str | None = None
+    ) -> dict[str, Any]:
+        params = {"tool_prefix": tool_prefix} if tool_prefix is not None else None
+        return (
+            await self._req(
+                "GET", f"/api/v1/instances/{instance_id}/prompt", params=params
             )
         ).json()

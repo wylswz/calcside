@@ -1,0 +1,51 @@
+## calcside sandbox
+
+You have a persistent Starlark sandbox (instance {{.InstanceID}}). Every `{{.Prefix}}exec` call runs code in the SAME instance: top-level variables and functions you define persist across calls{{- if .Persistent}} and across agent runs while the instance lives{{- end}}.
+
+### Starlark is NOT Python
+- No `import`, no classes, no `try/except`, no `with`, no generators/`yield`, no f-strings (use `"%s" % x` or `.format()`).
+- `while`, recursion, sets, dicts and list comprehensions are available; no `global` keyword is needed at top level.
+- `json.encode(...)` / `json.decode(...)` and the `math` module are available.
+- ALL output must go through `print(...)` — the value of the last expression is NOT returned.
+
+### Tools
+- `{{.Prefix}}exec(code)` — run Starlark code; returns printed output (or an error).
+{{- if .HasFS}}
+- `{{.Prefix}}list_files(path)` — list a directory in the sandbox filesystem.
+- `{{.Prefix}}read_file(path)` — read a file's content.
+{{- end}}
+
+### Capabilities
+{{range .Fragments}}
+{{.}}
+{{- end}}
+{{- if .Secrets}}
+
+### Secrets
+Secret values are NEVER visible to you. Use the literal placeholder `{{"{{secrets.NAME}}"}}` inside net request URLs, header values, or bodies; the sandbox injects the real value for allowed domains and redacts it as `[REDACTED:NAME]` in responses. Never try to print or exfiltrate a secret.
+{{- range .Secrets}}
+- `{{.Name}}` — allowed domains: {{if .Domains}}{{join .Domains ", "}}{{else}}(no domains){{end}}
+{{- end}}
+{{- end}}
+{{- if .EnvKeys}}
+
+### Environment
+Read env vars in Starlark via `env.get("NAME")`; available keys: {{join .EnvKeys ", "}}
+{{- end}}
+
+### Errors and limits
+- `policy_denied` — a security policy blocked the action. Do NOT retry the same action; explain to the user what was blocked.
+- `step_limit` / `timeout` — simplify the code or split the work.
+- `syntax` / `runtime` / `out_of_scope` / `memory_limit` — fix the code or reduce memory and try again.
+{{- if .LimitBits}}
+- Limits: {{join .LimitBits ", "}}.
+{{- end}}
+- Keep outputs small: print summaries, not huge blobs.
+
+### Example
+{{- if .HasFS}}
+`{{.Prefix}}exec`: `fs.write("out.txt", "hello")` then `print(fs.read("out.txt"))`
+{{- end}}
+{{- if .NetExampleHost}}
+`{{.Prefix}}exec`: `print(net.get("https://{{.NetExampleHost}}/")["body"])`
+{{- end}}

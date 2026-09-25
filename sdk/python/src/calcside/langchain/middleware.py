@@ -28,7 +28,6 @@ from langchain_core.tools import StructuredTool
 from typing_extensions import NotRequired, override
 
 from calcside.client import AsyncClient, CalcsideError, Client, ExecResult
-from calcside.langchain.prompt import SandboxInfo, SecretInfo, build_prompt
 
 if TYPE_CHECKING:
     from langgraph.runtime import Runtime
@@ -74,7 +73,7 @@ class CalcsideMiddleware(AgentMiddleware[CalcsideState, ContextT]):
         tool_prefix: str = "calcside_",
         max_tool_output_chars: int = 16000,
         exec_timeout_ms: int | None = None,
-        system_prompt: str | Callable[[SandboxInfo], str] | None = None,
+        system_prompt: str | Callable[[str, dict[str, Any]], str] | None = None,
     ) -> None:
         """Initialize the middleware.
 
@@ -98,9 +97,9 @@ class CalcsideMiddleware(AgentMiddleware[CalcsideState, ContextT]):
             tool_prefix: Tool name prefix.
             max_tool_output_chars: Tool output truncation limit.
             exec_timeout_ms: Per-call exec timeout passed to the server.
-            system_prompt: ``str`` is appended after the generated
-                prompt; a callable replaces the generated prompt entirely
-                (receives the ``SandboxInfo``).
+            system_prompt: ``str`` is appended after the server-generated
+                prompt; a callable receives ``(server_prompt,
+                prompt_response_dict)`` and returns the final prompt.
         """
         super().__init__()
         self._client = client or Client(base_url=base_url, api_key=api_key)
@@ -132,40 +131,20 @@ class CalcsideMiddleware(AgentMiddleware[CalcsideState, ContextT]):
             v = getattr(ctx, self._context_key, None)
         return str(v) if v else None
 
-    def _sandbox_info(
-        self, inst: dict[str, Any], mode: str, catalog: list[dict]
-    ) -> SandboxInfo:
-        spec = inst.get("spec") or {}
-        granted: dict[str, dict[str, Any]] = spec.get("capabilities") or {}
-        ops = {
-            c.get("name"): c.get("ops") or []
-            for c in catalog
-            if c.get("name") in granted
-        }
-        secrets = [
-            SecretInfo(name=n, allowed_domains=list(s.get("allowed_domains") or []))
-            for n, s in (spec.get("secrets") or {}).items()
-        ]
-        return SandboxInfo(
-            instance_id=inst["id"],
-            mode=mode,
-            tool_prefix=self._tool_prefix,
-            capabilities=granted,
-            ops=ops,
-            env=dict(spec.get("env") or {}),
-            secrets=secrets,
-            limits=dict(spec.get("limits") or {}),
-            ttl_seconds=spec.get("ttl_seconds"),
-        )
+    def _prompt_for(self, resp: dict[str, Any]) -> tuple[str, list[str]]:
+        """Apply ``system_prompt`` to the server-rendered prompt.
 
-    def _prompt_for(self, info: SandboxInfo) -> str:
+        Returns ``(final_prompt, capabilities)``. The callable form
+        receives ``(server_prompt, prompt_response_dict)``.
+        """
+        server_prompt = resp.get("prompt") or ""
+        capabilities = [str(c) for c in resp.get("capabilities") or []]
         sp = self._system_prompt
         if callable(sp):
-            return sp(info)
-        generated = build_prompt(info)
+            return sp(server_prompt, resp), capabilities
         if isinstance(sp, str) and sp:
-            return generated + "\n\n" + sp
-        return generated
+            return server_prompt + "\n\n" + sp, capabilities
+        return server_prompt, capabilities
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -203,30 +182,30 @@ class CalcsideMiddleware(AgentMiddleware[CalcsideState, ContextT]):
         "calcside_capabilities": [],
     }
 
-    def _resolved_update(
-        self, inst: dict[str, Any], owned: bool, mode: str
-    ) -> dict[str, Any]:
+    def _resolved_update(self, inst: dict[str, Any], owned: bool) -> dict[str, Any]:
         iid = inst["id"]
         self.last_instance_id = iid
-        info = self._sandbox_info(inst, mode, self._client.capabilities())
+        resp = self._client.prompt(iid, tool_prefix=self._tool_prefix)
+        prompt, capabilities = self._prompt_for(resp)
         return {
             "calcside_instance_id": iid,
             "calcside_owned": owned,
-            "calcside_prompt": self._prompt_for(info),
-            "calcside_capabilities": list(info.capabilities),
+            "calcside_prompt": prompt,
+            "calcside_capabilities": capabilities,
         }
 
     async def _resolved_update_async(
-        self, inst: dict[str, Any], owned: bool, mode: str
+        self, inst: dict[str, Any], owned: bool
     ) -> dict[str, Any]:
         iid = inst["id"]
         self.last_instance_id = iid
-        info = self._sandbox_info(inst, mode, await self._aclient.capabilities())
+        resp = await self._aclient.prompt(iid, tool_prefix=self._tool_prefix)
+        prompt, capabilities = self._prompt_for(resp)
         return {
             "calcside_instance_id": iid,
             "calcside_owned": owned,
-            "calcside_prompt": self._prompt_for(info),
-            "calcside_capabilities": list(info.capabilities),
+            "calcside_prompt": prompt,
+            "calcside_capabilities": capabilities,
         }
 
     def _get_optional(self, iid: str) -> dict[str, Any] | None:
@@ -268,7 +247,7 @@ class CalcsideMiddleware(AgentMiddleware[CalcsideState, ContextT]):
                     f"calcside instance {iid} is not running"
                     f" (status={(inst or {}).get('status') or 'missing'})"
                 )
-            return self._resolved_update(inst, owned=False, mode="reused")
+            return self._resolved_update(inst, owned=False)
 
         if kind == "resume":
             inst = self._get_optional(iid)  # type: ignore[arg-type]
@@ -278,15 +257,11 @@ class CalcsideMiddleware(AgentMiddleware[CalcsideState, ContextT]):
                 if state.get("calcside_prompt"):
                     self.last_instance_id = iid
                     return None  # nothing changed — resumed run
-                return self._resolved_update(
-                    inst,
-                    owned,
-                    "per_run" if owned else "reused",  # type: ignore[arg-type]
-                )
+                return self._resolved_update(inst, owned)  # type: ignore[arg-type]
             # owned but gone → fall through to create
 
         inst = self._client.create_instance(self._spec)
-        return self._resolved_update(inst, owned=True, mode="per_run")
+        return self._resolved_update(inst, owned=True)
 
     @override
     async def abefore_agent(
@@ -309,7 +284,7 @@ class CalcsideMiddleware(AgentMiddleware[CalcsideState, ContextT]):
                     f"calcside instance {iid} is not running"
                     f" (status={(inst or {}).get('status') or 'missing'})"
                 )
-            return await self._resolved_update_async(inst, owned=False, mode="reused")
+            return await self._resolved_update_async(inst, owned=False)
 
         if kind == "resume":
             inst = await self._aget_optional(iid)  # type: ignore[arg-type]
@@ -318,14 +293,10 @@ class CalcsideMiddleware(AgentMiddleware[CalcsideState, ContextT]):
                 if state.get("calcside_prompt"):
                     self.last_instance_id = iid
                     return None
-                return await self._resolved_update_async(
-                    inst,
-                    owned,
-                    "per_run" if owned else "reused",  # type: ignore[arg-type]
-                )
+                return await self._resolved_update_async(inst, owned)  # type: ignore[arg-type]
 
         inst = await self._aclient.create_instance(self._spec)
-        return await self._resolved_update_async(inst, owned=True, mode="per_run")
+        return await self._resolved_update_async(inst, owned=True)
 
     @override
     def after_agent(
@@ -564,4 +535,4 @@ class CalcsideMiddleware(AgentMiddleware[CalcsideState, ContextT]):
         ]
 
 
-__all__ = ["CalcsideMiddleware", "CalcsideState", "SandboxInfo", "SecretInfo"]
+__all__ = ["CalcsideMiddleware", "CalcsideState"]

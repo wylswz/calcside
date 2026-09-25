@@ -94,13 +94,59 @@ function AuditTab({ id }: { id: string }) {
   )
 }
 
+interface PromptResponse {
+  instance_id: string
+  prompt: string
+  capabilities: string[]
+  tools: Record<string, string>
+}
+
+function PromptTab({ id, running }: { id: string; running: boolean }) {
+  const [prefix, setPrefix] = useState('calcside_')
+  const [copied, setCopied] = useState(false)
+  const { data, error } = useQuery({
+    queryKey: ['instance-prompt', id, prefix],
+    queryFn: () => api.get<PromptResponse>(`/api/v1/instances/${id}/prompt?tool_prefix=${encodeURIComponent(prefix)}`),
+    enabled: running && /^[A-Za-z0-9_]{0,32}$/.test(prefix),
+    retry: false,
+  })
+  const copy = async () => {
+    if (!data) return
+    await navigator.clipboard.writeText(data.prompt)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-xs">
+        <label className="text-gray-500">tool prefix</label>
+        <input
+          className="rounded border border-gray-300 dark:border-gray-700 bg-transparent px-2 py-1 font-mono w-40"
+          value={prefix}
+          onChange={(e) => setPrefix(e.target.value)}
+        />
+        <Button onClick={copy} disabled={!data} className="!px-2 !py-1 text-xs ml-auto">
+          {copied ? 'Copied' : 'Copy'}
+        </Button>
+      </div>
+      {!running && <p className="text-xs text-gray-500">instance is not running — no prompt available</p>}
+      {error && <p className="text-xs text-red-600">{(error as Error).message}</p>}
+      {data && (
+        <pre className="rounded border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 p-3 text-xs font-mono max-h-[32rem] overflow-auto whitespace-pre-wrap">
+          {data.prompt}
+        </pre>
+      )}
+    </div>
+  )
+}
+
 export default function InstanceDetail() {
   const { id = '' } = useParams()
   const qc = useQueryClient()
   const [code, setCode] = useState(DEFAULT_CODE)
   const [result, setResult] = useState<ExecResult | null>(null)
   const [running, setRunning] = useState(false)
-  const [tab, setTab] = useState<'execs' | 'audit'>('execs')
+  const [tab, setTab] = useState<'execs' | 'audit' | 'prompt'>('execs')
 
   const { data: inst } = useQuery({
     queryKey: ['instance', id],
@@ -199,6 +245,7 @@ export default function InstanceDetail() {
           <div className="flex gap-2 border-b border-gray-200 dark:border-gray-800 text-sm">
             <button className={`px-3 py-1.5 ${tab === 'execs' ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`} onClick={() => setTab('execs')}>Executions</button>
             <button className={`px-3 py-1.5 ${tab === 'audit' ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`} onClick={() => setTab('audit')}>Audit</button>
+            <button className={`px-3 py-1.5 ${tab === 'prompt' ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`} onClick={() => setTab('prompt')}>Agent prompt</button>
           </div>
           {tab === 'execs' && (
             <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-800">
@@ -222,6 +269,7 @@ export default function InstanceDetail() {
             </div>
           )}
           {tab === 'audit' && <AuditTab id={id} />}
+          {tab === 'prompt' && <PromptTab id={id} running={inst.status === 'running'} />}
         </div>
 
         <div className="space-y-4">

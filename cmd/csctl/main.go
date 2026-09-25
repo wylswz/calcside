@@ -119,7 +119,7 @@ func usage() {
 
   login --server URL --api-key KEY   save config (validates credentials)
   whoami
-  instances create|ls|get|rm|keepalive
+  instances create|ls|get|rm|keepalive|prompt
   exec <id> [-f file | -c code]
   run [create flags] [-f file | -c code]
   files <id> [path]
@@ -396,6 +396,29 @@ func cmdInstances(ctx context.Context, c *client.Client, args []string) int {
 			return fail(err)
 		}
 		fmt.Fprintf(stdout, "%s expires %s\n", in.ID, in.ExpiresAt.Format(time.RFC3339))
+		return 0
+	case "prompt":
+		if len(args) < 2 {
+			fmt.Fprintln(stderr, "prompt: instance id required")
+			return 2
+		}
+		fs := flag.NewFlagSet("instances prompt", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		var prefix string
+		var out types.OutputFormat
+		fs.StringVar(&prefix, "tool-prefix", "calcside_", "tool name prefix")
+		fs.TextVar(&out, "o", types.FormatText, "output format (json)")
+		if err := fs.Parse(args[2:]); err != nil {
+			return 2
+		}
+		res, err := c.Prompt(ctx, args[1], prefix)
+		if err != nil {
+			return fail(err)
+		}
+		if out == types.FormatJSON {
+			return outputJSON(res)
+		}
+		fmt.Fprint(stdout, res.Prompt)
 		return 0
 	}
 	fmt.Fprintln(stderr, "unknown instances subcommand")

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"calcside/internal/engine"
 	"calcside/internal/instance"
 	"calcside/internal/policy"
+	promptpkg "calcside/internal/prompt"
 	"calcside/internal/secrets"
 	"calcside/internal/store"
 	"calcside/internal/types"
@@ -154,6 +156,12 @@ func (r execResp) VisitExecResponse(w http.ResponseWriter) error { return r.writ
 type filesResp struct{ rawJSON }
 
 func (r filesResp) VisitFilesResponse(w http.ResponseWriter) error { return r.write(w) }
+
+type instancePromptResp struct{ rawJSON }
+
+func (r instancePromptResp) VisitInstancePromptResponse(w http.ResponseWriter) error {
+	return r.write(w)
+}
 
 type listExecutionsResp struct{ rawJSON }
 
@@ -499,6 +507,91 @@ func (s *strictImpl) Exec(ctx context.Context, req gen.ExecRequestObject) (gen.E
 		}
 	}
 	return execResp{rawJSON{200, res}}, nil
+}
+
+var toolPrefixRe = regexp.MustCompile(`^[A-Za-z0-9_]{0,32}$`)
+
+// InstancePrompt renders the server-side agent system prompt for a live
+// instance.
+func (s *strictImpl) InstancePrompt(ctx context.Context, req gen.InstancePromptRequestObject) (gen.InstancePromptResponseObject, error) {
+	ctx = realCtx(ctx)
+	if _, e := needAuth(ctx); e != nil {
+		return instancePromptResp{*e}, nil
+	}
+	in, e := s.ownedInstance(ctx, req.Id)
+	if e != nil {
+		return instancePromptResp{*e}, nil
+	}
+	prefix := "calcside_"
+	if req.Params.ToolPrefix != nil {
+		prefix = *req.Params.ToolPrefix
+	}
+	if !toolPrefixRe.MatchString(prefix) {
+		return instancePromptResp{rawJSON{400, errEnv(types.ErrCodeBadRequest, "invalid tool_prefix")}}, nil
+	}
+	if in.Status != types.InstanceRunning {
+		return instancePromptResp{rawJSON{409, errEnv(types.ErrCodeNotRunning, "instance not running")}}, nil
+	}
+	data, err := s.d.Manager.PromptData(in.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, instance.ErrNotFound):
+			return instancePromptResp{rawJSON{404, errEnv(types.ErrCodeNotFound, "instance not found")}}, nil
+		case errors.Is(err, instance.ErrNotRunning):
+			return instancePromptResp{rawJSON{409, errEnv(types.ErrCodeNotRunning, "instance not running")}}, nil
+		default:
+			return instancePromptResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+		}
+	}
+	var fragments []string
+	var names []types.CapabilityName
+	for _, p := range data.Parts {
+		fragments = append(fragments, p.Factory.Prompt(p.Config))
+		names = append(names, p.Factory.Name())
+	}
+	var secretsInfo []promptpkg.SecretInfo
+	for _, sec := range data.Secrets {
+		secretsInfo = append(secretsInfo, promptpkg.SecretInfo{Name: sec.Name, Domains: sec.Domains})
+	}
+	var netHost string
+	if len(data.NetHosts) > 0 {
+		netHost = data.NetHosts[0]
+	}
+	text, err := promptpkg.Render(promptpkg.Input{
+		InstanceID:     in.ID,
+		Prefix:         prefix,
+		Fragments:      fragments,
+		CapNames:       capNamesToStrings(names),
+		Env:            data.Env,
+		Secrets:        secretsInfo,
+		ExecTimeoutMs:  data.Limits.ExecTimeoutMs,
+		MaxSteps:       data.Limits.MaxSteps,
+		MaxOutputBytes: data.Limits.MaxOutputBytes,
+		TTLSeconds:     data.TTLSeconds,
+		NetExampleHost: netHost,
+		Persistent:     true,
+	})
+	if err != nil {
+		return instancePromptResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+	}
+	return instancePromptResp{rawJSON{200, map[string]any{
+		"instance_id":  in.ID,
+		"prompt":       text,
+		"capabilities": names,
+		"tools": map[string]string{
+			"exec":       prefix + "exec",
+			"list_files": prefix + "list_files",
+			"read_file":  prefix + "read_file",
+		},
+	}}}, nil
+}
+
+func capNamesToStrings(in []types.CapabilityName) []string {
+	out := make([]string, len(in))
+	for i, n := range in {
+		out[i] = string(n)
+	}
+	return out
 }
 
 // files serves GET /instances/{id}/files?path=/work/... through the fs

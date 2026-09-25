@@ -123,6 +123,18 @@ func (factory) Validate(raw json.RawMessage, limits capability.ServerLimits) (an
 	return cfg, nil
 }
 
+func (f factory) Prompt(cfgAny any) string {
+	cfg, _ := cfgAny.(Config)
+	var b strings.Builder
+	b.WriteString("#### `io`\n")
+	for _, op := range f.Ops() {
+		b.WriteString(capability.OpLine(types.CapIO, op) + "\n")
+	}
+	b.WriteString("- `print(...)` writes to the same output buffer.\n")
+	fmt.Fprintf(&b, "- Output is capped at %d bytes per exec.\n", cfg.MaxOutputBytes)
+	return b.String()
+}
+
 func (factory) New(cfgAny any, env capability.InstanceEnv) (starlark.Value, io.Closer, error) {
 	cfg, ok := cfgAny.(Config)
 	if !ok {

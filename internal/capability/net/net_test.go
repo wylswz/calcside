@@ -188,3 +188,17 @@ func TestBlockedIPRanges(t *testing.T) {
 		t.Error("8.8.8.8 should not be blocked")
 	}
 }
+
+func TestPrompt(t *testing.T) {
+	cfg, err := factory{}.Validate(json.RawMessage(`{"allow_hosts":["a.com","b.com"],"methods":["GET","POST"]}`), capability.ServerLimits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := factory{}.Prompt(cfg)
+	for _, want := range []string{"a.com, b.com", "GET, POST", "{status, headers, body}", "{{secrets.NAME}}", "[REDACTED:NAME]",
+		"Accept-Encoding", "net.get(", "net.post(", "net.request("} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("missing %q in:\n%s", want, p)
+		}
+	}
+}

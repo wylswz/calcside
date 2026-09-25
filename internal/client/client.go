@@ -227,6 +227,31 @@ func (c *Client) Exec(ctx context.Context, id, code string, timeoutMs int64) (*e
 	return &res, nil
 }
 
+// PromptResult is the server-generated agent prompt for an instance.
+type PromptResult struct {
+	InstanceID   string            `json:"instance_id"`
+	Prompt       string            `json:"prompt"`
+	Capabilities []string          `json:"capabilities"`
+	Tools        map[string]string `json:"tools"`
+}
+
+// Prompt returns the server-generated agent prompt for an instance.
+func (c *Client) Prompt(ctx context.Context, id, toolPrefix string) (*PromptResult, error) {
+	params := &gen.InstancePromptParams{}
+	if toolPrefix != "" {
+		params.ToolPrefix = &toolPrefix
+	}
+	resp, err := c.gc.InstancePromptWithResponse(ctx, id, params)
+	if err != nil {
+		return nil, err
+	}
+	var m PromptResult
+	if err := unwrap(resp, resp.Body, &m); err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
 // FileEntry is one files-endpoint entry.
 type FileEntry struct {
 	Name  string `json:"name"`

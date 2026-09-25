@@ -107,9 +107,54 @@ def test_reuse_mode_persists_across_runs(server):
 
         # reused instance is still running — middleware never deletes it
         assert c.get_instance(iid)["status"] == "running"
-        assert "reused" in m2.seen_system[0] or "calcside" in m2.seen_system[0]
+        # injected system message contains the server-rendered prompt
+        server_prompt = c.prompt(iid)["prompt"]
+        assert server_prompt in m2.seen_system[0]
     finally:
         c.delete_instance(iid)
+
+
+def test_system_prompt_string_appended(server):
+    mw = CalcsideMiddleware(
+        base_url=server,
+        instance_id=None,
+        spec={"capabilities": {"io": {}}, "ttl_seconds": 300},
+        system_prompt="EXTRA INSTRUCTION XYZ",
+    )
+    model = ScriptedChatModel(
+        script=[_tc("calcside_exec", {"code": "print(1)"}), AIMessage(content="ok")]
+    )
+    create_agent(model, tools=[], middleware=[mw]).invoke(
+        {"messages": [{"role": "user", "content": "go"}]}
+    )
+    sys_msg = model.seen_system[0]
+    assert "calcside sandbox" in sys_msg  # server prompt present
+    assert sys_msg.endswith("EXTRA INSTRUCTION XYZ")
+
+
+def test_system_prompt_callable_receives_server_prompt(server):
+    captured: dict[str, Any] = {}
+
+    def override(server_prompt: str, resp: dict[str, Any]) -> str:
+        captured["prompt"] = server_prompt
+        captured["resp"] = resp
+        return "CUSTOM PROMPT"
+
+    mw = CalcsideMiddleware(
+        base_url=server,
+        spec={"capabilities": {"io": {}}, "ttl_seconds": 300},
+        system_prompt=override,
+    )
+    model = ScriptedChatModel(
+        script=[_tc("calcside_exec", {"code": "print(1)"}), AIMessage(content="ok")]
+    )
+    create_agent(model, tools=[], middleware=[mw]).invoke(
+        {"messages": [{"role": "user", "content": "go"}]}
+    )
+    assert model.seen_system[0] == "CUSTOM PROMPT"
+    assert "calcside sandbox" in captured["prompt"]
+    assert captured["resp"]["tools"]["exec"] == "calcside_exec"
+    assert "io" in captured["resp"]["capabilities"]
 
 
 def test_context_override_wins(server):

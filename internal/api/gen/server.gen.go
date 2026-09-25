@@ -475,6 +475,22 @@ type Instance struct {
 	UserId       string            `json:"user_id"`
 }
 
+// InstancePrompt defines model for InstancePrompt.
+type InstancePrompt struct {
+	Capabilities []CapabilityName `json:"capabilities"`
+	InstanceId   string           `json:"instance_id"`
+
+	// Prompt rendered system prompt (markdown)
+	Prompt string `json:"prompt"`
+
+	// Tools tool names the prompt references (prefix applied)
+	Tools struct {
+		Exec      *string `json:"exec,omitempty"`
+		ListFiles *string `json:"list_files,omitempty"`
+		ReadFile  *string `json:"read_file,omitempty"`
+	} `json:"tools"`
+}
+
 // InstanceResponse defines model for InstanceResponse.
 type InstanceResponse struct {
 	Instance *Instance `json:"instance,omitempty"`
@@ -658,6 +674,12 @@ type FilesParams struct {
 	Path *string `form:"path,omitempty" json:"path,omitempty"`
 }
 
+// InstancePromptParams defines parameters for InstancePrompt.
+type InstancePromptParams struct {
+	// ToolPrefix prefix used for tool names in the prompt (default calcside_)
+	ToolPrefix *string `form:"tool_prefix,omitempty" json:"tool_prefix,omitempty"`
+}
+
 // CreateInstanceJSONRequestBody defines body for CreateInstance for application/json ContentType.
 type CreateInstanceJSONRequestBody = InstanceSpec
 
@@ -717,6 +739,9 @@ type ServerInterface interface {
 
 	// (POST /api/v1/instances/{id}/keepalive)
 	Keepalive(c *gin.Context, id IdPath)
+
+	// (GET /api/v1/instances/{id}/prompt)
+	InstancePrompt(c *gin.Context, id IdPath, params InstancePromptParams)
 
 	// (GET /api/v1/keys)
 	ListKeys(c *gin.Context)
@@ -1062,6 +1087,42 @@ func (siw *ServerInterfaceWrapper) Keepalive(c *gin.Context) {
 	siw.Handler.Keepalive(c, id)
 }
 
+// InstancePrompt operation middleware
+func (siw *ServerInterfaceWrapper) InstancePrompt(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params InstancePromptParams
+
+	// ------------- Optional query parameter "tool_prefix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "tool_prefix", c.Request.URL.Query(), &params.ToolPrefix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter tool_prefix: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.InstancePrompt(c, id, params)
+}
+
 // ListKeys operation middleware
 func (siw *ServerInterfaceWrapper) ListKeys(c *gin.Context) {
 
@@ -1370,6 +1431,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/api/v1/instances/:id/keepalive", wrapper.Keepalive)
 	router.POST(options.BaseURL+"/api/v1/instances/:id/exec", wrapper.Exec)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/files", wrapper.Files)
+	router.GET(options.BaseURL+"/api/v1/instances/:id/prompt", wrapper.InstancePrompt)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/executions", wrapper.ListExecutions)
 	router.GET(options.BaseURL+"/api/v1/audit", wrapper.ListAudit)
 	router.GET(options.BaseURL+"/api/v1/policies", wrapper.ListPolicies)
@@ -1968,6 +2030,85 @@ func (response Keepalive404JSONResponse) VisitKeepaliveResponse(w http.ResponseW
 type Keepalive409JSONResponse ErrorEnvelope
 
 func (response Keepalive409JSONResponse) VisitKeepaliveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InstancePromptRequestObject struct {
+	Id     IdPath `json:"id"`
+	Params InstancePromptParams
+}
+
+type InstancePromptResponseObject interface {
+	VisitInstancePromptResponse(w http.ResponseWriter) error
+}
+
+type InstancePrompt200JSONResponse InstancePrompt
+
+func (response InstancePrompt200JSONResponse) VisitInstancePromptResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InstancePrompt400JSONResponse struct{ ErrorJSONResponse }
+
+func (response InstancePrompt400JSONResponse) VisitInstancePromptResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InstancePrompt401JSONResponse ErrorEnvelope
+
+func (response InstancePrompt401JSONResponse) VisitInstancePromptResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InstancePrompt404JSONResponse ErrorEnvelope
+
+func (response InstancePrompt404JSONResponse) VisitInstancePromptResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InstancePrompt409JSONResponse ErrorEnvelope
+
+func (response InstancePrompt409JSONResponse) VisitInstancePromptResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -2874,6 +3015,9 @@ type StrictServerInterface interface {
 	// (POST /api/v1/instances/{id}/keepalive)
 	Keepalive(ctx context.Context, request KeepaliveRequestObject) (KeepaliveResponseObject, error)
 
+	// (GET /api/v1/instances/{id}/prompt)
+	InstancePrompt(ctx context.Context, request InstancePromptRequestObject) (InstancePromptResponseObject, error)
+
 	// (GET /api/v1/keys)
 	ListKeys(ctx context.Context, request ListKeysRequestObject) (ListKeysResponseObject, error)
 
@@ -3266,6 +3410,33 @@ func (sh *strictHandler) Keepalive(ctx *gin.Context, id IdPath) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(KeepaliveResponseObject); ok {
 		if err := validResponse.VisitKeepaliveResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// InstancePrompt operation middleware
+func (sh *strictHandler) InstancePrompt(ctx *gin.Context, id IdPath, params InstancePromptParams) {
+	var request InstancePromptRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.InstancePrompt(ctx, request.(InstancePromptRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InstancePrompt")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(InstancePromptResponseObject); ok {
+		if err := validResponse.VisitInstancePromptResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

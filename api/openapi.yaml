@@ -245,6 +245,37 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
+  /api/v1/instances/{id}/prompt:
+    get:
+      operationId: instancePrompt
+      tags: [instances]
+      description: >-
+        Server-generated agent system prompt describing this instance's
+        granted capabilities, env, secrets (names/domains only) and
+        limits. The instance must be live and running: the prompt
+        describes its effective in-memory config, so a deleted/expired
+        instance returns 409 not_running (404 when it no longer exists at
+        all, same as exec).
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: tool_prefix
+          in: query
+          description: prefix used for tool names in the prompt (default calcside_)
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9_]{0,32}$'
+            default: calcside_
+      responses:
+        '200':
+          description: generated prompt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstancePrompt'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
   /api/v1/instances/{id}/executions:
     get:
       operationId: listExecutions
@@ -735,6 +766,22 @@ components:
         is_dir: { type: boolean }
         size: { type: integer, format: int64 }
         mtime: { type: integer, format: int64 }
+    InstancePrompt:
+      type: object
+      required: [instance_id, prompt, capabilities, tools]
+      properties:
+        instance_id: { type: string }
+        prompt: { type: string, description: rendered system prompt (markdown) }
+        capabilities:
+          type: array
+          items: { $ref: '#/components/schemas/CapabilityName' }
+        tools:
+          type: object
+          description: tool names the prompt references (prefix applied)
+          properties:
+            exec: { type: string }
+            list_files: { type: string }
+            read_file: { type: string }
     FilesResult:
       type: object
       description: either a directory listing or a file's path+content

@@ -1,9 +1,12 @@
 package fs
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+
+	"calcside/internal/capability"
 )
 
 func TestTraversalRejections(t *testing.T) {
@@ -124,5 +127,18 @@ func TestDeleteNonRecursiveFailsOnNonEmptyDir(t *testing.T) {
 	ok, _ := v.Exists("/work/d")
 	if ok {
 		t.Fatal("dir still exists")
+	}
+}
+
+func TestPrompt(t *testing.T) {
+	cfg, err := factory{}.Validate(json.RawMessage(`{"quota_bytes": 1024, "max_files": 5, "read_only": true}`), capability.ServerLimits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := factory{}.Prompt(cfg)
+	for _, want := range []string{"`/work`", "1024 bytes", "5 files", "read-only", "fs.read", "fs.write"} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("missing %q in:\n%s", want, p)
+		}
 	}
 }

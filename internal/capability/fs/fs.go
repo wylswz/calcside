@@ -411,6 +411,21 @@ func (factory) Validate(raw json.RawMessage, limits capability.ServerLimits) (an
 	return cfg, nil
 }
 
+func (f factory) Prompt(cfgAny any) string {
+	cfg, _ := cfgAny.(Config)
+	var b strings.Builder
+	b.WriteString("#### `fs`\n")
+	for _, op := range f.Ops() {
+		b.WriteString(capability.OpLine(types.CapFS, op) + "\n")
+	}
+	b.WriteString("- Paths are rooted at `/work`.\n")
+	fmt.Fprintf(&b, "- Quota: %d bytes, max %d files.\n", cfg.QuotaBytes, cfg.MaxFiles)
+	if cfg.ReadOnly {
+		b.WriteString("- The filesystem is read-only.\n")
+	}
+	return b.String()
+}
+
 func (factory) New(cfgAny any, env capability.InstanceEnv) (starlark.Value, io.Closer, error) {
 	cfg, ok := cfgAny.(Config)
 	if !ok {

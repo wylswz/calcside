@@ -115,6 +115,7 @@ type inst struct {
 	closers  []io.Closer
 	out      *capio.Buffer
 	vfs      interface{ Files() map[string][]byte } // *fs.Closer V, kept loose to avoid import
+	capCfgs  map[string]any                         // validated capability configs, incl. implicit io
 	limits   Limits
 	userID   string
 	userMail string
@@ -533,6 +534,7 @@ func (m *Manager) Create(ctx context.Context, user *store.User, rawSpec []byte) 
 		closers:  closers,
 		out:      outBuf,
 		vfs:      vfs,
+		capCfgs:  typed,
 		limits:   spec.Limits,
 		userID:   user.ID,
 		userMail: user.Email,
@@ -558,6 +560,76 @@ func (m *Manager) get(id string) (*inst, bool) {
 	defer m.mu.Unlock()
 	in, ok := m.insts[id]
 	return in, ok
+}
+
+// PromptPart pairs a granted capability's factory with its validated
+// config for prompt rendering.
+type PromptPart struct {
+	Factory capability.Factory
+	Config  any
+}
+
+// PromptSecret lists one secret for the prompt: name + allowed domains
+// only. Values never leave the secrets package.
+type PromptSecret struct {
+	Name    string
+	Domains []string
+}
+
+// PromptData carries everything the agent-prompt endpoint needs. Only
+// live, running instances have it (the rendered instructions describe
+// the instance's effective config).
+type PromptData struct {
+	Instance   *store.Instance
+	Parts      []PromptPart // granted capabilities in registry order
+	Env        map[string]string
+	Secrets    []PromptSecret
+	Limits     Limits
+	TTLSeconds int64
+	// NetHosts is the raw allow_hosts list from the persisted spec (for
+	// the worked example).
+	NetHosts []string
+}
+
+// PromptData returns prompt input for a live instance.
+func (m *Manager) PromptData(id string) (*PromptData, error) {
+	in, ok := m.get(id)
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if in.meta.Status != types.InstanceRunning {
+		return nil, ErrNotRunning
+	}
+	var spec Spec
+	_ = json.Unmarshal(in.meta.Spec, &spec)
+	d := &PromptData{
+		Instance:   in.meta,
+		Env:        spec.Env,
+		Limits:     in.limits,
+		TTLSeconds: spec.TTLSeconds,
+	}
+	for _, name := range m.reg.Names() {
+		cfg, granted := in.capCfgs[string(name)]
+		if !granted {
+			continue
+		}
+		f, _ := m.reg.Get(name)
+		d.Parts = append(d.Parts, PromptPart{Factory: f, Config: cfg})
+	}
+	if in.secrets != nil {
+		for _, n := range in.secrets.Names() {
+			d.Secrets = append(d.Secrets, PromptSecret{Name: n, Domains: in.secrets.Domains(n)})
+		}
+	}
+	if raw := spec.Capabilities[string(types.CapNet)]; len(raw) > 0 {
+		var nc struct {
+			AllowHosts []string `json:"allow_hosts"`
+		}
+		if json.Unmarshal(raw, &nc) == nil {
+			d.NetHosts = nc.AllowHosts
+		}
+	}
+	return d, nil
 }
 
 // Get returns the store record if the instance is live.

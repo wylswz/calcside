@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -235,6 +236,17 @@ type OpInfo struct {
 	Params []string `json:"params,omitempty"`
 }
 
+// OpLine renders one op's signature line for prompt fragments:
+// "- `fs.read(path)` — read file contents as string".
+func OpLine(capName types.CapabilityName, op OpInfo) string {
+	params := strings.Join(op.Params, ", ")
+	doc := ""
+	if op.Doc != "" {
+		doc = " — " + op.Doc
+	}
+	return fmt.Sprintf("- `%s.%s(%s)`%s", capName, op.Name, params, doc)
+}
+
 // FieldDoc documents a capability config field.
 type FieldDoc struct {
 	Name    string          `json:"name"`
@@ -251,6 +263,11 @@ type Factory interface {
 	// Validate parses and validates raw JSON config, applying defaults and
 	// clamping against server limits. Returns the typed config for New.
 	Validate(cfg json.RawMessage, limits ServerLimits) (any, error)
+	// Prompt renders this capability's markdown section for the
+	// server-generated agent system prompt, from the validated config
+	// returned by Validate. Op signatures come from Ops() so docs never
+	// drift from the code.
+	Prompt(cfg any) string
 	// New builds the starlark value bound to the instance environment
 	// (gate + resolved secrets). The returned io.Closer (may be nil) is
 	// closed when the instance ends.

@@ -50,6 +50,24 @@ def test_error_envelope(server):
     assert ei.value.code == "not_found"
 
 
+def test_prompt(server):
+    c = Client(base_url=server)
+    inst = c.create_instance({"capabilities": {"fs": {}, "io": {}}, "ttl_seconds": 600})
+    try:
+        r = c.prompt(inst["id"])
+        assert r["instance_id"] == inst["id"]
+        assert "calcside sandbox" in r["prompt"]
+        assert r["tools"]["exec"] == "calcside_exec"
+        assert set(r["capabilities"]) == {"fs", "io"}
+        r2 = c.prompt(inst["id"], tool_prefix="sb_")
+        assert r2["tools"]["exec"] == "sb_exec"
+        assert "sb_exec" in r2["prompt"]
+    finally:
+        c.delete_instance(inst["id"])
+    with pytest.raises(CalcsideError):
+        c.prompt(inst["id"])
+
+
 def test_exec_error(server):
     c = Client(base_url=server)
     inst = c.create_instance({"capabilities": {"io": {}}, "ttl_seconds": 300})
@@ -73,6 +91,7 @@ def test_client_paths_in_openapi(server):
         ("post", "/api/v1/instances/{id}/keepalive"),
         ("post", "/api/v1/instances/{id}/exec"),
         ("get", "/api/v1/instances/{id}/files"),
+        ("get", "/api/v1/instances/{id}/prompt"),
     ]
     for method, path in used:
         assert path in paths, f"missing path {path}"
