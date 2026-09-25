@@ -1,0 +1,4 @@
+calcside.db*
+bin/
+web/node_modules
+web/dist
