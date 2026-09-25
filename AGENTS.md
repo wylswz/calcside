@@ -6,6 +6,7 @@
 - `make gen` regenerates code from `api/openapi.yaml`; `make gen-check` fails if generated files drift.
 - `make lint` runs gen-check + vet + gofmt + web typecheck/lint; `make build` builds web then `bin/calcside`, `bin/csctl`.
 - Dev: `make dev` starts the backend in dev mode (anonymous auth, no login) on :8787 plus the Vite dev server on :5173. `make serve-dev` runs the backend alone with the embedded UI.
+- Python SDK (`sdk/python`, uv project): `make sdk-test` (pytest, builds + boots a dev-mode server), `make sdk-lint` (ruff). Not part of `make test`/`make lint`.
 
 ## Conventions
 - No container / host process capabilities. New capabilities implement `capability.Factory` and must route every op through `Gate.Invoke` so hooks and audit see it.

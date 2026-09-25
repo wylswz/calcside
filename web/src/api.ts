@@ -51,10 +51,27 @@ export function isDevMode(): boolean {
   return devMode
 }
 
-export async function loadAuthConfig(): Promise<AuthConfig> {
-  const cfg = await api.get<AuthConfig>('/api/v1/auth/config')
-  devMode = cfg.dev_mode ?? false
-  return cfg
+// loadAuthConfig fetches auth/config. When the backend is unreachable
+// (network error, or a 5xx such as the Vite proxy's 502 while the
+// backend is still starting) it retries with 1s→2s→4s… backoff capped
+// at 5s and reports the state through onRetrying — the app must not
+// fall into the login flow just because the backend isn't up yet.
+export async function loadAuthConfig(onRetrying?: (retrying: boolean) => void): Promise<AuthConfig> {
+  let delay = 1000
+  for (;;) {
+    try {
+      const cfg = await api.get<AuthConfig>('/api/v1/auth/config')
+      devMode = cfg.dev_mode ?? false
+      onRetrying?.(false)
+      return cfg
+    } catch (e) {
+      const retryable = !(e instanceof ApiError) || e.status >= 500
+      onRetrying?.(retryable)
+      if (!retryable) throw e
+      await new Promise((r) => setTimeout(r, delay))
+      delay = Math.min(delay * 2, 5000)
+    }
+  }
 }
 
 const raw = createClient<paths>({ credentials: 'same-origin' })

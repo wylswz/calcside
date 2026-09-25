@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Route, Routes, NavLink, Navigate, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api, loadAuthConfig, User, AuthConfig, AuthKind } from './api'
@@ -9,11 +10,11 @@ import Policies from './pages/Policies'
 import Audit from './pages/Audit'
 import Secrets from './pages/Secrets'
 
-function useMe() {
+function useMe(onBackendRetrying: (retrying: boolean) => void) {
   return useQuery({
     queryKey: ['me'],
     queryFn: async () => {
-      const cfg = await loadAuthConfig()
+      const cfg = await loadAuthConfig(onBackendRetrying)
       const r = await api.get<{ user: User; kind: AuthKind }>('/api/v1/me')
       return { user: r.user, cfg }
     },
@@ -25,14 +26,19 @@ const navCls = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-1.5 rounded text-sm ${isActive ? 'bg-gray-200 dark:bg-gray-800 font-medium' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'}`
 
 export default function App() {
-  const { data, isLoading, isError, error } = useMe()
+  const [backendRetrying, setBackendRetrying] = useState(false)
+  const { data, isLoading, isError, error } = useMe(setBackendRetrying)
   const navigate = useNavigate()
   const user = data?.user
   const cfg: AuthConfig | undefined = data?.cfg
   const dev = cfg?.dev_mode === true
 
-  if (isLoading) {
-    return <div className="p-8 text-sm text-gray-500">loading…</div>
+  if (isLoading || (backendRetrying && !data)) {
+    return (
+      <div className="p-8 text-sm text-gray-500">
+        {backendRetrying ? 'backend unreachable — retrying…' : 'loading…'}
+      </div>
+    )
   }
   const onLoginPage = window.location.pathname === '/login'
   if ((isError || !user) && dev) {

@@ -4,3 +4,5 @@ web/node_modules
 web/dist/*
 !web/dist/README.txt
 calcside-dev.db*
+sdk/python/.venv/
+__pycache__/

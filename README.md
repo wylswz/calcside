@@ -63,4 +63,26 @@ Instance spec (`POST /api/v1/instances`):
 - `make dev` runs both the backend (`127.0.0.1:8787`) and the Vite dev server (`127.0.0.1:5173`, proxying `/api` + `/auth`); `make serve-dev` runs the backend alone with the embedded console.
 - **Web console**: React + Vite built to `web/dist`, embedded with `go:embed` and served by the backend.
 
-`cmd/calcside` server, `cmd/csctl` CLI, `internal/{capability,engine,instance,policy,audit,store,auth,api,client}`, `api/openapi.yaml` contract, `web/` console.
+`cmd/calcside` server, `cmd/csctl` CLI, `internal/{capability,engine,instance,policy,audit,store,auth,api,client}`, `api/openapi.yaml` contract, `web/` console, `sdk/python` Python client + LangChain middleware.
+
+## LangChain integration
+
+`sdk/python` ships a `calcside` client and `CalcsideMiddleware` for
+LangChain v1 agents. It registers `calcside_exec` / `calcside_list_files` /
+`calcside_read_file` tools and injects a system prompt describing the
+granted capabilities, Starlark-vs-Python differences, and secret/env
+usage.
+
+```python
+from langchain.agents import create_agent
+from calcside.langchain import CalcsideMiddleware
+
+agent = create_agent(model, tools=[], middleware=[
+    # fresh sandbox per run, deleted afterwards:
+    CalcsideMiddleware(spec={"capabilities": {"fs": {}}, "ttl_seconds": 900}),
+    # or reuse one across runs: CalcsideMiddleware(instance_id="ins_...")
+])
+```
+
+See [sdk/python/README.md](sdk/python/README.md) for install, modes, and
+lifecycle details.
