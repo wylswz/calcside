@@ -133,6 +133,11 @@ func (s *Service) setSessionCookie(w http.ResponseWriter, raw string) {
 	})
 }
 
+// ClearSessionCookie expires the session cookie on the response.
+func (s *Service) ClearSessionCookie(w http.ResponseWriter) {
+	s.clearSessionCookie(w)
+}
+
 func (s *Service) clearSessionCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,

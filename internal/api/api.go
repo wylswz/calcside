@@ -82,9 +82,17 @@ func (d Deps) authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		p, err := d.Auth.Resolve(c.Request.Context(), c.Request)
 		if err != nil {
-			writeErr(c.Writer, http.StatusUnauthorized, types.ErrCodeUnauthorized, err.Error())
-			c.Abort()
-			return
+			// Dev mode: a stale session cookie from an earlier
+			// database is not a credential failure — downgrade to
+			// anonymous and clear it. A wrong bearer token is an
+			// explicit credential and still 401s.
+			if d.Dev && !hasBearer(c.Request) {
+				d.Auth.ClearSessionCookie(c.Writer)
+			} else {
+				writeErr(c.Writer, http.StatusUnauthorized, types.ErrCodeUnauthorized, err.Error())
+				c.Abort()
+				return
+			}
 		}
 		if p == nil && d.Dev && d.Anonymous != nil {
 			p = &auth.Principal{User: d.Anonymous, Kind: types.AuthAnonymous}
@@ -173,6 +181,10 @@ func (d Deps) resolveOnly() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+func hasBearer(r *http.Request) bool {
+	return strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ")
 }
 
 // noRoute serves JSON errors under /api and the embedded SPA

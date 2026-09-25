@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -130,6 +131,39 @@ func TestNonDevUnauthenticated401(t *testing.T) {
 	code, m, _ := e.req("GET", "/api/v1/me", "", nil, nil)
 	if code != 401 || m["error"].(map[string]any)["code"] != string(types.ErrCodeUnauthorized) {
 		t.Fatalf("me: %d %v", code, m)
+	}
+	// non-dev keeps rejecting stale cookies
+	stale := []*http.Cookie{{Name: "cs_session", Value: "stale"}}
+	code, m, _ = e.req("GET", "/api/v1/me", "", nil, stale)
+	if code != 401 {
+		t.Fatalf("non-dev stale cookie: %d %v", code, m)
+	}
+}
+
+func TestDevModeStaleCookieFallsBackAnonymous(t *testing.T) {
+	e := newDevEnv(t, nil)
+	stale := []*http.Cookie{{Name: "cs_session", Value: "stale"}}
+	code, m, setCookies := e.req("GET", "/api/v1/me", "", nil, stale)
+	if code != 200 || m["kind"] != string(types.AuthAnonymous) {
+		t.Fatalf("me: %d %v", code, m)
+	}
+	var cleared bool
+	for _, c := range setCookies {
+		if c.Name == "cs_session" && c.MaxAge < 0 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Fatalf("expected cs_session clearing Set-Cookie, got %v", setCookies)
+	}
+}
+
+func TestDevModeBogusBearerStill401(t *testing.T) {
+	e := newDevEnv(t, nil)
+	bad := map[string]string{"Authorization": "Bearer cs_bogus"}
+	code, m, _ := e.req("GET", "/api/v1/me", "", bad, nil)
+	if code != 401 {
+		t.Fatalf("bogus bearer: %d %v", code, m)
 	}
 }
 

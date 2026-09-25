@@ -25,7 +25,7 @@ const navCls = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-1.5 rounded text-sm ${isActive ? 'bg-gray-200 dark:bg-gray-800 font-medium' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'}`
 
 export default function App() {
-  const { data, isLoading, isError } = useMe()
+  const { data, isLoading, isError, error } = useMe()
   const navigate = useNavigate()
   const user = data?.user
   const cfg: AuthConfig | undefined = data?.cfg
@@ -35,6 +35,16 @@ export default function App() {
     return <div className="p-8 text-sm text-gray-500">loading…</div>
   }
   const onLoginPage = window.location.pathname === '/login'
+  if ((isError || !user) && dev) {
+    return (
+      <div className="p-8">
+        <div className="max-w-md mx-auto rounded border border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950/40 px-4 py-3 text-sm text-red-800 dark:text-red-300">
+          <div className="font-medium mb-1">dev mode — failed to load anonymous session</div>
+          {error instanceof Error ? error.message : 'unknown error'}
+        </div>
+      </div>
+    )
+  }
   if ((isError || !user) && !dev) {
     if (!onLoginPage) return <Navigate to="/login" replace />
     return (
