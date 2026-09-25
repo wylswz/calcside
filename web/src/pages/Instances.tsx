@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Instance, Secret } from '../api'
+import type { SecretSource } from '../enums'
 import { Badge, Button, Field, Modal, StatusBadge, fmtCountdown, fmtTime, inputCls } from '../components/ui'
 
 interface SpecDraft {
@@ -16,7 +17,7 @@ interface SpecDraft {
 interface EnvRow { k: string; v: string }
 interface SecretRow {
   name: string
-  kind: 'vault' | 'inline'
+  kind: SecretSource
   value: string      // inline only
   domains: string    // comma/space separated; optional for vault (narrows)
 }
@@ -169,7 +170,7 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
               return (
                 <div key={i} className="mb-2 rounded border border-gray-200 dark:border-gray-800 p-2 space-y-1">
                   <div className="flex gap-1 items-center">
-                    <select className={inputCls + ' !w-20 text-xs'} value={r.kind} onChange={(e) => set({ kind: e.target.value as 'vault' | 'inline' })}>
+                    <select className={inputCls + ' !w-20 text-xs'} value={r.kind} onChange={(e) => set({ kind: e.target.value as SecretSource })}>
                       <option value="vault">vault</option>
                       <option value="inline">inline</option>
                     </select>

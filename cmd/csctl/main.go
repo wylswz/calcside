@@ -17,6 +17,7 @@ import (
 
 	"calcside/internal/client"
 	"calcside/internal/engine"
+	"calcside/internal/types"
 )
 
 type config struct {
@@ -188,7 +189,7 @@ type createFlags struct {
 	envs      strList
 	secrets   strList
 	spec      string
-	output    string
+	output    types.OutputFormat
 }
 
 type strList []string
@@ -209,7 +210,7 @@ func registerCreateFlags(fs *flag.FlagSet, f *createFlags) {
 	fs.Var(&f.envs, "env", "K=V env var visible to the script (repeatable)")
 	fs.Var(&f.secrets, "secret", "NAME[=dom1,dom2] vault secret ref, optionally narrowing its domains (repeatable)")
 	fs.StringVar(&f.spec, "spec", "", "raw spec JSON file")
-	fs.StringVar(&f.output, "o", "", "output format (json)")
+	fs.TextVar(&f.output, "o", types.FormatText, "output format (json)")
 }
 
 func parseSize(s string) (int64, error) {
@@ -254,7 +255,15 @@ func buildSpec(f *createFlags) (client.InstanceSpec, error) {
 	if f.netAllow != "" {
 		netCfg := map[string]any{"allow_hosts": strings.Split(f.netAllow, ",")}
 		if f.netMethod != "" {
-			netCfg["methods"] = strings.Split(f.netMethod, ",")
+			ms := strings.Split(f.netMethod, ",")
+			for i, m := range ms {
+				pm, err := types.ParseHTTPMethod(m)
+				if err != nil {
+					return nil, fmt.Errorf("bad --net-methods: %w", err)
+				}
+				ms[i] = string(pm)
+			}
+			netCfg["methods"] = ms
 		}
 		caps["net"] = netCfg
 	}
@@ -327,7 +336,7 @@ func cmdInstances(ctx context.Context, c *client.Client, args []string) int {
 		if err != nil {
 			return fail(err)
 		}
-		if f.output == "json" {
+		if f.output == types.FormatJSON {
 			return outputJSON(in)
 		}
 		fmt.Fprintln(stdout, in.ID)
@@ -335,16 +344,18 @@ func cmdInstances(ctx context.Context, c *client.Client, args []string) int {
 	case "ls":
 		fs := flag.NewFlagSet("instances ls", flag.ContinueOnError)
 		fs.SetOutput(stderr)
-		status := fs.String("status", "", "filter by status")
-		out := fs.String("o", "", "json")
+		var status types.InstanceStatus
+		var out types.OutputFormat
+		fs.TextVar(&status, "status", types.InstanceStatus(""), "filter by status")
+		fs.TextVar(&out, "o", types.FormatText, "output format (json)")
 		if err := fs.Parse(args[1:]); err != nil {
 			return 2
 		}
-		lst, err := c.ListInstances(ctx, *status)
+		lst, err := c.ListInstances(ctx, status)
 		if err != nil {
 			return fail(err)
 		}
-		if *out == "json" {
+		if out == types.FormatJSON {
 			return outputJSON(lst)
 		}
 		tw := newTabWriter()
@@ -436,7 +447,8 @@ func cmdExec(ctx context.Context, c *client.Client, args []string) int {
 	file := fs.String("f", "", "starlark file")
 	code := fs.String("c", "", "inline code")
 	timeout := fs.Int64("timeout-ms", 0, "exec timeout override ms")
-	out := fs.String("o", "", "json")
+	var out types.OutputFormat
+	fs.TextVar(&out, "o", types.FormatText, "output format (json)")
 	// Instance id comes first; flags follow it.
 	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
 		fmt.Fprintln(stderr, "exec: instance id required")
@@ -454,7 +466,7 @@ func cmdExec(ctx context.Context, c *client.Client, args []string) int {
 	if err != nil {
 		return fail(err)
 	}
-	return printExecResult(res, *out == "json")
+	return printExecResult(res, out == types.FormatJSON)
 }
 
 func cmdRun(ctx context.Context, c *client.Client, args []string) int {
@@ -484,7 +496,7 @@ func cmdRun(ctx context.Context, c *client.Client, args []string) int {
 	if err != nil {
 		return fail(err)
 	}
-	return printExecResult(res, f.output == "json")
+	return printExecResult(res, f.output == types.FormatJSON)
 }
 
 // --- files ---

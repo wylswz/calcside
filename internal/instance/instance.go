@@ -23,6 +23,7 @@ import (
 	"calcside/internal/policy"
 	"calcside/internal/secrets"
 	"calcside/internal/store"
+	"calcside/internal/types"
 )
 
 // Spec is the JSON document POSTed to create an instance.
@@ -38,10 +39,10 @@ type Spec struct {
 // SecretSpec is one entry of spec.secrets: either a vault ref (name of a
 // vault secret owned by the instance owner) or an inline value.
 type SecretSpec struct {
-	Ref            string   `json:"ref,omitempty"`
-	Value          string   `json:"value,omitempty"`
-	AllowedDomains []string `json:"allowed_domains,omitempty"`
-	Inline         bool     `json:"inline,omitempty"`
+	Ref            string             `json:"ref,omitempty"`
+	Value          string             `json:"value,omitempty"`
+	AllowedDomains []string           `json:"allowed_domains,omitempty"`
+	Source         types.SecretSource `json:"source,omitempty"` // set on output; input "source" is validated for consistency
 }
 
 // Limits requested per instance (clamped by server limits).
@@ -252,7 +253,7 @@ func (m *Manager) ParseSpec(raw []byte) (*Spec, map[string]any, error) {
 	}
 	typed := map[string]any{}
 	for name, rawCfg := range spec.Capabilities {
-		f, ok := m.reg.Get(name)
+		f, ok := m.reg.Get(types.CapabilityName(name))
 		if !ok {
 			return nil, nil, fmt.Errorf("%w: %q", ErrCapabilityName, name)
 		}
@@ -295,6 +296,15 @@ func (m *Manager) resolveSecrets(ctx context.Context, userID string, spec *Spec)
 	for name, ss := range spec.Secrets {
 		if ss.Ref != "" && ss.Value != "" {
 			return nil, nil, fmt.Errorf("secret %s: exactly one of ref or value", name)
+		}
+		if ss.Source != "" && ss.Source != types.SecretVault && ss.Source != types.SecretInline {
+			return nil, nil, fmt.Errorf("secret %s: invalid source %q", name, ss.Source)
+		}
+		if ss.Source == types.SecretVault && ss.Ref == "" {
+			return nil, nil, fmt.Errorf("secret %s: source %q requires ref", name, ss.Source)
+		}
+		if ss.Source == types.SecretInline && ss.Value == "" {
+			return nil, nil, fmt.Errorf("secret %s: source %q requires value", name, ss.Source)
 		}
 		var value []byte
 		var rules []hostmatch.Rule
@@ -342,7 +352,7 @@ func (m *Manager) resolveSecrets(ctx context.Context, userID string, spec *Spec)
 				rules = narrowed
 				effDomains = ss.AllowedDomains
 			}
-			sanitized[name] = SecretSpec{Ref: ss.Ref, AllowedDomains: effDomains}
+			sanitized[name] = SecretSpec{Ref: ss.Ref, AllowedDomains: effDomains, Source: types.SecretVault}
 		} else if ss.Value != "" {
 			if len(ss.Value) > secrets.MaxValueBytes {
 				return nil, nil, fmt.Errorf("secret %s: value exceeds %d bytes", name, secrets.MaxValueBytes)
@@ -353,7 +363,7 @@ func (m *Manager) resolveSecrets(ctx context.Context, userID string, spec *Spec)
 				return nil, nil, fmt.Errorf("secret %s: %w", name, err)
 			}
 			value = []byte(ss.Value)
-			sanitized[name] = SecretSpec{Inline: true, AllowedDomains: ss.AllowedDomains}
+			sanitized[name] = SecretSpec{AllowedDomains: ss.AllowedDomains, Source: types.SecretInline}
 		} else {
 			return nil, nil, fmt.Errorf("secret %s: exactly one of ref or value", name)
 		}
@@ -425,7 +435,7 @@ func (m *Manager) Create(ctx context.Context, user *store.User, rawSpec []byte) 
 		UserID:       user.ID,
 		Spec:         sanitizeSpec(spec, sanitizedSecrets),
 		Labels:       spec.Labels,
-		Status:       store.StatusRunning,
+		Status:       types.InstanceRunning,
 		CreatedAt:    now,
 		LastActiveAt: now,
 		ExpiresAt:    now.Add(time.Duration(spec.TTLSeconds) * time.Second),
@@ -464,14 +474,15 @@ func (m *Manager) Create(ctx context.Context, user *store.User, rawSpec []byte) 
 	for k, v := range spec.Capabilities {
 		caps[k] = v
 	}
-	if _, ok := caps["io"]; !ok {
-		caps["io"] = nil
-		if f, ok2 := m.reg.Get("io"); ok2 {
+	ioName := string(types.CapIO)
+	if _, ok := caps[ioName]; !ok {
+		caps[ioName] = nil
+		if f, ok2 := m.reg.Get(types.CapIO); ok2 {
 			cfg, err := f.Validate(json.RawMessage(fmt.Sprintf(`{"max_output_bytes":%d}`, spec.Limits.MaxOutputBytes)), capability.ServerLimits{MaxOutputBytes: m.limits.MaxOutputBytes})
 			if err != nil {
 				return nil, err
 			}
-			typed["io"] = cfg
+			typed[ioName] = cfg
 		}
 	}
 
@@ -481,7 +492,7 @@ func (m *Manager) Create(ctx context.Context, user *store.User, rawSpec []byte) 
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		f, _ := m.reg.Get(name)
+		f, _ := m.reg.Get(types.CapabilityName(name))
 		val, closer, err := f.New(typed[name], capability.InstanceEnv{Gate: gate, Secrets: secSet})
 		if err != nil {
 			for _, c := range closers {
@@ -558,7 +569,7 @@ func (m *Manager) Get(ctx context.Context, id string) (*store.Instance, error) {
 }
 
 // List returns live instances for the user (status filter optional).
-func (m *Manager) List(ctx context.Context, userID, status string) ([]*store.Instance, error) {
+func (m *Manager) List(ctx context.Context, userID string, status types.InstanceStatus) ([]*store.Instance, error) {
 	return m.st.ListInstances(ctx, userID, status)
 }
 
@@ -568,7 +579,7 @@ func (m *Manager) Keepalive(ctx context.Context, id string) (*store.Instance, er
 	if !ok {
 		return nil, ErrNotFound
 	}
-	if in.meta.Status != store.StatusRunning {
+	if in.meta.Status != types.InstanceRunning {
 		return nil, ErrNotRunning
 	}
 	bumpTTL(ctx, m, in)
@@ -594,7 +605,7 @@ func (m *Manager) Exec(ctx context.Context, id, code string, timeoutOverride tim
 	if !ok {
 		return nil, ErrNotFound
 	}
-	if in.meta.Status != store.StatusRunning {
+	if in.meta.Status != types.InstanceRunning {
 		return nil, ErrNotRunning
 	}
 	timeout := time.Duration(in.limits.ExecTimeoutMs) * time.Millisecond
@@ -629,7 +640,7 @@ func (m *Manager) WithSession(id string, fn func(s *engine.Session, gate *capabi
 	if !ok {
 		return ErrNotFound
 	}
-	if in.meta.Status != store.StatusRunning {
+	if in.meta.Status != types.InstanceRunning {
 		return ErrNotRunning
 	}
 	in.sess.ExecMu.Lock()
@@ -662,7 +673,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	if !ok {
 		return ErrNotFound
 	}
-	m.end(ctx, in, store.StatusDeleted)
+	m.end(ctx, in, types.InstanceDeleted)
 	return nil
 }
 
@@ -675,7 +686,7 @@ func (m *Manager) Redact(id, s string) string {
 	return s
 }
 
-func (m *Manager) end(ctx context.Context, in *inst, status string) {
+func (m *Manager) end(ctx context.Context, in *inst, status types.InstanceStatus) {
 	in.gate.Revoke()
 	if in.secrets != nil {
 		in.secrets.Wipe()
@@ -701,13 +712,13 @@ func (m *Manager) Reap(ctx context.Context) {
 	var doomed []*inst
 	m.mu.Lock()
 	for _, in := range m.insts {
-		if in.meta.Status == store.StatusRunning && !in.meta.ExpiresAt.After(now) {
+		if in.meta.Status == types.InstanceRunning && !in.meta.ExpiresAt.After(now) {
 			doomed = append(doomed, in)
 		}
 	}
 	m.mu.Unlock()
 	for _, in := range doomed {
-		m.end(ctx, in, store.StatusExpired)
+		m.end(ctx, in, types.InstanceExpired)
 	}
 }
 

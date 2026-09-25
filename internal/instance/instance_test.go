@@ -13,6 +13,7 @@ import (
 	"calcside/internal/engine"
 	"calcside/internal/store"
 	_ "calcside/internal/store/sqlite"
+	"calcside/internal/types"
 )
 
 func testMgr(t *testing.T, now *time.Time, limits ServerLimits) (*Manager, store.Store, *store.User) {
@@ -58,7 +59,7 @@ func TestTTLExpiryViaFakeClock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != store.StatusExpired || got.EndedAt == nil {
+	if got.Status != types.InstanceExpired || got.EndedAt == nil {
 		t.Fatalf("expected expired, got %+v", got)
 	}
 	// exec on expired instance fails
@@ -148,7 +149,7 @@ func TestStartupMarksRunningAsLost(t *testing.T) {
 		t.Fatalf("expected 1 lost, got %d", n)
 	}
 	got, _ := st.GetInstance(ctx, meta.ID)
-	if got.Status != store.StatusLost {
+	if got.Status != types.InstanceLost {
 		t.Fatalf("expected lost, got %s", got.Status)
 	}
 }

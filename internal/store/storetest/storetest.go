@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"calcside/internal/store"
+	"calcside/internal/types"
 )
 
 // Run exercises the whole Store contract against a fresh implementation.
@@ -104,7 +105,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		now := time.Now().UTC()
 		in := &store.Instance{
 			UserID: u.ID, Spec: []byte(`{"ttl_seconds":60}`),
-			Labels: map[string]string{"team": "x"}, Status: store.StatusRunning,
+			Labels: map[string]string{"team": "x"}, Status: types.InstanceRunning,
 			CreatedAt: now, LastActiveAt: now, ExpiresAt: now.Add(time.Minute),
 		}
 		if err := s.CreateInstance(ctx, in); err != nil {
@@ -114,17 +115,17 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		if err != nil || got.Labels["team"] != "x" {
 			t.Fatalf("GetInstance: %v %+v", err, got)
 		}
-		lst, err := s.ListInstances(ctx, u.ID, store.StatusRunning)
+		lst, err := s.ListInstances(ctx, u.ID, types.InstanceRunning)
 		if err != nil || len(lst) != 1 {
 			t.Fatalf("ListInstances: %v %d", err, len(lst))
 		}
-		in.Status = store.StatusExpired
+		in.Status = types.InstanceExpired
 		end := now.Add(time.Hour)
 		in.EndedAt = &end
 		if err := s.UpdateInstance(ctx, in); err != nil {
 			t.Fatal(err)
 		}
-		lst, _ = s.ListInstances(ctx, u.ID, store.StatusRunning)
+		lst, _ = s.ListInstances(ctx, u.ID, types.InstanceRunning)
 		if len(lst) != 0 {
 			t.Fatalf("expected 0 running, got %d", len(lst))
 		}
@@ -132,7 +133,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		if len(lst) != 1 {
 			t.Fatalf("expected 1 total, got %d", len(lst))
 		}
-		in2 := &store.Instance{UserID: u.ID, Spec: []byte(`{}`), Status: store.StatusRunning,
+		in2 := &store.Instance{UserID: u.ID, Spec: []byte(`{}`), Status: types.InstanceRunning,
 			CreatedAt: now, LastActiveAt: now, ExpiresAt: now.Add(time.Minute)}
 		if err := s.CreateInstance(ctx, in2); err != nil {
 			t.Fatal(err)
@@ -142,7 +143,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 			t.Fatalf("MarkRunningAsLost: %v n=%d", err, n)
 		}
 		got, _ = s.GetInstance(ctx, in2.ID)
-		if got.Status != store.StatusLost || got.EndedAt == nil {
+		if got.Status != types.InstanceLost || got.EndedAt == nil {
 			t.Fatalf("expected lost: %+v", got)
 		}
 	})
@@ -151,13 +152,13 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		s := newStore(t)
 		u, _ := s.UpsertUserByEmail(ctx, "e@x.com", "", "")
 		now := time.Now().UTC()
-		in := &store.Instance{UserID: u.ID, Spec: []byte(`{}`), Status: store.StatusRunning,
+		in := &store.Instance{UserID: u.ID, Spec: []byte(`{}`), Status: types.InstanceRunning,
 			CreatedAt: now, LastActiveAt: now, ExpiresAt: now.Add(time.Minute)}
 		if err := s.CreateInstance(ctx, in); err != nil {
 			t.Fatal(err)
 		}
 		e := &store.Execution{InstanceID: in.ID, UserID: u.ID, CodeSHA256: "abc",
-			CodeSnippet: "print(1)", Status: store.ExecOK, DurationMs: 5, Steps: 10, OutputBytes: 2}
+			CodeSnippet: "print(1)", Status: types.ExecOK, DurationMs: 5, Steps: 10, OutputBytes: 2}
 		if err := s.CreateExecution(ctx, e); err != nil {
 			t.Fatal(err)
 		}
@@ -171,8 +172,8 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		s := newStore(t)
 		now := time.Now().UTC()
 		evs := []store.AuditEvent{
-			{Ts: now, UserID: "u1", InstanceID: "i1", ExecID: "e1", Capability: "fs", Op: "read", Args: `{"path":"/work/a"}`, Decision: "allow"},
-			{Ts: now.Add(time.Second), UserID: "u1", InstanceID: "i1", ExecID: "e2", Capability: "net", Op: "get", Args: `{}`, Decision: "deny", Phase: "before", Reason: "nope"},
+			{Ts: now, UserID: "u1", InstanceID: "i1", ExecID: "e1", Capability: types.CapFS, Op: "read", Args: `{"path":"/work/a"}`, Decision: types.DecisionAllow},
+			{Ts: now.Add(time.Second), UserID: "u1", InstanceID: "i1", ExecID: "e2", Capability: types.CapNet, Op: "get", Args: `{}`, Decision: types.DecisionDeny, Phase: types.PhaseBefore, Reason: "nope"},
 		}
 		if err := s.InsertAuditEvents(ctx, evs); err != nil {
 			t.Fatal(err)
@@ -189,6 +190,45 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		lst, _ = s.ListAuditEvents(ctx, store.AuditFilter{UserID: "u1", Before: &before})
 		if len(lst) != 1 {
 			t.Fatalf("before filter: %d", len(lst))
+		}
+	})
+
+	t.Run("invalid enums rejected", func(t *testing.T) {
+		s := newStore(t)
+		u, _ := s.UpsertUserByEmail(ctx, "v@x.com", "", "")
+		now := time.Now().UTC()
+		bad := &store.Instance{UserID: u.ID, Spec: []byte(`{}`), Status: types.InstanceStatus("bogus"),
+			CreatedAt: now, LastActiveAt: now, ExpiresAt: now.Add(time.Minute)}
+		if err := s.CreateInstance(ctx, bad); err == nil {
+			t.Fatal("CreateInstance accepted invalid status")
+		}
+		bad.Status = types.InstanceRunning
+		if err := s.CreateInstance(ctx, bad); err != nil {
+			t.Fatal(err)
+		}
+		bad.Status = "bogus"
+		if err := s.UpdateInstance(ctx, bad); err == nil {
+			t.Fatal("UpdateInstance accepted invalid status")
+		}
+		e := &store.Execution{InstanceID: bad.ID, UserID: u.ID, Status: types.ExecStatus("weird")}
+		if err := s.CreateExecution(ctx, e); err == nil {
+			t.Fatal("CreateExecution accepted invalid status")
+		}
+		e.Status = types.ExecError
+		e.ErrorType = types.ExecErrorType("nonsense")
+		if err := s.CreateExecution(ctx, e); err == nil {
+			t.Fatal("CreateExecution accepted invalid error_type")
+		}
+		evs := []store.AuditEvent{
+			{Ts: now, UserID: "u1", Capability: types.CapFS, Op: "read", Decision: types.Decision("maybe")},
+		}
+		if err := s.InsertAuditEvents(ctx, evs); err == nil {
+			t.Fatal("InsertAuditEvents accepted invalid decision")
+		}
+		evs[0].Decision = types.DecisionDeny
+		evs[0].Phase = types.Phase("middle")
+		if err := s.InsertAuditEvents(ctx, evs); err == nil {
+			t.Fatal("InsertAuditEvents accepted invalid phase")
 		}
 	})
 

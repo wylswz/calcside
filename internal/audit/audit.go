@@ -68,7 +68,7 @@ func (r *Recorder) Observe(rec capability.Record) {
 	select {
 	case r.ch <- ev:
 	default:
-		slog.Warn("audit queue full, dropping event", "op", ev.Capability+"."+ev.Op)
+		slog.Warn("audit queue full, dropping event", "op", string(ev.Capability)+"."+string(ev.Op))
 	}
 }
 

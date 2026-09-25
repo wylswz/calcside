@@ -17,6 +17,7 @@ import (
 	"go.starlark.net/starlark"
 
 	"calcside/internal/capability"
+	"calcside/internal/types"
 )
 
 const root = "/work"
@@ -354,27 +355,40 @@ type factory struct{}
 // Factory returns the capability.Factory for "fs".
 func Factory() capability.Factory { return factory{} }
 
-func (factory) Name() string { return "fs" }
+// Op consts for fs.
+const (
+	OpRead   types.Op = "read"
+	OpWrite  types.Op = "write"
+	OpAppend types.Op = "append"
+	OpExists types.Op = "exists"
+	OpStat   types.Op = "stat"
+	OpList   types.Op = "list"
+	OpWalk   types.Op = "walk"
+	OpMkdir  types.Op = "mkdir"
+	OpDelete types.Op = "delete"
+)
+
+func (factory) Name() types.CapabilityName { return types.CapFS }
 
 func (factory) Ops() []capability.OpInfo {
 	return []capability.OpInfo{
-		{Name: "read", Doc: "read file contents as string", Params: []string{"path"}},
-		{Name: "write", Doc: "write string to file, creating parents", Params: []string{"path", "content"}},
-		{Name: "append", Doc: "append string to file, creating parents", Params: []string{"path", "content"}},
-		{Name: "exists", Doc: "whether path exists", Params: []string{"path"}},
-		{Name: "stat", Doc: "dict{name,path,is_dir,size,mtime}", Params: []string{"path"}},
-		{Name: "list", Doc: "list direct children of dir", Params: []string{"dir"}},
-		{Name: "walk", Doc: "recursive listing under dir", Params: []string{"dir"}},
-		{Name: "mkdir", Doc: "create dir and parents", Params: []string{"path"}},
-		{Name: "delete", Doc: "delete file or dir", Params: []string{"path", "recursive"}},
+		{Name: OpRead, Doc: "read file contents as string", Params: []string{"path"}},
+		{Name: OpWrite, Doc: "write string to file, creating parents", Params: []string{"path", "content"}},
+		{Name: OpAppend, Doc: "append string to file, creating parents", Params: []string{"path", "content"}},
+		{Name: OpExists, Doc: "whether path exists", Params: []string{"path"}},
+		{Name: OpStat, Doc: "dict{name,path,is_dir,size,mtime}", Params: []string{"path"}},
+		{Name: OpList, Doc: "list direct children of dir", Params: []string{"dir"}},
+		{Name: OpWalk, Doc: "recursive listing under dir", Params: []string{"dir"}},
+		{Name: OpMkdir, Doc: "create dir and parents", Params: []string{"path"}},
+		{Name: OpDelete, Doc: "delete file or dir", Params: []string{"path", "recursive"}},
 	}
 }
 
 func (factory) ConfigFields() []capability.FieldDoc {
 	return []capability.FieldDoc{
-		{Name: "quota_bytes", Type: "int", Doc: "max total bytes stored", Default: defaultQuota},
-		{Name: "max_files", Type: "int", Doc: "max number of files", Default: defaultMaxFiles},
-		{Name: "read_only", Type: "bool", Doc: "reject all writes", Default: false},
+		{Name: "quota_bytes", Type: types.FieldInt, Doc: "max total bytes stored", Default: defaultQuota},
+		{Name: "max_files", Type: types.FieldInt, Doc: "max number of files", Default: defaultMaxFiles},
+		{Name: "read_only", Type: types.FieldBool, Doc: "reject all writes", Default: false},
 	}
 }
 
@@ -441,9 +455,9 @@ func bindFS(v *VFS, gate *capability.Gate) starlark.Value {
 		return starlark.NewList(l)
 	}
 
-	return capability.Bind("fs", gate, map[string]capability.Method{
-		"read": func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
-			p, _, err := pathArg("read", args, kwargs)
+	return capability.Bind(types.CapFS, gate, map[types.Op]capability.Method{
+		OpRead: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
+			p, _, err := pathArg(string(OpRead), args, kwargs)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -459,9 +473,9 @@ func bindFS(v *VFS, gate *capability.Gate) starlark.Value {
 				return starlark.String(s), map[string]any{"bytes": len(s)}, nil
 			}, nil
 		},
-		"write": func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
+		OpWrite: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
 			var p, content string
-			if err := starlark.UnpackArgs("write", args, kwargs, "path", &p, "content", &content); err != nil {
+			if err := starlark.UnpackArgs(string(OpWrite), args, kwargs, "path", &p, "content", &content); err != nil {
 				return nil, nil, err
 			}
 			full, err := Resolve(p)
@@ -476,9 +490,9 @@ func bindFS(v *VFS, gate *capability.Gate) starlark.Value {
 				return starlark.None, map[string]any{"bytes": n}, nil
 			}, nil
 		},
-		"append": func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
+		OpAppend: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
 			var p, content string
-			if err := starlark.UnpackArgs("append", args, kwargs, "path", &p, "content", &content); err != nil {
+			if err := starlark.UnpackArgs(string(OpAppend), args, kwargs, "path", &p, "content", &content); err != nil {
 				return nil, nil, err
 			}
 			full, err := Resolve(p)
@@ -493,8 +507,8 @@ func bindFS(v *VFS, gate *capability.Gate) starlark.Value {
 				return starlark.None, map[string]any{"bytes": n}, nil
 			}, nil
 		},
-		"exists": func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
-			p, _, err := pathArg("exists", args, kwargs)
+		OpExists: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
+			p, _, err := pathArg(string(OpExists), args, kwargs)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -510,8 +524,8 @@ func bindFS(v *VFS, gate *capability.Gate) starlark.Value {
 				return starlark.Bool(ok), nil, nil
 			}, nil
 		},
-		"stat": func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
-			p, _, err := pathArg("stat", args, kwargs)
+		OpStat: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
+			p, _, err := pathArg(string(OpStat), args, kwargs)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -527,9 +541,9 @@ func bindFS(v *VFS, gate *capability.Gate) starlark.Value {
 				return entryDict(e), map[string]any{"is_dir": e.IsDir, "size": e.Size}, nil
 			}, nil
 		},
-		"list": func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
+		OpList: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
 			p := root
-			if err := starlark.UnpackArgs("list", args, kwargs, "dir?", &p); err != nil {
+			if err := starlark.UnpackArgs(string(OpList), args, kwargs, "dir?", &p); err != nil {
 				return nil, nil, err
 			}
 			full, err := Resolve(p)
@@ -544,9 +558,9 @@ func bindFS(v *VFS, gate *capability.Gate) starlark.Value {
 				return entryList(entries), map[string]any{"count": len(entries)}, nil
 			}, nil
 		},
-		"walk": func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
+		OpWalk: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
 			p := root
-			if err := starlark.UnpackArgs("walk", args, kwargs, "dir?", &p); err != nil {
+			if err := starlark.UnpackArgs(string(OpWalk), args, kwargs, "dir?", &p); err != nil {
 				return nil, nil, err
 			}
 			full, err := Resolve(p)
@@ -561,8 +575,8 @@ func bindFS(v *VFS, gate *capability.Gate) starlark.Value {
 				return entryList(entries), map[string]any{"count": len(entries)}, nil
 			}, nil
 		},
-		"mkdir": func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
-			p, _, err := pathArg("mkdir", args, kwargs)
+		OpMkdir: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
+			p, _, err := pathArg(string(OpMkdir), args, kwargs)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -577,10 +591,10 @@ func bindFS(v *VFS, gate *capability.Gate) starlark.Value {
 				return starlark.None, nil, nil
 			}, nil
 		},
-		"delete": func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
+		OpDelete: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
 			var p string
 			var recursive bool
-			if err := starlark.UnpackArgs("delete", args, kwargs, "path", &p, "recursive?", &recursive); err != nil {
+			if err := starlark.UnpackArgs(string(OpDelete), args, kwargs, "path", &p, "recursive?", &recursive); err != nil {
 				return nil, nil, err
 			}
 			full, err := Resolve(p)

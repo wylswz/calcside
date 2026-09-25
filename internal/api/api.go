@@ -25,6 +25,7 @@ import (
 	"calcside/internal/policy"
 	"calcside/internal/secrets"
 	"calcside/internal/store"
+	"calcside/internal/types"
 )
 
 const (
@@ -51,8 +52,8 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func writeErr(w http.ResponseWriter, status int, code, msg string) {
-	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": msg}})
+func writeErr(w http.ResponseWriter, status int, code types.APIErrorCode, msg string) {
+	writeJSON(w, status, map[string]any{"error": map[string]string{"code": string(code), "message": msg}})
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any, limit int64) error {
@@ -129,7 +130,7 @@ func Handler(d Deps) http.Handler {
 func spaHandler(web fs.FS) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			writeErr(w, 405, "method_not_allowed", "method not allowed")
+			writeErr(w, 405, types.ErrCodeMethodNotAllowed, "method not allowed")
 			return
 		}
 		upath := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
@@ -191,7 +192,7 @@ func (a *api) now() time.Time {
 
 func (a *api) me(w http.ResponseWriter, r *http.Request) {
 	p := principal(r)
-	writeJSON(w, 200, map[string]any{"user": p.User, "via_key": p.ViaKey})
+	writeJSON(w, 200, map[string]any{"user": p.User, "via_key": p.ViaKey()})
 }
 
 func (a *api) capabilities(w http.ResponseWriter, r *http.Request) {
@@ -216,7 +217,7 @@ func (a *api) createKey(w http.ResponseWriter, r *http.Request) {
 		ExpiresIn int64  `json:"expires_in_seconds"`
 	}
 	if err := decode(w, r, &body, maxBodyBytes); err != nil {
-		writeErr(w, 400, "bad_request", "invalid JSON body")
+		writeErr(w, 400, types.ErrCodeBadRequest, "invalid JSON body")
 		return
 	}
 	var exp *time.Time
@@ -226,7 +227,7 @@ func (a *api) createKey(w http.ResponseWriter, r *http.Request) {
 	}
 	secret, key := auth.NewAPIKey(p.User.ID, body.Name, exp)
 	if err := a.d.Store.CreateAPIKey(r.Context(), key); err != nil {
-		writeErr(w, 500, "internal", err.Error())
+		writeErr(w, 500, types.ErrCodeInternal, err.Error())
 		return
 	}
 	writeJSON(w, 201, map[string]any{"key": key, "secret": secret})
@@ -236,7 +237,7 @@ func (a *api) listKeys(w http.ResponseWriter, r *http.Request) {
 	p := principal(r)
 	keys, err := a.d.Store.ListAPIKeys(r.Context(), p.User.ID)
 	if err != nil {
-		writeErr(w, 500, "internal", err.Error())
+		writeErr(w, 500, types.ErrCodeInternal, err.Error())
 		return
 	}
 	if keys == nil {
@@ -250,10 +251,10 @@ func (a *api) deleteKey(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := a.d.Store.RevokeAPIKey(r.Context(), p.User.ID, id); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			writeErr(w, 404, "not_found", "key not found")
+			writeErr(w, 404, types.ErrCodeNotFound, "key not found")
 			return
 		}
-		writeErr(w, 500, "internal", err.Error())
+		writeErr(w, 500, types.ErrCodeInternal, err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -265,7 +266,7 @@ func (a *api) createInstance(w http.ResponseWriter, r *http.Request) {
 	p := principal(r)
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	if err != nil {
-		writeErr(w, 400, "bad_request", "body too large")
+		writeErr(w, 400, types.ErrCodeBadRequest, "body too large")
 		return
 	}
 	if len(raw) == 0 {
@@ -275,11 +276,11 @@ func (a *api) createInstance(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, instance.ErrTooMany):
-			writeErr(w, 429, "too_many", err.Error())
+			writeErr(w, 429, types.ErrCodeTooMany, err.Error())
 		case errors.Is(err, instance.ErrCapabilityName):
-			writeErr(w, 400, "bad_capability", err.Error())
+			writeErr(w, 400, types.ErrCodeBadCapability, err.Error())
 		default:
-			writeErr(w, 400, "bad_spec", err.Error())
+			writeErr(w, 400, types.ErrCodeBadSpec, err.Error())
 		}
 		return
 	}
@@ -288,9 +289,17 @@ func (a *api) createInstance(w http.ResponseWriter, r *http.Request) {
 
 func (a *api) listInstances(w http.ResponseWriter, r *http.Request) {
 	p := principal(r)
-	lst, err := a.d.Manager.List(r.Context(), p.User.ID, r.URL.Query().Get("status"))
+	var status types.InstanceStatus
+	if q := r.URL.Query().Get("status"); q != "" {
+		status = types.InstanceStatus(q)
+		if !status.Valid() {
+			writeErr(w, 400, types.ErrCodeBadRequest, "invalid status filter")
+			return
+		}
+	}
+	lst, err := a.d.Manager.List(r.Context(), p.User.ID, status)
 	if err != nil {
-		writeErr(w, 500, "internal", err.Error())
+		writeErr(w, 500, types.ErrCodeInternal, err.Error())
 		return
 	}
 	if lst == nil {
@@ -305,7 +314,7 @@ func (a *api) ownedInstance(w http.ResponseWriter, r *http.Request) (*store.Inst
 	p := principal(r)
 	in, err := a.d.Manager.Get(r.Context(), r.PathValue("id"))
 	if err != nil || in.UserID != p.User.ID {
-		writeErr(w, 404, "not_found", "instance not found")
+		writeErr(w, 404, types.ErrCodeNotFound, "instance not found")
 		return nil, false
 	}
 	return in, true
@@ -326,10 +335,10 @@ func (a *api) deleteInstance(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := a.d.Manager.Delete(r.Context(), in.ID); err != nil {
 		if errors.Is(err, instance.ErrNotFound) {
-			writeErr(w, 404, "not_found", "instance not found")
+			writeErr(w, 404, types.ErrCodeNotFound, "instance not found")
 			return
 		}
-		writeErr(w, 500, "internal", err.Error())
+		writeErr(w, 500, types.ErrCodeInternal, err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -343,10 +352,10 @@ func (a *api) keepalive(w http.ResponseWriter, r *http.Request) {
 	meta, err := a.d.Manager.Keepalive(r.Context(), in.ID)
 	if err != nil {
 		if errors.Is(err, instance.ErrNotRunning) {
-			writeErr(w, 409, "not_running", "instance not running")
+			writeErr(w, 409, types.ErrCodeNotRunning, "instance not running")
 			return
 		}
-		writeErr(w, 404, "not_found", "instance not found")
+		writeErr(w, 404, types.ErrCodeNotFound, "instance not found")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"instance": meta})
@@ -357,8 +366,8 @@ func (a *api) exec(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if in.Status != store.StatusRunning {
-		writeErr(w, 409, "not_running", "instance not running")
+	if in.Status != types.InstanceRunning {
+		writeErr(w, 409, types.ErrCodeNotRunning, "instance not running")
 		return
 	}
 	var body struct {
@@ -367,15 +376,15 @@ func (a *api) exec(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxCodeBytes+1024))
 	if err != nil {
-		writeErr(w, 413, "too_large", "request body too large")
+		writeErr(w, 413, types.ErrCodeTooLarge, "request body too large")
 		return
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
-		writeErr(w, 400, "bad_request", "invalid JSON body")
+		writeErr(w, 400, types.ErrCodeBadRequest, "invalid JSON body")
 		return
 	}
 	if len(body.Code) > maxCodeBytes {
-		writeErr(w, 413, "too_large", "code exceeds 256KB")
+		writeErr(w, 413, types.ErrCodeTooLarge, "code exceeds 256KB")
 		return
 	}
 	p := principal(r)
@@ -385,10 +394,10 @@ func (a *api) exec(w http.ResponseWriter, r *http.Request) {
 		if len(snippet) > snippetBytes {
 			snippet = snippet[:snippetBytes]
 		}
-		status := store.ExecOK
-		errType := ""
+		status := types.ExecOK
+		var errType types.ExecErrorType
 		if res.Error != nil {
-			status = store.ExecError
+			status = types.ExecError
 			errType = res.Error.Type
 		}
 		_ = a.d.Store.CreateExecution(r.Context(), &store.Execution{
@@ -403,11 +412,11 @@ func (a *api) exec(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, instance.ErrNotFound):
-			writeErr(w, 404, "not_found", "instance not found")
+			writeErr(w, 404, types.ErrCodeNotFound, "instance not found")
 		case errors.Is(err, instance.ErrNotRunning):
-			writeErr(w, 409, "not_running", "instance not running")
+			writeErr(w, 409, types.ErrCodeNotRunning, "instance not running")
 		default:
-			writeErr(w, 400, "bad_request", err.Error())
+			writeErr(w, 400, types.ErrCodeBadRequest, err.Error())
 		}
 		return
 	}
@@ -421,12 +430,12 @@ func (a *api) files(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if in.Status != store.StatusRunning {
-		writeErr(w, 409, "not_running", "instance not running")
+	if in.Status != types.InstanceRunning {
+		writeErr(w, 409, types.ErrCodeNotRunning, "instance not running")
 		return
 	}
-	if !a.d.Manager.HasCapability(in.ID, "fs") {
-		writeErr(w, 400, "no_fs", "instance has no fs capability")
+	if !a.d.Manager.HasCapability(in.ID, string(types.CapFS)) {
+		writeErr(w, 400, types.ErrCodeNoFS, "instance has no fs capability")
 		return
 	}
 	p := r.URL.Query().Get("path")
@@ -437,7 +446,7 @@ func (a *api) files(w http.ResponseWriter, r *http.Request) {
 	var listing []any
 	var content string
 	err := a.d.Manager.WithSession(in.ID, func(s *engine.Session, gate *capability.Gate) error {
-		fsv, ok := s.Predeclared["fs"]
+		fsv, ok := s.Predeclared[string(types.CapFS)]
 		if !ok {
 			return errors.New("no fs binding")
 		}
@@ -486,13 +495,13 @@ func (a *api) files(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, instance.ErrNotFound):
-			writeErr(w, 404, "not_found", "instance not found")
+			writeErr(w, 404, types.ErrCodeNotFound, "instance not found")
 		case errors.Is(err, instance.ErrNotRunning):
-			writeErr(w, 409, "not_running", "instance not running")
+			writeErr(w, 409, types.ErrCodeNotRunning, "instance not running")
 		case strings.Contains(err.Error(), "does not exist"):
-			writeErr(w, 404, "not_found", err.Error())
+			writeErr(w, 404, types.ErrCodeNotFound, err.Error())
 		default:
-			writeErr(w, 400, "fs_error", err.Error())
+			writeErr(w, 400, types.ErrCodeFSError, err.Error())
 		}
 		return
 	}
@@ -561,7 +570,7 @@ func (a *api) executions(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	lst, err := a.d.Store.ListExecutions(r.Context(), in.ID, limit)
 	if err != nil {
-		writeErr(w, 500, "internal", err.Error())
+		writeErr(w, 500, types.ErrCodeInternal, err.Error())
 		return
 	}
 	if lst == nil {
@@ -584,7 +593,7 @@ func (a *api) auditEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	lst, err := a.d.Store.ListAuditEvents(r.Context(), f)
 	if err != nil {
-		writeErr(w, 500, "internal", err.Error())
+		writeErr(w, 500, types.ErrCodeInternal, err.Error())
 		return
 	}
 	if lst == nil {
@@ -599,7 +608,7 @@ func (a *api) listPolicies(w http.ResponseWriter, r *http.Request) {
 	p := principal(r)
 	lst, err := a.d.Store.ListPolicies(r.Context(), p.User.ID)
 	if err != nil {
-		writeErr(w, 500, "internal", err.Error())
+		writeErr(w, 500, types.ErrCodeInternal, err.Error())
 		return
 	}
 	if lst == nil {
@@ -616,15 +625,15 @@ func (a *api) createPolicy(w http.ResponseWriter, r *http.Request) {
 		Enabled *bool  `json:"enabled"`
 	}
 	if err := decode(w, r, &body, maxBodyBytes); err != nil {
-		writeErr(w, 400, "bad_request", "invalid JSON body")
+		writeErr(w, 400, types.ErrCodeBadRequest, "invalid JSON body")
 		return
 	}
 	if body.Name == "" || body.Rego == "" {
-		writeErr(w, 400, "bad_request", "name and rego required")
+		writeErr(w, 400, types.ErrCodeBadRequest, "name and rego required")
 		return
 	}
 	if err := policy.Validate(body.Rego); err != nil {
-		writeErr(w, 400, "bad_policy", err.Error())
+		writeErr(w, 400, types.ErrCodeBadPolicy, err.Error())
 		return
 	}
 	pol := &store.Policy{UserID: p.User.ID, Name: body.Name, Rego: body.Rego, Enabled: true}
@@ -632,7 +641,7 @@ func (a *api) createPolicy(w http.ResponseWriter, r *http.Request) {
 		pol.Enabled = *body.Enabled
 	}
 	if err := a.d.Store.CreatePolicy(r.Context(), pol); err != nil {
-		writeErr(w, 500, "internal", err.Error())
+		writeErr(w, 500, types.ErrCodeInternal, err.Error())
 		return
 	}
 	writeJSON(w, 201, map[string]any{"policy": pol})
@@ -642,7 +651,7 @@ func (a *api) getPolicy(w http.ResponseWriter, r *http.Request) {
 	p := principal(r)
 	pol, err := a.d.Store.GetPolicy(r.Context(), r.PathValue("id"))
 	if err != nil || pol.UserID != p.User.ID {
-		writeErr(w, 404, "not_found", "policy not found")
+		writeErr(w, 404, types.ErrCodeNotFound, "policy not found")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"policy": pol})
@@ -652,7 +661,7 @@ func (a *api) updatePolicy(w http.ResponseWriter, r *http.Request) {
 	p := principal(r)
 	pol, err := a.d.Store.GetPolicy(r.Context(), r.PathValue("id"))
 	if err != nil || pol.UserID != p.User.ID {
-		writeErr(w, 404, "not_found", "policy not found")
+		writeErr(w, 404, types.ErrCodeNotFound, "policy not found")
 		return
 	}
 	var body struct {
@@ -661,7 +670,7 @@ func (a *api) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		Enabled *bool   `json:"enabled"`
 	}
 	if err := decode(w, r, &body, maxBodyBytes); err != nil {
-		writeErr(w, 400, "bad_request", "invalid JSON body")
+		writeErr(w, 400, types.ErrCodeBadRequest, "invalid JSON body")
 		return
 	}
 	if body.Name != nil {
@@ -669,7 +678,7 @@ func (a *api) updatePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Rego != nil {
 		if err := policy.Validate(*body.Rego); err != nil {
-			writeErr(w, 400, "bad_policy", err.Error())
+			writeErr(w, 400, types.ErrCodeBadPolicy, err.Error())
 			return
 		}
 		pol.Rego = *body.Rego
@@ -678,7 +687,7 @@ func (a *api) updatePolicy(w http.ResponseWriter, r *http.Request) {
 		pol.Enabled = *body.Enabled
 	}
 	if err := a.d.Store.UpdatePolicy(r.Context(), pol); err != nil {
-		writeErr(w, 500, "internal", err.Error())
+		writeErr(w, 500, types.ErrCodeInternal, err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]any{"policy": pol})
@@ -688,11 +697,11 @@ func (a *api) deletePolicy(w http.ResponseWriter, r *http.Request) {
 	p := principal(r)
 	pol, err := a.d.Store.GetPolicy(r.Context(), r.PathValue("id"))
 	if err != nil || pol.UserID != p.User.ID {
-		writeErr(w, 404, "not_found", "policy not found")
+		writeErr(w, 404, types.ErrCodeNotFound, "policy not found")
 		return
 	}
 	if err := a.d.Store.DeletePolicy(r.Context(), pol.ID); err != nil {
-		writeErr(w, 500, "internal", err.Error())
+		writeErr(w, 500, types.ErrCodeInternal, err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -703,7 +712,7 @@ func (a *api) validatePolicy(w http.ResponseWriter, r *http.Request) {
 		Rego string `json:"rego"`
 	}
 	if err := decode(w, r, &body, maxBodyBytes); err != nil {
-		writeErr(w, 400, "bad_request", "invalid JSON body")
+		writeErr(w, 400, types.ErrCodeBadRequest, "invalid JSON body")
 		return
 	}
 	if err := policy.Validate(body.Rego); err != nil {
@@ -717,7 +726,7 @@ func (a *api) validatePolicy(w http.ResponseWriter, r *http.Request) {
 
 func (a *api) secretsEnabled(w http.ResponseWriter) bool {
 	if a.d.Cipher == nil {
-		writeErr(w, 503, "secrets_disabled", "secrets vault disabled (no --secret-key)")
+		writeErr(w, 503, types.ErrCodeSecretsDisabled, "secrets vault disabled (no --secret-key)")
 		return false
 	}
 	return true
@@ -730,7 +739,7 @@ func (a *api) listSecrets(w http.ResponseWriter, r *http.Request) {
 	p := principal(r)
 	lst, err := a.d.Store.ListSecrets(r.Context(), p.User.ID)
 	if err != nil {
-		writeErr(w, 500, "internal", err.Error())
+		writeErr(w, 500, types.ErrCodeInternal, err.Error())
 		return
 	}
 	if lst == nil {
@@ -766,25 +775,25 @@ func (a *api) createSecret(w http.ResponseWriter, r *http.Request) {
 		AllowedDomains []string `json:"allowed_domains"`
 	}
 	if err := decode(w, r, &body, maxBodyBytes); err != nil {
-		writeErr(w, 400, "bad_request", "invalid JSON body")
+		writeErr(w, 400, types.ErrCodeBadRequest, "invalid JSON body")
 		return
 	}
 	if err := validateSecretInput(body.Name, body.Value, body.AllowedDomains); err != nil {
-		writeErr(w, 400, "bad_secret", err.Error())
+		writeErr(w, 400, types.ErrCodeBadSecret, err.Error())
 		return
 	}
 	ct, err := a.d.Cipher.Seal([]byte(body.Value), p.User.ID+"/"+body.Name)
 	if err != nil {
-		writeErr(w, 500, "internal", err.Error())
+		writeErr(w, 500, types.ErrCodeInternal, err.Error())
 		return
 	}
 	s := &store.Secret{UserID: p.User.ID, Name: body.Name, Ciphertext: ct, AllowedDomains: body.AllowedDomains}
 	if err := a.d.Store.CreateSecret(r.Context(), s); err != nil {
 		if errors.Is(err, store.ErrConflict) {
-			writeErr(w, 409, "conflict", "secret with that name already exists")
+			writeErr(w, 409, types.ErrCodeConflict, "secret with that name already exists")
 			return
 		}
-		writeErr(w, 500, "internal", err.Error())
+		writeErr(w, 500, types.ErrCodeInternal, err.Error())
 		return
 	}
 	writeJSON(w, 201, map[string]any{"secret": s})
@@ -795,7 +804,7 @@ func (a *api) ownedSecret(w http.ResponseWriter, r *http.Request) (*store.Secret
 	p := principal(r)
 	s, err := a.d.Store.GetSecret(r.Context(), r.PathValue("id"))
 	if err != nil || s.UserID != p.User.ID {
-		writeErr(w, 404, "not_found", "secret not found")
+		writeErr(w, 404, types.ErrCodeNotFound, "secret not found")
 		return nil, false
 	}
 	return s, true
@@ -815,30 +824,30 @@ func (a *api) updateSecret(w http.ResponseWriter, r *http.Request) {
 		AllowedDomains []string `json:"allowed_domains"`
 	}
 	if err := decode(w, r, &body, maxBodyBytes); err != nil {
-		writeErr(w, 400, "bad_request", "invalid JSON body")
+		writeErr(w, 400, types.ErrCodeBadRequest, "invalid JSON body")
 		return
 	}
 	if body.Value != nil {
 		if len(*body.Value) == 0 || len(*body.Value) > secrets.MaxValueBytes {
-			writeErr(w, 400, "bad_secret", "value must be 1..16KiB")
+			writeErr(w, 400, types.ErrCodeBadSecret, "value must be 1..16KiB")
 			return
 		}
 		ct, err := a.d.Cipher.Seal([]byte(*body.Value), p.User.ID+"/"+s.Name)
 		if err != nil {
-			writeErr(w, 500, "internal", err.Error())
+			writeErr(w, 500, types.ErrCodeInternal, err.Error())
 			return
 		}
 		s.Ciphertext = ct
 	}
 	if body.AllowedDomains != nil {
 		if _, err := secrets.ValidateDomains(body.AllowedDomains); err != nil {
-			writeErr(w, 400, "bad_secret", err.Error())
+			writeErr(w, 400, types.ErrCodeBadSecret, err.Error())
 			return
 		}
 		s.AllowedDomains = body.AllowedDomains
 	}
 	if err := a.d.Store.UpdateSecret(r.Context(), s); err != nil {
-		writeErr(w, 500, "internal", err.Error())
+		writeErr(w, 500, types.ErrCodeInternal, err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]any{"secret": s})
@@ -853,7 +862,7 @@ func (a *api) deleteSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.d.Store.DeleteSecret(r.Context(), s.ID); err != nil {
-		writeErr(w, 500, "internal", err.Error())
+		writeErr(w, 500, types.ErrCodeInternal, err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})

@@ -1,6 +1,7 @@
 package capability
 
 import (
+	"calcside/internal/types"
 	"context"
 	"errors"
 	"sync"
@@ -29,7 +30,7 @@ func (h denyHook) Before(ctx context.Context, c *Call) error {
 func (h denyHook) After(ctx context.Context, c *Call, r *Result) error { return nil }
 
 func invoke(g *Gate) error {
-	_, err := g.Invoke(context.Background(), "fs", "read", map[string]any{"path": "/work/a"},
+	_, err := g.Invoke(context.Background(), types.CapFS, "read", map[string]any{"path": "/work/a"},
 		func(ctx context.Context, _ map[string]any) (starlark.Value, map[string]any, error) {
 			return starlark.String("x"), map[string]any{"bytes": 1}, nil
 		})
@@ -67,10 +68,10 @@ func TestDeniedCallsRecorded(t *testing.T) {
 	if !errors.As(err, &denied) {
 		t.Fatalf("expected DeniedError, got %v", err)
 	}
-	if denied.Hook != "denyhook" || denied.Phase != "before" {
+	if denied.Hook != "denyhook" || denied.Phase != types.PhaseBefore {
 		t.Fatalf("bad denied error %+v", denied)
 	}
-	if len(obs.recs) != 1 || obs.recs[0].Decision != "deny" {
+	if len(obs.recs) != 1 || obs.recs[0].Decision != types.DecisionDeny {
 		t.Fatalf("denied call not recorded: %+v", obs.recs)
 	}
 }
@@ -82,7 +83,7 @@ func TestAllowedRecorded(t *testing.T) {
 	if err := invoke(g); err != nil {
 		t.Fatal(err)
 	}
-	if len(obs.recs) != 1 || obs.recs[0].Decision != "allow" {
+	if len(obs.recs) != 1 || obs.recs[0].Decision != types.DecisionAllow {
 		t.Fatalf("expected allow record: %+v", obs.recs)
 	}
 }

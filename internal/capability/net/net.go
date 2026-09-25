@@ -25,14 +25,15 @@ import (
 	"calcside/internal/capability"
 	"calcside/internal/hostmatch"
 	"calcside/internal/secrets"
+	"calcside/internal/types"
 )
 
 // Config configures one instance's net capability.
 type Config struct {
-	AllowHosts       []string `json:"allow_hosts"`
-	Methods          []string `json:"methods"`
-	MaxResponseBytes int64    `json:"max_response_bytes"`
-	TimeoutMs        int64    `json:"timeout_ms"`
+	AllowHosts       []string           `json:"allow_hosts"`
+	Methods          []types.HTTPMethod `json:"methods"`
+	MaxResponseBytes int64              `json:"max_response_bytes"`
+	TimeoutMs        int64              `json:"timeout_ms"`
 	// RootCAs optionally overrides the TLS trust store (tests only).
 	RootCAs *x509.CertPool `json:"-"`
 }
@@ -82,15 +83,19 @@ func (c *client) authorize(method, rawURL string) (host, effPort string, err err
 		}
 	}
 
+	m, err := types.ParseHTTPMethod(method)
+	if err != nil {
+		return "", "", fmt.Errorf("net: %w", err)
+	}
 	ok := false
-	for _, m := range c.cfg.Methods {
-		if strings.EqualFold(m, method) {
+	for _, cm := range c.cfg.Methods {
+		if cm == m {
 			ok = true
 			break
 		}
 	}
 	if !ok {
-		return "", "", fmt.Errorf("net: method %s not in methods %v", method, c.cfg.Methods)
+		return "", "", fmt.Errorf("net: method %s not in methods %v", m, c.cfg.Methods)
 	}
 	if len(c.rules) == 0 {
 		return "", "", fmt.Errorf("net: no hosts permitted (empty allow_hosts)")
@@ -444,27 +449,34 @@ type factory struct{}
 // Factory returns the capability.Factory for "net".
 func Factory() capability.Factory { return factory{} }
 
-func (factory) Name() string { return "net" }
+// Op consts for net.
+const (
+	OpGet     types.Op = "get"
+	OpPost    types.Op = "post"
+	OpRequest types.Op = "request"
+)
+
+func (factory) Name() types.CapabilityName { return types.CapNet }
 
 func (factory) Ops() []capability.OpInfo {
 	return []capability.OpInfo{
-		{Name: "get", Doc: "HTTP GET; returns {status,headers,body}; supports {{secrets.NAME}} placeholders; Accept-Encoding/Range/If-Range/TE headers are rejected", Params: []string{"url", "headers"}},
-		{Name: "post", Doc: "HTTP POST; returns {status,headers,body}", Params: []string{"url", "body", "headers", "content_type"}},
-		{Name: "request", Doc: "HTTP request with arbitrary method", Params: []string{"method", "url", "body", "headers"}},
+		{Name: OpGet, Doc: "HTTP GET; returns {status,headers,body}; supports {{secrets.NAME}} placeholders; Accept-Encoding/Range/If-Range/TE headers are rejected", Params: []string{"url", "headers"}},
+		{Name: OpPost, Doc: "HTTP POST; returns {status,headers,body}", Params: []string{"url", "body", "headers", "content_type"}},
+		{Name: OpRequest, Doc: "HTTP request with arbitrary method", Params: []string{"method", "url", "body", "headers"}},
 	}
 }
 
 func (factory) ConfigFields() []capability.FieldDoc {
 	return []capability.FieldDoc{
-		{Name: "allow_hosts", Type: "[]string", Doc: "exact host, *.suffix wildcard, or host:port; IP literals allowed for testing", Default: []string{}},
-		{Name: "methods", Type: "[]string", Doc: "permitted HTTP methods", Default: []string{"GET", "POST"}},
-		{Name: "max_response_bytes", Type: "int", Doc: "response body cap", Default: defaultMaxResponse},
-		{Name: "timeout_ms", Type: "int", Doc: "request timeout", Default: defaultTimeoutMs},
+		{Name: "allow_hosts", Type: types.FieldStringList, Doc: "exact host, *.suffix wildcard, or host:port; IP literals allowed for testing", Default: []string{}},
+		{Name: "methods", Type: types.FieldStringList, Doc: "permitted HTTP methods", Default: []string{"GET", "POST"}},
+		{Name: "max_response_bytes", Type: types.FieldInt, Doc: "response body cap", Default: defaultMaxResponse},
+		{Name: "timeout_ms", Type: types.FieldInt, Doc: "request timeout", Default: defaultTimeoutMs},
 	}
 }
 
 func (factory) Validate(raw json.RawMessage, limits capability.ServerLimits) (any, error) {
-	cfg := Config{Methods: []string{"GET", "POST"}, MaxResponseBytes: defaultMaxResponse, TimeoutMs: defaultTimeoutMs}
+	cfg := Config{Methods: []types.HTTPMethod{types.MethodGet, types.MethodPost}, MaxResponseBytes: defaultMaxResponse, TimeoutMs: defaultTimeoutMs}
 	if len(raw) > 0 && string(raw) != "null" {
 		if err := json.Unmarshal(raw, &cfg); err != nil {
 			return nil, fmt.Errorf("net config: %w", err)
@@ -484,10 +496,7 @@ func (factory) Validate(raw json.RawMessage, limits capability.ServerLimits) (an
 		}
 	}
 	if len(cfg.Methods) == 0 {
-		cfg.Methods = []string{"GET", "POST"}
-	}
-	for i := range cfg.Methods {
-		cfg.Methods[i] = strings.ToUpper(cfg.Methods[i])
+		cfg.Methods = []types.HTTPMethod{types.MethodGet, types.MethodPost}
 	}
 	if cfg.MaxResponseBytes <= 0 {
 		cfg.MaxResponseBytes = defaultMaxResponse
@@ -633,11 +642,11 @@ func bind(c *client, gate *capability.Gate) starlark.Value {
 			return respValue(r), respMeta(r, len(secretRefs(rawURL, headers, body))), nil
 		}, nil
 	}
-	return capability.Bind("net", gate, map[string]capability.Method{
-		"get": func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
+	return capability.Bind(types.CapNet, gate, map[types.Op]capability.Method{
+		OpGet: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
 			var rawURL string
 			var hdrs starlark.Value
-			if err := starlark.UnpackArgs("get", args, kwargs, "url", &rawURL, "headers?", &hdrs); err != nil {
+			if err := starlark.UnpackArgs(string(OpGet), args, kwargs, "url", &rawURL, "headers?", &hdrs); err != nil {
 				return nil, nil, err
 			}
 			headers, err := unpackStringDict(hdrs)
@@ -646,11 +655,11 @@ func bind(c *client, gate *capability.Gate) starlark.Value {
 			}
 			return call("GET", rawURL, "", headers, "")
 		},
-		"post": func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
+		OpPost: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
 			var rawURL, body, contentType string
 			var hdrs starlark.Value
 			contentType = "application/json"
-			if err := starlark.UnpackArgs("post", args, kwargs, "url", &rawURL, "body?", &body, "headers?", &hdrs, "content_type?", &contentType); err != nil {
+			if err := starlark.UnpackArgs(string(OpPost), args, kwargs, "url", &rawURL, "body?", &body, "headers?", &hdrs, "content_type?", &contentType); err != nil {
 				return nil, nil, err
 			}
 			headers, err := unpackStringDict(hdrs)
@@ -659,11 +668,14 @@ func bind(c *client, gate *capability.Gate) starlark.Value {
 			}
 			return call("POST", rawURL, body, headers, contentType)
 		},
-		"request": func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
+		OpRequest: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
 			var method, rawURL, body string
 			var hdrs starlark.Value
-			if err := starlark.UnpackArgs("request", args, kwargs, "method", &method, "url", &rawURL, "body?", &body, "headers?", &hdrs); err != nil {
+			if err := starlark.UnpackArgs(string(OpRequest), args, kwargs, "method", &method, "url", &rawURL, "body?", &body, "headers?", &hdrs); err != nil {
 				return nil, nil, err
+			}
+			if _, err := types.ParseHTTPMethod(method); err != nil {
+				return nil, nil, fmt.Errorf("net: %w", err)
 			}
 			method = strings.ToUpper(method)
 			headers, err := unpackStringDict(hdrs)

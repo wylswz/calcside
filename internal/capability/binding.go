@@ -3,6 +3,8 @@ package capability
 import (
 	"context"
 
+	"calcside/internal/types"
+
 	"go.starlark.net/starlark"
 	"go.starlark.net/starlarkstruct"
 )
@@ -19,11 +21,11 @@ type Method func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, 
 // Bind builds a starlark module value whose members call through the gate.
 // Arg parsing happens before Invoke so Before hooks see normalized args;
 // malformed-arg calls error without reaching the gate.
-func Bind(name string, gate *Gate, methods map[string]Method) starlark.Value {
+func Bind(name types.CapabilityName, gate *Gate, methods map[types.Op]Method) starlark.Value {
 	members := starlark.StringDict{}
 	for mname, m := range methods {
 		mname, m := mname, m
-		members[mname] = starlark.NewBuiltin(name+"."+mname, func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		members[string(mname)] = starlark.NewBuiltin(string(name)+"."+string(mname), func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 			callArgs, body, err := m(args, kwargs)
 			if err != nil {
 				return nil, err

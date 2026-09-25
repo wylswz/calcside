@@ -16,6 +16,7 @@ import (
 
 	"calcside/internal/engine"
 	"calcside/internal/store"
+	"calcside/internal/types"
 )
 
 // Client talks to a calcside server with API-key auth.
@@ -40,7 +41,7 @@ func (c *Client) WithCookie(cookie string) *Client {
 // Error is a non-2xx API response.
 type Error struct {
 	Status  int
-	Code    string
+	Code    types.APIErrorCode // "" if the server sent an unrecognized code
 	Message string
 }
 
@@ -88,7 +89,12 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 		var m map[string]any
 		if json.Unmarshal(data, &m) == nil {
 			if eobj, ok := m["error"].(map[string]any); ok {
-				e.Code, _ = eobj["code"].(string)
+				if cs, ok2 := eobj["code"].(string); ok2 {
+					c := types.APIErrorCode(cs)
+					if c.Valid() {
+						e.Code = c
+					}
+				}
 				e.Message, _ = eobj["message"].(string)
 			}
 		}
@@ -137,13 +143,13 @@ func (c *Client) CreateInstance(ctx context.Context, spec InstanceSpec) (*store.
 	return m.Instance, nil
 }
 
-func (c *Client) ListInstances(ctx context.Context, status string) ([]*store.Instance, error) {
+func (c *Client) ListInstances(ctx context.Context, status types.InstanceStatus) ([]*store.Instance, error) {
 	var m struct {
 		Instances []*store.Instance `json:"instances"`
 	}
 	q := ""
 	if status != "" {
-		q = "?status=" + url.QueryEscape(status)
+		q = "?status=" + url.QueryEscape(string(status))
 	}
 	if err := c.do(ctx, "GET", "/api/v1/instances"+q, nil, &m); err != nil {
 		return nil, err

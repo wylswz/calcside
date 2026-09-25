@@ -12,13 +12,14 @@ import (
 	"calcside/internal/capability"
 	capfs "calcside/internal/capability/fs"
 	capio "calcside/internal/capability/io"
+	"calcside/internal/types"
 )
 
 type denyAll struct{}
 
 func (denyAll) Name() string { return "denyall" }
 func (denyAll) Before(ctx context.Context, c *capability.Call) error {
-	if c.Capability == "fs" {
+	if c.Capability == types.CapFS {
 		return &denyErr{"no fs allowed"}
 	}
 	return nil
@@ -63,7 +64,7 @@ func TestStepLimit(t *testing.T) {
 	e := New(4)
 	s, buf := newSession(t, nil, 1<<20)
 	res := e.Exec(context.Background(), s, "x", "while True:\n  pass", 0, 1000, buf.String)
-	if res.Error == nil || res.Error.Type != "step_limit" {
+	if res.Error == nil || res.Error.Type != types.ErrStepLimit {
 		t.Fatalf("expected step_limit, got %+v", res.Error)
 	}
 }
@@ -72,7 +73,7 @@ func TestTimeout(t *testing.T) {
 	e := New(4)
 	s, buf := newSession(t, nil, 1<<20)
 	res := e.Exec(context.Background(), s, "x", "while True:\n  pass", 50*time.Millisecond, 1<<60, buf.String)
-	if res.Error == nil || res.Error.Type != "timeout" {
+	if res.Error == nil || res.Error.Type != types.ErrTimeout {
 		t.Fatalf("expected timeout, got %+v", res.Error)
 	}
 }
@@ -129,7 +130,7 @@ func TestMissingCapability(t *testing.T) {
 	res := e.Exec(context.Background(), s, "x", "net.get('http://x')", 0, 1<<20, buf.String)
 	// Undefined names are resolve.ErrorList, classified as "syntax" (a
 	// static error): an absent capability fails at resolve time.
-	if res.Error == nil || res.Error.Type != "syntax" || !strings.Contains(res.Error.Message, "net") {
+	if res.Error == nil || res.Error.Type != types.ErrSyntax || !strings.Contains(res.Error.Message, "net") {
 		t.Fatalf("expected undefined-name resolve error, got %+v", res.Error)
 	}
 }
@@ -138,7 +139,7 @@ func TestSyntaxErrorType(t *testing.T) {
 	e := New(4)
 	s, buf := newSession(t, nil, 1<<20)
 	res := e.Exec(context.Background(), s, "x", "def f(:\n", 0, 1<<20, buf.String)
-	if res.Error == nil || res.Error.Type != "syntax" {
+	if res.Error == nil || res.Error.Type != types.ErrSyntax {
 		t.Fatalf("expected syntax, got %+v", res.Error)
 	}
 }
@@ -147,7 +148,7 @@ func TestPolicyDeniedType(t *testing.T) {
 	e := New(4)
 	s, buf := newSession(t, []capability.Hook{denyAll{}}, 1<<20)
 	res := e.Exec(context.Background(), s, "x", "fs.read('a')", 0, 1<<20, buf.String)
-	if res.Error == nil || res.Error.Type != "policy_denied" {
+	if res.Error == nil || res.Error.Type != types.ErrPolicyDenied {
 		t.Fatalf("expected policy_denied, got %+v", res.Error)
 	}
 }
@@ -202,7 +203,7 @@ func TestMemoryWatchdog(t *testing.T) {
 	defer e.Close()
 	s, buf := newSession(t, nil, 1<<20)
 	res := e.Exec(context.Background(), s, "x", "while True:\n  pass", 30*time.Second, 1<<60, buf.String)
-	if res.Error == nil || res.Error.Type != "memory_limit" {
+	if res.Error == nil || res.Error.Type != types.ErrMemoryLimit {
 		t.Fatalf("expected memory_limit, got %+v", res.Error)
 	}
 }
@@ -219,7 +220,7 @@ func TestMemoryWatchdogRealHeap(t *testing.T) {
 	s, buf := newSession(t, nil, 1<<20)
 	code := "x = []\nwhile True:\n  x.append(\"a\" * 1000000)"
 	res := e.Exec(context.Background(), s, "x", code, 60*time.Second, 1<<60, buf.String)
-	if res.Error == nil || res.Error.Type != "memory_limit" {
+	if res.Error == nil || res.Error.Type != types.ErrMemoryLimit {
 		t.Fatalf("expected memory_limit, got %+v", res.Error)
 	}
 }

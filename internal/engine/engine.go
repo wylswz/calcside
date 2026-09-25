@@ -20,6 +20,7 @@ import (
 	"go.starlark.net/syntax"
 
 	"calcside/internal/capability"
+	"calcside/internal/types"
 )
 
 // Session is the per-instance runtime state shared by all execs.
@@ -48,9 +49,9 @@ func (s *Session) execContext(execID string) capability.ExecContext {
 
 // Error is the structured script error in an ExecResult.
 type Error struct {
-	Type      string `json:"type"` // syntax|runtime|policy_denied|out_of_scope|timeout|step_limit|memory_limit
-	Message   string `json:"message"`
-	Backtrace string `json:"backtrace,omitempty"`
+	Type      types.ExecErrorType `json:"type"` // syntax|runtime|policy_denied|out_of_scope|timeout|step_limit|memory_limit
+	Message   string              `json:"message"`
+	Backtrace string              `json:"backtrace,omitempty"`
 }
 
 // Result of one execution.
@@ -200,7 +201,7 @@ func (e *Engine) Exec(ctx context.Context, s *Session, execID, code string, time
 	case e.sem <- struct{}{}:
 		defer func() { <-e.sem }()
 	case <-ctx.Done():
-		res.Error = &Error{Type: "timeout", Message: "waiting for exec slot: " + ctx.Err().Error()}
+		res.Error = &Error{Type: types.ErrTimeout, Message: "waiting for exec slot: " + ctx.Err().Error()}
 		return res
 	}
 
@@ -265,7 +266,7 @@ func (e *Engine) Exec(ctx context.Context, s *Session, execID, code string, time
 	if err != nil {
 		res.Error = classify(ctx, err, maxSteps, res.Steps)
 	} else if maxSteps > 0 && res.Steps >= maxSteps {
-		res.Error = &Error{Type: "step_limit", Message: "exceeded execution step limit"}
+		res.Error = &Error{Type: types.ErrStepLimit, Message: "exceeded execution step limit"}
 	}
 	return res
 }
@@ -284,10 +285,10 @@ func classify(ctx context.Context, err error, maxSteps, steps uint64) *Error {
 	}
 
 	if errors.Is(err, capability.ErrOutOfScope) {
-		return &Error{Type: "out_of_scope", Message: msg, Backtrace: bt}
+		return &Error{Type: types.ErrOutOfScope, Message: msg, Backtrace: bt}
 	}
 	if errors.As(err, &denied) {
-		return &Error{Type: "policy_denied", Message: denied.Error(), Backtrace: bt}
+		return &Error{Type: types.ErrPolicyDenied, Message: denied.Error(), Backtrace: bt}
 	}
 
 	// Parse errors (syntax.Error) and resolve errors (resolve.ErrorList,
@@ -295,21 +296,21 @@ func classify(ctx context.Context, err error, maxSteps, steps uint64) *Error {
 	var synErr syntax.Error
 	var resErr resolve.ErrorList
 	if errors.As(err, &synErr) || errors.As(err, &resErr) {
-		return &Error{Type: "syntax", Message: msg, Backtrace: bt}
+		return &Error{Type: types.ErrSyntax, Message: msg, Backtrace: bt}
 	}
 
 	// Context cause distinguishes timeout from watchdog cancellation.
 	if cause := context.Cause(ctx); cause != nil || ctx.Err() != nil {
 		switch {
 		case errors.Is(cause, ErrMemoryLimit):
-			return &Error{Type: "memory_limit", Message: msg, Backtrace: bt}
+			return &Error{Type: types.ErrMemoryLimit, Message: msg, Backtrace: bt}
 		default:
-			return &Error{Type: "timeout", Message: msg, Backtrace: bt}
+			return &Error{Type: types.ErrTimeout, Message: msg, Backtrace: bt}
 		}
 	}
 
 	if maxSteps > 0 && steps >= maxSteps {
-		return &Error{Type: "step_limit", Message: msg, Backtrace: bt}
+		return &Error{Type: types.ErrStepLimit, Message: msg, Backtrace: bt}
 	}
-	return &Error{Type: "runtime", Message: msg, Backtrace: bt}
+	return &Error{Type: types.ErrRuntime, Message: msg, Backtrace: bt}
 }

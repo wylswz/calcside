@@ -1,6 +1,9 @@
 import React from 'react'
+import type { Decision, InstanceStatus } from '../enums'
 
-export function Badge({ tone, children }: { tone: 'green' | 'red' | 'gray' | 'yellow' | 'blue'; children: React.ReactNode }) {
+type Tone = 'green' | 'red' | 'gray' | 'yellow' | 'blue'
+
+export function Badge({ tone, children }: { tone: Tone; children: React.ReactNode }) {
   const cls = {
     green: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
     red: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
@@ -11,13 +14,21 @@ export function Badge({ tone, children }: { tone: 'green' | 'red' | 'gray' | 'ye
   return <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${cls}`}>{children}</span>
 }
 
-export function StatusBadge({ status }: { status: string }) {
-  const tone = status === 'running' ? 'green' : status === 'expired' || status === 'lost' ? 'yellow' : 'gray'
-  return <Badge tone={tone}>{status}</Badge>
+const statusTones: Record<InstanceStatus, Tone> = {
+  running: 'green',
+  expired: 'yellow',
+  lost: 'yellow',
+  deleted: 'gray',
 }
 
-export function DecisionBadge({ decision }: { decision: string }) {
-  return <Badge tone={decision === 'allow' ? 'green' : 'red'}>{decision}</Badge>
+export function StatusBadge({ status }: { status: InstanceStatus }) {
+  return <Badge tone={statusTones[status]}>{status}</Badge>
+}
+
+const decisionTones: Record<Decision, Tone> = { allow: 'green', deny: 'red' }
+
+export function DecisionBadge({ decision }: { decision: Decision }) {
+  return <Badge tone={decisionTones[decision]}>{decision}</Badge>
 }
 
 export function Button(props: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'danger' }) {

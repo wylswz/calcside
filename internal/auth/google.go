@@ -9,6 +9,8 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
+
+	"calcside/internal/types"
 )
 
 // GoogleConfig configures Google OIDC login.
@@ -97,7 +99,7 @@ func (g *GoogleFlow) LoginHandler() http.Handler {
 func (g *GoogleFlow) CallbackHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fail := func(status int, msg string) {
-			writeErr(w, status, "auth_failed", msg)
+			writeErr(w, status, types.ErrCodeAuthFailed, msg)
 		}
 		c, err := r.Cookie(oidcCookie)
 		if err != nil {

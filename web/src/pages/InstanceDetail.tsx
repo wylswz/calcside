@@ -4,6 +4,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
 import { api, AuditEvent, ExecResult, Execution, FileEntry, Instance } from '../api'
+import type { SecretSource } from '../enums'
+
+interface SpecSecret { ref?: string; source?: SecretSource; allowed_domains?: string[] }
 import { Badge, Button, DecisionBadge, StatusBadge, fmtCountdown, fmtTime } from '../components/ui'
 
 const DEFAULT_CODE = `# Starlark. Capabilities appear as globals when granted.
@@ -119,7 +122,7 @@ export default function InstanceDetail() {
       qc.invalidateQueries({ queryKey: ['audit', id] })
       qc.invalidateQueries({ queryKey: ['files', id] })
     } catch (e: any) {
-      setResult({ exec_id: '', output: '', error: { type: 'http', message: e.message }, duration_ms: 0, steps: 0 })
+      setResult({ exec_id: '', output: '', error: { type: 'runtime', message: e.message }, duration_ms: 0, steps: 0 })
     } finally {
       setRunning(false)
     }
@@ -233,10 +236,10 @@ export default function InstanceDetail() {
                 {Object.entries(inst.spec.env ?? {}).map(([k, v]) => (
                   <div key={k}><span className="text-gray-500">{k}</span>={v as string}</div>
                 ))}
-                {Object.entries(inst.spec.secrets ?? {}).map(([k, v]: [string, any]) => (
+                {(Object.entries(inst.spec.secrets ?? {}) as [string, SpecSecret][]).map(([k, v]) => (
                   <div key={k}>
                     <span className="text-gray-500">{k}</span>
-                    <span className="text-gray-400"> {v.ref ? `→vault:${v.ref}` : '(inline)'} {(v.allowed_domains ?? []).join(', ')}</span>
+                    <span className="text-gray-400"> {v.source === 'vault' ? `→vault:${v.ref}` : '(inline)'} {(v.allowed_domains ?? []).join(', ')}</span>
                   </div>
                 ))}
               </div>

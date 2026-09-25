@@ -14,6 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"calcside/internal/store"
+	"calcside/internal/types"
 )
 
 //go:embed migrations/*.sql
@@ -24,7 +25,7 @@ type db struct {
 }
 
 func init() {
-	store.RegisterDriver("sqlite", Open)
+	store.RegisterDriver(types.DriverSQLite, Open)
 }
 
 // Open opens (and migrates) a sqlite database at dsn (file path or :memory:).
@@ -254,6 +255,9 @@ func (d *db) DeleteExpiredSessions(ctx context.Context) (int, error) {
 // --- instances ---
 
 func (d *db) CreateInstance(ctx context.Context, in *store.Instance) error {
+	if !in.Status.Valid() {
+		return fmt.Errorf("sqlite: invalid instance status %q", in.Status)
+	}
 	if in.ID == "" {
 		in.ID = store.NewID(store.PrefixInstance)
 	}
@@ -297,7 +301,7 @@ func (d *db) GetInstance(ctx context.Context, id string) (*store.Instance, error
 	return in, err
 }
 
-func (d *db) ListInstances(ctx context.Context, userID, status string) ([]*store.Instance, error) {
+func (d *db) ListInstances(ctx context.Context, userID string, status types.InstanceStatus) ([]*store.Instance, error) {
 	q := `SELECT ` + instCols + ` FROM instances WHERE user_id=?`
 	args := []any{userID}
 	if status != "" {
@@ -322,6 +326,9 @@ func (d *db) ListInstances(ctx context.Context, userID, status string) ([]*store
 }
 
 func (d *db) UpdateInstance(ctx context.Context, in *store.Instance) error {
+	if !in.Status.Valid() {
+		return fmt.Errorf("sqlite: invalid instance status %q", in.Status)
+	}
 	labels, err := json.Marshal(in.Labels)
 	if err != nil {
 		return err
@@ -336,7 +343,7 @@ func (d *db) MarkRunningAsLost(ctx context.Context) (int, error) {
 	now := ns(time.Now().UTC())
 	res, err := d.q.ExecContext(ctx,
 		`UPDATE instances SET status=?, ended_at=? WHERE status=?`,
-		store.StatusLost, now, store.StatusRunning)
+		types.InstanceLost, now, types.InstanceRunning)
 	if err != nil {
 		return 0, err
 	}
@@ -347,6 +354,9 @@ func (d *db) MarkRunningAsLost(ctx context.Context) (int, error) {
 // --- executions ---
 
 func (d *db) CreateExecution(ctx context.Context, e *store.Execution) error {
+	if !e.Status.Valid() || !e.ErrorType.Valid() {
+		return fmt.Errorf("sqlite: invalid exec status/error type %q/%q", e.Status, e.ErrorType)
+	}
 	if e.ID == "" {
 		e.ID = store.NewID(store.PrefixExecution)
 	}
@@ -407,6 +417,10 @@ func (d *db) InsertAuditEvents(ctx context.Context, evs []store.AuditEvent) erro
 	}
 	defer stmt.Close()
 	for _, e := range evs {
+		if !e.Decision.Valid() || !e.Phase.Valid() || !e.Capability.Valid() {
+			_ = tx.Rollback()
+			return fmt.Errorf("sqlite: invalid audit decision/phase/capability %q/%q/%q", e.Decision, e.Phase, e.Capability)
+		}
 		if e.ID == "" {
 			e.ID = store.NewID(store.PrefixAudit)
 		}

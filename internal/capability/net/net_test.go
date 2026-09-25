@@ -12,6 +12,7 @@ import (
 
 	"calcside/internal/capability"
 	"calcside/internal/hostmatch"
+	"calcside/internal/types"
 )
 
 func newClient(t *testing.T, cfg Config) *client {
@@ -143,7 +144,7 @@ func TestMethodNotAllowed(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer ts.Close()
 	host, port := hostPort(ts)
-	c := newClient(t, Config{AllowHosts: []string{host + ":" + port}, Methods: []string{"GET"}})
+	c := newClient(t, Config{AllowHosts: []string{host + ":" + port}, Methods: []types.HTTPMethod{types.MethodGet}})
 	_, err := c.do(context.Background(), "DELETE", ts.URL, "", nil, "")
 	if err == nil || !strings.Contains(err.Error(), "method") {
 		t.Fatalf("expected method denial, got %v", err)

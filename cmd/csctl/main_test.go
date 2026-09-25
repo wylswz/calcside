@@ -21,6 +21,7 @@ import (
 	"calcside/internal/instance"
 	"calcside/internal/store"
 	_ "calcside/internal/store/sqlite"
+	"calcside/internal/types"
 )
 
 type testEnv struct {
@@ -132,12 +133,12 @@ func TestRunDeletesInstance(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("expected exit 2 on syntax error, got %d", code)
 	}
-	lst, err := env.st.ListInstances(context.Background(), "", store.StatusRunning)
+	lst, err := env.st.ListInstances(context.Background(), "", types.InstanceRunning)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, in := range lst {
-		if in.Status == store.StatusRunning {
+		if in.Status == types.InstanceRunning {
 			t.Fatalf("ephemeral instance leaked: %s", in.ID)
 		}
 	}
@@ -147,9 +148,9 @@ func TestRunDeletesInstance(t *testing.T) {
 	if code != 0 || out != "ok\n" {
 		t.Fatalf("run: %d %q", code, out)
 	}
-	lst, _ = env.st.ListInstances(context.Background(), "", store.StatusRunning)
+	lst, _ = env.st.ListInstances(context.Background(), "", types.InstanceRunning)
 	for _, in := range lst {
-		if in.Status == store.StatusRunning {
+		if in.Status == types.InstanceRunning {
 			t.Fatalf("ephemeral instance leaked: %s", in.ID)
 		}
 	}

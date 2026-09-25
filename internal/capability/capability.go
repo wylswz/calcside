@@ -16,6 +16,7 @@ import (
 	"go.starlark.net/starlark"
 
 	"calcside/internal/secrets"
+	"calcside/internal/types"
 )
 
 // ErrOutOfScope is returned by any capability op invoked while its gate is
@@ -38,8 +39,8 @@ type Call struct {
 	UserID         string
 	UserEmail      string
 	InstanceLabels map[string]string
-	Capability     string // "fs" | "net" | "io"
-	Op             string // e.g. "read", "write", "get"
+	Capability     types.CapabilityName // "fs" | "net" | "io"
+	Op             types.Op             // e.g. "read", "write", "get"
 	Args           map[string]any
 }
 
@@ -53,7 +54,7 @@ type Result struct {
 // DeniedError is produced when a hook denies a call.
 type DeniedError struct {
 	Hook   string
-	Phase  string // "before" | "after"
+	Phase  types.Phase // "before" | "after"
 	Reason string
 }
 
@@ -74,8 +75,8 @@ type Hook interface {
 // registered Observer (audit).
 type Record struct {
 	Call     Call
-	Decision string // "allow" | "deny"
-	Phase    string // "before" | "after" | "" (runtime error / out of scope)
+	Decision types.Decision // "allow" | "deny"
+	Phase    types.Phase    // "before" | "after" | "" (runtime error / out of scope)
 	Reason   string
 	Err      error
 	Duration time.Duration
@@ -155,7 +156,7 @@ func (g *Gate) Armed() bool {
 // Invoke runs one capability operation through the gate: armed check,
 // Before hooks (first error denies), the op itself, After hooks, and
 // observer recording.
-func (g *Gate) Invoke(ctx context.Context, capability, op string, args map[string]any, fn Op) (starlark.Value, error) {
+func (g *Gate) Invoke(ctx context.Context, capability types.CapabilityName, op types.Op, args map[string]any, fn Op) (starlark.Value, error) {
 	g.mu.RLock()
 	if !g.armed || g.revoked {
 		g.mu.RUnlock()
@@ -168,7 +169,7 @@ func (g *Gate) Invoke(ctx context.Context, capability, op string, args map[strin
 					InstanceLabels: g.owner.Labels,
 					Capability:     capability, Op: op, Args: args,
 				},
-				Decision: "deny",
+				Decision: types.DecisionDeny,
 				Reason:   ErrOutOfScope.Error(),
 				Err:      ErrOutOfScope,
 			})
@@ -188,7 +189,7 @@ func (g *Gate) Invoke(ctx context.Context, capability, op string, args map[strin
 		Op:             op,
 		Args:           args,
 	}
-	rec := Record{Call: call, Decision: "allow"}
+	rec := Record{Call: call, Decision: types.DecisionAllow}
 	start := time.Now()
 	defer func() {
 		rec.Duration = time.Since(start)
@@ -199,11 +200,11 @@ func (g *Gate) Invoke(ctx context.Context, capability, op string, args map[strin
 
 	for _, h := range g.hooks {
 		if err := h.Before(ctx, &call); err != nil {
-			rec.Decision = "deny"
-			rec.Phase = "before"
+			rec.Decision = types.DecisionDeny
+			rec.Phase = types.PhaseBefore
 			rec.Reason = err.Error()
 			rec.Err = err
-			return nil, &DeniedError{Hook: h.Name(), Phase: "before", Reason: err.Error()}
+			return nil, &DeniedError{Hook: h.Name(), Phase: types.PhaseBefore, Reason: err.Error()}
 		}
 	}
 
@@ -212,11 +213,11 @@ func (g *Gate) Invoke(ctx context.Context, capability, op string, args map[strin
 
 	for _, h := range g.hooks {
 		if err := h.After(ctx, &call, res); err != nil {
-			rec.Decision = "deny"
-			rec.Phase = "after"
+			rec.Decision = types.DecisionDeny
+			rec.Phase = types.PhaseAfter
 			rec.Reason = err.Error()
 			rec.Err = err
-			return nil, &DeniedError{Hook: h.Name(), Phase: "after", Reason: err.Error()}
+			return nil, &DeniedError{Hook: h.Name(), Phase: types.PhaseAfter, Reason: err.Error()}
 		}
 	}
 
@@ -229,22 +230,22 @@ func (g *Gate) Invoke(ctx context.Context, capability, op string, args map[strin
 
 // OpInfo documents one capability operation.
 type OpInfo struct {
-	Name   string   `json:"name"`
+	Name   types.Op `json:"name"`
 	Doc    string   `json:"doc"`
 	Params []string `json:"params,omitempty"`
 }
 
 // FieldDoc documents a capability config field.
 type FieldDoc struct {
-	Name    string `json:"name"`
-	Type    string `json:"type"`
-	Doc     string `json:"doc"`
-	Default any    `json:"default,omitempty"`
+	Name    string          `json:"name"`
+	Type    types.FieldType `json:"type"`
+	Doc     string          `json:"doc"`
+	Default any             `json:"default,omitempty"`
 }
 
 // Factory builds a starlark binding for one capability.
 type Factory interface {
-	Name() string
+	Name() types.CapabilityName
 	Ops() []OpInfo
 	ConfigFields() []FieldDoc
 	// Validate parses and validates raw JSON config, applying defaults and
@@ -279,12 +280,12 @@ type ServerLimits struct {
 
 // Registry holds capability factories by name.
 type Registry struct {
-	factories map[string]Factory
-	order     []string
+	factories map[types.CapabilityName]Factory
+	order     []types.CapabilityName
 }
 
 func NewRegistry() *Registry {
-	return &Registry{factories: map[string]Factory{}}
+	return &Registry{factories: map[types.CapabilityName]Factory{}}
 }
 
 func (r *Registry) Register(f Factory) {
@@ -295,13 +296,13 @@ func (r *Registry) Register(f Factory) {
 	r.factories[name] = f
 }
 
-func (r *Registry) Get(name string) (Factory, bool) {
+func (r *Registry) Get(name types.CapabilityName) (Factory, bool) {
 	f, ok := r.factories[name]
 	return f, ok
 }
 
-func (r *Registry) Names() []string {
-	out := make([]string, len(r.order))
+func (r *Registry) Names() []types.CapabilityName {
+	out := make([]types.CapabilityName, len(r.order))
 	copy(out, r.order)
 	return out
 }

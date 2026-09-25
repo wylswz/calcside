@@ -21,6 +21,7 @@ import (
 	"github.com/open-policy-agent/opa/v1/rego"
 
 	"calcside/internal/capability"
+	"calcside/internal/types"
 )
 
 const requiredPackage = "calcside.hooks"
@@ -195,17 +196,17 @@ func (h *Hook) SetUserPolicies(pols map[string]*Set) {
 	h.perUser = pols
 }
 
-func inputFor(phase string, c *capability.Call, r *capability.Result) map[string]any {
+func inputFor(phase types.Phase, c *capability.Call, r *capability.Result) map[string]any {
 	in := map[string]any{
-		"phase":      phase,
+		"phase":      string(phase),
 		"user":       map[string]any{"id": c.UserID, "email": c.UserEmail},
 		"instance":   map[string]any{"id": c.InstanceID, "labels": c.InstanceLabels},
 		"exec_id":    c.ExecID,
-		"capability": c.Capability,
-		"op":         c.Op,
+		"capability": string(c.Capability),
+		"op":         string(c.Op),
 		"args":       c.Args,
 	}
-	if phase == "after" && r != nil {
+	if phase == types.PhaseAfter && r != nil {
 		errStr := any(nil)
 		if r.Err != nil {
 			errStr = r.Err.Error()
@@ -248,7 +249,7 @@ func (h *Hook) evalSet(ctx context.Context, s *Set, in map[string]any) (string, 
 	return strings.Join(msgs, "; "), true
 }
 
-func (h *Hook) eval(ctx context.Context, phase string, c *capability.Call, r *capability.Result) error {
+func (h *Hook) eval(ctx context.Context, phase types.Phase, c *capability.Call, r *capability.Result) error {
 	in := inputFor(phase, c, r)
 	if h.global != nil {
 		if reason, denied := h.evalSet(ctx, h.global, in); denied {
@@ -269,9 +270,9 @@ func (h *Hook) eval(ctx context.Context, phase string, c *capability.Call, r *ca
 }
 
 func (h *Hook) Before(ctx context.Context, c *capability.Call) error {
-	return h.eval(ctx, "before", c, nil)
+	return h.eval(ctx, types.PhaseBefore, c, nil)
 }
 
 func (h *Hook) After(ctx context.Context, c *capability.Call, r *capability.Result) error {
-	return h.eval(ctx, "after", c, r)
+	return h.eval(ctx, types.PhaseAfter, c, r)
 }

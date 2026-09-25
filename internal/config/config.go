@@ -2,6 +2,8 @@
 package config
 
 import (
+	"calcside/internal/types"
+
 	"flag"
 	"fmt"
 	"os"
@@ -13,7 +15,7 @@ import (
 // Config is the server configuration.
 type Config struct {
 	Addr                 string
-	Store                string
+	Store                types.StoreDriver
 	DSN                  string
 	PolicyDir            string
 	BaseURL              string
@@ -78,7 +80,7 @@ func Parse(args []string) (Config, error) {
 	var c Config
 	fs := flag.NewFlagSet("calcside serve", flag.ContinueOnError)
 	fs.StringVar(&c.Addr, "addr", envOr("ADDR", ":8080"), "listen address")
-	fs.StringVar(&c.Store, "store", envOr("STORE", "sqlite"), "store driver")
+	fs.TextVar(&c.Store, "store", types.StoreDriver(envOr("STORE", string(types.DriverSQLite))), "store driver")
 	fs.StringVar(&c.DSN, "dsn", envOr("DSN", "calcside.db"), "store DSN")
 	fs.StringVar(&c.PolicyDir, "policy-dir", envOr("POLICY_DIR", ""), "global rego policy dir")
 	fs.StringVar(&c.BaseURL, "base-url", envOr("BASE_URL", "http://localhost:8080"), "external base URL")

@@ -13,6 +13,7 @@ import (
 	"go.starlark.net/starlark"
 
 	"calcside/internal/capability"
+	"calcside/internal/types"
 )
 
 const truncMarker = "\n...[output truncated]"
@@ -86,17 +87,23 @@ func Factory() capability.Factory { return factory{} }
 
 type factory struct{}
 
-func (factory) Name() string { return "io" }
+// Op consts for io.
+const (
+	OpPrintln types.Op = "println"
+	OpPrint   types.Op = "print" // used by the print builtin, not a method
+)
+
+func (factory) Name() types.CapabilityName { return types.CapIO }
 
 func (factory) Ops() []capability.OpInfo {
 	return []capability.OpInfo{
-		{Name: "println", Doc: "write args to output buffer, space separated, newline terminated"},
+		{Name: OpPrintln, Doc: "write args to output buffer, space separated, newline terminated"},
 	}
 }
 
 func (factory) ConfigFields() []capability.FieldDoc {
 	return []capability.FieldDoc{
-		{Name: "max_output_bytes", Type: "int", Doc: "output buffer cap", Default: defaultMaxOutput},
+		{Name: "max_output_bytes", Type: types.FieldInt, Doc: "output buffer cap", Default: defaultMaxOutput},
 	}
 }
 
@@ -135,7 +142,7 @@ func (c *Closer) Close() error { return nil }
 func PrintBuiltin(buf *Buffer, gate *capability.Gate) *starlark.Builtin {
 	return starlark.NewBuiltin("print", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		s := joinArgs(args) + "\n"
-		return gate.Invoke(capability.ThreadContext(thread), "io", "print", map[string]any{"bytes": len(s)},
+		return gate.Invoke(capability.ThreadContext(thread), types.CapIO, OpPrint, map[string]any{"bytes": len(s)},
 			func(ctx context.Context, _ map[string]any) (starlark.Value, map[string]any, error) {
 				n := buf.Write(s)
 				return starlark.None, map[string]any{"bytes": n}, nil
@@ -150,8 +157,8 @@ func BindBuffer(buf *Buffer, gate *capability.Gate) starlark.Value {
 }
 
 func bindModule(buf *Buffer, gate *capability.Gate) starlark.Value {
-	return capability.Bind("io", gate, map[string]capability.Method{
-		"println": func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
+	return capability.Bind(types.CapIO, gate, map[types.Op]capability.Method{
+		OpPrintln: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
 			s := joinArgs(args) + "\n"
 			return map[string]any{"bytes": len(s)}, func(ctx context.Context) (starlark.Value, map[string]any, error) {
 				n := buf.Write(s)

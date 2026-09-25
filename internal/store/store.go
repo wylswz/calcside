@@ -3,6 +3,7 @@
 package store
 
 import (
+	"calcside/internal/types"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -17,28 +18,31 @@ var ErrNotFound = errors.New("store: not found")
 // ErrConflict is returned when a uniqueness constraint is violated.
 var ErrConflict = errors.New("store: conflict")
 
+// IDPrefix is the fixed string identifying the entity kind in an ID.
+type IDPrefix string
+
 // ID prefixes.
 const (
-	PrefixUser      = "usr_"
-	PrefixAPIKey    = "key_"
-	PrefixInstance  = "ins_"
-	PrefixExecution = "exe_"
-	PrefixPolicy    = "pol_"
-	PrefixAudit     = "aud_"
-	PrefixSecret    = "sec_"
+	PrefixUser      IDPrefix = "usr_"
+	PrefixAPIKey    IDPrefix = "key_"
+	PrefixInstance  IDPrefix = "ins_"
+	PrefixExecution IDPrefix = "exe_"
+	PrefixPolicy    IDPrefix = "pol_"
+	PrefixAudit     IDPrefix = "aud_"
+	PrefixSecret    IDPrefix = "sec_"
 )
 
 const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 // NewID returns a prefixed random ID (prefix + 24 base62 chars).
-func NewID(prefix string) string {
+func NewID(prefix IDPrefix) string {
 	b := make([]byte, 24)
 	raw := make([]byte, 24)
 	_, _ = rand.Read(raw)
 	for i := range b {
 		b[i] = alphabet[int(raw[i])%len(alphabet)]
 	}
-	return prefix + string(b)
+	return string(prefix) + string(b)
 }
 
 type User struct {
@@ -69,66 +73,46 @@ type Session struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// Instance status values.
-const (
-	StatusRunning = "running"
-	StatusDeleted = "deleted"
-	StatusExpired = "expired"
-	StatusLost    = "lost"
-)
-
 type Instance struct {
-	ID           string            `json:"id"`
-	UserID       string            `json:"user_id"`
-	Spec         json.RawMessage   `json:"spec"` // serialized as a JSON object
-	Labels       map[string]string `json:"labels"`
-	Status       string            `json:"status"`
-	CreatedAt    time.Time         `json:"created_at"`
-	LastActiveAt time.Time         `json:"last_active_at"`
-	ExpiresAt    time.Time         `json:"expires_at"`
-	EndedAt      *time.Time        `json:"ended_at,omitempty"`
+	ID           string               `json:"id"`
+	UserID       string               `json:"user_id"`
+	Spec         json.RawMessage      `json:"spec"` // serialized as a JSON object
+	Labels       map[string]string    `json:"labels"`
+	Status       types.InstanceStatus `json:"status"`
+	CreatedAt    time.Time            `json:"created_at"`
+	LastActiveAt time.Time            `json:"last_active_at"`
+	ExpiresAt    time.Time            `json:"expires_at"`
+	EndedAt      *time.Time           `json:"ended_at,omitempty"`
 }
-
-// Execution status values.
-const (
-	ExecOK    = "ok"
-	ExecError = "error"
-)
 
 type Execution struct {
-	ID          string    `json:"id"`
-	InstanceID  string    `json:"instance_id"`
-	UserID      string    `json:"user_id"`
-	CodeSHA256  string    `json:"code_sha256"`
-	CodeSnippet string    `json:"code_snippet"`
-	Status      string    `json:"status"`
-	ErrorType   string    `json:"error_type,omitempty"`
-	DurationMs  int64     `json:"duration_ms"`
-	Steps       uint64    `json:"steps"`
-	OutputBytes int64     `json:"output_bytes"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string              `json:"id"`
+	InstanceID  string              `json:"instance_id"`
+	UserID      string              `json:"user_id"`
+	CodeSHA256  string              `json:"code_sha256"`
+	CodeSnippet string              `json:"code_snippet"`
+	Status      types.ExecStatus    `json:"status"`
+	ErrorType   types.ExecErrorType `json:"error_type,omitempty"` // "" = no error
+	DurationMs  int64               `json:"duration_ms"`
+	Steps       uint64              `json:"steps"`
+	OutputBytes int64               `json:"output_bytes"`
+	CreatedAt   time.Time           `json:"created_at"`
 }
 
-// Audit decisions.
-const (
-	DecisionAllow = "allow"
-	DecisionDeny  = "deny"
-)
-
 type AuditEvent struct {
-	ID         string    `json:"id"`
-	Ts         time.Time `json:"ts"`
-	UserID     string    `json:"user_id"`
-	InstanceID string    `json:"instance_id"`
-	ExecID     string    `json:"exec_id"`
-	Capability string    `json:"capability"`
-	Op         string    `json:"op"`
-	Args       string    `json:"args"` // JSON, truncated to 4KB
-	Phase      string    `json:"phase"`
-	Decision   string    `json:"decision"`
-	Reason     string    `json:"reason"`
-	Error      string    `json:"error"`
-	DurationMs int64     `json:"duration_ms"`
+	ID         string               `json:"id"`
+	Ts         time.Time            `json:"ts"`
+	UserID     string               `json:"user_id"`
+	InstanceID string               `json:"instance_id"`
+	ExecID     string               `json:"exec_id"`
+	Capability types.CapabilityName `json:"capability"`
+	Op         types.Op             `json:"op"`
+	Args       string               `json:"args"` // JSON, truncated to 4KB
+	Phase      types.Phase          `json:"phase"`
+	Decision   types.Decision       `json:"decision"`
+	Reason     string               `json:"reason"`
+	Error      string               `json:"error"`
+	DurationMs int64                `json:"duration_ms"`
 }
 
 type AuditFilter struct {
@@ -177,7 +161,7 @@ type Store interface {
 
 	CreateInstance(ctx context.Context, in *Instance) error
 	GetInstance(ctx context.Context, id string) (*Instance, error)
-	ListInstances(ctx context.Context, userID, status string) ([]*Instance, error)
+	ListInstances(ctx context.Context, userID string, status types.InstanceStatus) ([]*Instance, error)
 	UpdateInstance(ctx context.Context, in *Instance) error
 	MarkRunningAsLost(ctx context.Context) (int, error)
 
@@ -203,15 +187,15 @@ type Store interface {
 	Close() error
 }
 
-var drivers = map[string]func(ctx context.Context, dsn string) (Store, error){}
+var drivers = map[types.StoreDriver]func(ctx context.Context, dsn string) (Store, error){}
 
 // RegisterDriver is called by driver packages (e.g. store/sqlite) in init.
-func RegisterDriver(name string, fn func(ctx context.Context, dsn string) (Store, error)) {
+func RegisterDriver(name types.StoreDriver, fn func(ctx context.Context, dsn string) (Store, error)) {
 	drivers[name] = fn
 }
 
 // Open creates a Store for the given registered driver.
-func Open(ctx context.Context, driver, dsn string) (Store, error) {
+func Open(ctx context.Context, driver types.StoreDriver, dsn string) (Store, error) {
 	fn, ok := drivers[driver]
 	if !ok {
 		return nil, fmt.Errorf("store: unknown driver %q", driver)

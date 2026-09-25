@@ -141,7 +141,7 @@ func TestSpecSanitized(t *testing.T) {
 		t.Fatal(err)
 	}
 	ss := parsed["secrets"].(map[string]any)["INL"].(map[string]any)
-	if ss["inline"] != true || ss["value"] != nil {
+	if ss["source"] != "inline" || ss["value"] != nil {
 		t.Fatalf("sanitized spec wrong: %v", ss)
 	}
 	// DB row also clean

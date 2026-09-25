@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"calcside/internal/store"
+	"calcside/internal/types"
 )
 
 var _ = fmt.Sprintf
@@ -25,10 +26,13 @@ var _ = fmt.Sprintf
 // Principal is an authenticated user.
 type Principal struct {
 	User    *store.User
-	ViaKey  bool   // authenticated by API key (not session)
-	KeyID   string // set when ViaKey
-	Session string // raw session token when cookie-auth
+	Kind    types.AuthKind // session | api_key
+	KeyID   string         // set when Kind == api_key
+	Session string         // raw session token when cookie-auth
 }
+
+// ViaKey reports whether the principal authenticated by API key.
+func (p *Principal) ViaKey() bool { return p.Kind == types.AuthAPIKey }
 
 type ctxKey int
 
@@ -161,7 +165,7 @@ func (s *Service) Resolve(ctx context.Context, r *http.Request) (*Principal, err
 			return nil, errors.New("key owner missing")
 		}
 		_ = s.st.TouchAPIKey(ctx, k.ID, now)
-		return &Principal{User: u, ViaKey: true, KeyID: k.ID}, nil
+		return &Principal{User: u, Kind: types.AuthAPIKey, KeyID: k.ID}, nil
 	}
 	if c, err := r.Cookie(sessionCookie); err == nil && c.Value != "" {
 		sess, err := s.st.GetSession(ctx, hashToken(c.Value))
@@ -175,7 +179,7 @@ func (s *Service) Resolve(ctx context.Context, r *http.Request) (*Principal, err
 		if err != nil {
 			return nil, errors.New("session owner missing")
 		}
-		return &Principal{User: u, Session: c.Value}, nil
+		return &Principal{User: u, Kind: types.AuthSession, Session: c.Value}, nil
 	}
 	return nil, nil
 }
@@ -186,12 +190,12 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, err := s.Resolve(r.Context(), r)
 		if err != nil {
-			writeErr(w, http.StatusUnauthorized, "unauthorized", err.Error())
+			writeErr(w, http.StatusUnauthorized, types.ErrCodeUnauthorized, err.Error())
 			return
 		}
-		if p != nil && !p.ViaKey && r.Method != http.MethodGet && r.Method != http.MethodHead {
+		if p != nil && !p.ViaKey() && r.Method != http.MethodGet && r.Method != http.MethodHead {
 			if r.Header.Get(csrfHeader) != csrfValue {
-				writeErr(w, http.StatusForbidden, "csrf", "missing "+csrfHeader+" header")
+				writeErr(w, http.StatusForbidden, types.ErrCodeCSRF, "missing "+csrfHeader+" header")
 				return
 			}
 		}
@@ -206,7 +210,7 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 func RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if FromContext(r.Context()) == nil {
-			writeErr(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+			writeErr(w, http.StatusUnauthorized, types.ErrCodeUnauthorized, "authentication required")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -218,22 +222,22 @@ func RequireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := FromContext(r.Context())
 		if p == nil {
-			writeErr(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+			writeErr(w, http.StatusUnauthorized, types.ErrCodeUnauthorized, "authentication required")
 			return
 		}
-		if p.ViaKey {
-			writeErr(w, http.StatusForbidden, "forbidden", "session required to manage API keys")
+		if p.ViaKey() {
+			writeErr(w, http.StatusForbidden, types.ErrCodeForbidden, "session required to manage API keys")
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
 }
 
-func writeErr(w http.ResponseWriter, status int, code, msg string) {
+func writeErr(w http.ResponseWriter, status int, code types.APIErrorCode, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"error": map[string]string{"code": code, "message": msg},
+		"error": map[string]string{"code": string(code), "message": msg},
 	})
 }
 
@@ -244,7 +248,7 @@ func (s *Service) DevLoginEnabled() bool { return s.devLogin }
 func (s *Service) DevLoginHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.devLogin {
-			writeErr(w, http.StatusNotFound, "not_found", "dev login disabled")
+			writeErr(w, http.StatusNotFound, types.ErrCodeNotFound, "dev login disabled")
 			return
 		}
 		var body struct {
@@ -252,17 +256,17 @@ func (s *Service) DevLoginHandler() http.Handler {
 			Name  string `json:"name"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil || body.Email == "" {
-			writeErr(w, http.StatusBadRequest, "bad_request", "email required")
+			writeErr(w, http.StatusBadRequest, types.ErrCodeBadRequest, "email required")
 			return
 		}
 		u, err := s.st.UpsertUserByEmail(r.Context(), body.Email, body.Name, "")
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal", err.Error())
+			writeErr(w, http.StatusInternalServerError, types.ErrCodeInternal, err.Error())
 			return
 		}
 		raw, err := s.CreateSession(r.Context(), u.ID)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal", err.Error())
+			writeErr(w, http.StatusInternalServerError, types.ErrCodeInternal, err.Error())
 			return
 		}
 		s.setSessionCookie(w, raw)
