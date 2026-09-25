@@ -8,7 +8,9 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"mime"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -31,12 +33,13 @@ const (
 
 // Deps wires the API.
 type Deps struct {
-	Store    store.Store
-	Manager  *instance.Manager
-	Registry *capability.Registry
-	Auth     *auth.Service
-	Web      fs.FS // static files served at /; nil for now
-	Now      func() time.Time
+	Store         store.Store
+	Manager       *instance.Manager
+	Registry      *capability.Registry
+	Auth          *auth.Service
+	Web           fs.FS // static files served at /; nil for now
+	GoogleEnabled bool  // reported by /api/v1/auth/config
+	Now           func() time.Time
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -62,6 +65,12 @@ func Handler(d Deps) http.Handler {
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
+	})
+	mux.HandleFunc("GET /api/v1/auth/config", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]any{
+			"google":    d.GoogleEnabled,
+			"dev_login": d.Auth.DevLoginEnabled(),
+		})
 	})
 
 	// auth routes
@@ -100,9 +109,52 @@ func Handler(d Deps) http.Handler {
 	mux.Handle("/api/", d.Auth.Middleware(auth.RequireAuth(sessionGate(api))))
 
 	if d.Web != nil {
-		mux.Handle("/", http.FileServerFS(d.Web))
+		mux.Handle("/", spaHandler(d.Web))
 	}
 	return mux
+}
+
+// spaHandler serves the built web console: real files when present,
+// index.html for unknown non-API GET paths (client-side routing), long
+// cache for hashed assets, no-cache for index.html.
+func spaHandler(web fs.FS) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			writeErr(w, 405, "method_not_allowed", "method not allowed")
+			return
+		}
+		upath := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+		serve := func(name string) bool {
+			data, err := fs.ReadFile(web, name)
+			if err != nil {
+				return false
+			}
+			if name == "index.html" {
+				w.Header().Set("Cache-Control", "no-cache")
+			} else if strings.HasPrefix(name, "assets/") {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			}
+			if ct := mime.TypeByExtension(path.Ext(name)); ct != "" {
+				w.Header().Set("Content-Type", ct)
+			}
+			w.WriteHeader(200)
+			_, _ = w.Write(data)
+			return true
+		}
+		if upath != "index.html" {
+			if st, err := fs.Stat(web, upath); err == nil && !st.IsDir() {
+				if serve(upath) {
+					return
+				}
+			}
+		}
+		if serve("index.html") {
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte("calcside console not built; run `make web`\n"))
+	})
 }
 
 // sessionGate enforces RequireSession only for /api/v1/keys*.

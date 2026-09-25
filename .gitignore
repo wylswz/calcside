@@ -1,4 +1,5 @@
 calcside.db*
 bin/
 web/node_modules
-web/dist
+web/dist/*
+!web/dist/README.txt

@@ -1,9 +1,16 @@
-BINARY := bin/calcside
+BINARIES := bin/calcside bin/csctl
 
-.PHONY: build test lint run-dev tidy
+.PHONY: build test lint web dev run-dev tidy
 
-build:
-	go build -o $(BINARY) ./cmd/calcside
+build: web $(BINARIES)
+
+$(BINARIES): $(shell find cmd internal -name '*.go')
+	go build -o bin/calcside ./cmd/calcside
+	go build -o bin/csctl ./cmd/csctl
+
+web:
+	pnpm -C web install --frozen-lockfile
+	pnpm -C web build
 
 test:
 	go test -race ./...
@@ -11,8 +18,10 @@ test:
 lint:
 	go vet ./...
 	@test -z "$$(gofmt -l .)" || (gofmt -l . && exit 1)
+	pnpm -C web typecheck
+	pnpm -C web lint
 
-run-dev:
+dev run-dev:
 	go run ./cmd/calcside serve --dev-login --policy-dir policies/examples
 
 tidy:

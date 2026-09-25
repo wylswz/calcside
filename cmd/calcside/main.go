@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -23,6 +24,7 @@ import (
 	"calcside/internal/instance"
 	"calcside/internal/store"
 	_ "calcside/internal/store/sqlite"
+	webpkg "calcside/web"
 )
 
 func main() {
@@ -95,8 +97,13 @@ func serve(cfg config.Config) error {
 		return fmt.Errorf("google oidc: %w", err)
 	}
 
+	var webFS fs.FS
+	if sub, err := fs.Sub(webpkg.Dist, "dist"); err == nil {
+		webFS = sub
+	}
 	mux := api.Handler(api.Deps{
 		Store: st, Manager: mgr, Registry: reg, Auth: svc,
+		Web: webFS, GoogleEnabled: flow != nil,
 	})
 	if flow != nil {
 		flow.Bind(svc)
