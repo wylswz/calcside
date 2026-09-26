@@ -306,6 +306,21 @@ paths:
                 $ref: '#/components/schemas/ExecutionsResponse'
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
+  /api/v1/executions/{id}:
+    get:
+      operationId: getExecution
+      tags: [instances]
+      description: single execution including the full submitted code
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: execution detail with full code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionDetail'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
   /api/v1/audit:
     get:
       operationId: listAudit
@@ -859,6 +874,12 @@ components:
         executions:
           type: array
           items: { $ref: '#/components/schemas/Execution' }
+    ExecutionDetail:
+      type: object
+      required: [execution, code]
+      properties:
+        execution: { $ref: '#/components/schemas/Execution' }
+        code: { type: string, description: full submitted code (empty for executions recorded before this field existed) }
     AuditEvent:
       type: object
       required: [id, ts, user_id, instance_id, exec_id, capability, op, args, phase, decision, reason, error, duration_ms]

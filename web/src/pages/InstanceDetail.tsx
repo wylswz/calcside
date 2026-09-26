@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
@@ -7,7 +7,8 @@ import { api, AuditEvent, ExecResult, Execution, FileEntry, Instance } from '../
 import type { SecretSource } from '../api'
 
 interface SpecSecret { ref?: string; source?: SecretSource; allowed_domains?: string[] }
-import { Badge, Button, DecisionBadge, StatusBadge, fmtCountdown, fmtTime } from '../components/ui'
+import { Badge, Button, StatusBadge, fmtCountdown, fmtTime } from '../components/ui'
+import { AuditTable, ExecCode } from '../components/AuditTable'
 
 const DEFAULT_CODE = `# Starlark. Capabilities appear as globals when granted.
 # fs.read/write/list, net.get/post, print/json/math are always available.
@@ -67,31 +68,7 @@ function AuditTab({ id }: { id: string }) {
     queryFn: () => api.get<{ events: AuditEvent[] }>(`/api/v1/audit?instance_id=${id}&limit=200`),
     refetchInterval: 5000,
   })
-  return (
-    <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-800">
-      <table className="w-full text-xs">
-        <thead className="bg-gray-100 dark:bg-gray-900 text-left text-gray-600 dark:text-gray-400">
-          <tr>
-            <th className="px-2 py-1.5">Time</th><th className="px-2 py-1.5">Cap</th><th className="px-2 py-1.5">Op</th>
-            <th className="px-2 py-1.5">Args</th><th className="px-2 py-1.5">Decision</th><th className="px-2 py-1.5">Reason</th><th className="px-2 py-1.5">ms</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-200 dark:divide-gray-800 font-mono">
-          {(data?.events ?? []).map((e) => (
-            <tr key={e.id}>
-              <td className="px-2 py-1">{new Date(e.ts).toLocaleTimeString()}</td>
-              <td className="px-2 py-1">{e.capability}</td>
-              <td className="px-2 py-1">{e.op}</td>
-              <td className="px-2 py-1 max-w-[220px] truncate" title={e.args}>{e.args}</td>
-              <td className="px-2 py-1"><DecisionBadge decision={e.decision} /></td>
-              <td className="px-2 py-1 max-w-[200px] truncate" title={e.reason}>{e.reason}</td>
-              <td className="px-2 py-1">{e.duration_ms}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
+  return <AuditTable events={data?.events ?? []} />
 }
 
 interface PromptResponse {
@@ -147,6 +124,7 @@ export default function InstanceDetail() {
   const [result, setResult] = useState<ExecResult | null>(null)
   const [running, setRunning] = useState(false)
   const [tab, setTab] = useState<'execs' | 'audit' | 'prompt'>('execs')
+  const [openExec, setOpenExec] = useState<string | null>(null)
 
   const { data: inst } = useQuery({
     queryKey: ['instance', id],
@@ -255,14 +233,26 @@ export default function InstanceDetail() {
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-gray-800 font-mono">
                   {(execs?.executions ?? []).map((x) => (
-                    <tr key={x.id}>
-                      <td className="px-2 py-1">{x.id}</td>
-                      <td className="px-2 py-1">{x.status === 'ok' ? <Badge tone="green">ok</Badge> : <Badge tone="red">{x.error_type || 'error'}</Badge>}</td>
-                      <td className="px-2 py-1 max-w-[240px] truncate" title={x.code_snippet}>{x.code_snippet}</td>
-                      <td className="px-2 py-1">{x.duration_ms}</td>
-                      <td className="px-2 py-1">{x.steps}</td>
-                      <td className="px-2 py-1">{fmtTime(x.created_at)}</td>
-                    </tr>
+                    <Fragment key={x.id}>
+                      <tr
+                        className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900"
+                        onClick={() => setOpenExec(openExec === x.id ? null : x.id)}
+                      >
+                        <td className="px-2 py-1">{openExec === x.id ? '▾ ' : '▸ '}{x.id}</td>
+                        <td className="px-2 py-1">{x.status === 'ok' ? <Badge tone="green">ok</Badge> : <Badge tone="red">{x.error_type || 'error'}</Badge>}</td>
+                        <td className="px-2 py-1 max-w-[240px] truncate" title={x.code_snippet}>{x.code_snippet}</td>
+                        <td className="px-2 py-1">{x.duration_ms}</td>
+                        <td className="px-2 py-1">{x.steps}</td>
+                        <td className="px-2 py-1">{fmtTime(x.created_at)}</td>
+                      </tr>
+                      {openExec === x.id && (
+                        <tr>
+                          <td colSpan={6} className="px-3 py-3 bg-gray-50/60 dark:bg-gray-900/40">
+                            <ExecCode execId={x.id} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

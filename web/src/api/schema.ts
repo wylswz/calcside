@@ -232,6 +232,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/executions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description single execution including the full submitted code */
+        get: operations["getExecution"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit": {
         parameters: {
             query?: never;
@@ -632,6 +649,11 @@ export interface components {
         };
         ExecutionsResponse: {
             executions?: components["schemas"]["Execution"][];
+        };
+        ExecutionDetail: {
+            execution: components["schemas"]["Execution"];
+            /** @description full submitted code (empty for executions recorded before this field existed) */
+            code: string;
         };
         AuditEvent: {
             id: string;
@@ -1147,6 +1169,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExecutionsResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getExecution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description execution detail with full code */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionDetail"];
                 };
             };
             401: components["responses"]["Error"];

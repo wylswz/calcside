@@ -158,9 +158,17 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 			t.Fatal(err)
 		}
 		e := &store.Execution{InstanceID: in.ID, UserID: u.ID, CodeSHA256: "abc",
-			CodeSnippet: "print(1)", Status: types.ExecOK, DurationMs: 5, Steps: 10, OutputBytes: 2}
+			CodeSnippet: "print(1)", Code: "print(1)\nprint(2)",
+			Status: types.ExecOK, DurationMs: 5, Steps: 10, OutputBytes: 2}
 		if err := s.CreateExecution(ctx, e); err != nil {
 			t.Fatal(err)
+		}
+		got, err := s.GetExecution(ctx, e.ID)
+		if err != nil || got.Code != e.Code {
+			t.Fatalf("GetExecution: %v %+v", err, got)
+		}
+		if _, err := s.GetExecution(ctx, "exe_missing"); err == nil {
+			t.Fatal("GetExecution: expected ErrNotFound")
 		}
 		lst, err := s.ListExecutions(ctx, in.ID, 10)
 		if err != nil || len(lst) != 1 || lst[0].Steps != 10 {

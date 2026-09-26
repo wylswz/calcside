@@ -434,6 +434,13 @@ type Execution struct {
 	UserId      string         `json:"user_id"`
 }
 
+// ExecutionDetail defines model for ExecutionDetail.
+type ExecutionDetail struct {
+	// Code full submitted code (empty for executions recorded before this field existed)
+	Code      string    `json:"code"`
+	Execution Execution `json:"execution"`
+}
+
 // ExecutionsResponse defines model for ExecutionsResponse.
 type ExecutionsResponse struct {
 	Executions *[]Execution `json:"executions,omitempty"`
@@ -751,6 +758,9 @@ type ServerInterface interface {
 	// (GET /api/v1/capabilities)
 	Capabilities(c *gin.Context)
 
+	// (GET /api/v1/executions/{id})
+	GetExecution(c *gin.Context, id IdPath)
+
 	// (GET /api/v1/extensions)
 	ListExtensions(c *gin.Context)
 
@@ -911,6 +921,31 @@ func (siw *ServerInterfaceWrapper) Capabilities(c *gin.Context) {
 	}
 
 	siw.Handler.Capabilities(c)
+}
+
+// GetExecution operation middleware
+func (siw *ServerInterfaceWrapper) GetExecution(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetExecution(c, id)
 }
 
 // ListExtensions operation middleware
@@ -1485,6 +1520,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/instances/:id/files", wrapper.Files)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/prompt", wrapper.InstancePrompt)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/executions", wrapper.ListExecutions)
+	router.GET(options.BaseURL+"/api/v1/executions/:id", wrapper.GetExecution)
 	router.GET(options.BaseURL+"/api/v1/audit", wrapper.ListAudit)
 	router.GET(options.BaseURL+"/api/v1/policies", wrapper.ListPolicies)
 	router.POST(options.BaseURL+"/api/v1/policies", wrapper.CreatePolicy)
@@ -1588,6 +1624,56 @@ func (response Capabilities401JSONResponse) VisitCapabilitiesResponse(w http.Res
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetExecutionRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type GetExecutionResponseObject interface {
+	VisitGetExecutionResponse(w http.ResponseWriter) error
+}
+
+type GetExecution200JSONResponse ExecutionDetail
+
+func (response GetExecution200JSONResponse) VisitGetExecutionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetExecution401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetExecution401JSONResponse) VisitGetExecutionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetExecution404JSONResponse ErrorEnvelope
+
+func (response GetExecution404JSONResponse) VisitGetExecutionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -3078,6 +3164,9 @@ type StrictServerInterface interface {
 	// (GET /api/v1/capabilities)
 	Capabilities(ctx context.Context, request CapabilitiesRequestObject) (CapabilitiesResponseObject, error)
 
+	// (GET /api/v1/executions/{id})
+	GetExecution(ctx context.Context, request GetExecutionRequestObject) (GetExecutionResponseObject, error)
+
 	// (GET /api/v1/extensions)
 	ListExtensions(ctx context.Context, request ListExtensionsRequestObject) (ListExtensionsResponseObject, error)
 
@@ -3278,6 +3367,32 @@ func (sh *strictHandler) Capabilities(ctx *gin.Context) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(CapabilitiesResponseObject); ok {
 		if err := validResponse.VisitCapabilitiesResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetExecution operation middleware
+func (sh *strictHandler) GetExecution(ctx *gin.Context, id IdPath) {
+	var request GetExecutionRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetExecution(ctx, request.(GetExecutionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetExecution")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(GetExecutionResponseObject); ok {
+		if err := validResponse.VisitGetExecutionResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

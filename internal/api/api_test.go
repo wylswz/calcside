@@ -222,6 +222,37 @@ func TestExecOnEndedInstance409(t *testing.T) {
 	}
 }
 
+func TestGetExecution(t *testing.T) {
+	e := newEnv(t)
+	cookies := login(e, "a@x.com")
+	csrf := map[string]string{"X-Requested-With": "calcside"}
+	_, m, _ := e.req("POST", "/api/v1/keys", `{"name":"k"}`, csrf, cookies)
+	bearer := map[string]string{"Authorization": "Bearer " + m["secret"].(string)}
+	_, m, _ = e.req("POST", "/api/v1/instances", `{}`, bearer, nil)
+	instID := m["instance"].(map[string]any)["id"].(string)
+	code, m, _ := e.req("POST", "/api/v1/instances/"+instID+"/exec", `{"code":"print('hi')"}`, bearer, nil)
+	if code != 200 {
+		t.Fatalf("exec: %d %v", code, m)
+	}
+	execID := m["exec_id"].(string)
+
+	code, m, _ = e.req("GET", "/api/v1/executions/"+execID, "", bearer, nil)
+	if code != 200 || m["code"] != "print('hi')" {
+		t.Fatalf("get execution: %d %v", code, m)
+	}
+	if m["execution"].(map[string]any)["code"] != nil {
+		t.Fatal("execution object should not embed code")
+	}
+
+	cookiesB := login(e, "b@x.com")
+	_, m, _ = e.req("POST", "/api/v1/keys", `{"name":"k"}`, csrf, cookiesB)
+	bearerB := map[string]string{"Authorization": "Bearer " + m["secret"].(string)}
+	code, _, _ = e.req("GET", "/api/v1/executions/"+execID, "", bearerB, nil)
+	if code != 404 {
+		t.Fatalf("other user's execution: expected 404, got %d", code)
+	}
+}
+
 func TestUnauth401(t *testing.T) {
 	e := newEnv(t)
 	code, _, _ := e.req("GET", "/api/v1/me", "", nil, nil)

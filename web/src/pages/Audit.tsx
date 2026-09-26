@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, AuditEvent } from '../api'
-import { Button, DecisionBadge, Field, inputCls } from '../components/ui'
+import { Button, Field, inputCls } from '../components/ui'
+import { AuditTable } from '../components/AuditTable'
 
 const PAGE = 50
 
@@ -42,32 +43,7 @@ export default function Audit() {
         <Field label="Instance ID"><input className={inputCls + ' !w-64'} value={instFilter} onChange={(e) => { setInstFilter(e.target.value); setPage(0); setCursors([undefined]) }} placeholder="ins_…" /></Field>
         <Field label="Exec ID"><input className={inputCls + ' !w-64'} value={execFilter} onChange={(e) => { setExecFilter(e.target.value); setPage(0); setCursors([undefined]) }} placeholder="exe_…" /></Field>
       </div>
-      <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-800">
-        <table className="w-full text-xs">
-          <thead className="bg-gray-100 dark:bg-gray-900 text-left text-gray-600 dark:text-gray-400">
-            <tr>
-              <th className="px-2 py-1.5">Time</th><th className="px-2 py-1.5">Instance</th><th className="px-2 py-1.5">Exec</th>
-              <th className="px-2 py-1.5">Cap</th><th className="px-2 py-1.5">Op</th><th className="px-2 py-1.5">Args</th>
-              <th className="px-2 py-1.5">Decision</th><th className="px-2 py-1.5">Reason</th><th className="px-2 py-1.5">ms</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-800 font-mono">
-            {events.map((e) => (
-              <tr key={e.id}>
-                <td className="px-2 py-1">{new Date(e.ts).toLocaleString()}</td>
-                <td className="px-2 py-1">{e.instance_id}</td>
-                <td className="px-2 py-1">{e.exec_id}</td>
-                <td className="px-2 py-1">{e.capability}</td>
-                <td className="px-2 py-1">{e.op}</td>
-                <td className="px-2 py-1 max-w-[200px] truncate" title={e.args}>{e.args}</td>
-                <td className="px-2 py-1"><DecisionBadge decision={e.decision} /></td>
-                <td className="px-2 py-1 max-w-[180px] truncate" title={e.reason}>{e.reason}</td>
-                <td className="px-2 py-1">{e.duration_ms}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <AuditTable events={events} showScope />
       <div className="mt-2 flex gap-2 items-center text-xs">
         <Button onClick={prev} disabled={page === 0}>Prev</Button>
         <span>page {page + 1}</span>

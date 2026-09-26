@@ -196,6 +196,7 @@ type execRow struct {
 	UserID      string
 	CodeSHA256  string
 	CodeSnippet string
+	Code        string
 	Status      string
 	ErrorType   string
 	DurationMs  int64
@@ -209,7 +210,7 @@ func (execRow) TableName() string { return "executions" }
 func (r execRow) toStore() *store.Execution {
 	return &store.Execution{
 		ID: r.ID, InstanceID: r.InstanceID, UserID: r.UserID,
-		CodeSHA256: r.CodeSHA256, CodeSnippet: r.CodeSnippet,
+		CodeSHA256: r.CodeSHA256, CodeSnippet: r.CodeSnippet, Code: r.Code,
 		Status:      types.ExecStatus(r.Status),
 		ErrorType:   types.ExecErrorType(r.ErrorType),
 		DurationMs:  r.DurationMs,
@@ -516,11 +517,20 @@ func (d *sqlDB) CreateExecution(ctx context.Context, e *store.Execution) error {
 	}
 	return d.g.WithContext(ctx).Create(&execRow{
 		ID: e.ID, InstanceID: e.InstanceID, UserID: e.UserID,
-		CodeSHA256: e.CodeSHA256, CodeSnippet: e.CodeSnippet,
+		CodeSHA256: e.CodeSHA256, CodeSnippet: e.CodeSnippet, Code: e.Code,
 		Status: string(e.Status), ErrorType: string(e.ErrorType),
 		DurationMs: e.DurationMs, Steps: int64(e.Steps),
 		OutputBytes: e.OutputBytes, CreatedAt: e.CreatedAt.UTC(),
 	}).Error
+}
+
+func (d *sqlDB) GetExecution(ctx context.Context, id string) (*store.Execution, error) {
+	var row execRow
+	err := d.g.WithContext(ctx).Where("id = ?", id).Take(&row).Error
+	if err != nil {
+		return nil, mapNotFound(err)
+	}
+	return row.toStore(), nil
 }
 
 func (d *sqlDB) ListExecutions(ctx context.Context, instanceID string, limit int) ([]*store.Execution, error) {

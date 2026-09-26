@@ -91,6 +91,7 @@ type Execution struct {
 	UserID      string              `json:"user_id"`
 	CodeSHA256  string              `json:"code_sha256"`
 	CodeSnippet string              `json:"code_snippet"`
+	Code        string              `json:"-"` // full code; served only by the execution detail endpoint
 	Status      types.ExecStatus    `json:"status"`
 	ErrorType   types.ExecErrorType `json:"error_type,omitempty"` // "" = no error
 	DurationMs  int64               `json:"duration_ms"`
@@ -166,6 +167,7 @@ type Store interface {
 	MarkRunningAsLost(ctx context.Context) (int, error)
 
 	CreateExecution(ctx context.Context, e *Execution) error
+	GetExecution(ctx context.Context, id string) (*Execution, error)
 	ListExecutions(ctx context.Context, instanceID string, limit int) ([]*Execution, error)
 
 	InsertAuditEvents(ctx context.Context, evs []AuditEvent) error

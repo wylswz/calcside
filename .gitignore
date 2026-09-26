@@ -6,3 +6,5 @@ web/dist/*
 calcside-dev.db*
 .venv/
 __pycache__/
+
+*.pckl

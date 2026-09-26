@@ -436,6 +436,13 @@ type Execution struct {
 	UserId      string         `json:"user_id"`
 }
 
+// ExecutionDetail defines model for ExecutionDetail.
+type ExecutionDetail struct {
+	// Code full submitted code (empty for executions recorded before this field existed)
+	Code      string    `json:"code"`
+	Execution Execution `json:"execution"`
+}
+
 // ExecutionsResponse defines model for ExecutionsResponse.
 type ExecutionsResponse struct {
 	Executions *[]Execution `json:"executions,omitempty"`
@@ -824,6 +831,11 @@ type ClientInterface interface {
 	// Capabilities performs a GET /api/v1/capabilities (the `Capabilities` operationId) request.
 	Capabilities(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetExecution performs a GET /api/v1/executions/{id} (the `GetExecution` operationId) request.
+	//
+	// single execution including the full submitted code.
+	GetExecution(ctx context.Context, id IdPath, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListExtensions performs a GET /api/v1/extensions (the `ListExtensions` operationId) request.
 	ListExtensions(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -991,6 +1003,21 @@ func (c *Client) AuthConfig(ctx context.Context, reqEditors ...RequestEditorFn) 
 // Capabilities performs a GET /api/v1/capabilities (the `Capabilities` operationId) request.
 func (c *Client) Capabilities(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCapabilitiesRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetExecution performs a GET /api/v1/executions/{id} (the `GetExecution` operationId) request.
+//
+// single execution including the full submitted code.
+func (c *Client) GetExecution(ctx context.Context, id IdPath, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetExecutionRequest(c.Server, id)
 	if err != nil {
 		return nil, err
 	}
@@ -1595,6 +1622,40 @@ func NewCapabilitiesRequest(server string) (*http.Request, error) {
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/capabilities")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetExecutionRequest constructs an http.Request for the GetExecution method
+func NewGetExecutionRequest(server string, id IdPath) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/executions/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -2649,6 +2710,13 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	CapabilitiesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*CapabilitiesResponse, error)
 
+	// GetExecutionWithResponse performs a GET /api/v1/executions/{id} (the `GetExecution` operationId) request.
+	//
+	// single execution including the full submitted code.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetExecutionWithResponse(ctx context.Context, id IdPath, reqEditors ...RequestEditorFn) (*GetExecutionResponse, error)
+
 	// ListExtensionsWithResponse performs a GET /api/v1/extensions (the `ListExtensions` operationId) request.
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -2968,6 +3036,61 @@ func (r CapabilitiesResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r CapabilitiesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetExecutionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ExecutionDetail
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetExecutionResponse) GetJSON200() *ExecutionDetail {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetExecutionResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetExecutionResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r GetExecutionResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetExecutionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetExecutionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetExecutionResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -4494,6 +4617,19 @@ func (c *ClientWithResponses) CapabilitiesWithResponse(ctx context.Context, reqE
 	return ParseCapabilitiesResponse(rsp)
 }
 
+// GetExecutionWithResponse performs a GET /api/v1/executions/{id} (the `GetExecution` operationId) request.
+//
+// single execution including the full submitted code.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetExecutionWithResponse(ctx context.Context, id IdPath, reqEditors ...RequestEditorFn) (*GetExecutionResponse, error) {
+	rsp, err := c.GetExecution(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetExecutionResponse(rsp)
+}
+
 // ListExtensionsWithResponse performs a GET /api/v1/extensions (the `ListExtensions` operationId) request.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -4965,6 +5101,46 @@ func ParseCapabilitiesResponse(rsp *http.Response) (*CapabilitiesResponse, error
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetExecutionResponse parses an HTTP response from a GetExecutionWithResponse call
+func ParseGetExecutionResponse(rsp *http.Response) (*GetExecutionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetExecutionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ExecutionDetail
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
 
 	}
 

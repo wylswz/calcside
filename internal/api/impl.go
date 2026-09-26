@@ -177,6 +177,12 @@ func (r listExecutionsResp) VisitListExecutionsResponse(w http.ResponseWriter) e
 	return r.write(w)
 }
 
+type getExecutionResp struct{ rawJSON }
+
+func (r getExecutionResp) VisitGetExecutionResponse(w http.ResponseWriter) error {
+	return r.write(w)
+}
+
 type listAuditResp struct{ rawJSON }
 
 func (r listAuditResp) VisitListAuditResponse(w http.ResponseWriter) error { return r.write(w) }
@@ -514,7 +520,7 @@ func (s *strictImpl) Exec(ctx context.Context, req gen.ExecRequestObject) (gen.E
 		}
 		_ = s.d.Store.CreateExecution(ctx, &store.Execution{
 			ID: execID, InstanceID: in.ID, UserID: p.User.ID,
-			CodeSHA256: hex.EncodeToString(sum[:]), CodeSnippet: snippet,
+			CodeSHA256: hex.EncodeToString(sum[:]), CodeSnippet: snippet, Code: body.Code,
 			Status: status, ErrorType: errType, DurationMs: res.DurationMs,
 			Steps: res.Steps, OutputBytes: int64(len(res.Output)),
 		})
@@ -784,6 +790,21 @@ func (s *strictImpl) ListExecutions(ctx context.Context, req gen.ListExecutionsR
 		lst = []*store.Execution{}
 	}
 	return listExecutionsResp{rawJSON{200, map[string]any{"executions": lst}}}, nil
+}
+
+// GetExecution returns one execution with its full code. Ownership is
+// enforced via the execution's user_id: other users' execs are 404.
+func (s *strictImpl) GetExecution(ctx context.Context, req gen.GetExecutionRequestObject) (gen.GetExecutionResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return getExecutionResp{*e}, nil
+	}
+	ex, err := s.d.Store.GetExecution(ctx, req.Id)
+	if err != nil || ex.UserID != p.User.ID {
+		return getExecutionResp{rawJSON{404, errEnv(types.ErrCodeNotFound, "execution not found")}}, nil
+	}
+	return getExecutionResp{rawJSON{200, map[string]any{"execution": ex, "code": ex.Code}}}, nil
 }
 
 // --- audit ---
