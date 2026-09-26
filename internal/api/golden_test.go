@@ -25,6 +25,11 @@ var goldenDir = filepath.Join("testdata", "golden")
 // idRe matches generated resource ids (usr_/key_/ins_/exe_/pol_/sec_/aud_
 // + base62). Collected from every raw response body so ids embedded in
 // free text (prompt, audit args) are found too.
+//
+// Known blind spot: all ids of one kind collapse to the same placeholder
+// (every instance is "<id:ins>"), so golden cannot catch id-swap bugs —
+// e.g. an endpoint returning a *different* execution's id passes. Golden
+// covers wire format, not business correctness; behavior tests cover ids.
 var idRe = regexp.MustCompile(`\b(usr|key|ins|exe|pol|sec|aud)_[A-Za-z0-9]{10,}`)
 
 // numKeys are nondeterministic numeric fields normalized to "<num>".
@@ -183,6 +188,11 @@ func TestGolden(t *testing.T) {
 	g.req(e, "instance_keepalive", "POST", "/api/v1/instances/"+instID+"/keepalive", "", bearer, nil)
 	g.req(e, "instance_list_status_bad", "GET", "/api/v1/instances?status=bogus", "", bearer, nil)
 	g.req(e, "instance_get_missing", "GET", "/api/v1/instances/ins_000000000000000000000000", "", bearer, nil)
+
+	// files on an instance without the fs capability -> 400 no_fs
+	_, m, _ = e.req("POST", "/api/v1/instances", `{"capabilities":{"io":{}}}`, bearer, nil)
+	noFSID := m["instance"].(map[string]any)["id"].(string)
+	g.req(e, "files_no_fs", "GET", "/api/v1/instances/"+noFSID+"/files", "", bearer, nil)
 
 	// exec: success, script error, too large
 	g.req(e, "exec_ok", "POST", "/api/v1/instances/"+instID+"/exec",

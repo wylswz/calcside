@@ -8,3 +8,5 @@ calcside-dev.db*
 __pycache__/
 
 *.pckl
+
+.idea/

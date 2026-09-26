@@ -2,6 +2,13 @@
 // types (store.*) never reach the wire directly, so sensitive fields
 // (key hashes, ciphertext, full code) cannot leak by a missing json
 // tag.
+//
+// Boundary rule: dto owns the wire shape of every entity that has a
+// persistent model or sensitive fields. Pure server-side metadata —
+// capability and extension docs — is serialized directly by the package
+// that owns it (internal/service/catalog), and dto merely aliases those
+// types: they carry no sensitive fields and have no separate persistent
+// representation.
 package dto
 
 import (

@@ -16,7 +16,9 @@ func New(reg *capability.Registry) *Service {
 	return &Service{reg: reg}
 }
 
-// CapabilityDoc describes one registered capability factory.
+// CapabilityDoc describes one registered capability factory. This is the
+// public wire shape (contract-bound); api/dto aliases it — see the dto
+// package doc for the boundary rule.
 type CapabilityDoc struct {
 	Name         string                `json:"name"`
 	Ops          []capability.OpInfo   `json:"ops"`
@@ -38,7 +40,8 @@ func (s *Service) Capabilities() []CapabilityDoc {
 }
 
 // ExtensionsView is the extension catalog plus whether remote/local
-// sources are enabled on this server.
+// sources are enabled on this server. This is the public wire shape
+// (contract-bound); api/dto aliases it — see the dto package doc.
 type ExtensionsView struct {
 	Extensions    []ext.Info `json:"extensions"`
 	RemoteEnabled bool       `json:"remote_enabled"`
