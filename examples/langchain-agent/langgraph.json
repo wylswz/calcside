@@ -1,0 +1,7 @@
+{
+  "source": { "kind": "uv", "root": "." },
+  "graphs": {
+    "calcside_agent": "./agent.py:graph"
+  },
+  "env": ".env"
+}

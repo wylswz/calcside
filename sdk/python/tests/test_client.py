@@ -79,6 +79,42 @@ def test_exec_error(server):
         c.delete_instance(inst["id"])
 
 
+def test_secrets(server):
+    c = Client(base_url=server)
+    sec = c.create_secret(
+        "SDK_TEST_TOKEN", "hunter2", allowed_domains=["api.example.com"]
+    )
+    try:
+        assert sec["name"] == "SDK_TEST_TOKEN"
+        assert "value" not in sec  # write-only
+        assert sec["allowed_domains"] == ["api.example.com"]
+        assert any(s["id"] == sec["id"] for s in c.list_secrets())
+
+        with pytest.raises(CalcsideError) as ei:
+            c.create_secret("SDK_TEST_TOKEN", "x")
+        assert ei.value.status == 409
+
+        upd = c.update_secret(sec["id"], allowed_domains=["*.example.com"])
+        assert upd["allowed_domains"] == ["*.example.com"]
+
+        inst = c.create_instance(
+            {
+                "capabilities": {
+                    "net": {"allow_hosts": ["api.example.com"], "methods": ["GET"]}
+                },
+                "secrets": {"SDK_TEST_TOKEN": {"ref": "SDK_TEST_TOKEN"}},
+                "ttl_seconds": 300,
+            }
+        )
+        try:
+            assert inst["spec"]["secrets"]["SDK_TEST_TOKEN"]["source"] == "vault"
+        finally:
+            c.delete_instance(inst["id"])
+    finally:
+        c.delete_secret(sec["id"])
+    assert all(s["id"] != sec["id"] for s in c.list_secrets())
+
+
 def test_client_paths_in_openapi(server):
     """Every (method, path) the client uses must exist in the contract."""
     spec = yaml.safe_load(OPENAPI.read_text())
@@ -92,6 +128,10 @@ def test_client_paths_in_openapi(server):
         ("post", "/api/v1/instances/{id}/exec"),
         ("get", "/api/v1/instances/{id}/files"),
         ("get", "/api/v1/instances/{id}/prompt"),
+        ("get", "/api/v1/secrets"),
+        ("post", "/api/v1/secrets"),
+        ("put", "/api/v1/secrets/{id}"),
+        ("delete", "/api/v1/secrets/{id}"),
     ]
     for method, path in used:
         assert path in paths, f"missing path {path}"

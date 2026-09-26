@@ -172,6 +172,42 @@ class Client:
             "GET", f"/api/v1/instances/{instance_id}/prompt", params=params
         ).json()
 
+    def list_secrets(self) -> list[dict[str, Any]]:
+        """Vault secrets metadata — values are never returned."""
+        return self._req("GET", "/api/v1/secrets").json().get("secrets") or []
+
+    def create_secret(
+        self,
+        name: str,
+        value: str,
+        allowed_domains: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Create a vault secret (e.g. ``TAVILY_API_KEY``); returns metadata."""
+        body: dict[str, Any] = {"name": name, "value": value}
+        if allowed_domains is not None:
+            body["allowed_domains"] = allowed_domains
+        return self._req("POST", "/api/v1/secrets", json=body).json()["secret"]
+
+    def update_secret(
+        self,
+        secret_id: str,
+        *,
+        value: str | None = None,
+        allowed_domains: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Update a vault secret's value and/or domain allowlist."""
+        body: dict[str, Any] = {}
+        if value is not None:
+            body["value"] = value
+        if allowed_domains is not None:
+            body["allowed_domains"] = allowed_domains
+        return self._req("PUT", f"/api/v1/secrets/{secret_id}", json=body).json()[
+            "secret"
+        ]
+
+    def delete_secret(self, secret_id: str) -> None:
+        self._req("DELETE", f"/api/v1/secrets/{secret_id}")
+
 
 class AsyncClient:
     """Async calcside API client (same surface as ``Client``)."""
@@ -260,3 +296,36 @@ class AsyncClient:
                 "GET", f"/api/v1/instances/{instance_id}/prompt", params=params
             )
         ).json()
+
+    async def list_secrets(self) -> list[dict[str, Any]]:
+        return (await self._req("GET", "/api/v1/secrets")).json().get("secrets") or []
+
+    async def create_secret(
+        self,
+        name: str,
+        value: str,
+        allowed_domains: list[str] | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"name": name, "value": value}
+        if allowed_domains is not None:
+            body["allowed_domains"] = allowed_domains
+        return (await self._req("POST", "/api/v1/secrets", json=body)).json()["secret"]
+
+    async def update_secret(
+        self,
+        secret_id: str,
+        *,
+        value: str | None = None,
+        allowed_domains: list[str] | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {}
+        if value is not None:
+            body["value"] = value
+        if allowed_domains is not None:
+            body["allowed_domains"] = allowed_domains
+        return (
+            await self._req("PUT", f"/api/v1/secrets/{secret_id}", json=body)
+        ).json()["secret"]
+
+    async def delete_secret(self, secret_id: str) -> None:
+        await self._req("DELETE", f"/api/v1/secrets/{secret_id}")

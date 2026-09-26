@@ -1,0 +1,15 @@
+[project]
+name = "calcside-langchain-agent-example"
+version = "0.1.0"
+description = "LangChain agent backed by a calcside Starlark sandbox"
+requires-python = ">=3.10"
+dependencies = [
+    "calcside[langchain]",
+    "langchain-openai>=0.3,<1",
+    "langchain-anthropic>=0.3,<1",
+    "langgraph-cli[inmem]>=0.3,<1",
+]
+
+# Reference the local SDK checkout instead of a published package.
+[tool.uv.sources]
+calcside = { path = "../../sdk/python", editable = true }
