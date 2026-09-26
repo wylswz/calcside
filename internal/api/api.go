@@ -128,14 +128,20 @@ func bodyLimit() gin.HandlerFunc {
 func Handler(d Deps) http.Handler {
 	// All dependencies are programmer-supplied; a missing one is a
 	// wiring bug, so fail fast instead of panicking mid-request.
-	for name, ok := range map[string]bool{
-		"IAM": d.IAM != nil, "Vault": d.Vault != nil,
-		"Policy": d.Policy != nil, "Audit": d.Audit != nil,
-		"Catalog": d.Catalog != nil, "Sandbox": d.Sandbox != nil,
-		"Auth": d.Auth != nil,
+	for _, dep := range []struct {
+		name string
+		ok   bool
+	}{
+		{"IAM", d.IAM != nil},
+		{"Vault", d.Vault != nil},
+		{"Policy", d.Policy != nil},
+		{"Audit", d.Audit != nil},
+		{"Catalog", d.Catalog != nil},
+		{"Sandbox", d.Sandbox != nil},
+		{"Auth", d.Auth != nil},
 	} {
-		if !ok {
-			panic("api: Deps." + name + " is nil")
+		if !dep.ok {
+			panic("api: Deps." + dep.name + " is nil")
 		}
 	}
 	if d.Dev {
