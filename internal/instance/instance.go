@@ -688,8 +688,14 @@ func bumpTTL(ctx context.Context, m *Manager, in *inst) {
 }
 
 // Exec runs code on a live instance.
-func (m *Manager) Exec(ctx context.Context, id, code string, timeoutOverride time.Duration, record func(res *engine.Result, execID string)) (*engine.Result, error) {
-	in, ok := m.get(id)
+func (m *Manager) Exec(
+	ctx context.Context,
+	instanceId string,
+	code string,
+	timeoutOverride time.Duration,
+	record func(res *engine.Result, execID string),
+) (*engine.Result, error) {
+	in, ok := m.get(instanceId)
 	if !ok {
 		return nil, ErrNotFound
 	}

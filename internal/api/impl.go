@@ -482,6 +482,8 @@ func (s *strictImpl) Keepalive(ctx context.Context, req gen.KeepaliveRequestObje
 	return keepaliveResp{rawJSON{200, map[string]any{"instance": meta}}}, nil
 }
 
+// Exec a code snippet
+// 1. loop-up or create an instance
 func (s *strictImpl) Exec(ctx context.Context, req gen.ExecRequestObject) (gen.ExecResponseObject, error) {
 	ctx = realCtx(ctx)
 	p, e := needAuth(ctx)
