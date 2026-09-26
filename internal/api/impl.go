@@ -2,15 +2,11 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -18,10 +14,6 @@ import (
 
 	"calcside/internal/api/gen"
 	"calcside/internal/auth"
-	"calcside/internal/capability"
-	"calcside/internal/engine"
-	"calcside/internal/instance"
-	promptpkg "calcside/internal/prompt"
 	"calcside/internal/secrets"
 	"calcside/internal/service"
 	auditsvc "calcside/internal/service/audit"
@@ -354,12 +346,9 @@ func (s *strictImpl) ListInstances(ctx context.Context, req gen.ListInstancesReq
 			return listInstancesResp{fail(service.BadRequest("invalid status filter"))}, nil
 		}
 	}
-	lst, err := s.d.Manager.List(ctx, p.User.ID, status)
+	lst, err := s.d.Sandbox.List(ctx, actorOf(p), status)
 	if err != nil {
-		return listInstancesResp{fail(service.Internal(err))}, nil
-	}
-	if lst == nil {
-		lst = []*store.Instance{}
+		return listInstancesResp{fail(err)}, nil
 	}
 	return listInstancesResp{rawJSON{200, map[string]any{"instances": lst}}}, nil
 }
@@ -378,16 +367,9 @@ func (s *strictImpl) CreateInstance(ctx context.Context, req gen.CreateInstanceR
 		}
 		raw = b
 	}
-	meta, err := s.d.Manager.Create(ctx, p.User, raw)
+	meta, err := s.d.Sandbox.Create(ctx, actorOf(p), raw)
 	if err != nil {
-		switch {
-		case errors.Is(err, instance.ErrTooMany):
-			return createInstanceResp{fail(service.Errf(types.ErrCodeTooMany, "%s", err.Error()))}, nil
-		case errors.Is(err, instance.ErrCapabilityName):
-			return createInstanceResp{fail(service.Errf(types.ErrCodeBadCapability, "%s", err.Error()))}, nil
-		default:
-			return createInstanceResp{fail(service.Errf(types.ErrCodeBadSpec, "%s", err.Error()))}, nil
-		}
+		return createInstanceResp{fail(err)}, nil
 	}
 	return createInstanceResp{rawJSON{201, map[string]any{"instance": meta}}}, nil
 }
@@ -410,9 +392,9 @@ func (s *strictImpl) GetInstance(ctx context.Context, req gen.GetInstanceRequest
 	if _, e := needAuth(ctx); e != nil {
 		return getInstanceResp{*e}, nil
 	}
-	in, e := s.ownedInstance(ctx, req.Id)
-	if e != nil {
-		return getInstanceResp{*e}, nil
+	in, err := s.d.Sandbox.Get(ctx, actorOf(principal(ctx)), req.Id)
+	if err != nil {
+		return getInstanceResp{fail(err)}, nil
 	}
 	return getInstanceResp{rawJSON{200, map[string]any{"instance": in}}}, nil
 }
@@ -422,15 +404,8 @@ func (s *strictImpl) DeleteInstance(ctx context.Context, req gen.DeleteInstanceR
 	if _, e := needAuth(ctx); e != nil {
 		return deleteInstanceResp{*e}, nil
 	}
-	in, e := s.ownedInstance(ctx, req.Id)
-	if e != nil {
-		return deleteInstanceResp{*e}, nil
-	}
-	if err := s.d.Manager.Delete(ctx, in.ID); err != nil {
-		if errors.Is(err, instance.ErrNotFound) {
-			return deleteInstanceResp{fail(service.NotFound("instance not found"))}, nil
-		}
-		return deleteInstanceResp{fail(service.Internal(err))}, nil
+	if err := s.d.Sandbox.Delete(ctx, actorOf(principal(ctx)), req.Id); err != nil {
+		return deleteInstanceResp{fail(err)}, nil
 	}
 	return deleteInstanceResp{rawJSON{200, map[string]any{"ok": true}}}, nil
 }
@@ -440,16 +415,9 @@ func (s *strictImpl) Keepalive(ctx context.Context, req gen.KeepaliveRequestObje
 	if _, e := needAuth(ctx); e != nil {
 		return keepaliveResp{*e}, nil
 	}
-	in, e := s.ownedInstance(ctx, req.Id)
-	if e != nil {
-		return keepaliveResp{*e}, nil
-	}
-	meta, err := s.d.Manager.Keepalive(ctx, in.ID)
+	meta, err := s.d.Sandbox.Keepalive(ctx, actorOf(principal(ctx)), req.Id)
 	if err != nil {
-		if errors.Is(err, instance.ErrNotRunning) {
-			return keepaliveResp{fail(service.Errf(types.ErrCodeNotRunning, "instance not running"))}, nil
-		}
-		return keepaliveResp{fail(service.NotFound("instance not found"))}, nil
+		return keepaliveResp{fail(err)}, nil
 	}
 	return keepaliveResp{rawJSON{200, map[string]any{"instance": meta}}}, nil
 }
@@ -462,13 +430,6 @@ func (s *strictImpl) Exec(ctx context.Context, req gen.ExecRequestObject) (gen.E
 	if e != nil {
 		return execResp{*e}, nil
 	}
-	in, e := s.ownedInstance(ctx, req.Id)
-	if e != nil {
-		return execResp{*e}, nil
-	}
-	if in.Status != types.InstanceRunning {
-		return execResp{fail(service.Errf(types.ErrCodeNotRunning, "instance not running"))}, nil
-	}
 	var body gen.ExecRequest
 	if req.Body != nil {
 		body = *req.Body
@@ -477,39 +438,10 @@ func (s *strictImpl) Exec(ctx context.Context, req gen.ExecRequestObject) (gen.E
 	if body.TimeoutMs != nil {
 		timeoutMs = *body.TimeoutMs
 	}
-	if len(body.Code) > maxCodeBytes {
-		return execResp{fail(service.Errf(types.ErrCodeTooLarge, "code exceeds 256KB"))}, nil
-	}
-	record := func(res *engine.Result, execID string) {
-		sum := sha256.Sum256([]byte(body.Code))
-		snippet := body.Code
-		if len(snippet) > snippetBytes {
-			snippet = snippet[:snippetBytes]
-		}
-		status := types.ExecOK
-		var errType types.ExecErrorType
-		if res.Error != nil {
-			status = types.ExecError
-			errType = res.Error.Type
-		}
-		_ = s.d.Store.CreateExecution(ctx, &store.Execution{
-			ID: execID, InstanceID: in.ID, UserID: p.User.ID,
-			CodeSHA256: hex.EncodeToString(sum[:]), CodeSnippet: snippet, Code: body.Code,
-			Status: status, ErrorType: errType, DurationMs: res.DurationMs,
-			Steps: res.Steps, OutputBytes: int64(len(res.Output)),
-		})
-	}
-	res, err := s.d.Manager.Exec(ctx, in.ID, body.Code,
-		time.Duration(timeoutMs)*time.Millisecond, record)
+	res, err := s.d.Sandbox.Exec(ctx, actorOf(p), req.Id, body.Code,
+		time.Duration(timeoutMs)*time.Millisecond)
 	if err != nil {
-		switch {
-		case errors.Is(err, instance.ErrNotFound):
-			return execResp{fail(service.NotFound("instance not found"))}, nil
-		case errors.Is(err, instance.ErrNotRunning):
-			return execResp{fail(service.Errf(types.ErrCodeNotRunning, "instance not running"))}, nil
-		default:
-			return execResp{fail(service.BadRequest("%s", err.Error()))}, nil
-		}
+		return execResp{fail(err)}, nil
 	}
 	return execResp{rawJSON{200, res}}, nil
 }
@@ -520,10 +452,7 @@ var toolPrefixRe = regexp.MustCompile(`^[A-Za-z0-9_]{0,32}$`)
 // instance.
 func (s *strictImpl) InstancePrompt(ctx context.Context, req gen.InstancePromptRequestObject) (gen.InstancePromptResponseObject, error) {
 	ctx = realCtx(ctx)
-	if _, e := needAuth(ctx); e != nil {
-		return instancePromptResp{*e}, nil
-	}
-	in, e := s.ownedInstance(ctx, req.Id)
+	p, e := needAuth(ctx)
 	if e != nil {
 		return instancePromptResp{*e}, nil
 	}
@@ -531,66 +460,15 @@ func (s *strictImpl) InstancePrompt(ctx context.Context, req gen.InstancePromptR
 	if req.Params.ToolPrefix != nil {
 		prefix = *req.Params.ToolPrefix
 	}
-	if !toolPrefixRe.MatchString(prefix) {
-		return instancePromptResp{fail(service.BadRequest("invalid tool_prefix"))}, nil
-	}
-	if in.Status != types.InstanceRunning {
-		return instancePromptResp{fail(service.Errf(types.ErrCodeNotRunning, "instance not running"))}, nil
-	}
-	data, err := s.d.Manager.PromptData(in.ID)
+	v, err := s.d.Sandbox.Prompt(ctx, actorOf(p), req.Id, prefix)
 	if err != nil {
-		switch {
-		case errors.Is(err, instance.ErrNotFound):
-			return instancePromptResp{fail(service.NotFound("instance not found"))}, nil
-		case errors.Is(err, instance.ErrNotRunning):
-			return instancePromptResp{fail(service.Errf(types.ErrCodeNotRunning, "instance not running"))}, nil
-		default:
-			return instancePromptResp{fail(service.Internal(err))}, nil
-		}
-	}
-	var fragments []string
-	var names []types.CapabilityName
-	for _, p := range data.Parts {
-		fragments = append(fragments, p.Factory.Prompt(p.Config))
-		names = append(names, p.Factory.Name())
-	}
-	var secretsInfo []promptpkg.SecretInfo
-	for _, sec := range data.Secrets {
-		secretsInfo = append(secretsInfo, promptpkg.SecretInfo{Name: sec.Name, Domains: sec.Domains})
-	}
-	var netHost string
-	if len(data.NetHosts) > 0 {
-		netHost = data.NetHosts[0]
-	} else if slices.Contains(capNamesToStrings(names), "net") {
-		// Unrestricted net: still show a worked example.
-		netHost = "api.example.com"
-	}
-	text, err := promptpkg.Render(promptpkg.Input{
-		InstanceID:     in.ID,
-		Prefix:         prefix,
-		Fragments:      fragments,
-		CapNames:       capNamesToStrings(names),
-		Env:            data.Env,
-		Secrets:        secretsInfo,
-		ExecTimeoutMs:  data.Limits.ExecTimeoutMs,
-		MaxSteps:       data.Limits.MaxSteps,
-		MaxOutputBytes: data.Limits.MaxOutputBytes,
-		TTLSeconds:     data.TTLSeconds,
-		NetExampleHost: netHost,
-		Persistent:     true,
-	})
-	if err != nil {
-		return instancePromptResp{fail(service.Internal(err))}, nil
+		return instancePromptResp{fail(err)}, nil
 	}
 	return instancePromptResp{rawJSON{200, map[string]any{
-		"instance_id":  in.ID,
-		"prompt":       text,
-		"capabilities": names,
-		"tools": map[string]string{
-			"exec":       prefix + "exec",
-			"list_files": prefix + "list_files",
-			"read_file":  prefix + "read_file",
-		},
+		"instance_id":  v.InstanceID,
+		"prompt":       v.Prompt,
+		"capabilities": v.Capabilities,
+		"tools":        v.Tools,
 	}}}, nil
 }
 
@@ -606,93 +484,23 @@ func capNamesToStrings(in []types.CapabilityName) []string {
 // capability binding inside a gated "console" session.
 func (s *strictImpl) Files(ctx context.Context, req gen.FilesRequestObject) (gen.FilesResponseObject, error) {
 	ctx = realCtx(ctx)
-	if _, e := needAuth(ctx); e != nil {
-		return filesResp{*e}, nil
-	}
-	in, e := s.ownedInstance(ctx, req.Id)
+	p, e := needAuth(ctx)
 	if e != nil {
 		return filesResp{*e}, nil
 	}
-	if in.Status != types.InstanceRunning {
-		return filesResp{fail(service.Errf(types.ErrCodeNotRunning, "instance not running"))}, nil
-	}
-	if !s.d.Manager.HasCapability(in.ID, string(types.CapFS)) {
-		return filesResp{fail(service.Errf(types.ErrCodeNoFS, "instance has no fs capability"))}, nil
-	}
-	p := "/work"
+	path := "/work"
 	if req.Params.Path != nil && *req.Params.Path != "" {
-		p = *req.Params.Path
+		path = *req.Params.Path
 	}
-	var stat map[string]any
-	var listing []any
-	var content string
-	err := s.d.Manager.WithSession(in.ID, func(s *engine.Session, gate *capability.Gate) error {
-		fsv, ok := s.Predeclared[string(types.CapFS)]
-		if !ok {
-			return errors.New("no fs binding")
-		}
-		mod, ok := fsv.(starlark.HasAttrs)
-		if !ok {
-			return errors.New("bad fs binding")
-		}
-		thread := &starlark.Thread{Name: "console"}
-		thread.SetLocal(capability.ContextKey, ctx)
-		call := func(method string, args ...starlark.Value) (starlark.Value, error) {
-			fn, err := mod.Attr(method)
-			if err != nil {
-				return nil, err
-			}
-			return starlark.Call(thread, fn, starlark.Tuple(args), nil)
-		}
-		statV, err := call("stat", starlark.String(p))
-		if err != nil {
-			return err
-		}
-		stat, err = toGo(statV)
-		if err != nil {
-			return err
-		}
-		if d, _ := stat["is_dir"].(bool); d {
-			listV, err := call("list", starlark.String(p))
-			if err != nil {
-				return err
-			}
-			v, err := toGoAny(listV)
-			if err != nil {
-				return err
-			}
-			listing, _ = v.([]any)
-			return nil
-		}
-		readV, err := call("read", starlark.String(p))
-		if err != nil {
-			return err
-		}
-		if sv, ok := readV.(starlark.String); ok {
-			content = string(sv)
-		}
-		return nil
-	})
+	v, err := s.d.Sandbox.Browse(ctx, actorOf(p), req.Id, path)
 	if err != nil {
-		switch {
-		case errors.Is(err, instance.ErrNotFound):
-			return filesResp{fail(service.NotFound("instance not found"))}, nil
-		case errors.Is(err, instance.ErrNotRunning):
-			return filesResp{fail(service.Errf(types.ErrCodeNotRunning, "instance not running"))}, nil
-		case strings.Contains(err.Error(), "does not exist"):
-			return filesResp{fail(service.NotFound(err.Error()))}, nil
-		default:
-			return filesResp{fail(service.Errf(types.ErrCodeFSError, "%s", err.Error()))}, nil
-		}
+		return filesResp{fail(err)}, nil
 	}
-	if d, _ := stat["is_dir"].(bool); d {
-		if listing == nil {
-			listing = []any{}
-		}
-		return filesResp{rawJSON{200, map[string]any{"entries": listing}}}, nil
+	if v.IsDir {
+		return filesResp{rawJSON{200, map[string]any{"entries": v.Entries}}}, nil
 	}
 	return filesResp{rawJSON{200, map[string]any{
-		"path": stat["path"], "content": s.d.Manager.Redact(in.ID, content),
+		"path": v.Path, "content": v.Content,
 	}}}, nil
 }
 
@@ -748,20 +556,13 @@ func (s *strictImpl) ListExecutions(ctx context.Context, req gen.ListExecutionsR
 	if _, e := needAuth(ctx); e != nil {
 		return listExecutionsResp{*e}, nil
 	}
-	in, e := s.ownedInstance(ctx, req.Id)
-	if e != nil {
-		return listExecutionsResp{*e}, nil
-	}
 	limit := 0
 	if req.Params.Limit != nil {
 		limit = *req.Params.Limit
 	}
-	lst, err := s.d.Store.ListExecutions(ctx, in.ID, limit)
+	lst, err := s.d.Sandbox.ListExecutions(ctx, actorOf(principal(ctx)), req.Id, limit)
 	if err != nil {
-		return listExecutionsResp{fail(service.Internal(err))}, nil
-	}
-	if lst == nil {
-		lst = []*store.Execution{}
+		return listExecutionsResp{fail(err)}, nil
 	}
 	return listExecutionsResp{rawJSON{200, map[string]any{"executions": lst}}}, nil
 }
@@ -774,9 +575,9 @@ func (s *strictImpl) GetExecution(ctx context.Context, req gen.GetExecutionReque
 	if e != nil {
 		return getExecutionResp{*e}, nil
 	}
-	ex, err := s.d.Store.GetExecution(ctx, req.Id)
-	if err != nil || ex.UserID != p.User.ID {
-		return getExecutionResp{fail(service.NotFound("execution not found"))}, nil
+	ex, err := s.d.Sandbox.GetExecution(ctx, actorOf(p), req.Id)
+	if err != nil {
+		return getExecutionResp{fail(err)}, nil
 	}
 	return getExecutionResp{rawJSON{200, map[string]any{"execution": ex, "code": ex.Code}}}, nil
 }

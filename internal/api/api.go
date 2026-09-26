@@ -26,16 +26,13 @@ import (
 	"calcside/internal/service/catalog"
 	"calcside/internal/service/iam"
 	policysvc "calcside/internal/service/policy"
+	"calcside/internal/service/sandbox"
 	"calcside/internal/service/vault"
 	"calcside/internal/store"
 	"calcside/internal/types"
 )
 
-const (
-	maxBodyBytes = 1 << 20
-	maxCodeBytes = 256 << 10
-	snippetBytes = 2 << 10
-)
+const maxBodyBytes = 1 << 20
 
 // Deps wires the API.
 type Deps struct {
@@ -44,6 +41,7 @@ type Deps struct {
 	Policy  *policysvc.Service
 	Audit   *auditsvc.Service
 	Catalog *catalog.Service
+	Sandbox *sandbox.Service
 
 	Store         store.Store
 	Manager       *instance.Manager
@@ -133,7 +131,7 @@ func bodyLimit() gin.HandlerFunc {
 		}
 		limit := int64(maxBodyBytes)
 		if strings.HasSuffix(c.Request.URL.Path, "/exec") {
-			limit = maxCodeBytes + 1024
+			limit = sandbox.MaxCodeBytes + 1024
 		}
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
 		c.Next()
@@ -166,6 +164,9 @@ func Handler(d Deps) http.Handler {
 	}
 	if d.Catalog == nil {
 		d.Catalog = catalog.New(d.Registry)
+	}
+	if d.Sandbox == nil {
+		d.Sandbox = sandbox.New(d.Store, d.Manager)
 	}
 	impl := &strictImpl{d: d}
 	strict := gen.NewStrictHandlerWithOptions(impl, nil, gen.StrictGinServerOptions{
