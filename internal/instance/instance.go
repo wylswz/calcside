@@ -738,7 +738,7 @@ var ErrNoCapability = errors.New("instance: capability not granted")
 
 // WithConsole arms the gate for a console operation and hands fn the gate
 // plus the named capability's closer. ErrNotFound / ErrNotRunning as
-// WithSession; ErrNoCapability when the instance lacks that capability.
+// for Exec; ErrNoCapability when the instance lacks that capability.
 func (m *Manager) WithConsole(id string, cap types.CapabilityName, fn func(gate *capability.Gate, closer io.Closer) error) error {
 	in, ok := m.get(id)
 	if !ok {
