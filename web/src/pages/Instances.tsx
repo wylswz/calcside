@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Instance, Secret } from '../api'
@@ -20,6 +20,7 @@ interface SecretRow {
   kind: SecretSource
   value: string      // inline only
   domains: string    // comma/space separated; optional for vault (narrows)
+  auto?: boolean     // added via an ext secret config field
 }
 interface ExtRow {
   source: string                  // catalog entry source or custom text
@@ -57,19 +58,20 @@ function extCfgValue(type: string, v: string): any {
 
 // ExtRowEditor edits one extension alias row: catalog pick or custom
 // source, alias, per-manifest config form, ops + dependency hints.
-function ExtRowEditor({ row, catalog, secretNames, netOn, fsOn, onChange, onRemove }: {
+function ExtRowEditor({ row, catalog, specNames, vaultNames, netOn, fsOn, onChange, onEnsureSecret, onRemove }: {
   row: ExtRow
   catalog: ExtensionInfo[]
-  secretNames: string[]
+  specNames: string[]   // names already present in the spec's secrets
+  vaultNames: string[]  // names in the user's vault
   netOn: boolean
   fsOn: boolean
   onChange: (r: ExtRow) => void
+  onEnsureSecret: (prevName: string, s: SecretRow) => void
   onRemove: () => void
 }) {
   const set = (patch: Partial<ExtRow>) => onChange({ ...row, ...patch })
   const entry = catalog.find((x) => x.source === row.source)
   const setCfg = (k: string, v: string) => set({ config: { ...row.config, [k]: v } })
-  const secretOpts = [...new Set(secretNames)]
   return (
     <div className="mb-2 rounded border border-gray-200 dark:border-gray-800 p-2 space-y-1">
       <div className="flex gap-1 items-center">
@@ -115,28 +117,31 @@ function ExtRowEditor({ row, catalog, secretNames, netOn, fsOn, onChange, onRemo
         )
       })}
       {entry && (entry.config ?? []).map((f) => (
-        <ExtCfgInput key={f.name} f={f} secretNames={secretOpts}
-          value={row.config[f.name] ?? ''} onChange={(v) => setCfg(f.name, v)} />
+        <ExtCfgInput key={f.name} f={f} specNames={specNames} vaultNames={vaultNames}
+          value={row.config[f.name] ?? ''} onChange={(v) => setCfg(f.name, v)} onEnsureSecret={onEnsureSecret} />
       ))}
       {entry && (entry.config ?? []).map((f) => {
         if (f.type !== 'secret') return null
-        const m = String(f.default ?? '').match(secretRefRe)
-        const need = row.config[f.name]?.match(secretRefRe)?.[1] ?? m?.[1]
-        if (need && !secretOpts.includes(need)) {
-          return <p key={'s' + f.name} className="text-xs text-amber-600 dark:text-amber-400">add secret {need}</p>
+        const eff = row.config[f.name] || String(f.default ?? '')
+        const need = eff.match(secretRefRe)?.[1]
+        if (!need || specNames.includes(need)) return null
+        if (vaultNames.includes(need)) {
+          return <p key={'s' + f.name} className="text-xs text-gray-500">vault secret {need} will be added to the instance</p>
         }
-        return null
+        return <p key={'s' + f.name} className="text-xs text-amber-600 dark:text-amber-400">secret {need} not defined — pick it above or create it inline</p>
       })}
     </div>
   )
 }
 
 // ExtCfgInput renders one manifest config field.
-function ExtCfgInput({ f, value, secretNames, onChange }: {
+function ExtCfgInput({ f, value, specNames, vaultNames, onChange, onEnsureSecret }: {
   f: ExtConfigField
   value: string
-  secretNames: string[]
+  specNames: string[]
+  vaultNames: string[]
   onChange: (v: string) => void
+  onEnsureSecret: (prevName: string, s: SecretRow) => void
 }) {
   const ph = f.default != null ? `default: ${typeof f.default === 'object' ? JSON.stringify(f.default) : f.default}` : ''
   const label = (
@@ -157,21 +162,79 @@ function ExtCfgInput({ f, value, secretNames, onChange }: {
     case 'string_map':
       return <div>{label}<textarea className={inputCls + ' font-mono text-xs'} rows={2} placeholder={ph + ' (k=v per line)'} value={value} onChange={(e) => onChange(e.target.value)} /></div>
     case 'secret':
-      return (
-        <div>
-          {label}
-          <select className={inputCls + ' font-mono text-xs'} value={value}
-            onChange={(e) => onChange(e.target.value)}>
-            <option value="">{ph ? `default (${String(f.default)})` : 'default'}</option>
-            {secretNames.map((n) => (
-              <option key={n} value={`{{secrets.${n}}}`}>{`{{secrets.${n}}}`}</option>
-            ))}
-          </select>
-        </div>
-      )
+      return <SecretCfgInput f={f} label={label} value={value} specNames={specNames} vaultNames={vaultNames} onChange={onChange} onEnsureSecret={onEnsureSecret} />
     default:
       return <div>{label}<input className={inputCls + ' font-mono text-xs'} placeholder={ph} value={value} onChange={(e) => onChange(e.target.value)} /></div>
   }
+}
+
+const secretNameRe = /^[A-Z_][A-Z0-9_]{0,63}$/
+
+// SecretCfgInput edits a `type: secret` config field: pick any vault or
+// already-defined instance secret, or create a new inline secret on the
+// spot (upserted into the spec's secrets via onEnsureSecret).
+function SecretCfgInput({ f, label, value, specNames, vaultNames, onChange, onEnsureSecret }: {
+  f: ExtConfigField
+  label: ReactNode
+  value: string
+  specNames: string[]
+  vaultNames: string[]
+  onChange: (v: string) => void
+  onEnsureSecret: (prevName: string, s: SecretRow) => void
+}) {
+  const defName = String(f.default ?? '').match(secretRefRe)?.[1] ?? ''
+  const [newMode, setNewMode] = useState(false)
+  const [draft, setDraft] = useState({ name: defName, value: '', domains: '' })
+  const [prevName, setPrevName] = useState('')
+  const vaultSet = new Set(vaultNames)
+  const names = [...new Set([...vaultNames, ...specNames])]
+
+  const applyDraft = (d: typeof draft) => {
+    onEnsureSecret(prevName, { name: d.name, kind: 'inline', value: d.value, domains: d.domains })
+    setPrevName(d.name)
+    onChange(d.name ? `{{secrets.${d.name}}}` : '')
+  }
+
+  return (
+    <div>
+      {label}
+      <select className={inputCls + ' font-mono text-xs'} value={newMode ? '__new__' : value}
+        onChange={(e) => {
+          const v = e.target.value
+          if (v === '__new__') {
+            setNewMode(true)
+            applyDraft(draft)
+            return
+          }
+          if (newMode && prevName) {
+            onEnsureSecret(prevName, { name: '', kind: 'inline', value: '', domains: '' })
+          }
+          setNewMode(false)
+          onChange(v)
+        }}>
+        <option value="">{f.default != null ? `default (${String(f.default)})` : 'default'}</option>
+        {names.map((n) => (
+          <option key={n} value={`{{secrets.${n}}}`}>{`{{secrets.${n}}}`}{vaultSet.has(n) ? ' — vault' : ''}</option>
+        ))}
+        <option value="__new__">+ new inline secret…</option>
+      </select>
+      {newMode && (
+        <div className="mt-1 space-y-1 rounded border border-gray-200 dark:border-gray-800 p-2">
+          <input className={inputCls + ' font-mono text-xs'} placeholder="NAME" value={draft.name}
+            onChange={(e) => { const d = { ...draft, name: e.target.value }; setDraft(d); applyDraft(d) }} />
+          {draft.name && !secretNameRe.test(draft.name) && (
+            <p className="text-xs text-red-600">NAME must match [A-Z_][A-Z0-9_]*</p>
+          )}
+          <input type="password" className={inputCls + ' font-mono text-xs'} placeholder="value (never persisted)"
+            value={draft.value} autoComplete="new-password"
+            onChange={(e) => { const d = { ...draft, value: e.target.value }; setDraft(d); applyDraft(d) }} />
+          <input className={inputCls + ' font-mono text-xs'} placeholder="allowed domains (optional; empty = any)"
+            value={draft.domains}
+            onChange={(e) => { const d = { ...draft, domains: e.target.value }; setDraft(d); applyDraft(d) }} />
+        </div>
+      )}
+    </div>
+  )
 }
 
 function NewInstanceDialog({ onClose }: { onClose: () => void }) {
@@ -201,6 +264,24 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
     enabled: extOn,
     retry: false,
   })
+  const vaultNames = useMemo(() => (vault?.secrets ?? []).map((s) => s.name), [vault])
+
+  // upsertSecretRow adds or updates an auto-managed secret row (created
+  // from an ext secret field); a manually added row with the same name
+  // wins, and an empty name just removes the stale auto row.
+  const upsertSecretRow = (prevName: string, row: SecretRow) => {
+    setJsonDirty(false)
+    setSecretRows((rows) => {
+      const next = rows.filter((x) => !(x.auto && x.name === prevName && prevName !== row.name))
+      if (!row.name) return next
+      const i = next.findIndex((x) => x.name === row.name)
+      if (i >= 0) {
+        if (!next[i].auto) return next
+        return next.map((x, j) => (j === i ? { ...row, auto: true } : x))
+      }
+      return [...next, { ...row, auto: true }]
+    })
+  }
 
   const specFromForm = (): SpecDraft => {
     const labels: Record<string, string> = {}
@@ -230,9 +311,9 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
         secs[r.name] = { value: r.value, allowed_domains: doms }
       }
     }
-    if (Object.keys(secs).length) draft.secrets = secs
     if (extOn) {
       const exts: Record<string, any> = {}
+      const needed = new Set<string>()
       for (const r of extRows) {
         if (!r.alias || !aliasRe.test(r.alias) || !r.source) continue
         const e: Record<string, any> = { source: r.source }
@@ -246,9 +327,25 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
         }
         if (Object.keys(cfg).length) e.config = cfg
         exts[r.alias] = e
+        // every {{secrets.NAME}} referenced by config values or manifest
+        // defaults must exist in the instance's secrets
+        for (const f of entry?.config ?? []) {
+          if (f.type !== 'secret') continue
+          const m = (r.config[f.name] || String(f.default ?? '')).match(secretRefRe)
+          if (m) needed.add(m[1])
+        }
+        for (const v of Object.values(r.config)) {
+          const m = String(v).match(secretRefRe)
+          if (m) needed.add(m[1])
+        }
       }
       if (Object.keys(exts).length) caps.ext = exts
+      // referenced vault secrets are added automatically as refs
+      for (const n of needed) {
+        if (!secs[n] && vaultNames.includes(n)) secs[n] = { ref: n }
+      }
     }
+    if (Object.keys(secs).length) draft.secrets = secs
     return draft
   }
 
@@ -256,7 +353,7 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
     if (jsonDirty) return jsonText
     return JSON.stringify(specFromForm(), null, 2)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jsonDirty, ttlMin, fsOn, fsQuota, netOn, netHosts, netMethods, extOn, extRows, extCat, labelsText, envRows, secretRows])
+  }, [jsonDirty, ttlMin, fsOn, fsQuota, netOn, netHosts, netMethods, extOn, extRows, extCat, labelsText, envRows, secretRows, vault])
 
   const create = useMutation({
     mutationFn: (spec: any) => api.post<{ instance: Instance }>('/api/v1/instances', spec),
@@ -329,9 +426,11 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
               )}
               {extRows.map((r, i) => (
                 <ExtRowEditor key={i} row={r} catalog={extCat?.extensions ?? []}
-                  secretNames={secretRows.map((s) => s.name).filter(Boolean)}
+                  specNames={secretRows.map((s) => s.name).filter(Boolean)}
+                  vaultNames={vaultNames}
                   netOn={netOn} fsOn={fsOn}
                   onChange={(nr) => { setJsonDirty(false); const rs = [...extRows]; rs[i] = nr; setExtRows(rs) }}
+                  onEnsureSecret={upsertSecretRow}
                   onRemove={() => { setJsonDirty(false); setExtRows(extRows.filter((_, j) => j !== i)) }} />
               ))}
             </div>
@@ -375,6 +474,7 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
                       <option value="vault">vault</option>
                       <option value="inline">inline</option>
                     </select>
+                    {r.auto && <span className="text-xs text-gray-400">via ext</span>}
                     {r.kind === 'vault' ? (
                       <select className={inputCls + ' font-mono text-xs'} value={r.name} onChange={(e) => set({ name: e.target.value })}>
                         <option value="">pick…</option>
