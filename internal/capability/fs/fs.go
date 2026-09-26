@@ -444,6 +444,152 @@ func (c *Closer) Close() error { return nil }
 // Files returns all file contents (snapshot support).
 func (c *Closer) Files() map[string][]byte { return c.V.Files() }
 
+// Accessor is the typed Go entry point for host-side callers (the
+// console file browser). Every call goes through the same Gate.Invoke
+// as the Starlark binding, with identical args and audit metadata.
+type Accessor struct {
+	v    *VFS
+	gate *capability.Gate
+}
+
+// NewAccessor builds a typed accessor over the instance's VFS and gate.
+func NewAccessor(v *VFS, gate *capability.Gate) *Accessor {
+	return &Accessor{v: v, gate: gate}
+}
+
+func (a *Accessor) invoke(ctx context.Context, op types.Op, c call) error {
+	_, err := a.gate.Invoke(ctx, types.CapFS, op, c.args,
+		func(ctx context.Context, _ map[string]any) (starlark.Value, map[string]any, error) {
+			return c.body(ctx)
+		})
+	return err
+}
+
+// Read returns the file content at path.
+func (a *Accessor) Read(ctx context.Context, path string) (string, error) {
+	var s string
+	c, err := readCall(a.v, path, &s)
+	if err != nil {
+		return "", err
+	}
+	if err := a.invoke(ctx, OpRead, c); err != nil {
+		return "", err
+	}
+	return s, nil
+}
+
+// Stat returns the entry metadata for path.
+func (a *Accessor) Stat(ctx context.Context, path string) (Entry, error) {
+	var e Entry
+	c, err := statCall(a.v, path, &e)
+	if err != nil {
+		return Entry{}, err
+	}
+	if err := a.invoke(ctx, OpStat, c); err != nil {
+		return Entry{}, err
+	}
+	return e, nil
+}
+
+// List returns the direct children of dir.
+func (a *Accessor) List(ctx context.Context, dir string) ([]Entry, error) {
+	var entries []Entry
+	c, err := listCall(a.v, dir, &entries)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.invoke(ctx, OpList, c); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+// call is one gated fs operation: the normalized gate args plus the body
+// that performs it. Shared by the Starlark binding and the typed Go
+// Accessor so both produce identical policy input and audit records.
+type call struct {
+	args map[string]any
+	body capability.OpBody
+}
+
+func readCall(v *VFS, p string, res *string) (call, error) {
+	full, err := Resolve(p)
+	if err != nil {
+		return call{}, err
+	}
+	return call{
+		args: map[string]any{"path": full},
+		body: func(ctx context.Context) (starlark.Value, map[string]any, error) {
+			s, err := v.Read(p)
+			if err != nil {
+				return nil, nil, err
+			}
+			if res != nil {
+				*res = s
+			}
+			return starlark.String(s), map[string]any{"bytes": len(s)}, nil
+		},
+	}, nil
+}
+
+func statCall(v *VFS, p string, res *Entry) (call, error) {
+	full, err := Resolve(p)
+	if err != nil {
+		return call{}, err
+	}
+	return call{
+		args: map[string]any{"path": full},
+		body: func(ctx context.Context) (starlark.Value, map[string]any, error) {
+			e, err := v.Stat(p)
+			if err != nil {
+				return nil, nil, err
+			}
+			if res != nil {
+				*res = e
+			}
+			return entryDict(e), map[string]any{"is_dir": e.IsDir, "size": e.Size}, nil
+		},
+	}, nil
+}
+
+func listCall(v *VFS, dir string, res *[]Entry) (call, error) {
+	full, err := Resolve(dir)
+	if err != nil {
+		return call{}, err
+	}
+	return call{
+		args: map[string]any{"path": full},
+		body: func(ctx context.Context) (starlark.Value, map[string]any, error) {
+			entries, err := v.List(dir)
+			if err != nil {
+				return nil, nil, err
+			}
+			if res != nil {
+				*res = entries
+			}
+			return entryList(entries), map[string]any{"count": len(entries)}, nil
+		},
+	}, nil
+}
+
+func entryDict(e Entry) starlark.Value {
+	return dictOf(map[string]starlark.Value{
+		"name":   starlark.String(e.Name),
+		"path":   starlark.String(e.Path),
+		"is_dir": starlark.Bool(e.IsDir),
+		"size":   starlark.MakeInt64(e.Size),
+		"mtime":  starlark.MakeInt64(e.Mtime),
+	})
+}
+
+func entryList(entries []Entry) starlark.Value {
+	l := make([]starlark.Value, len(entries))
+	for i, e := range entries {
+		l[i] = entryDict(e)
+	}
+	return starlark.NewList(l)
+}
+
 func bindFS(v *VFS, gate *capability.Gate) starlark.Value {
 	pathArg := func(op string, args starlark.Tuple, kwargs []starlark.Tuple, extra ...any) (string, []any, error) {
 		var p string
@@ -453,22 +599,6 @@ func bindFS(v *VFS, gate *capability.Gate) starlark.Value {
 		}
 		return p, nil, nil
 	}
-	entryDict := func(e Entry) starlark.Value {
-		return dictOf(map[string]starlark.Value{
-			"name":   starlark.String(e.Name),
-			"path":   starlark.String(e.Path),
-			"is_dir": starlark.Bool(e.IsDir),
-			"size":   starlark.MakeInt64(e.Size),
-			"mtime":  starlark.MakeInt64(e.Mtime),
-		})
-	}
-	entryList := func(entries []Entry) starlark.Value {
-		l := make([]starlark.Value, len(entries))
-		for i, e := range entries {
-			l[i] = entryDict(e)
-		}
-		return starlark.NewList(l)
-	}
 
 	return capability.Bind(types.CapFS, gate, map[types.Op]capability.Method{
 		OpRead: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
@@ -476,17 +606,11 @@ func bindFS(v *VFS, gate *capability.Gate) starlark.Value {
 			if err != nil {
 				return nil, nil, err
 			}
-			full, err := Resolve(p)
+			c, err := readCall(v, p, nil)
 			if err != nil {
 				return nil, nil, err
 			}
-			return map[string]any{"path": full}, func(ctx context.Context) (starlark.Value, map[string]any, error) {
-				s, err := v.Read(p)
-				if err != nil {
-					return nil, nil, err
-				}
-				return starlark.String(s), map[string]any{"bytes": len(s)}, nil
-			}, nil
+			return c.args, c.body, nil
 		},
 		OpWrite: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
 			var p, content string
@@ -544,34 +668,22 @@ func bindFS(v *VFS, gate *capability.Gate) starlark.Value {
 			if err != nil {
 				return nil, nil, err
 			}
-			full, err := Resolve(p)
+			c, err := statCall(v, p, nil)
 			if err != nil {
 				return nil, nil, err
 			}
-			return map[string]any{"path": full}, func(ctx context.Context) (starlark.Value, map[string]any, error) {
-				e, err := v.Stat(p)
-				if err != nil {
-					return nil, nil, err
-				}
-				return entryDict(e), map[string]any{"is_dir": e.IsDir, "size": e.Size}, nil
-			}, nil
+			return c.args, c.body, nil
 		},
 		OpList: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
 			p := root
 			if err := starlark.UnpackArgs(string(OpList), args, kwargs, "dir?", &p); err != nil {
 				return nil, nil, err
 			}
-			full, err := Resolve(p)
+			c, err := listCall(v, p, nil)
 			if err != nil {
 				return nil, nil, err
 			}
-			return map[string]any{"path": full}, func(ctx context.Context) (starlark.Value, map[string]any, error) {
-				entries, err := v.List(p)
-				if err != nil {
-					return nil, nil, err
-				}
-				return entryList(entries), map[string]any{"count": len(entries)}, nil
-			}, nil
+			return c.args, c.body, nil
 		},
 		OpWalk: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
 			p := root

@@ -111,18 +111,21 @@ var (
 )
 
 type inst struct {
-	meta     *store.Instance
-	sess     *engine.Session
-	gate     *capability.Gate
-	closers  []io.Closer
-	out      *capio.Buffer
-	vfs      interface{ Files() map[string][]byte } // *fs.Closer V, kept loose to avoid import
-	capCfgs  map[string]any                         // validated capability configs, incl. implicit io
-	limits   Limits
-	userID   string
-	userMail string
-	secrets  *secrets.Set
-	metaMu   sync.Mutex // guards meta timestamp/status updates
+	meta    *store.Instance
+	sess    *engine.Session
+	gate    *capability.Gate
+	closers []io.Closer
+	// capClosers indexes capability closers by capability name, for
+	// host-side access (console file browse) without starlark types.
+	capClosers map[types.CapabilityName]io.Closer
+	out        *capio.Buffer
+	vfs        interface{ Files() map[string][]byte } // *fs.Closer V, kept loose to avoid import
+	capCfgs    map[string]any                         // validated capability configs, incl. implicit io
+	limits     Limits
+	userID     string
+	userMail   string
+	secrets    *secrets.Set
+	metaMu     sync.Mutex // guards meta timestamp/status updates
 }
 
 // Manager owns all live instances.
@@ -507,6 +510,7 @@ func (m *Manager) Create(ctx context.Context, user *store.User, rawSpec []byte) 
 		names = append(names, string(types.CapExt))
 	}
 	bindings := map[types.CapabilityName]starlark.Value{}
+	capClosers := map[types.CapabilityName]io.Closer{}
 	for _, name := range names {
 		f, _ := m.reg.Get(types.CapabilityName(name))
 		val, closer, err := f.New(typed[name], capability.InstanceEnv{Gate: gate, Secrets: secSet, Bindings: bindings, MaxSteps: spec.Limits.MaxSteps})
@@ -518,6 +522,7 @@ func (m *Manager) Create(ctx context.Context, user *store.User, rawSpec []byte) 
 		}
 		if closer != nil {
 			closers = append(closers, closer)
+			capClosers[types.CapabilityName(name)] = closer
 			switch c := closer.(type) {
 			case *capio.Closer:
 				outBuf = c.B
@@ -545,16 +550,17 @@ func (m *Manager) Create(ctx context.Context, user *store.User, rawSpec []byte) 
 	}
 
 	in := &inst{
-		meta:     meta,
-		gate:     gate,
-		closers:  closers,
-		out:      outBuf,
-		vfs:      vfs,
-		capCfgs:  typed,
-		limits:   spec.Limits,
-		userID:   user.ID,
-		userMail: user.Email,
-		secrets:  secSet,
+		meta:       meta,
+		gate:       gate,
+		closers:    closers,
+		capClosers: capClosers,
+		out:        outBuf,
+		vfs:        vfs,
+		capCfgs:    typed,
+		limits:     spec.Limits,
+		userID:     user.ID,
+		userMail:   user.Email,
+		secrets:    secSet,
 	}
 	in.sess = &engine.Session{
 		Gate:        gate,
@@ -726,16 +732,24 @@ func (m *Manager) Exec(
 	return &res, nil
 }
 
-// FSAccess performs a gated fs op for the files API using a synthetic
-// exec id. fn receives the session's gate; the caller invokes the fs
-// binding through it. Returns ErrNotFound/ErrNotRunning as appropriate.
-func (m *Manager) WithSession(id string, fn func(s *engine.Session, gate *capability.Gate) error) error {
+// ErrNoCapability is returned by WithConsole when the instance lacks the
+// named capability.
+var ErrNoCapability = errors.New("instance: capability not granted")
+
+// WithConsole arms the gate for a console operation and hands fn the gate
+// plus the named capability's closer. ErrNotFound / ErrNotRunning as
+// WithSession; ErrNoCapability when the instance lacks that capability.
+func (m *Manager) WithConsole(id string, cap types.CapabilityName, fn func(gate *capability.Gate, closer io.Closer) error) error {
 	in, ok := m.get(id)
 	if !ok {
 		return ErrNotFound
 	}
 	if in.meta.Status != types.InstanceRunning {
 		return ErrNotRunning
+	}
+	closer, ok := in.capClosers[cap]
+	if !ok {
+		return ErrNoCapability
 	}
 	in.sess.ExecMu.Lock()
 	defer in.sess.ExecMu.Unlock()
@@ -747,7 +761,7 @@ func (m *Manager) WithSession(id string, fn func(s *engine.Session, gate *capabi
 		Labels:     in.meta.Labels,
 	})
 	defer in.gate.Disarm()
-	return fn(in.sess, in.gate)
+	return fn(in.gate, closer)
 }
 
 // HasCapability reports whether the live instance has the named binding.
