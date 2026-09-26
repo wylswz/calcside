@@ -25,6 +25,7 @@ import (
 	"calcside/internal/policy"
 	promptpkg "calcside/internal/prompt"
 	"calcside/internal/secrets"
+	"calcside/internal/service"
 	"calcside/internal/store"
 	"calcside/internal/types"
 )
@@ -54,10 +55,6 @@ func (r rawJSON) write(w http.ResponseWriter) error {
 	return err
 }
 
-func errEnv(code types.APIErrorCode, msg string) any {
-	return map[string]any{"error": map[string]string{"code": string(code), "message": msg}}
-}
-
 func principal(ctx context.Context) *auth.Principal { return auth.FromContext(ctx) }
 
 // realCtx unwraps *gin.Context into Request.Context(): the gin Context
@@ -74,7 +71,7 @@ func needAuth(ctx context.Context) (*auth.Principal, *rawJSON) {
 	if p := principal(ctx); p != nil {
 		return p, nil
 	}
-	e := rawJSON{http.StatusUnauthorized, errEnv(types.ErrCodeUnauthorized, "authentication required")}
+	e := fail(&service.Error{Code: types.ErrCodeUnauthorized, Msg: "authentication required"})
 	return nil, &e
 }
 
@@ -83,11 +80,11 @@ func needAuth(ctx context.Context) (*auth.Principal, *rawJSON) {
 func needSession(ctx context.Context) (*auth.Principal, *rawJSON) {
 	p := principal(ctx)
 	if p == nil {
-		e := rawJSON{http.StatusUnauthorized, errEnv(types.ErrCodeUnauthorized, "authentication required")}
+		e := fail(&service.Error{Code: types.ErrCodeUnauthorized, Msg: "authentication required"})
 		return nil, &e
 	}
 	if p.ViaKey() {
-		e := rawJSON{http.StatusForbidden, errEnv(types.ErrCodeForbidden, "session required to manage API keys")}
+		e := fail(service.Forbidden("session required to manage API keys"))
 		return nil, &e
 	}
 	return p, nil
@@ -318,7 +315,7 @@ func (s *strictImpl) ListKeys(ctx context.Context, _ gen.ListKeysRequestObject) 
 	}
 	keys, err := s.d.Store.ListAPIKeys(ctx, p.User.ID)
 	if err != nil {
-		return listKeysResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+		return listKeysResp{fail(service.Internal(err))}, nil
 	}
 	if keys == nil {
 		keys = []*store.APIKey{}
@@ -347,7 +344,7 @@ func (s *strictImpl) CreateKey(ctx context.Context, req gen.CreateKeyRequestObje
 	}
 	secret, key := auth.NewAPIKey(p.User.ID, name, exp)
 	if err := s.d.Store.CreateAPIKey(ctx, key); err != nil {
-		return createKeyResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+		return createKeyResp{fail(service.Internal(err))}, nil
 	}
 	return createKeyResp{rawJSON{201, map[string]any{"key": key, "secret": secret}}}, nil
 }
@@ -360,9 +357,9 @@ func (s *strictImpl) DeleteKey(ctx context.Context, req gen.DeleteKeyRequestObje
 	}
 	if err := s.d.Store.RevokeAPIKey(ctx, p.User.ID, req.Id); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return deleteKeyResp{rawJSON{404, errEnv(types.ErrCodeNotFound, "key not found")}}, nil
+			return deleteKeyResp{fail(service.NotFound("key not found"))}, nil
 		}
-		return deleteKeyResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+		return deleteKeyResp{fail(service.Internal(err))}, nil
 	}
 	return deleteKeyResp{rawJSON{200, map[string]any{"ok": true}}}, nil
 }
@@ -379,12 +376,12 @@ func (s *strictImpl) ListInstances(ctx context.Context, req gen.ListInstancesReq
 	if req.Params.Status != nil {
 		status = types.InstanceStatus(*req.Params.Status)
 		if !status.Valid() {
-			return listInstancesResp{rawJSON{400, errEnv(types.ErrCodeBadRequest, "invalid status filter")}}, nil
+			return listInstancesResp{fail(service.BadRequest("invalid status filter"))}, nil
 		}
 	}
 	lst, err := s.d.Manager.List(ctx, p.User.ID, status)
 	if err != nil {
-		return listInstancesResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+		return listInstancesResp{fail(service.Internal(err))}, nil
 	}
 	if lst == nil {
 		lst = []*store.Instance{}
@@ -402,7 +399,7 @@ func (s *strictImpl) CreateInstance(ctx context.Context, req gen.CreateInstanceR
 	if req.Body != nil {
 		b, err := json.Marshal(req.Body)
 		if err != nil {
-			return createInstanceResp{rawJSON{400, errEnv(types.ErrCodeBadRequest, "invalid JSON body")}}, nil
+			return createInstanceResp{fail(service.BadRequest("invalid JSON body"))}, nil
 		}
 		raw = b
 	}
@@ -410,11 +407,11 @@ func (s *strictImpl) CreateInstance(ctx context.Context, req gen.CreateInstanceR
 	if err != nil {
 		switch {
 		case errors.Is(err, instance.ErrTooMany):
-			return createInstanceResp{rawJSON{429, errEnv(types.ErrCodeTooMany, err.Error())}}, nil
+			return createInstanceResp{fail(service.Errf(types.ErrCodeTooMany, "%s", err.Error()))}, nil
 		case errors.Is(err, instance.ErrCapabilityName):
-			return createInstanceResp{rawJSON{400, errEnv(types.ErrCodeBadCapability, err.Error())}}, nil
+			return createInstanceResp{fail(service.Errf(types.ErrCodeBadCapability, "%s", err.Error()))}, nil
 		default:
-			return createInstanceResp{rawJSON{400, errEnv(types.ErrCodeBadSpec, err.Error())}}, nil
+			return createInstanceResp{fail(service.Errf(types.ErrCodeBadSpec, "%s", err.Error()))}, nil
 		}
 	}
 	return createInstanceResp{rawJSON{201, map[string]any{"instance": meta}}}, nil
@@ -427,7 +424,7 @@ func (s *strictImpl) ownedInstance(ctx context.Context, id string) (*store.Insta
 	p := principal(ctx)
 	in, err := s.d.Manager.Get(ctx, id)
 	if err != nil || in.UserID != p.User.ID {
-		e := rawJSON{404, errEnv(types.ErrCodeNotFound, "instance not found")}
+		e := fail(service.NotFound("instance not found"))
 		return nil, &e
 	}
 	return in, nil
@@ -456,9 +453,9 @@ func (s *strictImpl) DeleteInstance(ctx context.Context, req gen.DeleteInstanceR
 	}
 	if err := s.d.Manager.Delete(ctx, in.ID); err != nil {
 		if errors.Is(err, instance.ErrNotFound) {
-			return deleteInstanceResp{rawJSON{404, errEnv(types.ErrCodeNotFound, "instance not found")}}, nil
+			return deleteInstanceResp{fail(service.NotFound("instance not found"))}, nil
 		}
-		return deleteInstanceResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+		return deleteInstanceResp{fail(service.Internal(err))}, nil
 	}
 	return deleteInstanceResp{rawJSON{200, map[string]any{"ok": true}}}, nil
 }
@@ -475,9 +472,9 @@ func (s *strictImpl) Keepalive(ctx context.Context, req gen.KeepaliveRequestObje
 	meta, err := s.d.Manager.Keepalive(ctx, in.ID)
 	if err != nil {
 		if errors.Is(err, instance.ErrNotRunning) {
-			return keepaliveResp{rawJSON{409, errEnv(types.ErrCodeNotRunning, "instance not running")}}, nil
+			return keepaliveResp{fail(service.Errf(types.ErrCodeNotRunning, "instance not running"))}, nil
 		}
-		return keepaliveResp{rawJSON{404, errEnv(types.ErrCodeNotFound, "instance not found")}}, nil
+		return keepaliveResp{fail(service.NotFound("instance not found"))}, nil
 	}
 	return keepaliveResp{rawJSON{200, map[string]any{"instance": meta}}}, nil
 }
@@ -495,7 +492,7 @@ func (s *strictImpl) Exec(ctx context.Context, req gen.ExecRequestObject) (gen.E
 		return execResp{*e}, nil
 	}
 	if in.Status != types.InstanceRunning {
-		return execResp{rawJSON{409, errEnv(types.ErrCodeNotRunning, "instance not running")}}, nil
+		return execResp{fail(service.Errf(types.ErrCodeNotRunning, "instance not running"))}, nil
 	}
 	var body gen.ExecRequest
 	if req.Body != nil {
@@ -506,7 +503,7 @@ func (s *strictImpl) Exec(ctx context.Context, req gen.ExecRequestObject) (gen.E
 		timeoutMs = *body.TimeoutMs
 	}
 	if len(body.Code) > maxCodeBytes {
-		return execResp{rawJSON{413, errEnv(types.ErrCodeTooLarge, "code exceeds 256KB")}}, nil
+		return execResp{fail(service.Errf(types.ErrCodeTooLarge, "code exceeds 256KB"))}, nil
 	}
 	record := func(res *engine.Result, execID string) {
 		sum := sha256.Sum256([]byte(body.Code))
@@ -532,11 +529,11 @@ func (s *strictImpl) Exec(ctx context.Context, req gen.ExecRequestObject) (gen.E
 	if err != nil {
 		switch {
 		case errors.Is(err, instance.ErrNotFound):
-			return execResp{rawJSON{404, errEnv(types.ErrCodeNotFound, "instance not found")}}, nil
+			return execResp{fail(service.NotFound("instance not found"))}, nil
 		case errors.Is(err, instance.ErrNotRunning):
-			return execResp{rawJSON{409, errEnv(types.ErrCodeNotRunning, "instance not running")}}, nil
+			return execResp{fail(service.Errf(types.ErrCodeNotRunning, "instance not running"))}, nil
 		default:
-			return execResp{rawJSON{400, errEnv(types.ErrCodeBadRequest, err.Error())}}, nil
+			return execResp{fail(service.BadRequest("%s", err.Error()))}, nil
 		}
 	}
 	return execResp{rawJSON{200, res}}, nil
@@ -560,20 +557,20 @@ func (s *strictImpl) InstancePrompt(ctx context.Context, req gen.InstancePromptR
 		prefix = *req.Params.ToolPrefix
 	}
 	if !toolPrefixRe.MatchString(prefix) {
-		return instancePromptResp{rawJSON{400, errEnv(types.ErrCodeBadRequest, "invalid tool_prefix")}}, nil
+		return instancePromptResp{fail(service.BadRequest("invalid tool_prefix"))}, nil
 	}
 	if in.Status != types.InstanceRunning {
-		return instancePromptResp{rawJSON{409, errEnv(types.ErrCodeNotRunning, "instance not running")}}, nil
+		return instancePromptResp{fail(service.Errf(types.ErrCodeNotRunning, "instance not running"))}, nil
 	}
 	data, err := s.d.Manager.PromptData(in.ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, instance.ErrNotFound):
-			return instancePromptResp{rawJSON{404, errEnv(types.ErrCodeNotFound, "instance not found")}}, nil
+			return instancePromptResp{fail(service.NotFound("instance not found"))}, nil
 		case errors.Is(err, instance.ErrNotRunning):
-			return instancePromptResp{rawJSON{409, errEnv(types.ErrCodeNotRunning, "instance not running")}}, nil
+			return instancePromptResp{fail(service.Errf(types.ErrCodeNotRunning, "instance not running"))}, nil
 		default:
-			return instancePromptResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+			return instancePromptResp{fail(service.Internal(err))}, nil
 		}
 	}
 	var fragments []string
@@ -608,7 +605,7 @@ func (s *strictImpl) InstancePrompt(ctx context.Context, req gen.InstancePromptR
 		Persistent:     true,
 	})
 	if err != nil {
-		return instancePromptResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+		return instancePromptResp{fail(service.Internal(err))}, nil
 	}
 	return instancePromptResp{rawJSON{200, map[string]any{
 		"instance_id":  in.ID,
@@ -642,10 +639,10 @@ func (s *strictImpl) Files(ctx context.Context, req gen.FilesRequestObject) (gen
 		return filesResp{*e}, nil
 	}
 	if in.Status != types.InstanceRunning {
-		return filesResp{rawJSON{409, errEnv(types.ErrCodeNotRunning, "instance not running")}}, nil
+		return filesResp{fail(service.Errf(types.ErrCodeNotRunning, "instance not running"))}, nil
 	}
 	if !s.d.Manager.HasCapability(in.ID, string(types.CapFS)) {
-		return filesResp{rawJSON{400, errEnv(types.ErrCodeNoFS, "instance has no fs capability")}}, nil
+		return filesResp{fail(service.Errf(types.ErrCodeNoFS, "instance has no fs capability"))}, nil
 	}
 	p := "/work"
 	if req.Params.Path != nil && *req.Params.Path != "" {
@@ -704,13 +701,13 @@ func (s *strictImpl) Files(ctx context.Context, req gen.FilesRequestObject) (gen
 	if err != nil {
 		switch {
 		case errors.Is(err, instance.ErrNotFound):
-			return filesResp{rawJSON{404, errEnv(types.ErrCodeNotFound, "instance not found")}}, nil
+			return filesResp{fail(service.NotFound("instance not found"))}, nil
 		case errors.Is(err, instance.ErrNotRunning):
-			return filesResp{rawJSON{409, errEnv(types.ErrCodeNotRunning, "instance not running")}}, nil
+			return filesResp{fail(service.Errf(types.ErrCodeNotRunning, "instance not running"))}, nil
 		case strings.Contains(err.Error(), "does not exist"):
-			return filesResp{rawJSON{404, errEnv(types.ErrCodeNotFound, err.Error())}}, nil
+			return filesResp{fail(service.NotFound(err.Error()))}, nil
 		default:
-			return filesResp{rawJSON{400, errEnv(types.ErrCodeFSError, err.Error())}}, nil
+			return filesResp{fail(service.Errf(types.ErrCodeFSError, "%s", err.Error()))}, nil
 		}
 	}
 	if d, _ := stat["is_dir"].(bool); d {
@@ -786,7 +783,7 @@ func (s *strictImpl) ListExecutions(ctx context.Context, req gen.ListExecutionsR
 	}
 	lst, err := s.d.Store.ListExecutions(ctx, in.ID, limit)
 	if err != nil {
-		return listExecutionsResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+		return listExecutionsResp{fail(service.Internal(err))}, nil
 	}
 	if lst == nil {
 		lst = []*store.Execution{}
@@ -804,7 +801,7 @@ func (s *strictImpl) GetExecution(ctx context.Context, req gen.GetExecutionReque
 	}
 	ex, err := s.d.Store.GetExecution(ctx, req.Id)
 	if err != nil || ex.UserID != p.User.ID {
-		return getExecutionResp{rawJSON{404, errEnv(types.ErrCodeNotFound, "execution not found")}}, nil
+		return getExecutionResp{fail(service.NotFound("execution not found"))}, nil
 	}
 	return getExecutionResp{rawJSON{200, map[string]any{"execution": ex, "code": ex.Code}}}, nil
 }
@@ -833,7 +830,7 @@ func (s *strictImpl) ListAudit(ctx context.Context, req gen.ListAuditRequestObje
 	}
 	lst, err := s.d.Store.ListAuditEvents(ctx, f)
 	if err != nil {
-		return listAuditResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+		return listAuditResp{fail(service.Internal(err))}, nil
 	}
 	if lst == nil {
 		lst = []*store.AuditEvent{}
@@ -851,7 +848,7 @@ func (s *strictImpl) ListPolicies(ctx context.Context, _ gen.ListPoliciesRequest
 	}
 	lst, err := s.d.Store.ListPolicies(ctx, p.User.ID)
 	if err != nil {
-		return listPoliciesResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+		return listPoliciesResp{fail(service.Internal(err))}, nil
 	}
 	if lst == nil {
 		lst = []*store.Policy{}
@@ -872,17 +869,17 @@ func (s *strictImpl) CreatePolicy(ctx context.Context, req gen.CreatePolicyReque
 		enabled = req.Body.Enabled
 	}
 	if name == "" || rego == "" {
-		return createPolicyResp{rawJSON{400, errEnv(types.ErrCodeBadRequest, "name and rego required")}}, nil
+		return createPolicyResp{fail(service.BadRequest("name and rego required"))}, nil
 	}
 	if err := policy.Validate(rego); err != nil {
-		return createPolicyResp{rawJSON{400, errEnv(types.ErrCodeBadPolicy, err.Error())}}, nil
+		return createPolicyResp{fail(service.Errf(types.ErrCodeBadPolicy, "%s", err.Error()))}, nil
 	}
 	pol := &store.Policy{UserID: p.User.ID, Name: name, Rego: rego, Enabled: true}
 	if enabled != nil {
 		pol.Enabled = *enabled
 	}
 	if err := s.d.Store.CreatePolicy(ctx, pol); err != nil {
-		return createPolicyResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+		return createPolicyResp{fail(service.Internal(err))}, nil
 	}
 	return createPolicyResp{rawJSON{201, map[string]any{"policy": pol}}}, nil
 }
@@ -910,7 +907,7 @@ func (s *strictImpl) GetPolicy(ctx context.Context, req gen.GetPolicyRequestObje
 	}
 	pol, err := s.d.Store.GetPolicy(ctx, req.Id)
 	if err != nil || pol.UserID != p.User.ID {
-		return getPolicyResp{rawJSON{404, errEnv(types.ErrCodeNotFound, "policy not found")}}, nil
+		return getPolicyResp{fail(service.NotFound("policy not found"))}, nil
 	}
 	return getPolicyResp{rawJSON{200, map[string]any{"policy": pol}}}, nil
 }
@@ -923,7 +920,7 @@ func (s *strictImpl) UpdatePolicy(ctx context.Context, req gen.UpdatePolicyReque
 	}
 	pol, err := s.d.Store.GetPolicy(ctx, req.Id)
 	if err != nil || pol.UserID != p.User.ID {
-		return updatePolicyResp{rawJSON{404, errEnv(types.ErrCodeNotFound, "policy not found")}}, nil
+		return updatePolicyResp{fail(service.NotFound("policy not found"))}, nil
 	}
 	if req.Body != nil {
 		if req.Body.Name != nil {
@@ -931,7 +928,7 @@ func (s *strictImpl) UpdatePolicy(ctx context.Context, req gen.UpdatePolicyReque
 		}
 		if req.Body.Rego != nil {
 			if err := policy.Validate(*req.Body.Rego); err != nil {
-				return updatePolicyResp{rawJSON{400, errEnv(types.ErrCodeBadPolicy, err.Error())}}, nil
+				return updatePolicyResp{fail(service.Errf(types.ErrCodeBadPolicy, "%s", err.Error()))}, nil
 			}
 			pol.Rego = *req.Body.Rego
 		}
@@ -940,7 +937,7 @@ func (s *strictImpl) UpdatePolicy(ctx context.Context, req gen.UpdatePolicyReque
 		}
 	}
 	if err := s.d.Store.UpdatePolicy(ctx, pol); err != nil {
-		return updatePolicyResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+		return updatePolicyResp{fail(service.Internal(err))}, nil
 	}
 	return updatePolicyResp{rawJSON{200, map[string]any{"policy": pol}}}, nil
 }
@@ -953,10 +950,10 @@ func (s *strictImpl) DeletePolicy(ctx context.Context, req gen.DeletePolicyReque
 	}
 	pol, err := s.d.Store.GetPolicy(ctx, req.Id)
 	if err != nil || pol.UserID != p.User.ID {
-		return deletePolicyResp{rawJSON{404, errEnv(types.ErrCodeNotFound, "policy not found")}}, nil
+		return deletePolicyResp{fail(service.NotFound("policy not found"))}, nil
 	}
 	if err := s.d.Store.DeletePolicy(ctx, pol.ID); err != nil {
-		return deletePolicyResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+		return deletePolicyResp{fail(service.Internal(err))}, nil
 	}
 	return deletePolicyResp{rawJSON{200, map[string]any{"ok": true}}}, nil
 }
@@ -964,8 +961,8 @@ func (s *strictImpl) DeletePolicy(ctx context.Context, req gen.DeletePolicyReque
 // --- secrets vault (session only) ---
 
 func secretsDisabled() *rawJSON {
-	return &rawJSON{http.StatusServiceUnavailable,
-		errEnv(types.ErrCodeSecretsDisabled, "secrets vault disabled (no --secret-key)")}
+	e := fail(service.Errf(types.ErrCodeSecretsDisabled, "secrets vault disabled (no --secret-key)"))
+	return &e
 }
 
 func (s *strictImpl) ListSecrets(ctx context.Context, _ gen.ListSecretsRequestObject) (gen.ListSecretsResponseObject, error) {
@@ -979,7 +976,7 @@ func (s *strictImpl) ListSecrets(ctx context.Context, _ gen.ListSecretsRequestOb
 	}
 	lst, err := s.d.Store.ListSecrets(ctx, p.User.ID)
 	if err != nil {
-		return listSecretsResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+		return listSecretsResp{fail(service.Internal(err))}, nil
 	}
 	if lst == nil {
 		lst = []*store.Secret{}
@@ -1021,11 +1018,11 @@ func (s *strictImpl) CreateSecret(ctx context.Context, req gen.CreateSecretReque
 		}
 	}
 	if err := validateSecretInput(name, value, domains); err != nil {
-		return createSecretResp{rawJSON{400, errEnv(types.ErrCodeBadSecret, err.Error())}}, nil
+		return createSecretResp{fail(service.Errf(types.ErrCodeBadSecret, "%s", err.Error()))}, nil
 	}
 	ct, err := s.d.Cipher.Seal([]byte(value), p.User.ID+"/"+name)
 	if err != nil {
-		return createSecretResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+		return createSecretResp{fail(service.Internal(err))}, nil
 	}
 	if domains == nil {
 		domains = []string{} // unrestricted; responses always carry an array
@@ -1033,9 +1030,9 @@ func (s *strictImpl) CreateSecret(ctx context.Context, req gen.CreateSecretReque
 	sec := &store.Secret{UserID: p.User.ID, Name: name, Ciphertext: ct, AllowedDomains: domains}
 	if err := s.d.Store.CreateSecret(ctx, sec); err != nil {
 		if errors.Is(err, store.ErrConflict) {
-			return createSecretResp{rawJSON{409, errEnv(types.ErrCodeConflict, "secret with that name already exists")}}, nil
+			return createSecretResp{fail(service.Conflict("secret with that name already exists"))}, nil
 		}
-		return createSecretResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+		return createSecretResp{fail(service.Internal(err))}, nil
 	}
 	return createSecretResp{rawJSON{201, map[string]any{"secret": sec}}}, nil
 }
@@ -1051,28 +1048,28 @@ func (s *strictImpl) UpdateSecret(ctx context.Context, req gen.UpdateSecretReque
 	}
 	sec, err := s.d.Store.GetSecret(ctx, req.Id)
 	if err != nil || sec.UserID != p.User.ID {
-		return updateSecretResp{rawJSON{404, errEnv(types.ErrCodeNotFound, "secret not found")}}, nil
+		return updateSecretResp{fail(service.NotFound("secret not found"))}, nil
 	}
 	if req.Body != nil {
 		if req.Body.Value != nil {
 			if len(*req.Body.Value) == 0 || len(*req.Body.Value) > secrets.MaxValueBytes {
-				return updateSecretResp{rawJSON{400, errEnv(types.ErrCodeBadSecret, "value must be 1..16KiB")}}, nil
+				return updateSecretResp{fail(service.Errf(types.ErrCodeBadSecret, "value must be 1..16KiB"))}, nil
 			}
 			ct, err := s.d.Cipher.Seal([]byte(*req.Body.Value), p.User.ID+"/"+sec.Name)
 			if err != nil {
-				return updateSecretResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+				return updateSecretResp{fail(service.Internal(err))}, nil
 			}
 			sec.Ciphertext = ct
 		}
 		if req.Body.AllowedDomains != nil {
 			if _, err := secrets.ValidateDomains(*req.Body.AllowedDomains); err != nil {
-				return updateSecretResp{rawJSON{400, errEnv(types.ErrCodeBadSecret, err.Error())}}, nil
+				return updateSecretResp{fail(service.Errf(types.ErrCodeBadSecret, "%s", err.Error()))}, nil
 			}
 			sec.AllowedDomains = *req.Body.AllowedDomains
 		}
 	}
 	if err := s.d.Store.UpdateSecret(ctx, sec); err != nil {
-		return updateSecretResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+		return updateSecretResp{fail(service.Internal(err))}, nil
 	}
 	return updateSecretResp{rawJSON{200, map[string]any{"secret": sec}}}, nil
 }
@@ -1088,10 +1085,10 @@ func (s *strictImpl) DeleteSecret(ctx context.Context, req gen.DeleteSecretReque
 	}
 	sec, err := s.d.Store.GetSecret(ctx, req.Id)
 	if err != nil || sec.UserID != p.User.ID {
-		return deleteSecretResp{rawJSON{404, errEnv(types.ErrCodeNotFound, "secret not found")}}, nil
+		return deleteSecretResp{fail(service.NotFound("secret not found"))}, nil
 	}
 	if err := s.d.Store.DeleteSecret(ctx, sec.ID); err != nil {
-		return deleteSecretResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+		return deleteSecretResp{fail(service.Internal(err))}, nil
 	}
 	return deleteSecretResp{rawJSON{200, map[string]any{"ok": true}}}, nil
 }
