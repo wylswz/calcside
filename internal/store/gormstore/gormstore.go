@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	glogger "gorm.io/gorm/logger"
 
 	"calcside/internal/store"
@@ -95,6 +96,12 @@ func mapWriteErr(err error) error {
 		return store.ErrConflict
 	}
 	return err
+}
+
+// col builds a SET assignment for .Set(...).Update, used where a struct
+// update would skip zero values (e.g. writing NULL into ended_at).
+func col(name string, v any) clause.Assignment {
+	return clause.Assignment{Column: clause.Column{Name: name}, Value: v}
 }
 
 // --- row structs ---
@@ -297,8 +304,7 @@ func (r secretRow) toStore() *store.Secret {
 func (d *sqlDB) UpsertUserByEmail(ctx context.Context, email, name, googleSub string) (*store.User, error) {
 	now := time.Now().UTC()
 	err := d.g.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var row userRow
-		rerr := tx.Where("email = ?", email).Take(&row).Error
+		row, rerr := gorm.G[userRow](tx).Where("email = ?", email).Take(ctx)
 		switch {
 		case errors.Is(rerr, gorm.ErrRecordNotFound):
 			row = userRow{
@@ -306,7 +312,7 @@ func (d *sqlDB) UpsertUserByEmail(ctx context.Context, email, name, googleSub st
 				Name: name, GoogleSub: googleSub,
 				CreatedAt: now, LastLoginAt: now,
 			}
-			return tx.Create(&row).Error
+			return gorm.G[userRow](tx).Create(ctx, &row)
 		case rerr != nil:
 			return rerr
 		default:
@@ -317,22 +323,22 @@ func (d *sqlDB) UpsertUserByEmail(ctx context.Context, email, name, googleSub st
 				row.GoogleSub = googleSub
 			}
 			row.LastLoginAt = now
-			return tx.Save(&row).Error
+			_, err := gorm.G[userRow](tx).Where("id = ?", row.ID).Updates(ctx, row)
+			return err
 		}
 	})
 	if err != nil {
 		return nil, err
 	}
-	var row userRow
-	if err := d.g.WithContext(ctx).Where("email = ?", email).Take(&row).Error; err != nil {
+	row, err := gorm.G[userRow](d.g).Where("email = ?", email).Take(ctx)
+	if err != nil {
 		return nil, err
 	}
 	return row.toStore(), nil
 }
 
 func (d *sqlDB) GetUser(ctx context.Context, id string) (*store.User, error) {
-	var row userRow
-	err := d.g.WithContext(ctx).Where("id = ?", id).Take(&row).Error
+	row, err := gorm.G[userRow](d.g).Where("id = ?", id).Take(ctx)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
@@ -353,12 +359,12 @@ func (d *sqlDB) CreateAPIKey(ctx context.Context, k *store.APIKey) error {
 		CreatedAt: k.CreatedAt.UTC(), LastUsedAt: k.LastUsedAt,
 		ExpiresAt: k.ExpiresAt, RevokedAt: k.RevokedAt,
 	}
-	return mapWriteErr(d.g.WithContext(ctx).Create(&row).Error)
+	return mapWriteErr(gorm.G[keyRow](d.g).Create(ctx, &row))
 }
 
 func (d *sqlDB) ListAPIKeys(ctx context.Context, userID string) ([]*store.APIKey, error) {
-	var rows []keyRow
-	err := d.g.WithContext(ctx).Where("user_id = ?", userID).Order("created_at").Find(&rows).Error
+	rows, err := gorm.G[keyRow](d.g).Where("user_id = ?", userID).
+		Order("created_at").Find(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -370,8 +376,7 @@ func (d *sqlDB) ListAPIKeys(ctx context.Context, userID string) ([]*store.APIKey
 }
 
 func (d *sqlDB) GetAPIKeyByHash(ctx context.Context, hash string) (*store.APIKey, error) {
-	var row keyRow
-	err := d.g.WithContext(ctx).Where("hash = ?", hash).Take(&row).Error
+	row, err := gorm.G[keyRow](d.g).Where("hash = ?", hash).Take(ctx)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
@@ -379,35 +384,35 @@ func (d *sqlDB) GetAPIKeyByHash(ctx context.Context, hash string) (*store.APIKey
 }
 
 func (d *sqlDB) RevokeAPIKey(ctx context.Context, userID, id string) error {
-	res := d.g.WithContext(ctx).Model(&keyRow{}).
+	n, err := gorm.G[keyRow](d.g).
 		Where("id = ? AND user_id = ? AND revoked_at IS NULL", id, userID).
-		Update("revoked_at", time.Now().UTC())
-	if res.Error != nil {
-		return res.Error
+		Update(ctx, "revoked_at", time.Now().UTC())
+	if err != nil {
+		return err
 	}
-	if res.RowsAffected == 0 {
+	if n == 0 {
 		return store.ErrNotFound
 	}
 	return nil
 }
 
 func (d *sqlDB) TouchAPIKey(ctx context.Context, id string, at time.Time) error {
-	return d.g.WithContext(ctx).Model(&keyRow{}).Where("id = ?", id).
-		Update("last_used_at", at.UTC()).Error
+	_, err := gorm.G[keyRow](d.g).Where("id = ?", id).
+		Update(ctx, "last_used_at", at.UTC())
+	return err
 }
 
 // --- sessions ---
 
 func (d *sqlDB) CreateSession(ctx context.Context, s *store.Session) error {
-	return d.g.WithContext(ctx).Create(&sessionRow{
+	return gorm.G[sessionRow](d.g).Create(ctx, &sessionRow{
 		Hash: s.Hash, UserID: s.UserID,
 		CreatedAt: s.CreatedAt.UTC(), ExpiresAt: s.ExpiresAt.UTC(),
-	}).Error
+	})
 }
 
 func (d *sqlDB) GetSession(ctx context.Context, hash string) (*store.Session, error) {
-	var row sessionRow
-	err := d.g.WithContext(ctx).Where("hash = ?", hash).Take(&row).Error
+	row, err := gorm.G[sessionRow](d.g).Where("hash = ?", hash).Take(ctx)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
@@ -418,12 +423,12 @@ func (d *sqlDB) GetSession(ctx context.Context, hash string) (*store.Session, er
 }
 
 func (d *sqlDB) DeleteSession(ctx context.Context, hash string) error {
-	return d.g.WithContext(ctx).Where("hash = ?", hash).Delete(&sessionRow{}).Error
+	_, err := gorm.G[sessionRow](d.g).Where("hash = ?", hash).Delete(ctx)
+	return err
 }
 
 func (d *sqlDB) DeleteExpiredSessions(ctx context.Context) (int, error) {
-	res := d.g.WithContext(ctx).Where("expires_at < ?", time.Now().UTC()).Delete(&sessionRow{})
-	return int(res.RowsAffected), res.Error
+	return gorm.G[sessionRow](d.g).Where("expires_at < ?", time.Now().UTC()).Delete(ctx)
 }
 
 // --- instances ---
@@ -439,17 +444,16 @@ func (d *sqlDB) CreateInstance(ctx context.Context, in *store.Instance) error {
 	if labels == nil {
 		labels = map[string]string{}
 	}
-	return d.g.WithContext(ctx).Create(&instanceRow{
+	return gorm.G[instanceRow](d.g).Create(ctx, &instanceRow{
 		ID: in.ID, UserID: in.UserID, Spec: []byte(in.Spec), Labels: labels,
 		Status:    string(in.Status),
 		CreatedAt: in.CreatedAt.UTC(), LastActiveAt: in.LastActiveAt.UTC(),
 		ExpiresAt: in.ExpiresAt.UTC(), EndedAt: in.EndedAt,
-	}).Error
+	})
 }
 
 func (d *sqlDB) GetInstance(ctx context.Context, id string) (*store.Instance, error) {
-	var row instanceRow
-	err := d.g.WithContext(ctx).Where("id = ?", id).Take(&row).Error
+	row, err := gorm.G[instanceRow](d.g).Where("id = ?", id).Take(ctx)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
@@ -457,12 +461,12 @@ func (d *sqlDB) GetInstance(ctx context.Context, id string) (*store.Instance, er
 }
 
 func (d *sqlDB) ListInstances(ctx context.Context, userID string, status types.InstanceStatus) ([]*store.Instance, error) {
-	tx := d.g.WithContext(ctx).Where("user_id = ?", userID)
+	q := gorm.G[instanceRow](d.g).Where("user_id = ?", userID).Order("created_at DESC")
 	if status != "" {
-		tx = tx.Where("status = ?", string(status))
+		q = q.Where("status = ?", string(status))
 	}
-	var rows []instanceRow
-	if err := tx.Order("created_at DESC").Find(&rows).Error; err != nil {
+	rows, err := q.Find(ctx)
+	if err != nil {
 		return nil, err
 	}
 	out := make([]*store.Instance, 0, len(rows))
@@ -484,23 +488,23 @@ func (d *sqlDB) UpdateInstance(ctx context.Context, in *store.Instance) error {
 	if err != nil {
 		return err
 	}
-	return d.g.WithContext(ctx).Model(&instanceRow{}).Where("id = ?", in.ID).Updates(map[string]any{
-		"labels":         string(lj),
-		"status":         string(in.Status),
-		"last_active_at": in.LastActiveAt.UTC(),
-		"expires_at":     in.ExpiresAt.UTC(),
-		"ended_at":       in.EndedAt,
-	}).Error
+	_, err = gorm.G[instanceRow](d.g).Where("id = ?", in.ID).Set(
+		col("labels", string(lj)),
+		col("status", string(in.Status)),
+		col("last_active_at", in.LastActiveAt.UTC()),
+		col("expires_at", in.ExpiresAt.UTC()),
+		col("ended_at", in.EndedAt),
+	).Update(ctx)
+	return err
 }
 
 func (d *sqlDB) MarkRunningAsLost(ctx context.Context) (int, error) {
-	res := d.g.WithContext(ctx).Model(&instanceRow{}).
+	return gorm.G[instanceRow](d.g).
 		Where("status = ?", string(types.InstanceRunning)).
-		Updates(map[string]any{
-			"status":   string(types.InstanceLost),
-			"ended_at": time.Now().UTC(),
-		})
-	return int(res.RowsAffected), res.Error
+		Set(
+			col("status", string(types.InstanceLost)),
+			col("ended_at", time.Now().UTC()),
+		).Update(ctx)
 }
 
 // --- executions ---
@@ -515,18 +519,17 @@ func (d *sqlDB) CreateExecution(ctx context.Context, e *store.Execution) error {
 	if e.CreatedAt.IsZero() {
 		e.CreatedAt = time.Now().UTC()
 	}
-	return d.g.WithContext(ctx).Create(&execRow{
+	return gorm.G[execRow](d.g).Create(ctx, &execRow{
 		ID: e.ID, InstanceID: e.InstanceID, UserID: e.UserID,
 		CodeSHA256: e.CodeSHA256, CodeSnippet: e.CodeSnippet, Code: e.Code,
 		Status: string(e.Status), ErrorType: string(e.ErrorType),
 		DurationMs: e.DurationMs, Steps: int64(e.Steps),
 		OutputBytes: e.OutputBytes, CreatedAt: e.CreatedAt.UTC(),
-	}).Error
+	})
 }
 
 func (d *sqlDB) GetExecution(ctx context.Context, id string) (*store.Execution, error) {
-	var row execRow
-	err := d.g.WithContext(ctx).Where("id = ?", id).Take(&row).Error
+	row, err := gorm.G[execRow](d.g).Where("id = ?", id).Take(ctx)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
@@ -537,9 +540,8 @@ func (d *sqlDB) ListExecutions(ctx context.Context, instanceID string, limit int
 	if limit <= 0 {
 		limit = 100
 	}
-	var rows []execRow
-	err := d.g.WithContext(ctx).Where("instance_id = ?", instanceID).
-		Order("created_at DESC").Limit(limit).Find(&rows).Error
+	rows, err := gorm.G[execRow](d.g).Where("instance_id = ?", instanceID).
+		Order("created_at DESC").Limit(limit).Find(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -572,7 +574,7 @@ func (d *sqlDB) InsertAuditEvents(ctx context.Context, evs []store.AuditEvent) e
 				Args: e.Args, Phase: string(e.Phase), Decision: string(e.Decision),
 				Reason: e.Reason, Error: e.Error, DurationMs: e.DurationMs,
 			}
-			if err := tx.Create(&row).Error; err != nil {
+			if err := gorm.G[auditRow](tx).Create(ctx, &row); err != nil {
 				return err
 			}
 		}
@@ -581,25 +583,24 @@ func (d *sqlDB) InsertAuditEvents(ctx context.Context, evs []store.AuditEvent) e
 }
 
 func (d *sqlDB) ListAuditEvents(ctx context.Context, f store.AuditFilter) ([]*store.AuditEvent, error) {
-	tx := d.g.WithContext(ctx).Model(&auditRow{})
+	q := gorm.G[auditRow](d.g).Order("ts DESC")
 	if f.UserID != "" {
-		tx = tx.Where("user_id = ?", f.UserID)
+		q = q.Where("user_id = ?", f.UserID)
 	}
 	if f.InstanceID != "" {
-		tx = tx.Where("instance_id = ?", f.InstanceID)
+		q = q.Where("instance_id = ?", f.InstanceID)
 	}
 	if f.ExecID != "" {
-		tx = tx.Where("exec_id = ?", f.ExecID)
+		q = q.Where("exec_id = ?", f.ExecID)
 	}
 	if f.Before != nil {
-		tx = tx.Where("ts < ?", f.Before.UTC())
+		q = q.Where("ts < ?", f.Before.UTC())
 	}
-	tx = tx.Order("ts DESC")
 	if f.Limit > 0 {
-		tx = tx.Limit(f.Limit)
+		q = q.Limit(f.Limit)
 	}
-	var rows []auditRow
-	if err := tx.Find(&rows).Error; err != nil {
+	rows, err := q.Find(ctx)
+	if err != nil {
 		return nil, err
 	}
 	out := make([]*store.AuditEvent, 0, len(rows))
@@ -620,15 +621,14 @@ func (d *sqlDB) CreatePolicy(ctx context.Context, p *store.Policy) error {
 		p.CreatedAt = now
 	}
 	p.UpdatedAt = now
-	return d.g.WithContext(ctx).Create(&policyRow{
+	return gorm.G[policyRow](d.g).Create(ctx, &policyRow{
 		ID: p.ID, UserID: p.UserID, Name: p.Name, Rego: p.Rego,
 		Enabled: p.Enabled, CreatedAt: p.CreatedAt.UTC(), UpdatedAt: p.UpdatedAt.UTC(),
-	}).Error
+	})
 }
 
 func (d *sqlDB) GetPolicy(ctx context.Context, id string) (*store.Policy, error) {
-	var row policyRow
-	err := d.g.WithContext(ctx).Where("id = ?", id).Take(&row).Error
+	row, err := gorm.G[policyRow](d.g).Where("id = ?", id).Take(ctx)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
@@ -636,8 +636,8 @@ func (d *sqlDB) GetPolicy(ctx context.Context, id string) (*store.Policy, error)
 }
 
 func (d *sqlDB) ListPolicies(ctx context.Context, userID string) ([]*store.Policy, error) {
-	var rows []policyRow
-	err := d.g.WithContext(ctx).Where("user_id = ?", userID).Order("created_at").Find(&rows).Error
+	rows, err := gorm.G[policyRow](d.g).Where("user_id = ?", userID).
+		Order("created_at").Find(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -650,20 +650,24 @@ func (d *sqlDB) ListPolicies(ctx context.Context, userID string) ([]*store.Polic
 
 func (d *sqlDB) UpdatePolicy(ctx context.Context, p *store.Policy) error {
 	p.UpdatedAt = time.Now().UTC()
-	res := d.g.WithContext(ctx).Model(&policyRow{}).Where("id = ?", p.ID).Updates(map[string]any{
-		"name": p.Name, "rego": p.Rego, "enabled": p.Enabled, "updated_at": p.UpdatedAt,
-	})
-	if res.Error != nil {
-		return res.Error
+	n, err := gorm.G[policyRow](d.g).Where("id = ?", p.ID).Set(
+		col("name", p.Name),
+		col("rego", p.Rego),
+		col("enabled", p.Enabled),
+		col("updated_at", p.UpdatedAt),
+	).Update(ctx)
+	if err != nil {
+		return err
 	}
-	if res.RowsAffected == 0 {
+	if n == 0 {
 		return store.ErrNotFound
 	}
 	return nil
 }
 
 func (d *sqlDB) DeletePolicy(ctx context.Context, id string) error {
-	return d.g.WithContext(ctx).Where("id = ?", id).Delete(&policyRow{}).Error
+	_, err := gorm.G[policyRow](d.g).Where("id = ?", id).Delete(ctx)
+	return err
 }
 
 // --- secrets ---
@@ -681,16 +685,15 @@ func (d *sqlDB) CreateSecret(ctx context.Context, s *store.Secret) error {
 	if domains == nil {
 		domains = []string{}
 	}
-	err := d.g.WithContext(ctx).Create(&secretRow{
+	err := gorm.G[secretRow](d.g).Create(ctx, &secretRow{
 		ID: s.ID, UserID: s.UserID, Name: s.Name, Ciphertext: s.Ciphertext,
 		AllowedDomains: domains, CreatedAt: s.CreatedAt.UTC(), UpdatedAt: s.UpdatedAt.UTC(),
-	}).Error
+	})
 	return mapWriteErr(err)
 }
 
 func (d *sqlDB) GetSecret(ctx context.Context, id string) (*store.Secret, error) {
-	var row secretRow
-	err := d.g.WithContext(ctx).Where("id = ?", id).Take(&row).Error
+	row, err := gorm.G[secretRow](d.g).Where("id = ?", id).Take(ctx)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
@@ -698,8 +701,8 @@ func (d *sqlDB) GetSecret(ctx context.Context, id string) (*store.Secret, error)
 }
 
 func (d *sqlDB) GetSecretByName(ctx context.Context, userID, name string) (*store.Secret, error) {
-	var row secretRow
-	err := d.g.WithContext(ctx).Where("user_id = ? AND name = ?", userID, name).Take(&row).Error
+	row, err := gorm.G[secretRow](d.g).
+		Where("user_id = ? AND name = ?", userID, name).Take(ctx)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
@@ -707,8 +710,8 @@ func (d *sqlDB) GetSecretByName(ctx context.Context, userID, name string) (*stor
 }
 
 func (d *sqlDB) ListSecrets(ctx context.Context, userID string) ([]*store.Secret, error) {
-	var rows []secretRow
-	err := d.g.WithContext(ctx).Where("user_id = ?", userID).Order("name").Find(&rows).Error
+	rows, err := gorm.G[secretRow](d.g).Where("user_id = ?", userID).
+		Order("name").Find(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -729,18 +732,21 @@ func (d *sqlDB) UpdateSecret(ctx context.Context, s *store.Secret) error {
 	if err != nil {
 		return err
 	}
-	res := d.g.WithContext(ctx).Model(&secretRow{}).Where("id = ?", s.ID).Updates(map[string]any{
-		"ciphertext": s.Ciphertext, "allowed_domains": string(dj), "updated_at": s.UpdatedAt,
-	})
-	if res.Error != nil {
-		return res.Error
+	n, err := gorm.G[secretRow](d.g).Where("id = ?", s.ID).Set(
+		col("ciphertext", s.Ciphertext),
+		col("allowed_domains", string(dj)),
+		col("updated_at", s.UpdatedAt),
+	).Update(ctx)
+	if err != nil {
+		return err
 	}
-	if res.RowsAffected == 0 {
+	if n == 0 {
 		return store.ErrNotFound
 	}
 	return nil
 }
 
 func (d *sqlDB) DeleteSecret(ctx context.Context, id string) error {
-	return d.g.WithContext(ctx).Where("id = ?", id).Delete(&secretRow{}).Error
+	_, err := gorm.G[secretRow](d.g).Where("id = ?", id).Delete(ctx)
+	return err
 }
