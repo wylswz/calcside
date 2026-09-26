@@ -1,0 +1,41 @@
+services:
+  calcside:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: calcside:latest
+    ports:
+      - "${CALCSIDE_PORT:-8080}:8080"
+    environment:
+      CALCSIDE_ADDR: ":8080"
+      CALCSIDE_DSN: /data/calcside.db
+      CALCSIDE_BASE_URL: ${CALCSIDE_BASE_URL:-http://localhost:8080}
+      # Secrets vault key: `openssl rand -base64 32`. Without it the vault is disabled.
+      CALCSIDE_SECRET_KEY: ${CALCSIDE_SECRET_KEY:-}
+      # Google SSO — leave empty to run without the login flow.
+      CALCSIDE_GOOGLE_CLIENT_ID: ${CALCSIDE_GOOGLE_CLIENT_ID:-}
+      CALCSIDE_GOOGLE_CLIENT_SECRET: ${CALCSIDE_GOOGLE_CLIENT_SECRET:-}
+      CALCSIDE_GOOGLE_ALLOWED_DOMAINS: ${CALCSIDE_GOOGLE_ALLOWED_DOMAINS:-}
+      # Dev mode (INSECURE, anonymous access):
+      #   CALCSIDE_DEV=true CALCSIDE_DEV_ALLOW_REMOTE=true docker compose up
+      CALCSIDE_DEV: ${CALCSIDE_DEV:-false}
+      CALCSIDE_DEV_ALLOW_REMOTE: ${CALCSIDE_DEV_ALLOW_REMOTE:-false}
+    volumes:
+      # Single volume holds the sqlite db plus all mutable config:
+      #   /data/policies  global .rego files (CALCSIDE_POLICY_DIR)
+      #   /data/ext       local ext capability dirs (CALCSIDE_EXT_LOCAL_ROOTS)
+      #   /data/ext-cache remote ext fetch cache
+      # Load config in, e.g.:
+      #   docker compose -f docker/docker-compose.yml cp ../policies/examples/. calcside:/data/policies/
+      #   docker compose -f docker/docker-compose.yml cp -r ../examples/capabilities/tavily calcside:/data/ext/
+      - calcside-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  calcside-data:
