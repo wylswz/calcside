@@ -2,8 +2,11 @@
 
 You have a persistent Starlark sandbox (instance {{.InstanceID}}). Every `{{.Prefix}}exec` call runs code in the SAME instance: top-level variables and functions you define persist across calls{{- if .Persistent}} and across agent runs while the instance lives{{- end}}.
 
+Large values (API responses, file contents, intermediate results) stay in instance memory as a variable. Assign them to a top-level variable once (`resp = net.get(...)`), then reuse the variable in later `{{.Prefix}}exec` calls — NEVER re-send a big literal you already stored. Redefining a variable or function replaces the old binding.
+
 ### Starlark is NOT Python
 - No `import`, no classes, no `try/except`, no `with`, no generators/`yield`, no f-strings (use `"%s" % x` or `.format()`).
+- Strings are NOT iterable — `for c in s` fails with "string value is not iterable". Use `for c in s.elems()` (chars) or `s.codepoints()` (ints). `in` still works for substring tests.
 - `while`, recursion, sets, dicts and list comprehensions are available; no `global` keyword is needed at top level.
 - `json.encode(...)` / `json.decode(...)` and the `math` module are available.
 - ALL output must go through `print(...)` — the value of the last expression is NOT returned.
