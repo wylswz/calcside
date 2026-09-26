@@ -19,13 +19,12 @@ import (
 	"calcside/internal/api/gen"
 	"calcside/internal/auth"
 	"calcside/internal/capability"
-	"calcside/internal/capability/ext"
 	"calcside/internal/engine"
 	"calcside/internal/instance"
-	"calcside/internal/policy"
 	promptpkg "calcside/internal/prompt"
 	"calcside/internal/secrets"
 	"calcside/internal/service"
+	auditsvc "calcside/internal/service/audit"
 	"calcside/internal/store"
 	"calcside/internal/types"
 )
@@ -88,6 +87,11 @@ func needSession(ctx context.Context) (*auth.Principal, *rawJSON) {
 		return nil, &e
 	}
 	return p, nil
+}
+
+// actorOf maps the transport principal onto the service-layer actor.
+func actorOf(p *auth.Principal) service.Actor {
+	return service.Actor{UserID: p.User.ID, Email: p.User.Email, Kind: p.Kind}
 }
 
 // Per-operation response wrappers (generated files are never edited).
@@ -254,7 +258,7 @@ func (s *strictImpl) AuthConfig(ctx context.Context, _ gen.AuthConfigRequestObje
 	return authConfigResp{rawJSON{http.StatusOK, map[string]any{
 		"google":   s.d.GoogleEnabled,
 		"dev_mode": s.d.Dev,
-		"secrets":  s.d.Cipher != nil,
+		"secrets":  s.d.Vault.Enabled(),
 	}}}, nil
 }
 
@@ -276,16 +280,7 @@ func (s *strictImpl) Capabilities(ctx context.Context, _ gen.CapabilitiesRequest
 	if _, e := needAuth(ctx); e != nil {
 		return capabilitiesResp{*e}, nil
 	}
-	var out []map[string]any
-	for _, name := range s.d.Registry.Names() {
-		f, _ := s.d.Registry.Get(name)
-		out = append(out, map[string]any{
-			"name":          string(name),
-			"ops":           f.Ops(),
-			"config_fields": f.ConfigFields(),
-		})
-	}
-	return capabilitiesResp{rawJSON{http.StatusOK, map[string]any{"capabilities": out}}}, nil
+	return capabilitiesResp{rawJSON{http.StatusOK, map[string]any{"capabilities": s.d.Catalog.Capabilities()}}}, nil
 }
 
 func (s *strictImpl) ListExtensions(ctx context.Context, _ gen.ListExtensionsRequestObject) (gen.ListExtensionsResponseObject, error) {
@@ -293,39 +288,27 @@ func (s *strictImpl) ListExtensions(ctx context.Context, _ gen.ListExtensionsReq
 	if _, e := needAuth(ctx); e != nil {
 		return listExtensionsResp{*e}, nil
 	}
-	out := map[string]any{"extensions": []any{}, "remote_enabled": false, "local_enabled": false}
-	if f, ok := s.d.Registry.Get(types.CapExt); ok {
-		if av, ok := f.(interface{ Available() ext.Catalog }); ok {
-			c := av.Available()
-			out["extensions"] = c.Extensions
-			out["remote_enabled"] = c.RemoteEnabled
-			out["local_enabled"] = c.LocalEnabled
-		}
-	}
-	return listExtensionsResp{rawJSON{http.StatusOK, out}}, nil
+	return listExtensionsResp{rawJSON{http.StatusOK, s.d.Catalog.Extensions()}}, nil
 }
 
 // --- api keys (session only) ---
 
 func (s *strictImpl) ListKeys(ctx context.Context, _ gen.ListKeysRequestObject) (gen.ListKeysResponseObject, error) {
 	ctx = realCtx(ctx)
-	p, e := needSession(ctx)
+	p, e := needAuth(ctx)
 	if e != nil {
 		return listKeysResp{*e}, nil
 	}
-	keys, err := s.d.Store.ListAPIKeys(ctx, p.User.ID)
+	keys, err := s.d.IAM.ListKeys(ctx, actorOf(p))
 	if err != nil {
-		return listKeysResp{fail(service.Internal(err))}, nil
-	}
-	if keys == nil {
-		keys = []*store.APIKey{}
+		return listKeysResp{fail(err)}, nil
 	}
 	return listKeysResp{rawJSON{200, map[string]any{"keys": keys}}}, nil
 }
 
 func (s *strictImpl) CreateKey(ctx context.Context, req gen.CreateKeyRequestObject) (gen.CreateKeyResponseObject, error) {
 	ctx = realCtx(ctx)
-	p, e := needSession(ctx)
+	p, e := needAuth(ctx)
 	if e != nil {
 		return createKeyResp{*e}, nil
 	}
@@ -337,29 +320,21 @@ func (s *strictImpl) CreateKey(ctx context.Context, req gen.CreateKeyRequestObje
 			expiresIn = *req.Body.ExpiresInSeconds
 		}
 	}
-	var exp *time.Time
-	if expiresIn > 0 {
-		t := s.d.now().Add(time.Duration(expiresIn) * time.Second)
-		exp = &t
-	}
-	secret, key := auth.NewAPIKey(p.User.ID, name, exp)
-	if err := s.d.Store.CreateAPIKey(ctx, key); err != nil {
-		return createKeyResp{fail(service.Internal(err))}, nil
+	key, secret, err := s.d.IAM.CreateKey(ctx, actorOf(p), name, expiresIn)
+	if err != nil {
+		return createKeyResp{fail(err)}, nil
 	}
 	return createKeyResp{rawJSON{201, map[string]any{"key": key, "secret": secret}}}, nil
 }
 
 func (s *strictImpl) DeleteKey(ctx context.Context, req gen.DeleteKeyRequestObject) (gen.DeleteKeyResponseObject, error) {
 	ctx = realCtx(ctx)
-	p, e := needSession(ctx)
+	p, e := needAuth(ctx)
 	if e != nil {
 		return deleteKeyResp{*e}, nil
 	}
-	if err := s.d.Store.RevokeAPIKey(ctx, p.User.ID, req.Id); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return deleteKeyResp{fail(service.NotFound("key not found"))}, nil
-		}
-		return deleteKeyResp{fail(service.Internal(err))}, nil
+	if err := s.d.IAM.RevokeKey(ctx, actorOf(p), req.Id); err != nil {
+		return deleteKeyResp{fail(err)}, nil
 	}
 	return deleteKeyResp{rawJSON{200, map[string]any{"ok": true}}}, nil
 }
@@ -814,7 +789,7 @@ func (s *strictImpl) ListAudit(ctx context.Context, req gen.ListAuditRequestObje
 	if e != nil {
 		return listAuditResp{*e}, nil
 	}
-	f := store.AuditFilter{UserID: p.User.ID}
+	var f auditsvc.Filter
 	if req.Params.InstanceId != nil {
 		f.InstanceID = *req.Params.InstanceId
 	}
@@ -828,12 +803,9 @@ func (s *strictImpl) ListAudit(ctx context.Context, req gen.ListAuditRequestObje
 		b := req.Params.Before.UTC()
 		f.Before = &b
 	}
-	lst, err := s.d.Store.ListAuditEvents(ctx, f)
+	lst, err := s.d.Audit.List(ctx, actorOf(p), f)
 	if err != nil {
-		return listAuditResp{fail(service.Internal(err))}, nil
-	}
-	if lst == nil {
-		lst = []*store.AuditEvent{}
+		return listAuditResp{fail(err)}, nil
 	}
 	return listAuditResp{rawJSON{200, map[string]any{"events": lst}}}, nil
 }
@@ -846,12 +818,9 @@ func (s *strictImpl) ListPolicies(ctx context.Context, _ gen.ListPoliciesRequest
 	if e != nil {
 		return listPoliciesResp{*e}, nil
 	}
-	lst, err := s.d.Store.ListPolicies(ctx, p.User.ID)
+	lst, err := s.d.Policy.List(ctx, actorOf(p))
 	if err != nil {
-		return listPoliciesResp{fail(service.Internal(err))}, nil
-	}
-	if lst == nil {
-		lst = []*store.Policy{}
+		return listPoliciesResp{fail(err)}, nil
 	}
 	return listPoliciesResp{rawJSON{200, map[string]any{"policies": lst}}}, nil
 }
@@ -868,18 +837,9 @@ func (s *strictImpl) CreatePolicy(ctx context.Context, req gen.CreatePolicyReque
 		name, rego = req.Body.Name, req.Body.Rego
 		enabled = req.Body.Enabled
 	}
-	if name == "" || rego == "" {
-		return createPolicyResp{fail(service.BadRequest("name and rego required"))}, nil
-	}
-	if err := policy.Validate(rego); err != nil {
-		return createPolicyResp{fail(service.Errf(types.ErrCodeBadPolicy, "%s", err.Error()))}, nil
-	}
-	pol := &store.Policy{UserID: p.User.ID, Name: name, Rego: rego, Enabled: true}
-	if enabled != nil {
-		pol.Enabled = *enabled
-	}
-	if err := s.d.Store.CreatePolicy(ctx, pol); err != nil {
-		return createPolicyResp{fail(service.Internal(err))}, nil
+	pol, err := s.d.Policy.Create(ctx, actorOf(p), name, rego, enabled)
+	if err != nil {
+		return createPolicyResp{fail(err)}, nil
 	}
 	return createPolicyResp{rawJSON{201, map[string]any{"policy": pol}}}, nil
 }
@@ -893,7 +853,7 @@ func (s *strictImpl) ValidatePolicy(ctx context.Context, req gen.ValidatePolicyR
 	if req.Body != nil {
 		rego = req.Body.Rego
 	}
-	if err := policy.Validate(rego); err != nil {
+	if err := s.d.Policy.ValidateRego(rego); err != nil {
 		return validatePolicyResp{rawJSON{200, map[string]any{"valid": false, "error": err.Error()}}}, nil
 	}
 	return validatePolicyResp{rawJSON{200, map[string]any{"valid": true}}}, nil
@@ -905,9 +865,9 @@ func (s *strictImpl) GetPolicy(ctx context.Context, req gen.GetPolicyRequestObje
 	if e != nil {
 		return getPolicyResp{*e}, nil
 	}
-	pol, err := s.d.Store.GetPolicy(ctx, req.Id)
-	if err != nil || pol.UserID != p.User.ID {
-		return getPolicyResp{fail(service.NotFound("policy not found"))}, nil
+	pol, err := s.d.Policy.Get(ctx, actorOf(p), req.Id)
+	if err != nil {
+		return getPolicyResp{fail(err)}, nil
 	}
 	return getPolicyResp{rawJSON{200, map[string]any{"policy": pol}}}, nil
 }
@@ -918,26 +878,14 @@ func (s *strictImpl) UpdatePolicy(ctx context.Context, req gen.UpdatePolicyReque
 	if e != nil {
 		return updatePolicyResp{*e}, nil
 	}
-	pol, err := s.d.Store.GetPolicy(ctx, req.Id)
-	if err != nil || pol.UserID != p.User.ID {
-		return updatePolicyResp{fail(service.NotFound("policy not found"))}, nil
-	}
+	var name, rego *string
+	var enabled *bool
 	if req.Body != nil {
-		if req.Body.Name != nil {
-			pol.Name = *req.Body.Name
-		}
-		if req.Body.Rego != nil {
-			if err := policy.Validate(*req.Body.Rego); err != nil {
-				return updatePolicyResp{fail(service.Errf(types.ErrCodeBadPolicy, "%s", err.Error()))}, nil
-			}
-			pol.Rego = *req.Body.Rego
-		}
-		if req.Body.Enabled != nil {
-			pol.Enabled = *req.Body.Enabled
-		}
+		name, rego, enabled = req.Body.Name, req.Body.Rego, req.Body.Enabled
 	}
-	if err := s.d.Store.UpdatePolicy(ctx, pol); err != nil {
-		return updatePolicyResp{fail(service.Internal(err))}, nil
+	pol, err := s.d.Policy.Update(ctx, actorOf(p), req.Id, name, rego, enabled)
+	if err != nil {
+		return updatePolicyResp{fail(err)}, nil
 	}
 	return updatePolicyResp{rawJSON{200, map[string]any{"policy": pol}}}, nil
 }
@@ -948,12 +896,8 @@ func (s *strictImpl) DeletePolicy(ctx context.Context, req gen.DeletePolicyReque
 	if e != nil {
 		return deletePolicyResp{*e}, nil
 	}
-	pol, err := s.d.Store.GetPolicy(ctx, req.Id)
-	if err != nil || pol.UserID != p.User.ID {
-		return deletePolicyResp{fail(service.NotFound("policy not found"))}, nil
-	}
-	if err := s.d.Store.DeletePolicy(ctx, pol.ID); err != nil {
-		return deletePolicyResp{fail(service.Internal(err))}, nil
+	if err := s.d.Policy.Delete(ctx, actorOf(p), req.Id); err != nil {
+		return deletePolicyResp{fail(err)}, nil
 	}
 	return deletePolicyResp{rawJSON{200, map[string]any{"ok": true}}}, nil
 }
@@ -967,19 +911,13 @@ func secretsDisabled() *rawJSON {
 
 func (s *strictImpl) ListSecrets(ctx context.Context, _ gen.ListSecretsRequestObject) (gen.ListSecretsResponseObject, error) {
 	ctx = realCtx(ctx)
-	p, e := needSession(ctx)
+	p, e := needAuth(ctx)
 	if e != nil {
 		return listSecretsResp{*e}, nil
 	}
-	if s.d.Cipher == nil {
-		return listSecretsResp{*secretsDisabled()}, nil
-	}
-	lst, err := s.d.Store.ListSecrets(ctx, p.User.ID)
+	lst, err := s.d.Vault.List(ctx, actorOf(p))
 	if err != nil {
-		return listSecretsResp{fail(service.Internal(err))}, nil
-	}
-	if lst == nil {
-		lst = []*store.Secret{}
+		return listSecretsResp{fail(err)}, nil
 	}
 	return listSecretsResp{rawJSON{200, map[string]any{"secrets": lst}}}, nil
 }
@@ -1002,12 +940,9 @@ func validateSecretInput(name, value string, domains []string) error {
 
 func (s *strictImpl) CreateSecret(ctx context.Context, req gen.CreateSecretRequestObject) (gen.CreateSecretResponseObject, error) {
 	ctx = realCtx(ctx)
-	p, e := needSession(ctx)
+	p, e := needAuth(ctx)
 	if e != nil {
 		return createSecretResp{*e}, nil
-	}
-	if s.d.Cipher == nil {
-		return createSecretResp{*secretsDisabled()}, nil
 	}
 	var name, value string
 	var domains []string
@@ -1017,78 +952,39 @@ func (s *strictImpl) CreateSecret(ctx context.Context, req gen.CreateSecretReque
 			domains = *req.Body.AllowedDomains
 		}
 	}
-	if err := validateSecretInput(name, value, domains); err != nil {
-		return createSecretResp{fail(service.Errf(types.ErrCodeBadSecret, "%s", err.Error()))}, nil
-	}
-	ct, err := s.d.Cipher.Seal([]byte(value), p.User.ID+"/"+name)
+	sec, err := s.d.Vault.Create(ctx, actorOf(p), name, value, domains)
 	if err != nil {
-		return createSecretResp{fail(service.Internal(err))}, nil
-	}
-	if domains == nil {
-		domains = []string{} // unrestricted; responses always carry an array
-	}
-	sec := &store.Secret{UserID: p.User.ID, Name: name, Ciphertext: ct, AllowedDomains: domains}
-	if err := s.d.Store.CreateSecret(ctx, sec); err != nil {
-		if errors.Is(err, store.ErrConflict) {
-			return createSecretResp{fail(service.Conflict("secret with that name already exists"))}, nil
-		}
-		return createSecretResp{fail(service.Internal(err))}, nil
+		return createSecretResp{fail(err)}, nil
 	}
 	return createSecretResp{rawJSON{201, map[string]any{"secret": sec}}}, nil
 }
 
 func (s *strictImpl) UpdateSecret(ctx context.Context, req gen.UpdateSecretRequestObject) (gen.UpdateSecretResponseObject, error) {
 	ctx = realCtx(ctx)
-	p, e := needSession(ctx)
+	p, e := needAuth(ctx)
 	if e != nil {
 		return updateSecretResp{*e}, nil
 	}
-	if s.d.Cipher == nil {
-		return updateSecretResp{*secretsDisabled()}, nil
-	}
-	sec, err := s.d.Store.GetSecret(ctx, req.Id)
-	if err != nil || sec.UserID != p.User.ID {
-		return updateSecretResp{fail(service.NotFound("secret not found"))}, nil
-	}
+	var value *string
+	var domains *[]string
 	if req.Body != nil {
-		if req.Body.Value != nil {
-			if len(*req.Body.Value) == 0 || len(*req.Body.Value) > secrets.MaxValueBytes {
-				return updateSecretResp{fail(service.Errf(types.ErrCodeBadSecret, "value must be 1..16KiB"))}, nil
-			}
-			ct, err := s.d.Cipher.Seal([]byte(*req.Body.Value), p.User.ID+"/"+sec.Name)
-			if err != nil {
-				return updateSecretResp{fail(service.Internal(err))}, nil
-			}
-			sec.Ciphertext = ct
-		}
-		if req.Body.AllowedDomains != nil {
-			if _, err := secrets.ValidateDomains(*req.Body.AllowedDomains); err != nil {
-				return updateSecretResp{fail(service.Errf(types.ErrCodeBadSecret, "%s", err.Error()))}, nil
-			}
-			sec.AllowedDomains = *req.Body.AllowedDomains
-		}
+		value, domains = req.Body.Value, req.Body.AllowedDomains
 	}
-	if err := s.d.Store.UpdateSecret(ctx, sec); err != nil {
-		return updateSecretResp{fail(service.Internal(err))}, nil
+	sec, err := s.d.Vault.Update(ctx, actorOf(p), req.Id, value, domains)
+	if err != nil {
+		return updateSecretResp{fail(err)}, nil
 	}
 	return updateSecretResp{rawJSON{200, map[string]any{"secret": sec}}}, nil
 }
 
 func (s *strictImpl) DeleteSecret(ctx context.Context, req gen.DeleteSecretRequestObject) (gen.DeleteSecretResponseObject, error) {
 	ctx = realCtx(ctx)
-	p, e := needSession(ctx)
+	p, e := needAuth(ctx)
 	if e != nil {
 		return deleteSecretResp{*e}, nil
 	}
-	if s.d.Cipher == nil {
-		return deleteSecretResp{*secretsDisabled()}, nil
-	}
-	sec, err := s.d.Store.GetSecret(ctx, req.Id)
-	if err != nil || sec.UserID != p.User.ID {
-		return deleteSecretResp{fail(service.NotFound("secret not found"))}, nil
-	}
-	if err := s.d.Store.DeleteSecret(ctx, sec.ID); err != nil {
-		return deleteSecretResp{fail(service.Internal(err))}, nil
+	if err := s.d.Vault.Delete(ctx, actorOf(p), req.Id); err != nil {
+		return deleteSecretResp{fail(err)}, nil
 	}
 	return deleteSecretResp{rawJSON{200, map[string]any{"ok": true}}}, nil
 }

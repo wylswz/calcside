@@ -22,6 +22,11 @@ import (
 	"calcside/internal/capability"
 	"calcside/internal/instance"
 	"calcside/internal/secrets"
+	auditsvc "calcside/internal/service/audit"
+	"calcside/internal/service/catalog"
+	"calcside/internal/service/iam"
+	policysvc "calcside/internal/service/policy"
+	"calcside/internal/service/vault"
 	"calcside/internal/store"
 	"calcside/internal/types"
 )
@@ -34,6 +39,12 @@ const (
 
 // Deps wires the API.
 type Deps struct {
+	IAM     *iam.Service
+	Vault   *vault.Service
+	Policy  *policysvc.Service
+	Audit   *auditsvc.Service
+	Catalog *catalog.Service
+
 	Store         store.Store
 	Manager       *instance.Manager
 	Registry      *capability.Registry
@@ -141,6 +152,21 @@ func Handler(d Deps) http.Handler {
 	r.HandleMethodNotAllowed = true
 	r.Use(gin.Recovery(), requestLogger())
 
+	if d.IAM == nil {
+		d.IAM = iam.New(d.Store, d.Now)
+	}
+	if d.Vault == nil {
+		d.Vault = vault.New(d.Store, d.Cipher)
+	}
+	if d.Policy == nil {
+		d.Policy = policysvc.New(d.Store)
+	}
+	if d.Audit == nil {
+		d.Audit = auditsvc.New(d.Store)
+	}
+	if d.Catalog == nil {
+		d.Catalog = catalog.New(d.Registry)
+	}
 	impl := &strictImpl{d: d}
 	strict := gen.NewStrictHandlerWithOptions(impl, nil, gen.StrictGinServerOptions{
 		RequestErrorHandlerFunc: func(c *gin.Context, err error) {
