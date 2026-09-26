@@ -41,10 +41,10 @@ type Deps struct {
 	Sandbox *sandbox.Service
 
 	Auth          *auth.Service
-	Web           fs.FS           // static files served at /; nil for now
-	GoogleEnabled bool            // reported by /api/v1/auth/config
-	Dev           bool            // anonymous dev mode
-	Anonymous     *store.User     // dev-mode anonymous principal's user
+	Web           fs.FS       // static files served at /; nil for now
+	GoogleEnabled bool        // reported by /api/v1/auth/config
+	Dev           bool        // anonymous dev mode
+	Anonymous     *store.User // dev-mode anonymous principal's user
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
