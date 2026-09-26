@@ -1,0 +1,19 @@
+{
+  "body": {
+    "code": "print(undefined_name)",
+    "execution": {
+      "code_sha256": "079cc159b5333f136d373b45f2423bc6326c32c2ef89379eeae74d8e24174508",
+      "code_snippet": "print(undefined_name)",
+      "created_at": "\u003cts\u003e",
+      "duration_ms": "\u003cnum\u003e",
+      "error_type": "syntax",
+      "id": "\u003cid:exe\u003e",
+      "instance_id": "\u003cid:ins\u003e",
+      "output_bytes": 0,
+      "status": "error",
+      "steps": "\u003cnum\u003e",
+      "user_id": "\u003cid:usr\u003e"
+    }
+  },
+  "status": 200
+}

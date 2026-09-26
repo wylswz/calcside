@@ -1,0 +1,10 @@
+{
+  "body": {
+    "duration_ms": "\u003cnum\u003e",
+    "error": null,
+    "exec_id": "\u003cid:exe\u003e",
+    "output": "world\n",
+    "steps": "\u003cnum\u003e"
+  },
+  "status": 200
+}

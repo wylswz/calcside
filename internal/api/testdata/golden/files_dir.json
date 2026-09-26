@@ -1,0 +1,14 @@
+{
+  "body": {
+    "entries": [
+      {
+        "is_dir": false,
+        "mtime": "\u003cnum\u003e",
+        "name": "hello.txt",
+        "path": "/work/hello.txt",
+        "size": 5
+      }
+    ]
+  },
+  "status": 200
+}

@@ -1,0 +1,9 @@
+{
+  "body": {
+    "error": {
+      "code": "csrf",
+      "message": "missing X-Requested-With header"
+    }
+  },
+  "status": 403
+}

@@ -1,0 +1,14 @@
+{
+  "body": {
+    "policy": {
+      "created_at": "\u003cts\u003e",
+      "enabled": false,
+      "id": "\u003cid:pol\u003e",
+      "name": "p",
+      "rego": "package calcside.hooks\ndeny contains \"x\" if { input.op == \"read\" }",
+      "updated_at": "\u003cts\u003e",
+      "user_id": "\u003cid:usr\u003e"
+    }
+  },
+  "status": 200
+}

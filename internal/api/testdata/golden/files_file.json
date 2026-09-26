@@ -1,0 +1,7 @@
+{
+  "body": {
+    "content": "world",
+    "path": "/work/hello.txt"
+  },
+  "status": 200
+}

@@ -1,0 +1,13 @@
+{
+  "body": {
+    "duration_ms": "\u003cnum\u003e",
+    "error": {
+      "message": "\u003cid:exe\u003e.star:1:7: undefined: undefined_name",
+      "type": "syntax"
+    },
+    "exec_id": "\u003cid:exe\u003e",
+    "output": "",
+    "steps": "\u003cnum\u003e"
+  },
+  "status": 200
+}

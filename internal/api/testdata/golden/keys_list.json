@@ -1,0 +1,15 @@
+{
+  "body": {
+    "keys": [
+      {
+        "created_at": "\u003cts\u003e",
+        "expires_at": "\u003cts\u003e",
+        "id": "\u003cid:key\u003e",
+        "name": "golden",
+        "prefix": "\u003csecret\u003e",
+        "user_id": "\u003cid:usr\u003e"
+      }
+    ]
+  },
+  "status": 200
+}

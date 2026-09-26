@@ -1,0 +1,9 @@
+{
+  "body": {
+    "error": {
+      "code": "bad_policy",
+      "message": "input: 1 error occurred: input:1: rego_parse_error: package expected"
+    }
+  },
+  "status": 400
+}

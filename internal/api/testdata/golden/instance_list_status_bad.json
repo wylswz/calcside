@@ -1,0 +1,9 @@
+{
+  "body": {
+    "error": {
+      "code": "bad_request",
+      "message": "invalid status filter"
+    }
+  },
+  "status": 400
+}

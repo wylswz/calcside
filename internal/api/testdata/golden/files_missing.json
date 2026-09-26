@@ -1,0 +1,9 @@
+{
+  "body": {
+    "error": {
+      "code": "not_found",
+      "message": "fs: file does not exist: /work/nope.txt"
+    }
+  },
+  "status": 404
+}

@@ -1,0 +1,37 @@
+{
+  "body": {
+    "instances": [
+      {
+        "created_at": "\u003cts\u003e",
+        "expires_at": "\u003cts\u003e",
+        "id": "\u003cid:ins\u003e",
+        "labels": {
+          "team": "golden"
+        },
+        "last_active_at": "\u003cts\u003e",
+        "spec": {
+          "capabilities": {
+            "fs": {},
+            "io": {}
+          },
+          "env": {
+            "REGION": "us-east-1"
+          },
+          "labels": {
+            "team": "golden"
+          },
+          "limits": {
+            "exec_timeout_ms": 30000,
+            "max_output_bytes": 1048576,
+            "max_steps": 1000000
+          },
+          "secrets": null,
+          "ttl_seconds": 900
+        },
+        "status": "running",
+        "user_id": "\u003cid:usr\u003e"
+      }
+    ]
+  },
+  "status": 200
+}

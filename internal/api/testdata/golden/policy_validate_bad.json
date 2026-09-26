@@ -1,0 +1,7 @@
+{
+  "body": {
+    "error": "input: 3 errors occurred:\ninput:1: rego_parse_error: package expected\ninput:1: rego_parse_error: var cannot be used for rule name\ninput:1: rego_parse_error: var cannot be used for rule name",
+    "valid": false
+  },
+  "status": 200
+}

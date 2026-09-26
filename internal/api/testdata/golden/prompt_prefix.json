@@ -1,0 +1,16 @@
+{
+  "body": {
+    "capabilities": [
+      "fs",
+      "io"
+    ],
+    "instance_id": "\u003cid:ins\u003e",
+    "prompt": "## calcside sandbox\n\nYou have a persistent Starlark sandbox (instance \u003cid:ins\u003e). Every `sb_exec` call runs code in the SAME instance: top-level variables and functions you define persist across calls and across agent runs while the instance lives.\n\nLarge values (API responses, file contents, intermediate results) stay in instance memory as a variable. Assign them to a top-level variable once (`resp = net.get(...)`), then reuse the variable in later `sb_exec` calls — NEVER re-send a big literal you already stored. Redefining a variable or function replaces the old binding.\n\n### Starlark is NOT Python\n- No `import`, no classes, no `try/except`, no `with`, no generators/`yield`, no f-strings (use `\"%s\" % x` or `.format()`).\n- Strings are NOT iterable — `for c in s` fails with \"string value is not iterable\". Use `for c in s.elems()` (chars) or `s.codepoints()` (ints). `in` still works for substring tests.\n- `while`, recursion, sets, dicts and list comprehensions are available; no `global` keyword is needed at top level.\n- `json.encode(...)` / `json.decode(...)` and the `math` module are available.\n- ALL output must go through `print(...)` — the value of the last expression is NOT returned.\n\n### Tools\n- `sb_exec(code)` — run Starlark code; returns printed output (or an error).\n- `sb_list_files(path)` — list a directory in the sandbox filesystem.\n- `sb_read_file(path)` — read a file's content.\n\n### Capabilities\n\n#### `fs`\n- `fs.read(path)` — read file contents as string\n- `fs.write(path, content)` — write string to file, creating parents\n- `fs.append(path, content)` — append string to file, creating parents\n- `fs.exists(path)` — whether path exists\n- `fs.stat(path)` — dict{name,path,is_dir,size,mtime}\n- `fs.list(dir)` — list direct children of dir\n- `fs.walk(dir)` — recursive listing under dir\n- `fs.mkdir(path)` — create dir and parents\n- `fs.delete(path, recursive)` — delete file or dir\n- Paths are rooted at `/work`.\n- Quota: 67108864 bytes, max 10000 files.\n\n#### `io`\n- `io.println()` — write args to output buffer, space separated, newline terminated\n- `print(...)` writes to the same output buffer.\n- Output is capped at 1048576 bytes per exec.\n\n\n### Environment\nRead env vars in Starlark via `env.get(\"NAME\")`; available keys: REGION\n\n### Errors and limits\n- `policy_denied` — a security policy blocked the action. Do NOT retry the same action; explain to the user what was blocked.\n- `step_limit` / `timeout` — simplify the code or split the work.\n- `syntax` / `runtime` / `out_of_scope` / `memory_limit` — fix the code or reduce memory and try again.\n- Limits: exec timeout 30000ms, 1000000 max steps, output cap 1048576 bytes, instance TTL 900s.\n- Keep outputs small: print summaries, not huge blobs.\n\n### Example\n`sb_exec`: `fs.write(\"out.txt\", \"hello\")` then `print(fs.read(\"out.txt\"))`\n",
+    "tools": {
+      "exec": "sb_exec",
+      "list_files": "sb_list_files",
+      "read_file": "sb_read_file"
+    }
+  },
+  "status": 200
+}

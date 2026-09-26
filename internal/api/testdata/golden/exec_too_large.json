@@ -1,0 +1,9 @@
+{
+  "body": {
+    "error": {
+      "code": "too_large",
+      "message": "code exceeds 256KB"
+    }
+  },
+  "status": 413
+}

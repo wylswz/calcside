@@ -1,0 +1,14 @@
+{
+  "body": {
+    "kind": "session",
+    "user": {
+      "created_at": "\u003cts\u003e",
+      "email": "a@x.com",
+      "id": "\u003cid:usr\u003e",
+      "last_login_at": "\u003cts\u003e",
+      "name": ""
+    },
+    "via_key": false
+  },
+  "status": 200
+}
