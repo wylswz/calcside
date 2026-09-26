@@ -164,6 +164,11 @@ type Store interface {
 	GetInstance(ctx context.Context, id string) (*Instance, error)
 	ListInstances(ctx context.Context, userID string, status types.InstanceStatus) ([]*Instance, error)
 	UpdateInstance(ctx context.Context, in *Instance) error
+	// ListExpiredInstances returns running instances whose sliding TTL
+	// elapsed before the given time. The API tier owns expiry as a
+	// status transition — an execution node cannot write it — so this
+	// drives the reaper.
+	ListExpiredInstances(ctx context.Context, before time.Time, limit int) ([]*Instance, error)
 	MarkRunningAsLost(ctx context.Context) (int, error)
 
 	CreateExecution(ctx context.Context, e *Execution) error

@@ -138,6 +138,16 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		if err := s.CreateInstance(ctx, in2); err != nil {
 			t.Fatal(err)
 		}
+		// Only running rows past their deadline are due; the already
+		// expired in and the still-live in2 must both be excluded.
+		due, err := s.ListExpiredInstances(ctx, now.Add(30*time.Second), 10)
+		if err != nil || len(due) != 0 {
+			t.Fatalf("ListExpiredInstances early: %v %d", err, len(due))
+		}
+		due, err = s.ListExpiredInstances(ctx, now.Add(2*time.Minute), 10)
+		if err != nil || len(due) != 1 || due[0].ID != in2.ID {
+			t.Fatalf("ListExpiredInstances due: %v %+v", err, due)
+		}
 		n, err := s.MarkRunningAsLost(ctx)
 		if err != nil || n != 1 {
 			t.Fatalf("MarkRunningAsLost: %v n=%d", err, n)

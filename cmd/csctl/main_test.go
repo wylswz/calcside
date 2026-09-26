@@ -48,17 +48,24 @@ func newTestEnv(t *testing.T) *testEnv {
 	reg.Register(capio.Factory())
 	rec := audit.NewRecorder(st)
 	t.Cleanup(rec.Close)
-	limits := instance.ServerLimits{
-		MaxInstancesPerUser: 10, DefaultTTL: 15 * time.Minute,
-		MaxTTL: 24 * time.Hour, MaxExecTimeout: 5 * time.Minute,
+	limits := capability.ServerLimits{
+		DefaultTTL: 15 * time.Minute,
+		MaxTTL:     24 * time.Hour, MaxExecTimeout: 5 * time.Minute,
 		MaxFSQuotaBytes: 256 << 20, NetAllowPrivate: true,
 	}
-	mgr := instance.New(st, engine.New(8), reg, rec, "", time.Second, limits, nil, nil, nil, time.Hour)
+	mgr := instance.New(instance.Options{
+		Engine: engine.New(8), Registry: reg, Limits: limits,
+		EvalTimeout: time.Second, ReapInterval: time.Hour,
+	})
+	vaultSvc := vault.New(st, nil)
 	svc := auth.NewService(st, false)
 	h := api.Handler(api.Deps{
-		IAM: iam.New(st, nil), Vault: vault.New(st, nil),
+		IAM: iam.New(st, nil), Vault: vaultSvc,
 		Policy: policysvc.New(st), Audit: auditsvc.New(st),
-		Catalog: catalog.New(reg), Sandbox: sandbox.New(st, mgr),
+		Catalog: catalog.New(reg), Sandbox: sandbox.New(sandbox.Options{
+			Store: st, Runtime: mgr, Secrets: vaultSvc, Audit: rec,
+			Registry: reg, Limits: limits, MaxInstancesPerUser: 10,
+		}),
 		Auth: svc,
 	})
 	srv := httptest.NewServer(h)

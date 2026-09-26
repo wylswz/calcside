@@ -2,127 +2,108 @@ package instance
 
 import (
 	"context"
-	"path/filepath"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
-	"calcside/internal/capability"
-	capfs "calcside/internal/capability/fs"
-	capio "calcside/internal/capability/io"
-	"calcside/internal/engine"
-	"calcside/internal/store"
-	_ "calcside/internal/store/gormstore"
-	"calcside/internal/types"
+	"calcside/internal/runtime"
 )
 
-func testMgr(t *testing.T, now *time.Time, limits ServerLimits) (*Manager, store.Store, *store.User) {
-	t.Helper()
-	st, err := store.Open(context.Background(), "sqlite", filepath.Join(t.TempDir(), "t.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.Close() })
-	reg := capability.NewRegistry()
-	reg.Register(capfs.Factory())
-	reg.Register(capio.Factory())
-	m := New(st, engine.New(8), reg, nil, "", time.Second, limits, nil, nil,
-		func() time.Time { return *now }, time.Hour)
-	u, err := st.UpsertUserByEmail(context.Background(), "u@x.com", "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return m, st, u
-}
-
-func defaultLimits() ServerLimits {
-	return ServerLimits{
-		MaxInstancesPerUser: 10,
-		DefaultTTL:          15 * time.Minute,
-		MaxTTL:              24 * time.Hour,
-		MaxExecTimeout:      5 * time.Minute,
-		MaxFSQuotaBytes:     256 << 20,
-	}
-}
-
-func TestTTLExpiryViaFakeClock(t *testing.T) {
+// A node reclaims memory only after the grace period: expiry as a
+// status is the API tier's call, and the node must not race ahead of
+// it and drop an instance the API tier still believes is running.
+func TestLocalReclaimWaitsOutGrace(t *testing.T) {
 	now := time.Now()
-	m, st, u := testMgr(t, &now, defaultLimits())
+	n := newNode(t, Options{Limits: defaultLimits(), ReapGrace: time.Minute}, &now)
 	ctx := context.Background()
-	meta, err := m.Create(ctx, u, []byte(`{"ttl_seconds":60,"capabilities":{"fs":{}}}`))
-	if err != nil {
-		t.Fatal(err)
+	id := n.mustCreate(`{"ttl_seconds":60,"capabilities":{"fs":{}}}`)
+
+	// Past the deadline but inside the grace window: still held.
+	now = now.Add(90 * time.Second)
+	n.m.Reap(ctx)
+	if n.m.Count() != 1 {
+		t.Fatalf("reclaimed inside grace window")
 	}
-	now = now.Add(2 * time.Minute)
-	m.Reap(ctx)
-	got, err := st.GetInstance(ctx, meta.ID)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := n.exec(id, "print(1)"); err != nil {
+		t.Fatalf("instance should still run inside grace: %v", err)
 	}
-	if got.Status != types.InstanceExpired || got.EndedAt == nil {
-		t.Fatalf("expected expired, got %+v", got)
+
+	// Past deadline + grace, with no renewal in between.
+	now = now.Add(10 * time.Minute)
+	n.m.Reap(ctx)
+	if n.m.Count() != 0 {
+		t.Fatalf("expected reclaim, %d still live", n.m.Count())
 	}
-	// exec on expired instance fails
-	if _, err := m.Exec(ctx, meta.ID, "print(1)", 0, nil); err != ErrNotFound {
-		t.Fatalf("expected ErrNotFound after expiry, got %v", err)
+	if _, err := n.exec(id, "print(1)"); !errors.Is(err, runtime.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after reclaim, got %v", err)
 	}
 }
 
 func TestKeepaliveExtends(t *testing.T) {
 	now := time.Now()
-	m, _, u := testMgr(t, &now, defaultLimits())
-	ctx := context.Background()
-	meta, err := m.Create(ctx, u, []byte(`{"ttl_seconds":60}`))
-	if err != nil {
-		t.Fatal(err)
-	}
+	n := newNode(t, Options{Limits: defaultLimits(), ReapGrace: time.Minute}, &now)
+	id := n.mustCreate(`{"ttl_seconds":60}`)
+
 	now = now.Add(50 * time.Second)
-	if _, err := m.Keepalive(ctx, meta.ID); err != nil {
+	if err := n.keepalive(id); err != nil {
 		t.Fatal(err)
 	}
-	now = now.Add(50 * time.Second) // 100s > 60s since creation
-	m.Reap(ctx)
-	if _, err := m.Exec(ctx, meta.ID, "print('alive')", 0, nil); err != nil {
+	// 100s since creation, but only 50s since the renewal.
+	now = now.Add(50 * time.Second)
+	n.m.Reap(context.Background())
+	if _, err := n.exec(id, "print('alive')"); err != nil {
 		t.Fatalf("instance should still be alive: %v", err)
 	}
 }
 
-func TestPerUserLimit(t *testing.T) {
+// The per-user quota moved to the API tier, which can see the whole
+// cluster. What a node enforces is its own capacity.
+func TestNodeInstanceLimit(t *testing.T) {
 	now := time.Now()
-	limits := defaultLimits()
-	limits.MaxInstancesPerUser = 2
-	m, _, u := testMgr(t, &now, limits)
-	ctx := context.Background()
+	n := newNode(t, Options{Limits: defaultLimits(), MaxInstances: 2}, &now)
 	for i := 0; i < 2; i++ {
-		if _, err := m.Create(ctx, u, []byte(`{}`)); err != nil {
+		if _, err := n.create(`{}`); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := m.Create(ctx, u, []byte(`{}`)); err != ErrTooMany {
+	if _, err := n.create(`{}`); !errors.Is(err, runtime.ErrTooMany) {
 		t.Fatalf("expected ErrTooMany, got %v", err)
+	}
+}
+
+// A node is reachable by anything on the internal network, so it must
+// not take the caller's word for who owns an instance.
+func TestOwnershipRecheckedOnNode(t *testing.T) {
+	now := time.Now()
+	n := newNode(t, Options{Limits: defaultLimits()}, &now)
+	id := n.mustCreate(`{"capabilities":{"fs":{}}}`)
+
+	_, err := n.m.Exec(context.Background(), &runtime.ExecRequest{
+		InstanceID: id,
+		Owner:      runtime.Owner{UserID: "usr_someone_else"},
+		ExecID:     "exe_intruder",
+		Code:       "print(1)",
+	})
+	if !errors.Is(err, runtime.ErrNotOwner) {
+		t.Fatalf("expected ErrNotOwner, got %v", err)
 	}
 }
 
 func TestConcurrentExecsSerialized(t *testing.T) {
 	now := time.Now()
-	m, _, u := testMgr(t, &now, defaultLimits())
-	ctx := context.Background()
-	meta, err := m.Create(ctx, u, []byte(`{"capabilities":{"fs":{}}}`))
-	if err != nil {
-		t.Fatal(err)
-	}
+	n := newNode(t, Options{Limits: defaultLimits()}, &now)
+	id := n.mustCreate(`{"capabilities":{"fs":{}}}`)
+
 	// Hammer the same instance from many goroutines; -race catches
 	// unsynchronized globals/buffer access.
-	if _, err := m.Exec(ctx, meta.ID, "counter = 0", 0, nil); err != nil {
-		t.Fatal(err)
-	}
+	n.mustExec(id, "counter = 0")
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			res, err := m.Exec(ctx, meta.ID,
-				"counter = counter + 1\nfs.write('n.txt', str(counter))", 0, nil)
+			res, err := n.exec(id, "counter = counter + 1\nfs.write('n.txt', str(counter))")
 			if err != nil || res.Error != nil {
 				t.Errorf("exec %d: %v %+v", i, err, res)
 			}
@@ -131,36 +112,45 @@ func TestConcurrentExecsSerialized(t *testing.T) {
 	wg.Wait()
 }
 
-func TestStartupMarksRunningAsLost(t *testing.T) {
+// Every gated call must come back on the response: the node cannot
+// write the audit log itself.
+func TestAuditRidesTheResponse(t *testing.T) {
 	now := time.Now()
-	m, st, u := testMgr(t, &now, defaultLimits())
-	ctx := context.Background()
-	meta, err := m.Create(ctx, u, []byte(`{"ttl_seconds":3600}`))
-	if err != nil {
-		t.Fatal(err)
+	n := newNode(t, Options{Limits: defaultLimits()}, &now)
+	id := n.mustCreate(`{"capabilities":{"fs":{}}}`)
+	n.mustExec(id, "fs.write('a.txt', 'hello')\nfs.read('a.txt')")
+
+	var ops []string
+	for _, ev := range n.audit() {
+		if ev.Capability == "fs" {
+			ops = append(ops, string(ev.Op))
+		}
+		if ev.InstanceID != id {
+			t.Fatalf("event attributed to %s, want %s", ev.InstanceID, id)
+		}
 	}
-	// Simulate a fresh process: new manager on same store.
-	m2, _, _ := testMgr2(t, &now, defaultLimits(), st)
-	n, err := m2.Recover(ctx)
-	if err != nil {
-		t.Fatal(err)
+	if len(ops) < 2 {
+		t.Fatalf("expected write+read in the audit batch, got %v", ops)
 	}
-	if n != 1 {
-		t.Fatalf("expected 1 lost, got %d", n)
-	}
-	got, _ := st.GetInstance(ctx, meta.ID)
-	if got.Status != types.InstanceLost {
-		t.Fatalf("expected lost, got %s", got.Status)
+	// Draining is per request: a second exec reports only its own.
+	before := len(n.audit())
+	n.mustExec(id, "fs.read('a.txt')")
+	if got := len(n.audit()) - before; got == 0 || got > 2 {
+		t.Fatalf("second exec reported %d events, want 1..2", got)
 	}
 }
 
-func testMgr2(t *testing.T, now *time.Time, limits ServerLimits, st store.Store) (*Manager, store.Store, *store.User) {
-	t.Helper()
-	reg := capability.NewRegistry()
-	reg.Register(capfs.Factory())
-	reg.Register(capio.Factory())
-	m := New(st, engine.New(8), reg, nil, "", time.Second, limits, nil, nil,
-		func() time.Time { return *now }, time.Hour)
-	u, _ := st.UpsertUserByEmail(context.Background(), "u@x.com", "", "")
-	return m, st, u
+func TestDeleteReleasesInstance(t *testing.T) {
+	now := time.Now()
+	n := newNode(t, Options{Limits: defaultLimits()}, &now)
+	id := n.mustCreate(`{"capabilities":{"fs":{}}}`)
+	if err := n.delete(id); err != nil {
+		t.Fatal(err)
+	}
+	if n.m.Count() != 0 {
+		t.Fatalf("instance still live after delete")
+	}
+	if err := n.delete(id); !errors.Is(err, runtime.ErrNotFound) {
+		t.Fatalf("second delete: expected ErrNotFound, got %v", err)
+	}
 }

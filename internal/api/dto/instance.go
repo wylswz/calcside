@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	capfs "calcside/internal/capability/fs"
+	"calcside/internal/runtime"
 	"calcside/internal/service/sandbox"
 	"calcside/internal/store"
 	"calcside/internal/types"
@@ -144,7 +144,7 @@ func NewInstancePrompt(v *sandbox.PromptView) InstancePrompt {
 	}
 }
 
-// FileEntry mirrors capfs.Entry's wire shape.
+// FileEntry mirrors the runtime contract's entry wire shape.
 type FileEntry struct {
 	Name  string `json:"name"`
 	Path  string `json:"path"`
@@ -153,11 +153,11 @@ type FileEntry struct {
 	Mtime int64  `json:"mtime"`
 }
 
-func NewFileEntry(e capfs.Entry) FileEntry {
+func NewFileEntry(e runtime.FileEntry) FileEntry {
 	return FileEntry{Name: e.Name, Path: e.Path, IsDir: e.IsDir, Size: e.Size, Mtime: e.Mtime}
 }
 
-func NewFileEntries(lst []capfs.Entry) []FileEntry {
+func NewFileEntries(lst []runtime.FileEntry) []FileEntry {
 	out := make([]FileEntry, len(lst))
 	for i, e := range lst {
 		out[i] = NewFileEntry(e)

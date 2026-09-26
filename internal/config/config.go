@@ -29,6 +29,7 @@ type Config struct {
 	GoogleAllowedDomains []string
 	CookieSecure         bool
 	MaxInstancesPerUser  int
+	MaxInstancesPerNode  int
 	DefaultTTL           time.Duration
 	MaxTTL               time.Duration
 	MaxExecTimeout       time.Duration
@@ -107,7 +108,8 @@ func Parse(args []string) (Config, error) {
 	fs.BoolVar(&c.CookieSecure, "cookie-secure", envBool("COOKIE_SECURE", false), "set Secure on cookies")
 	fs.BoolVar(&c.Dev, "dev", envBool("DEV", false), "dev mode: no login, anonymous principal (INSECURE)")
 	fs.BoolVar(&c.DevAllowRemote, "dev-allow-remote", envBool("DEV_ALLOW_REMOTE", false), "allow --dev on non-loopback addr (INSECURE)")
-	fs.IntVar(&c.MaxInstancesPerUser, "max-instances-per-user", envInt("MAX_INSTANCES_PER_USER", 10), "max live instances per user")
+	fs.IntVar(&c.MaxInstancesPerUser, "max-instances-per-user", envInt("MAX_INSTANCES_PER_USER", 10), "max live instances per user (cluster-wide, counted from the store)")
+	fs.IntVar(&c.MaxInstancesPerNode, "max-instances-per-node", envInt("MAX_INSTANCES_PER_NODE", 0), "max live instances on this execution node (0 = unlimited)")
 	fs.DurationVar(&c.DefaultTTL, "default-ttl", envDur("DEFAULT_TTL", 15*time.Minute), "default instance TTL")
 	fs.DurationVar(&c.MaxTTL, "max-ttl", envDur("MAX_TTL", 24*time.Hour), "max instance TTL")
 	fs.DurationVar(&c.MaxExecTimeout, "max-exec-timeout", envDur("MAX_EXEC_TIMEOUT", 5*time.Minute), "max exec timeout")

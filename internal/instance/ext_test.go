@@ -10,37 +10,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"calcside/internal/capability"
 	capext "calcside/internal/capability/ext"
 	capfs "calcside/internal/capability/fs"
 	capio "calcside/internal/capability/io"
 	capnet "calcside/internal/capability/net"
-	"calcside/internal/engine"
-	"calcside/internal/store"
-	_ "calcside/internal/store/gormstore"
+	"calcside/internal/runtime"
 	"calcside/internal/types"
 )
-
-type recObs struct {
-	mu   sync.Mutex
-	recs []capability.Record
-}
-
-func (o *recObs) Observe(r capability.Record) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.recs = append(o.recs, r)
-}
-
-func (o *recObs) all() []capability.Record {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return append([]capability.Record(nil), o.recs...)
-}
 
 // examplesDir resolves the repo's examples/capabilities dir.
 func examplesDir(t *testing.T) string {
@@ -55,14 +34,8 @@ func examplesDir(t *testing.T) string {
 	return d
 }
 
-func extMgr(t *testing.T, localRoots []string) (*Manager, store.Store, *store.User, *recObs) {
+func extNode(t *testing.T, localRoots []string) *node {
 	t.Helper()
-	ctx := context.Background()
-	st, err := store.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "t.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.Close() })
 	reg := capability.NewRegistry()
 	reg.Register(capfs.Factory())
 	reg.Register(capio.Factory())
@@ -74,10 +47,7 @@ func extMgr(t *testing.T, localRoots []string) (*Manager, store.Store, *store.Us
 	limits := defaultLimits()
 	limits.NetAllowPrivate = true
 	limits.SecretsAllowHTTP = true
-	obs := &recObs{}
-	m := New(st, engine.New(8), reg, obs, "", time.Second, limits, nil, nil, nil, time.Hour)
-	u, _ := st.UpsertUserByEmail(ctx, "u@x.com", "", "")
-	return m, st, u, obs
+	return newNode(t, Options{Registry: reg, Limits: limits}, nil)
 }
 
 func TestExtEndToEnd(t *testing.T) {
@@ -97,19 +67,19 @@ func TestExtEndToEnd(t *testing.T) {
 	host := strings.TrimPrefix(srv.URL, "http://")
 
 	extDir := examplesDir(t)
-	m, _, u, obs := extMgr(t, []string{extDir})
+	n := extNode(t, []string{extDir})
 
 	spec := fmt.Sprintf(`{"capabilities":{
 		"net": {"allow_hosts": [%q]},
 		"ext": {"tavily": {"source": %q, "config": {"base_url": %q}}}
 	}, "secrets": {"TAVILY_API_KEY": {"value": "s3cr3t-key", "allowed_domains": [%q]}}}`,
 		host, filepath.Join(extDir, "tavily"), srv.URL, host)
-	meta, err := m.Create(ctx, u, []byte(spec))
+	id, err := n.create(spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := m.Exec(ctx, meta.ID, `r = ext.tavily.search("hi")
-print(r[0]["title"])`, 0, nil)
+	res, err := n.exec(id, `r = ext.tavily.search("hi")
+print(r[0]["title"])`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,56 +97,56 @@ print(r[0]["title"])`, 0, nil)
 	}
 
 	// Audit: ext.tavily.search allow then net.post allow; secret absent.
-	var extRec, netRec *capability.Record
-	for i, r := range obs.all() {
-		b, _ := json.Marshal(r)
+	var extRec, netRec *runtime.AuditEvent
+	events := n.audit()
+	for i, ev := range events {
+		b, _ := json.Marshal(ev)
 		if strings.Contains(string(b), "s3cr3t-key") {
-			t.Fatalf("secret leaked in audit record: %s", b)
+			t.Fatalf("secret leaked in audit event: %s", b)
 		}
-		if r.Call.Capability == types.CapExt && r.Call.Op == "tavily.search" {
-			extRec = &obs.all()[i]
+		if ev.Capability == types.CapExt && ev.Op == "tavily.search" {
+			extRec = &events[i]
 		}
-		if r.Call.Capability == types.CapNet && r.Call.Op == "post" {
-			netRec = &obs.all()[i]
+		if ev.Capability == types.CapNet && ev.Op == "post" {
+			netRec = &events[i]
 		}
 	}
 	if extRec == nil || extRec.Decision != types.DecisionAllow {
-		t.Fatalf("missing/!allow ext record: %+v", extRec)
+		t.Fatalf("missing/!allow ext event: %+v", extRec)
 	}
 	if netRec == nil || netRec.Decision != types.DecisionAllow {
-		t.Fatalf("missing/!allow net record: %+v", netRec)
+		t.Fatalf("missing/!allow net event: %+v", netRec)
 	}
-	if extRec.Call.Args["query"] != "hi" {
-		t.Fatalf("ext args: %v", extRec.Call.Args)
+	if !strings.Contains(extRec.Args, `"query":"hi"`) {
+		t.Fatalf("ext args: %s", extRec.Args)
 	}
 
-	// Prompt documents the op.
-	pd, err := m.PromptData(meta.ID)
+	// Prompt documents the op. Fragments are rendered on the node,
+	// because only it has the factories and the effective config.
+	pd, err := n.m.Prompt(ctx, &runtime.PromptRequest{InstanceID: id, Owner: n.owner})
 	if err != nil {
 		t.Fatal(err)
 	}
 	found := false
-	for _, p := range pd.Parts {
-		if p.Factory.Name() == types.CapExt {
-			s := p.Factory.Prompt(p.Config)
-			if !strings.Contains(s, "ext.tavily.search(query, max_results)") {
-				t.Fatalf("prompt missing op line:\n%s", s)
+	for _, f := range pd.Fragments {
+		if f.Capability == types.CapExt {
+			if !strings.Contains(f.Text, "ext.tavily.search(query, max_results)") {
+				t.Fatalf("prompt missing op line:\n%s", f.Text)
 			}
-			if !strings.Contains(s, "Secrets used: api_key ← TAVILY_API_KEY") {
-				t.Fatalf("prompt missing secrets line:\n%s", s)
+			if !strings.Contains(f.Text, "Secrets used: api_key ← TAVILY_API_KEY") {
+				t.Fatalf("prompt missing secrets line:\n%s", f.Text)
 			}
 			found = true
 		}
 	}
 	if !found {
-		t.Fatal("ext not in prompt parts")
+		t.Fatal("ext not in prompt fragments")
 	}
 }
 
 // TestExtSecretOverride overrides the api_key config with a different
 // instance secret.
 func TestExtSecretOverride(t *testing.T) {
-	ctx := context.Background()
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
@@ -186,17 +156,17 @@ func TestExtSecretOverride(t *testing.T) {
 	host := strings.TrimPrefix(srv.URL, "http://")
 
 	extDir := examplesDir(t)
-	m, _, u, obs := extMgr(t, []string{extDir})
+	n := extNode(t, []string{extDir})
 	spec := fmt.Sprintf(`{"capabilities":{
 		"net": {"allow_hosts": [%q]},
 		"ext": {"tavily": {"source": %q, "config": {"base_url": %q, "api_key": "{{secrets.MY_TAVILY}}"}}}
 	}, "secrets": {"MY_TAVILY": {"value": "other-key-9", "allowed_domains": [%q]}}}`,
 		host, filepath.Join(extDir, "tavily"), srv.URL, host)
-	meta, err := m.Create(ctx, u, []byte(spec))
+	id, err := n.create(spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := m.Exec(ctx, meta.ID, `ext.tavily.search("q")`, 0, nil)
+	res, err := n.exec(id, `ext.tavily.search("q")`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,54 +176,51 @@ func TestExtSecretOverride(t *testing.T) {
 	if gotAuth != "Bearer other-key-9" {
 		t.Fatalf("Authorization %q", gotAuth)
 	}
-	for _, r := range obs.all() {
-		b, _ := json.Marshal(r)
+	for _, ev := range n.audit() {
+		b, _ := json.Marshal(ev)
 		if strings.Contains(string(b), "other-key-9") {
-			t.Fatalf("secret leaked in audit record: %s", b)
+			t.Fatalf("secret leaked in audit event: %s", b)
 		}
 	}
 }
 
 func TestExtMissingSecretRef(t *testing.T) {
-	ctx := context.Background()
 	extDir := examplesDir(t)
-	m, _, u, _ := extMgr(t, []string{extDir})
+	n := extNode(t, []string{extDir})
 	spec := fmt.Sprintf(`{"capabilities":{
 		"net": {"allow_hosts": ["x.example"]},
 		"ext": {"tavily": {"source": %q}}}}`,
 		filepath.Join(extDir, "tavily"))
-	_, err := m.Create(ctx, u, []byte(spec))
+	_, err := n.create(spec)
 	if err == nil || !strings.Contains(err.Error(), `references secret "TAVILY_API_KEY"`) {
 		t.Fatalf("want missing-secret error, got %v", err)
 	}
 }
 
 func TestExtMissingBaseDep(t *testing.T) {
-	ctx := context.Background()
 	extDir := examplesDir(t)
-	m, _, u, _ := extMgr(t, []string{extDir})
+	n := extNode(t, []string{extDir})
 	spec := fmt.Sprintf(`{"capabilities":{"ext":{"tavily":{"source":%q}}}}`,
 		filepath.Join(extDir, "tavily"))
-	_, err := m.Create(ctx, u, []byte(spec))
+	_, err := n.create(spec)
 	if err == nil || !strings.Contains(err.Error(), `requires capability "net"`) {
 		t.Fatalf("want requires-capability error, got %v", err)
 	}
 }
 
 func TestExtNetAllowlistEnforced(t *testing.T) {
-	ctx := context.Background()
 	extDir := examplesDir(t)
-	m, _, u, _ := extMgr(t, []string{extDir})
+	n := extNode(t, []string{extDir})
 	spec := fmt.Sprintf(`{"capabilities":{
 		"net": {"allow_hosts": ["nowhere.example"]},
 		"ext": {"tavily": {"source": %q, "config": {"base_url": "http://127.0.0.1:1"}}}},
 		"secrets": {"TAVILY_API_KEY": {"value": "x", "allowed_domains": ["127.0.0.1:1"]}}}`,
 		filepath.Join(extDir, "tavily"))
-	meta, err := m.Create(ctx, u, []byte(spec))
+	id, err := n.create(spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := m.Exec(ctx, meta.ID, `ext.tavily.search("hi")`, 0, nil)
+	res, err := n.exec(id, `ext.tavily.search("hi")`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,25 +246,22 @@ func writeTmpExt(t *testing.T, root, name string, files map[string]string) strin
 }
 
 func TestExtInitOutOfScope(t *testing.T) {
-	ctx := context.Background()
 	root := t.TempDir()
 	dir := writeTmpExt(t, root, "bad", map[string]string{
 		"capability.yaml": "name: bad\nops: [{name: go}]\ndependencies: [net]\n",
 		"main.star":       "net.get(url=\"http://x.example\")\ndef go():\n    return 1\n",
 	})
-	m, _, u, _ := extMgr(t, []string{root})
+	n := extNode(t, []string{root})
 	spec := fmt.Sprintf(`{"capabilities":{"net":{"allow_hosts":["x.example"]},"ext":{"bad":{"source":%q}}}}`, dir)
-	_, err := m.Create(ctx, u, []byte(spec))
+	_, err := n.create(spec)
 	if err == nil || !strings.Contains(err.Error(), "outside its scope") {
 		t.Fatalf("want out-of-scope error, got %v", err)
 	}
 }
 
 func TestExtRemoteDisabled(t *testing.T) {
-	ctx := context.Background()
-	m, _, u, _ := extMgr(t, nil)
-	_, err := m.Create(ctx, u, []byte(
-		`{"capabilities":{"ext":{"x":{"source":"github.com/a/b@v1","sum":"h1:z"}}}}`))
+	n := extNode(t, nil)
+	_, err := n.create(`{"capabilities":{"ext":{"x":{"source":"github.com/a/b@v1","sum":"h1:z"}}}}`)
 	if err == nil {
 		t.Fatal("remote source without allow-sources should fail")
 	}

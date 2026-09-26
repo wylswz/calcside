@@ -68,37 +68,63 @@ type Hook struct {
 	timeout time.Duration
 }
 
-// NewHook compiles the global policy dir (full capabilities) and the given
-// per-user policies (restricted capabilities). userPolicies: policyID ->
-// rego source. Any compile error is fatal.
-func NewHook(policyDir string, userPolicies map[string]string, evalTimeout time.Duration) (*Hook, error) {
+// LoadDir reads and validates every *.rego in dir, returning module
+// name -> source. An empty dir name yields no modules.
+//
+// The API tier calls this once at startup and ships the result with
+// each create request, so that an execution node compiles exactly the
+// snapshot the API tier had, rather than whatever happens to be on that
+// node's disk.
+func LoadDir(dir string) (map[string]string, error) {
+	if dir == "" {
+		return nil, nil
+	}
+	entries, err := filepath.Glob(filepath.Join(dir, "*.rego"))
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, e := range entries {
+		data, err := os.ReadFile(e)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateModule(e, string(data)); err != nil {
+			return nil, err
+		}
+		out[filepath.Base(e)] = string(data)
+	}
+	return out, nil
+}
+
+// NewHook compiles a policy snapshot: global modules (full
+// capabilities, keyed by module name) and per-user policies (restricted
+// capabilities, keyed by policy ID). Any compile error is fatal.
+func NewHook(globalModules, userPolicies map[string]string, evalTimeout time.Duration) (*Hook, error) {
 	if evalTimeout <= 0 {
 		evalTimeout = 100 * time.Millisecond
 	}
 	h := &Hook{perUser: map[string]*Set{}, timeout: evalTimeout}
-	if policyDir != "" {
-		entries, err := filepath.Glob(filepath.Join(policyDir, "*.rego"))
+	if len(globalModules) > 0 {
+		names := make([]string, 0, len(globalModules))
+		for name := range globalModules {
+			names = append(names, name)
+		}
+		// Compile in a stable order so a compile error is deterministic.
+		sort.Strings(names)
+		mods := make([]func(*rego.Rego), 0, len(names))
+		for _, name := range names {
+			src := globalModules[name]
+			if err := validateModule(name, src); err != nil {
+				return nil, err
+			}
+			mods = append(mods, rego.Module(name, src))
+		}
+		s, err := compile("global", nil, mods...)
 		if err != nil {
 			return nil, err
 		}
-		var mods []func(*rego.Rego)
-		for _, e := range entries {
-			data, err := os.ReadFile(e)
-			if err != nil {
-				return nil, err
-			}
-			if err := validateModule(e, string(data)); err != nil {
-				return nil, err
-			}
-			mods = append(mods, rego.Module(filepath.Base(e), string(data)))
-		}
-		if len(mods) > 0 {
-			s, err := compile("global", nil, mods...)
-			if err != nil {
-				return nil, err
-			}
-			h.global = s
-		}
+		h.global = s
 	}
 	for id, src := range userPolicies {
 		s, err := CompileUserPolicy(id, src)

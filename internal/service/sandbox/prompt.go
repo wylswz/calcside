@@ -2,12 +2,11 @@ package sandbox
 
 import (
 	"context"
-	"errors"
 	"regexp"
 	"slices"
 
-	"calcside/internal/instance"
 	promptpkg "calcside/internal/prompt"
+	"calcside/internal/runtime"
 	"calcside/internal/service"
 	"calcside/internal/types"
 )
@@ -22,44 +21,42 @@ type PromptView struct {
 	Tools        map[string]string
 }
 
-// Prompt renders the server-side agent system prompt for a live,
-// owned instance.
+// Prompt renders the server-side agent system prompt for a live, owned
+// instance. The node renders the per-capability fragments — only it has
+// the capability factories and the instance's effective config — and
+// this composes them into the final prompt.
 func (s *Service) Prompt(ctx context.Context, a service.Actor, id, toolPrefix string) (*PromptView, error) {
-	in, err := s.owned(ctx, a, id)
-	if err != nil {
+	// Ownership is checked before the argument so that probing for
+	// another user's instance cannot be distinguished by the error.
+	if _, err := s.owned(ctx, a, id); err != nil {
 		return nil, err
 	}
 	if !toolPrefixRe.MatchString(toolPrefix) {
 		return nil, service.BadRequest("invalid tool_prefix")
 	}
-	if in.Status != types.InstanceRunning {
-		return nil, service.Errf(types.ErrCodeNotRunning, "instance not running")
-	}
-	data, err := s.mgr.PromptData(in.ID)
+	in, err := s.running(ctx, a, id)
 	if err != nil {
-		switch {
-		case errors.Is(err, instance.ErrNotFound):
-			return nil, service.NotFound("instance not found")
-		case errors.Is(err, instance.ErrNotRunning):
-			return nil, service.Errf(types.ErrCodeNotRunning, "instance not running")
-		default:
-			return nil, service.Internal(err)
-		}
+		return nil, err
 	}
-	var fragments []string
-	var names []types.CapabilityName
-	for _, p := range data.Parts {
-		fragments = append(fragments, p.Factory.Prompt(p.Config))
-		names = append(names, p.Factory.Name())
+	data, err := s.rt.Prompt(ctx, &runtime.PromptRequest{InstanceID: in.ID, Owner: owner(a)})
+	if err != nil {
+		return nil, fail(err)
+	}
+	fragments := make([]string, 0, len(data.Fragments))
+	names := make([]types.CapabilityName, 0, len(data.Fragments))
+	for _, f := range data.Fragments {
+		fragments = append(fragments, f.Text)
+		names = append(names, f.Capability)
 	}
 	var secretsInfo []promptpkg.SecretInfo
 	for _, sec := range data.Secrets {
 		secretsInfo = append(secretsInfo, promptpkg.SecretInfo{Name: sec.Name, Domains: sec.Domains})
 	}
+	capNames := capNamesToStrings(names)
 	var netHost string
 	if len(data.NetHosts) > 0 {
 		netHost = data.NetHosts[0]
-	} else if slices.Contains(capNamesToStrings(names), "net") {
+	} else if slices.Contains(capNames, "net") {
 		// Unrestricted net: still show a worked example.
 		netHost = "api.example.com"
 	}
@@ -67,12 +64,12 @@ func (s *Service) Prompt(ctx context.Context, a service.Actor, id, toolPrefix st
 		InstanceID:     in.ID,
 		Prefix:         toolPrefix,
 		Fragments:      fragments,
-		CapNames:       capNamesToStrings(names),
+		CapNames:       capNames,
 		Env:            data.Env,
 		Secrets:        secretsInfo,
-		ExecTimeoutMs:  data.Limits.ExecTimeoutMs,
-		MaxSteps:       data.Limits.MaxSteps,
-		MaxOutputBytes: data.Limits.MaxOutputBytes,
+		ExecTimeoutMs:  data.ExecTimeoutMs,
+		MaxSteps:       data.MaxSteps,
+		MaxOutputBytes: data.MaxOutputBytes,
 		TTLSeconds:     data.TTLSeconds,
 		NetExampleHost: netHost,
 		Persistent:     true,

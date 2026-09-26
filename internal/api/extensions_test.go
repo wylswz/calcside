@@ -38,15 +38,23 @@ func TestListExtensions(t *testing.T) {
 		LocalRoots: []string{filepath.Join("..", "..", "examples", "capabilities")},
 		CacheDir:   t.TempDir(),
 	}))
-	mgr := instance.New(st, engine.New(8), reg, nil, "", time.Second, instance.ServerLimits{
-		MaxInstancesPerUser: 10, DefaultTTL: 15 * time.Minute,
-		MaxTTL: 24 * time.Hour, MaxExecTimeout: 5 * time.Minute,
-	}, nil, nil, nil, time.Hour)
+	limits := capability.ServerLimits{
+		DefaultTTL: 15 * time.Minute,
+		MaxTTL:     24 * time.Hour, MaxExecTimeout: 5 * time.Minute,
+	}
+	mgr := instance.New(instance.Options{
+		Engine: engine.New(8), Registry: reg, Limits: limits,
+		EvalTimeout: time.Second, ReapInterval: time.Hour,
+	})
+	vaultSvc := vault.New(st, nil)
 	svc := auth.NewService(st, false)
 	h := Handler(Deps{
-		IAM: iam.New(st, nil), Vault: vault.New(st, nil),
+		IAM: iam.New(st, nil), Vault: vaultSvc,
 		Policy: policysvc.New(st), Audit: auditsvc.New(st),
-		Catalog: catalog.New(reg), Sandbox: sandbox.New(st, mgr),
+		Catalog: catalog.New(reg), Sandbox: sandbox.New(sandbox.Options{
+			Store: st, Runtime: mgr, Secrets: vaultSvc,
+			Registry: reg, Limits: limits, MaxInstancesPerUser: 10,
+		}),
 		Auth: svc,
 	})
 	srv := httptest.NewServer(h)

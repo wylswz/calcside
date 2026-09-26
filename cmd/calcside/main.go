@@ -23,6 +23,7 @@ import (
 	"calcside/internal/config"
 	"calcside/internal/engine"
 	"calcside/internal/instance"
+	"calcside/internal/policy"
 	"calcside/internal/secrets"
 	auditsvc "calcside/internal/service/audit"
 	"calcside/internal/service/catalog"
@@ -77,8 +78,7 @@ func serve(cfg config.Config) error {
 
 	eng := engine.New(cfg.MaxConcurrentExecs, engine.WithMemoryLimit(cfg.ExecMemoryLimit))
 	defer eng.Close()
-	limits := instance.ServerLimits{
-		MaxInstancesPerUser: cfg.MaxInstancesPerUser,
+	limits := capability.ServerLimits{
 		DefaultTTL:          cfg.DefaultTTL,
 		MaxTTL:              cfg.MaxTTL,
 		MaxExecTimeout:      cfg.MaxExecTimeout,
@@ -102,14 +102,49 @@ func serve(cfg config.Config) error {
 	} else {
 		slog.Warn("secrets vault disabled (no --secret-key)")
 	}
-	mgr := instance.New(st, eng, reg, rec, cfg.PolicyDir, cfg.PolicyEvalTimeout,
-		limits, nil, cipher, nil, cfg.ReaperInterval)
-	if n, err := mgr.Recover(ctx); err != nil {
+
+	// Execution tier. It is in-process in this binary, but the API tier
+	// below reaches it only through runtime.Runtime and it holds no
+	// store handle, so the same code serves a separate worker.
+	mgr := instance.New(instance.Options{
+		Engine:       eng,
+		Registry:     reg,
+		Limits:       limits,
+		EvalTimeout:  cfg.PolicyEvalTimeout,
+		MaxInstances: cfg.MaxInstancesPerNode,
+		ReapInterval: cfg.ReaperInterval,
+	})
+	mgr.StartReaper()
+	defer mgr.StopReaper()
+
+	// Instances a previous process owned cannot be recovered: their
+	// Starlark globals lived in that process's memory.
+	if n, err := st.MarkRunningAsLost(ctx); err != nil {
 		return fmt.Errorf("recover: %w", err)
 	} else if n > 0 {
 		slog.Warn("marked lost instances", "count", n)
 	}
-	mgr.StartReaper()
+
+	// Global policies are read once here and travel with every create
+	// request, so a node never depends on its own copy of --policy-dir.
+	globalPolicies, err := policy.LoadDir(cfg.PolicyDir)
+	if err != nil {
+		return fmt.Errorf("--policy-dir: %w", err)
+	}
+
+	vaultSvc := vault.New(st, cipher)
+	sandboxSvc := sandbox.New(sandbox.Options{
+		Store:               st,
+		Runtime:             mgr,
+		Secrets:             vaultSvc,
+		Audit:               rec,
+		Registry:            reg,
+		Limits:              limits,
+		GlobalPolicies:      globalPolicies,
+		MaxInstancesPerUser: cfg.MaxInstancesPerUser,
+	})
+	// Expiry is a status transition, so it is the API tier's to make.
+	go expireLoop(ctx, sandboxSvc, cfg.ReaperInterval)
 
 	svc := auth.NewService(st, cfg.CookieSecure)
 	var anon *store.User
@@ -141,9 +176,9 @@ func serve(cfg config.Config) error {
 		webFS = sub
 	}
 	mux := api.Handler(api.Deps{
-		IAM: iam.New(st, nil), Vault: vault.New(st, cipher),
+		IAM: iam.New(st, nil), Vault: vaultSvc,
 		Policy: policysvc.New(st), Audit: auditsvc.New(st),
-		Catalog: catalog.New(reg), Sandbox: sandbox.New(st, mgr),
+		Catalog: catalog.New(reg), Sandbox: sandboxSvc,
 		Auth: svc, Web: webFS, GoogleEnabled: flow != nil,
 		Dev: cfg.Dev, Anonymous: anon,
 	})
@@ -169,7 +204,27 @@ func serve(cfg config.Config) error {
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 		return err
 	}
-	mgr.StopReaper()
 	rec.Close()
 	return nil
+}
+
+// expireLoop sweeps instances whose sliding TTL elapsed. Nodes reclaim
+// their own memory after a grace period, but only the API tier can
+// record that an instance expired.
+func expireLoop(ctx context.Context, svc *sandbox.Service, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			n, err := svc.ExpireDue(ctx, 200)
+			if err != nil {
+				slog.Error("expire sweep failed", "err", err)
+			} else if n > 0 {
+				slog.Info("expired instances", "count", n)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }

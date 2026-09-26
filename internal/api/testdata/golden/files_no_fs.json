@@ -1,0 +1,9 @@
+{
+  "body": {
+    "error": {
+      "code": "no_fs",
+      "message": "instance has no fs capability"
+    }
+  },
+  "status": 400
+}

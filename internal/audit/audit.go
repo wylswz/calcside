@@ -1,26 +1,30 @@
-// Package audit records every gated capability call into the store via an
-// async batched writer. It never records file contents or response bodies.
+// Package audit persists the gated capability calls an execution node
+// reports. Nodes do not write to the database: they return audit
+// batches on the response that produced them, and the API tier hands
+// those batches here for async batched insertion.
+//
+// It never records file contents or response bodies — that is enforced
+// upstream, where a Call's args are built.
 package audit
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"sync"
 	"time"
 
-	"calcside/internal/capability"
+	"calcside/internal/runtime"
 	"calcside/internal/store"
 )
 
 const (
-	argsMaxBytes = 4 << 10
-	batchSize    = 100
-	flushEvery   = time.Second
-	queueSize    = 4096
+	batchSize  = 100
+	flushEvery = time.Second
+	queueSize  = 4096
 )
 
-// Recorder is a capability.Observer that enqueues audit events.
+// Recorder buffers audit events and writes them to the store in
+// batches.
 type Recorder struct {
 	st   store.Store
 	ch   chan store.AuditEvent
@@ -35,36 +39,36 @@ func NewRecorder(st store.Store) *Recorder {
 	return r
 }
 
-// Observe converts a gate record into an AuditEvent and enqueues it.
-func (r *Recorder) Observe(rec capability.Record) {
-	args := "{}"
-	if rec.Call.Args != nil {
-		if b, err := json.Marshal(rec.Call.Args); err == nil {
-			if len(b) > argsMaxBytes {
-				b = b[:argsMaxBytes]
-			}
-			args = string(b)
-		}
+// Record enqueues a batch reported by an execution node. Events are
+// assigned IDs here: identity belongs to the tier that persists.
+//
+// Callers must call this even when the request that produced the batch
+// failed — a denied or erroring capability call is exactly the kind of
+// thing the audit log exists for.
+func (r *Recorder) Record(b runtime.AuditBatch) {
+	if b.Dropped > 0 {
+		slog.Warn("audit batch overflowed on the execution node", "dropped", b.Dropped)
 	}
-	errStr := ""
-	if rec.Err != nil {
-		errStr = rec.Err.Error()
+	for _, ev := range b.Events {
+		r.enqueue(store.AuditEvent{
+			ID:         store.NewID(store.PrefixAudit),
+			Ts:         ev.Ts,
+			UserID:     ev.UserID,
+			InstanceID: ev.InstanceID,
+			ExecID:     ev.ExecID,
+			Capability: ev.Capability,
+			Op:         ev.Op,
+			Args:       ev.Args,
+			Phase:      ev.Phase,
+			Decision:   ev.Decision,
+			Reason:     ev.Reason,
+			Error:      ev.Error,
+			DurationMs: ev.DurationMs,
+		})
 	}
-	ev := store.AuditEvent{
-		ID:         store.NewID(store.PrefixAudit),
-		Ts:         time.Now().UTC(),
-		UserID:     rec.Call.UserID,
-		InstanceID: rec.Call.InstanceID,
-		ExecID:     rec.Call.ExecID,
-		Capability: rec.Call.Capability,
-		Op:         rec.Call.Op,
-		Args:       args,
-		Phase:      rec.Phase,
-		Decision:   rec.Decision,
-		Reason:     rec.Reason,
-		Error:      errStr,
-		DurationMs: rec.Duration.Milliseconds(),
-	}
+}
+
+func (r *Recorder) enqueue(ev store.AuditEvent) {
 	select {
 	case r.ch <- ev:
 	default:

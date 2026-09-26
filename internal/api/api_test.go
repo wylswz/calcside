@@ -36,7 +36,27 @@ type env struct {
 	srv *httptest.Server
 	st  store.Store
 	mgr *instance.Manager
+	sbx *sandbox.Service
 	rec *audit.Recorder
+}
+
+// expire ages an instance out the way the API tier's reaper does:
+// backdate the stored deadline, then run the sweep. Expiry is a status
+// transition, so it is driven from the store, not from the node.
+func (e *env) expire(id string) {
+	e.t.Helper()
+	ctx := context.Background()
+	in, err := e.st.GetInstance(ctx, id)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	in.ExpiresAt = time.Now().Add(-time.Second)
+	if err := e.st.UpdateInstance(ctx, in); err != nil {
+		e.t.Fatal(err)
+	}
+	if _, err := e.sbx.ExpireDue(ctx, 10); err != nil {
+		e.t.Fatal(err)
+	}
 }
 
 func newEnv(t *testing.T) *env { return newEnvWith(t, nil) }
@@ -61,9 +81,9 @@ func newEnvWith(t *testing.T, cipher *secrets.Cipher) *env {
 			e.rec.Close()
 		}
 	})
-	limits := instance.ServerLimits{
-		MaxInstancesPerUser: 10, DefaultTTL: 15 * time.Minute,
-		MaxTTL: 24 * time.Hour, MaxExecTimeout: 5 * time.Minute,
+	limits := capability.ServerLimits{
+		DefaultTTL: 15 * time.Minute,
+		MaxTTL:     24 * time.Hour, MaxExecTimeout: 5 * time.Minute,
 		MaxFSQuotaBytes: 256 << 20,
 	}
 	if cipher != nil {
@@ -71,13 +91,21 @@ func newEnvWith(t *testing.T, cipher *secrets.Cipher) *env {
 		limits.NetAllowPrivate = true
 		limits.SecretsAllowHTTP = true
 	}
-	mgr := instance.New(st, engine.New(8), reg, rec, "", time.Second, limits, nil, cipher, nil, time.Hour)
+	mgr := instance.New(instance.Options{
+		Engine: engine.New(8), Registry: reg, Limits: limits,
+		EvalTimeout: time.Second, ReapInterval: time.Hour,
+	})
 	e.mgr = mgr
+	vaultSvc := vault.New(st, cipher)
+	e.sbx = sandbox.New(sandbox.Options{
+		Store: st, Runtime: mgr, Secrets: vaultSvc, Audit: rec,
+		Registry: reg, Limits: limits, MaxInstancesPerUser: 10,
+	})
 	svc := auth.NewService(st, false)
 	h := Handler(Deps{
-		IAM: iam.New(st, nil), Vault: vault.New(st, cipher),
+		IAM: iam.New(st, nil), Vault: vaultSvc,
 		Policy: policysvc.New(st), Audit: auditsvc.New(st),
-		Catalog: catalog.New(reg), Sandbox: sandbox.New(st, mgr),
+		Catalog: catalog.New(reg), Sandbox: e.sbx,
 		Auth: svc,
 	})
 	srv := httptest.NewServer(h)
@@ -223,10 +251,7 @@ func TestExecOnEndedInstance409(t *testing.T) {
 	bearer := map[string]string{"Authorization": "Bearer " + m["secret"].(string)}
 	_, m, _ = e.req("POST", "/api/v1/instances", `{"capabilities":{"io":{}}}`, bearer, nil)
 	instID := m["instance"].(map[string]any)["id"].(string)
-	// Expire it via manager directly.
-	in, _ := e.mgr.Get(context.Background(), instID)
-	in.ExpiresAt = time.Now().Add(-time.Second)
-	e.mgr.Reap(context.Background())
+	e.expire(instID)
 	code, _, _ := e.req("POST", "/api/v1/instances/"+instID+"/exec", `{"code":"print(1)"}`, bearer, nil)
 	if code != 409 {
 		t.Fatalf("expected 409, got %d", code)

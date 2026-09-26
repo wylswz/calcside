@@ -1,11 +1,9 @@
 package api
 
 import (
-	"context"
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 )
 
 // --- prompt endpoint ---
@@ -111,9 +109,7 @@ func TestPromptNonRunning(t *testing.T) {
 	// expired but still known → 409 not_running
 	_, m, _ = e.req("POST", "/api/v1/instances", `{"capabilities":{"io":{}}}`, bearer, nil)
 	instID2 := m["instance"].(map[string]any)["id"].(string)
-	in, _ := e.mgr.Get(context.Background(), instID2)
-	in.ExpiresAt = time.Now().Add(-time.Second)
-	e.mgr.Reap(context.Background())
+	e.expire(instID2)
 	code, m, _ = e.req("GET", "/api/v1/instances/"+instID2+"/prompt", "", bearer, nil)
 	if code != http.StatusConflict || m["error"].(map[string]any)["code"] != "not_running" {
 		t.Fatalf("expired prompt: expected 409 not_running, got %d %v", code, m)

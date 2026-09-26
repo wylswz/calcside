@@ -29,8 +29,19 @@ func writeDir(t *testing.T, files map[string]string) string {
 	return d
 }
 
+// modules writes files to a temp dir and loads them the way the API
+// tier does before shipping them to an execution node.
+func modules(t *testing.T, files map[string]string) map[string]string {
+	t.Helper()
+	m, err := LoadDir(writeDir(t, files))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
 func TestBeforeDenyOnHost(t *testing.T) {
-	dir := writeDir(t, map[string]string{
+	dir := modules(t, map[string]string{
 		"deny.rego": `package calcside.hooks
 deny contains msg if {
 	input.phase == "before"
@@ -52,7 +63,7 @@ deny contains msg if {
 }
 
 func TestAfterDenyOnResultBytes(t *testing.T) {
-	dir := writeDir(t, map[string]string{
+	dir := modules(t, map[string]string{
 		"big.rego": `package calcside.hooks
 deny contains msg if {
 	input.phase == "after"
@@ -78,7 +89,7 @@ deny contains msg if {
 func TestEvalErrorDenies(t *testing.T) {
 	// Strict builtin errors turn this json.unmarshal failure into an eval
 	// error, which must deny (fail closed).
-	dir := writeDir(t, map[string]string{
+	dir := modules(t, map[string]string{
 		"boom.rego": `package calcside.hooks
 deny contains "unreachable" if {
 	x := json.unmarshal("not json")
@@ -95,7 +106,7 @@ deny contains "unreachable" if {
 }
 
 func TestUserPolicyIsolation(t *testing.T) {
-	dir := writeDir(t, map[string]string{
+	dir := modules(t, map[string]string{
 		"global.rego": `package calcside.hooks
 deny contains "global rule" if {
 	input.args.host == "globalbad.com"
@@ -134,7 +145,7 @@ deny contains "b" if { input.args.host == "bbad.com" }`,
 
 func TestEvalTimeoutDenies(t *testing.T) {
 	// A 1ns eval budget means the eval context is dead on arrival.
-	dir := writeDir(t, map[string]string{
+	dir := modules(t, map[string]string{
 		"slow.rego": `package calcside.hooks
 deny contains "never" if { input.op == "get" }`,
 	})
@@ -179,7 +190,7 @@ deny contains "x" if { print("hi") }`,
 		if _, err := CompileUserPolicy("p", src); err == nil {
 			t.Fatalf("CompileUserPolicy accepted dangerous builtin: %s", src)
 		}
-		if _, err := NewHook("", map[string]string{"p": src}, 0); err == nil {
+		if _, err := NewHook(nil, map[string]string{"p": src}, 0); err == nil {
 			t.Fatalf("NewHook accepted dangerous builtin: %s", src)
 		}
 	}
@@ -199,7 +210,7 @@ func TestWrongPackageRejectedAtLoad(t *testing.T) {
 		"bad.rego": `package wrong.name
 x := 1`,
 	})
-	if _, err := NewHook(dir, nil, 0); err == nil {
+	if _, err := LoadDir(dir); err == nil {
 		t.Fatal("expected package rejection")
 	}
 }

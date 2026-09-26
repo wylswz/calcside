@@ -476,6 +476,26 @@ func (d *sqlDB) ListInstances(ctx context.Context, userID string, status types.I
 	return out, nil
 }
 
+func (d *sqlDB) ListExpiredInstances(ctx context.Context, before time.Time, limit int) ([]*store.Instance, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := gorm.G[instanceRow](d.g).
+		Where("status = ?", string(types.InstanceRunning)).
+		Where("expires_at <= ?", before.UTC()).
+		Order("expires_at ASC").
+		Limit(limit).
+		Find(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*store.Instance, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.toStore())
+	}
+	return out, nil
+}
+
 func (d *sqlDB) UpdateInstance(ctx context.Context, in *store.Instance) error {
 	if !in.Status.Valid() {
 		return fmt.Errorf("gormstore: invalid instance status %q", in.Status)

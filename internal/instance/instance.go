@@ -1,5 +1,13 @@
-// Package instance manages sandboxed Starlark instances: creation from
-// specs, gate/binding wiring, sliding TTL with a reaper, and exec routing.
+// Package instance manages sandboxed Starlark instances on an execution
+// node: it builds an instance from a self-contained create request,
+// wires the gate and capability bindings, routes execs, and reclaims
+// memory for instances the API tier has stopped renewing.
+//
+// The node holds no database handle. Everything it needs arrives in the
+// request (see internal/runtime) and everything the API tier must
+// persist — execution results, audit events — leaves in the response.
+// This is enforced structurally: this package must not import
+// calcside/internal/store (see `make arch-check`).
 package instance
 
 import (
@@ -8,7 +16,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"sort"
 	"sync"
 	"time"
@@ -20,66 +27,19 @@ import (
 	"calcside/internal/capability"
 	capio "calcside/internal/capability/io"
 	"calcside/internal/engine"
-	"calcside/internal/hostmatch"
 	"calcside/internal/policy"
+	"calcside/internal/runtime"
 	"calcside/internal/secrets"
-	"calcside/internal/store"
 	"calcside/internal/types"
 )
 
-// Spec is the JSON document POSTed to create an instance.
-type Spec struct {
-	TTLSeconds   int64                      `json:"ttl_seconds"`
-	Labels       map[string]string          `json:"labels"`
-	Capabilities map[string]json.RawMessage `json:"capabilities"`
-	Limits       Limits                     `json:"limits"`
-	Env          map[string]string          `json:"env"`
-	Secrets      map[string]SecretSpec      `json:"secrets"`
-}
+// A Manager is the in-process implementation of the execution tier: in
+// the single binary and in tests the API tier talks to it directly,
+// and on a worker it is what the transport server sits in front of.
+var _ runtime.Runtime = (*Manager)(nil)
 
-// SecretSpec is one entry of spec.secrets: either a vault ref (name of a
-// vault secret owned by the instance owner) or an inline value.
-type SecretSpec struct {
-	Ref            string             `json:"ref,omitempty"`
-	Value          string             `json:"value,omitempty"`
-	AllowedDomains []string           `json:"allowed_domains,omitempty"`
-	Source         types.SecretSource `json:"source,omitempty"` // set on output; input "source" is validated for consistency
-}
-
-// Limits requested per instance (clamped by server limits).
-type Limits struct {
-	ExecTimeoutMs  int64  `json:"exec_timeout_ms"`
-	MaxSteps       uint64 `json:"max_steps"`
-	MaxOutputBytes int64  `json:"max_output_bytes"`
-}
-
-// Defaults applied to instance limits.
-const (
-	defaultExecTimeoutMs = 30000
-	defaultMaxSteps      = 10000000
-	defaultMaxOutput     = 1 << 20
-
-	maxEnvEntries   = 64
-	maxEnvValueByte = 4 << 10
-)
-
-// ServerLimits bound what specs may request.
-type ServerLimits struct {
-	MaxInstancesPerUser int
-	DefaultTTL          time.Duration
-	MaxTTL              time.Duration
-	MaxExecTimeout      time.Duration
-	MaxSteps            uint64
-	MaxFSQuotaBytes     int64
-	MaxOutputBytes      int64
-	NetAllowPrivate     bool
-	NetAllowCIDRs       []*net.IPNet
-	MaxNetResponseBytes int64
-	SecretsAllowHTTP    bool
-}
-
-// Snapshotter persists instance state (placeholder wiring: only Delete is
-// called for now).
+// Snapshotter persists instance state (placeholder wiring: only Delete
+// is called for now).
 type Snapshotter interface {
 	Save(ctx context.Context, instanceID string, snap *Snapshot) error
 	Load(ctx context.Context, instanceID string) (*Snapshot, error)
@@ -103,15 +63,13 @@ func (NoopSnapshotter) Load(ctx context.Context, id string) (*Snapshot, error) {
 }
 func (NoopSnapshotter) Delete(ctx context.Context, id string) error { return nil }
 
-var (
-	ErrNotFound       = errors.New("instance: not found")
-	ErrNotRunning     = errors.New("instance: not running")
-	ErrTooMany        = errors.New("instance: per-user instance limit reached")
-	ErrCapabilityName = errors.New("instance: unknown capability")
-)
-
+// inst is one live instance. It holds no persistent identity beyond
+// what the create request supplied.
 type inst struct {
-	meta    *store.Instance
+	id     string
+	owner  runtime.Owner
+	labels map[string]string
+
 	sess    *engine.Session
 	gate    *capability.Gate
 	closers []io.Closer
@@ -121,62 +79,80 @@ type inst struct {
 	out        *capio.Buffer
 	vfs        interface{ Files() map[string][]byte } // *fs.Closer V, kept loose to avoid import
 	capCfgs    map[string]any                         // validated capability configs, incl. implicit io
-	limits     Limits
-	userID     string
-	userMail   string
+	spec       *runtime.Spec                          // normalized spec
 	secrets    *secrets.Set
-	metaMu     sync.Mutex // guards meta timestamp/status updates
+	sink       *auditSink
+
+	mu        sync.Mutex // guards expiresAt
+	expiresAt time.Time
 }
 
-// Manager owns all live instances.
+// Manager owns all live instances on this node.
 type Manager struct {
-	st          store.Store
-	eng         *engine.Engine
-	reg         *capability.Registry
-	obs         capability.Observer
-	policyDir   string
-	evalTimeout time.Duration
-	limits      ServerLimits
-	snap        Snapshotter
-	cipher      *secrets.Cipher // nil = vault secrets disabled
-	now         func() time.Time
+	eng          *engine.Engine
+	reg          *capability.Registry
+	evalTimeout  time.Duration
+	limits       capability.ServerLimits
+	maxInstances int
+	snap         Snapshotter
+	now          func() time.Time
 
 	mu    sync.Mutex
 	insts map[string]*inst
 
 	reapInterval time.Duration
+	reapGrace    time.Duration
 	stop         chan struct{}
 	wg           sync.WaitGroup
 }
 
-// New builds the manager. MarkRunningAsLost must be invoked by caller after
-// store recovery decisions are made.
-func New(st store.Store, eng *engine.Engine, reg *capability.Registry, obs capability.Observer, policyDir string, evalTimeout time.Duration, limits ServerLimits, snap Snapshotter, cipher *secrets.Cipher, now func() time.Time, reapInterval time.Duration) *Manager {
-	if snap == nil {
-		snap = NoopSnapshotter{}
-	}
-	if now == nil {
-		now = time.Now
-	}
-	if reapInterval <= 0 {
-		reapInterval = 10 * time.Second
-	}
-	m := &Manager{
-		st: st, eng: eng, reg: reg, obs: obs, policyDir: policyDir,
-		evalTimeout: evalTimeout, limits: limits, snap: snap, cipher: cipher, now: now,
-		insts: map[string]*inst{}, reapInterval: reapInterval,
-		stop: make(chan struct{}),
-	}
-	return m
+// Options configure a Manager.
+type Options struct {
+	Engine      *engine.Engine
+	Registry    *capability.Registry
+	Limits      capability.ServerLimits
+	EvalTimeout time.Duration
+	// MaxInstances caps live instances on this node; 0 is unlimited.
+	// The per-user quota is the API tier's job — only it has the
+	// cluster-wide view — while this protects a single node.
+	MaxInstances int
+	Snapshotter  Snapshotter
+	Now          func() time.Time
+	// ReapInterval is how often the local memory-reclaim sweep runs.
+	ReapInterval time.Duration
+	// ReapGrace is how long past its deadline an instance is kept before
+	// the node reclaims it on its own. The API tier is the authority for
+	// expiry and normally deletes the instance first; this only bounds
+	// memory for instances whose API tier stopped talking to us.
+	ReapGrace time.Duration
 }
 
-// Recover marks any store rows still "running" as lost (no snapshot
-// restore yet).
-func (m *Manager) Recover(ctx context.Context) (int, error) {
-	return m.st.MarkRunningAsLost(ctx)
+const defaultReapGrace = 5 * time.Minute
+
+// New builds the manager.
+func New(o Options) *Manager {
+	if o.Snapshotter == nil {
+		o.Snapshotter = NoopSnapshotter{}
+	}
+	if o.Now == nil {
+		o.Now = time.Now
+	}
+	if o.ReapInterval <= 0 {
+		o.ReapInterval = 10 * time.Second
+	}
+	if o.ReapGrace <= 0 {
+		o.ReapGrace = defaultReapGrace
+	}
+	return &Manager{
+		eng: o.Engine, reg: o.Registry, evalTimeout: o.EvalTimeout,
+		limits: o.Limits, maxInstances: o.MaxInstances,
+		snap: o.Snapshotter, now: o.Now,
+		insts: map[string]*inst{}, reapInterval: o.ReapInterval,
+		reapGrace: o.ReapGrace, stop: make(chan struct{}),
+	}
 }
 
-// StartReaper launches the background TTL reaper.
+// StartReaper launches the background memory-reclaim sweep.
 func (m *Manager) StartReaper() {
 	m.wg.Add(1)
 	go func() {
@@ -204,264 +180,58 @@ func (m *Manager) StopReaper() {
 	m.wg.Wait()
 }
 
-// ParseSpec validates spec JSON against registry + server limits and
-// returns the normalized spec plus typed capability configs.
-func (m *Manager) ParseSpec(raw []byte) (*Spec, map[string]any, error) {
-	var spec Spec
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &spec); err != nil {
-			return nil, nil, fmt.Errorf("invalid spec JSON: %w", err)
-		}
-	}
-	// TTL
-	if spec.TTLSeconds <= 0 {
-		spec.TTLSeconds = int64(m.limits.DefaultTTL / time.Second)
-	}
-	if m.limits.MaxTTL > 0 && time.Duration(spec.TTLSeconds)*time.Second > m.limits.MaxTTL {
-		return nil, nil, fmt.Errorf("ttl_seconds exceeds server max %d", int64(m.limits.MaxTTL/time.Second))
-	}
-	// Limits
-	if spec.Limits.ExecTimeoutMs <= 0 {
-		spec.Limits.ExecTimeoutMs = defaultExecTimeoutMs
-	}
-	if m.limits.MaxExecTimeout > 0 && time.Duration(spec.Limits.ExecTimeoutMs)*time.Millisecond > m.limits.MaxExecTimeout {
-		return nil, nil, fmt.Errorf("exec_timeout_ms exceeds server max %d", m.limits.MaxExecTimeout.Milliseconds())
-	}
-	if spec.Limits.MaxSteps == 0 {
-		spec.Limits.MaxSteps = m.limits.MaxSteps
-		if spec.Limits.MaxSteps == 0 {
-			spec.Limits.MaxSteps = defaultMaxSteps
-		}
-	}
-	if m.limits.MaxSteps > 0 && spec.Limits.MaxSteps > m.limits.MaxSteps {
-		spec.Limits.MaxSteps = m.limits.MaxSteps
-	}
-	if spec.Limits.MaxOutputBytes <= 0 {
-		spec.Limits.MaxOutputBytes = m.limits.MaxOutputBytes
-		if spec.Limits.MaxOutputBytes == 0 {
-			spec.Limits.MaxOutputBytes = defaultMaxOutput
-		}
-	}
-	if m.limits.MaxOutputBytes > 0 && spec.Limits.MaxOutputBytes > m.limits.MaxOutputBytes {
-		spec.Limits.MaxOutputBytes = m.limits.MaxOutputBytes
-	}
-	// Capabilities
-	sl := capability.ServerLimits{
-		MaxFSQuotaBytes:     m.limits.MaxFSQuotaBytes,
-		MaxTTL:              m.limits.MaxTTL,
-		DefaultTTL:          m.limits.DefaultTTL,
-		MaxExecTimeout:      m.limits.MaxExecTimeout,
-		MaxSteps:            m.limits.MaxSteps,
-		MaxOutputBytes:      m.limits.MaxOutputBytes,
-		NetAllowPrivate:     m.limits.NetAllowPrivate,
-		NetAllowCIDRs:       m.limits.NetAllowCIDRs,
-		MaxNetResponseBytes: m.limits.MaxNetResponseBytes,
-		SecretsAllowHTTP:    m.limits.SecretsAllowHTTP,
-	}
-	typed := map[string]any{}
-	for name, rawCfg := range spec.Capabilities {
-		f, ok := m.reg.Get(types.CapabilityName(name))
-		if !ok {
-			return nil, nil, fmt.Errorf("%w: %q", ErrCapabilityName, name)
-		}
-		cfg, err := f.Validate(rawCfg, sl)
-		if err != nil {
-			return nil, nil, err
-		}
-		typed[name] = cfg
-	}
-	// env validation
-	if len(spec.Env) > maxEnvEntries {
-		return nil, nil, fmt.Errorf("env: more than %d entries", maxEnvEntries)
-	}
-	for k, v := range spec.Env {
-		if !secrets.ValidName(k) {
-			return nil, nil, fmt.Errorf("env: invalid name %q", k)
-		}
-		if len(v) > maxEnvValueByte {
-			return nil, nil, fmt.Errorf("env: value for %s exceeds %d bytes", k, maxEnvValueByte)
-		}
-	}
-	// secret name validation (resolution happens in Create, needs user ctx)
-	for name := range spec.Secrets {
-		if !secrets.ValidName(name) {
-			return nil, nil, fmt.Errorf("secrets: invalid name %q", name)
-		}
-		if _, isEnv := spec.Env[name]; isEnv {
-			return nil, nil, fmt.Errorf("secrets: name %q also used by env", name)
-		}
-	}
-	return &spec, typed, nil
-}
-
-// resolveSecrets decrypts vault refs / accepts inline values into a
-// secrets.Set, and returns the sanitized spec.secrets map for persistence
-// (inline values stripped, refs carrying effective allowed_domains).
-func (m *Manager) resolveSecrets(ctx context.Context, userID string, spec *Spec) (*secrets.Set, map[string]SecretSpec, error) {
+// buildSecrets turns the resolved secrets from the request into the
+// in-memory set. Vault decryption and allowlist narrowing already
+// happened on the API tier; the node only reparses the allowlist.
+func buildSecrets(in []runtime.Secret) (*secrets.Set, error) {
 	set := secrets.NewSet()
-	sanitized := map[string]SecretSpec{}
-	for name, ss := range spec.Secrets {
-		if ss.Ref != "" && ss.Value != "" {
-			return nil, nil, fmt.Errorf("secret %s: exactly one of ref or value", name)
+	for _, s := range in {
+		rules, err := secrets.ValidateDomains(s.AllowedDomains)
+		if err != nil {
+			return nil, fmt.Errorf("secret %s: %w", s.Name, err)
 		}
-		if ss.Source != "" && ss.Source != types.SecretVault && ss.Source != types.SecretInline {
-			return nil, nil, fmt.Errorf("secret %s: invalid source %q", name, ss.Source)
-		}
-		if ss.Source == types.SecretVault && ss.Ref == "" {
-			return nil, nil, fmt.Errorf("secret %s: source %q requires ref", name, ss.Source)
-		}
-		if ss.Source == types.SecretInline && ss.Value == "" {
-			return nil, nil, fmt.Errorf("secret %s: source %q requires value", name, ss.Source)
-		}
-		var value []byte
-		var rules []hostmatch.Rule
-		var effDomains []string
-		if ss.Ref != "" {
-			if m.cipher == nil {
-				return nil, nil, fmt.Errorf("secret %s: vault secrets disabled (no --secret-key)", name)
-			}
-			rec, err := m.st.GetSecretByName(ctx, userID, ss.Ref)
-			if err != nil {
-				return nil, nil, fmt.Errorf("secret %s: unknown vault ref %q", name, ss.Ref)
-			}
-			value, err = m.cipher.Open(rec.Ciphertext, userID+"/"+rec.Name)
-			if err != nil {
-				return nil, nil, fmt.Errorf("secret %s: vault decrypt failed", name)
-			}
-			vaultRules, err := hostmatch.ParseAll(rec.AllowedDomains)
-			if err != nil {
-				return nil, nil, fmt.Errorf("secret %s: bad vault domains", name)
-			}
-			if len(ss.AllowedDomains) == 0 {
-				rules = vaultRules
-				effDomains = rec.AllowedDomains
-			} else {
-				narrowed, err := hostmatch.ParseAll(ss.AllowedDomains)
-				if err != nil {
-					return nil, nil, fmt.Errorf("secret %s: %w", name, err)
-				}
-				// An unrestricted vault secret (no domains) may always be
-				// narrowed by the spec.
-				for _, nr := range narrowed {
-					if len(vaultRules) == 0 {
-						break
-					}
-					covered := false
-					for _, vr := range vaultRules {
-						if hostmatch.Covers(vr, nr) {
-							covered = true
-							break
-						}
-					}
-					if !covered {
-						entry := nr.Host
-						if nr.Port != "" {
-							entry += ":" + nr.Port
-						}
-						return nil, nil, fmt.Errorf("secret %s: domain %q not covered by vault allowlist", name, entry)
-					}
-				}
-				rules = narrowed
-				effDomains = ss.AllowedDomains
-			}
-			sanitized[name] = SecretSpec{Ref: ss.Ref, AllowedDomains: effDomains, Source: types.SecretVault}
-		} else if ss.Value != "" {
-			if len(ss.Value) > secrets.MaxValueBytes {
-				return nil, nil, fmt.Errorf("secret %s: value exceeds %d bytes", name, secrets.MaxValueBytes)
-			}
-			var err error
-			rules, err = secrets.ValidateDomains(ss.AllowedDomains)
-			if err != nil {
-				return nil, nil, fmt.Errorf("secret %s: %w", name, err)
-			}
-			value = []byte(ss.Value)
-			sanitized[name] = SecretSpec{AllowedDomains: ss.AllowedDomains, Source: types.SecretInline}
-		} else {
-			return nil, nil, fmt.Errorf("secret %s: exactly one of ref or value", name)
-		}
-		set.Add(name, value, rules)
+		set.Add(s.Name, []byte(s.Value), rules)
 	}
-	return set, sanitized, nil
-}
-
-// sanitizeSpec returns the spec JSON persisted for the instance: env and
-// structure intact, inline secret values replaced by {"inline": true}.
-func sanitizeSpec(spec *Spec, sanitized map[string]SecretSpec) json.RawMessage {
-	out := *spec
-	if len(spec.Secrets) > 0 {
-		out.Secrets = sanitized
-	}
-	b, err := json.Marshal(&out)
-	if err != nil {
-		return json.RawMessage(`{}`)
-	}
-	return b
+	return set, nil
 }
 
 // Create instantiates bindings + policies and registers the instance.
-func (m *Manager) Create(ctx context.Context, user *store.User, rawSpec []byte) (*store.Instance, error) {
-	spec, typed, err := m.ParseSpec(rawSpec)
+// The request must be self-contained: the node performs no lookups.
+func (m *Manager) Create(ctx context.Context, req *runtime.CreateRequest) (*runtime.CreateResponse, error) {
+	spec, typed, err := capability.NormalizeSpec(req.Spec, m.reg, m.limits)
 	if err != nil {
 		return nil, err
 	}
 
 	m.mu.Lock()
-	count := 0
-	for _, in := range m.insts {
-		if in.userID == user.ID {
-			count++
-		}
-	}
+	n := len(m.insts)
 	m.mu.Unlock()
-	if m.limits.MaxInstancesPerUser > 0 && count >= m.limits.MaxInstancesPerUser {
-		return nil, ErrTooMany
+	if m.maxInstances > 0 && n >= m.maxInstances {
+		return nil, runtime.ErrTooMany
 	}
 
-	// Compile the owner's enabled policies at this moment.
-	pols, err := m.st.ListPolicies(ctx, user.ID)
+	// Compile the policy snapshot the API tier captured for us.
+	hook, err := policy.NewHook(req.Policies.Global, req.Policies.User, m.evalTimeout)
 	if err != nil {
-		return nil, err
+		return nil, runtime.Errf(runtime.ErrBadSpec, "%s", err)
 	}
-	userPols := map[string]string{}
-	for _, p := range pols {
-		if p.Enabled {
-			userPols[p.ID] = p.Rego
-		}
-	}
-	hook, err := policy.NewHook(m.policyDir, userPols, m.evalTimeout)
+
+	secSet, err := buildSecrets(req.Secrets)
 	if err != nil {
-		return nil, err
+		return nil, runtime.Errf(runtime.ErrBadSpec, "%s", err)
 	}
 
-	// Resolve secrets (decrypt vault refs / accept inline values) at
-	// creation — snapshot semantics like policies. The persisted spec is
-	// sanitized: inline values are stripped.
-	secSet, sanitizedSecrets, err := m.resolveSecrets(ctx, user.ID, spec)
-	if err != nil {
-		return nil, err
+	labels := req.Labels
+	if labels == nil {
+		labels = map[string]string{}
 	}
-
-	now := m.now().UTC()
-	meta := &store.Instance{
-		ID:           store.NewID(store.PrefixInstance),
-		UserID:       user.ID,
-		Spec:         sanitizeSpec(spec, sanitizedSecrets),
-		Labels:       spec.Labels,
-		Status:       types.InstanceRunning,
-		CreatedAt:    now,
-		LastActiveAt: now,
-		ExpiresAt:    now.Add(time.Duration(spec.TTLSeconds) * time.Second),
-	}
-	if meta.Labels == nil {
-		meta.Labels = map[string]string{}
-	}
-
+	sink := &auditSink{}
 	gate := capability.NewGate(capability.GateOwner{
-		InstanceID: meta.ID,
-		UserID:     user.ID,
-		UserEmail:  user.Email,
-		Labels:     meta.Labels,
-	}, []capability.Hook{hook}, m.obs)
+		InstanceID: req.InstanceID,
+		UserID:     req.Owner.UserID,
+		UserEmail:  req.Owner.Email,
+		Labels:     labels,
+	}, []capability.Hook{hook}, sink)
 
 	predeclared := starlark.StringDict{
 		"json": starjson.Module,
@@ -490,9 +260,9 @@ func (m *Manager) Create(ctx context.Context, user *store.User, rawSpec []byte) 
 	if _, ok := caps[ioName]; !ok {
 		caps[ioName] = nil
 		if f, ok2 := m.reg.Get(types.CapIO); ok2 {
-			cfg, err := f.Validate(json.RawMessage(fmt.Sprintf(`{"max_output_bytes":%d}`, spec.Limits.MaxOutputBytes)), capability.ServerLimits{MaxOutputBytes: m.limits.MaxOutputBytes})
+			cfg, err := f.Validate(json.RawMessage(fmt.Sprintf(`{"max_output_bytes":%d}`, spec.Limits.MaxOutputBytes)), m.limits)
 			if err != nil {
-				return nil, err
+				return nil, runtime.Errf(runtime.ErrBadSpec, "%s", err)
 			}
 			typed[ioName] = cfg
 		}
@@ -518,7 +288,7 @@ func (m *Manager) Create(ctx context.Context, user *store.User, rawSpec []byte) 
 			for _, c := range closers {
 				_ = c.Close()
 			}
-			return nil, fmt.Errorf("capability %s: %w", name, err)
+			return nil, runtime.Errf(runtime.ErrBadSpec, "capability %s: %s", name, err)
 		}
 		if closer != nil {
 			closers = append(closers, closer)
@@ -539,96 +309,142 @@ func (m *Manager) Create(ctx context.Context, user *store.User, rawSpec []byte) 
 	predeclared["print"] = capio.PrintBuiltin(outBuf, gate)
 
 	if err := engine.ValidatePredeclared(predeclared); err != nil {
-		return nil, err
-	}
-
-	if err := m.st.CreateInstance(ctx, meta); err != nil {
 		for _, c := range closers {
 			_ = c.Close()
 		}
-		return nil, err
+		return nil, runtime.Errf(runtime.ErrBadSpec, "%s", err)
 	}
 
 	in := &inst{
-		meta:       meta,
+		id:         req.InstanceID,
+		owner:      req.Owner,
+		labels:     labels,
 		gate:       gate,
 		closers:    closers,
 		capClosers: capClosers,
 		out:        outBuf,
 		vfs:        vfs,
 		capCfgs:    typed,
-		limits:     spec.Limits,
-		userID:     user.ID,
-		userMail:   user.Email,
+		spec:       spec,
 		secrets:    secSet,
+		sink:       sink,
+		expiresAt:  req.ExpiresAt,
 	}
 	in.sess = &engine.Session{
 		Gate:        gate,
 		Predeclared: predeclared,
 		Globals:     starlark.StringDict{},
-		InstanceID:  meta.ID,
-		UserID:      user.ID,
-		UserEmail:   user.Email,
-		Labels:      meta.Labels,
+		InstanceID:  req.InstanceID,
+		UserID:      req.Owner.UserID,
+		UserEmail:   req.Owner.Email,
+		Labels:      labels,
 	}
 	m.mu.Lock()
-	m.insts[meta.ID] = in
+	m.insts[req.InstanceID] = in
 	m.mu.Unlock()
-	return meta, nil
+
+	granted := make([]types.CapabilityName, 0, len(m.reg.Names()))
+	for _, name := range m.reg.Names() {
+		if _, ok := typed[string(name)]; ok {
+			granted = append(granted, name)
+		}
+	}
+	return &runtime.CreateResponse{Capabilities: granted}, nil
 }
 
-func (m *Manager) get(id string) (*inst, bool) {
+// live resolves an instance and verifies the caller owns it. Ownership
+// is re-checked here even though the API tier already did: a node is
+// reachable by anything on the internal network, so it must not treat
+// the caller's word as sufficient.
+func (m *Manager) live(id string, owner runtime.Owner) (*inst, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	in, ok := m.insts[id]
-	return in, ok
-}
-
-// PromptPart pairs a granted capability's factory with its validated
-// config for prompt rendering.
-type PromptPart struct {
-	Factory capability.Factory
-	Config  any
-}
-
-// PromptSecret lists one secret for the prompt: name + allowed domains
-// only. Values never leave the secrets package.
-type PromptSecret struct {
-	Name    string
-	Domains []string
-}
-
-// PromptData carries everything the agent-prompt endpoint needs. Only
-// live, running instances have it (the rendered instructions describe
-// the instance's effective config).
-type PromptData struct {
-	Instance   *store.Instance
-	Parts      []PromptPart // granted capabilities in registry order
-	Env        map[string]string
-	Secrets    []PromptSecret
-	Limits     Limits
-	TTLSeconds int64
-	// NetHosts is the raw allow_hosts list from the persisted spec (for
-	// the worked example).
-	NetHosts []string
-}
-
-// PromptData returns prompt input for a live instance.
-func (m *Manager) PromptData(id string) (*PromptData, error) {
-	in, ok := m.get(id)
+	m.mu.Unlock()
 	if !ok {
-		return nil, ErrNotFound
+		return nil, runtime.ErrNotFound
 	}
-	if in.meta.Status != types.InstanceRunning {
-		return nil, ErrNotRunning
+	if owner.UserID != "" && in.owner.UserID != owner.UserID {
+		return nil, runtime.ErrNotOwner
 	}
-	var spec Spec
-	_ = json.Unmarshal(in.meta.Spec, &spec)
-	d := &PromptData{
-		Instance:   in.meta,
-		Env:        spec.Env,
-		Limits:     in.limits,
-		TTLSeconds: spec.TTLSeconds,
+	return in, nil
+}
+
+func (in *inst) renew(deadline time.Time) {
+	if deadline.IsZero() {
+		return
+	}
+	in.mu.Lock()
+	in.expiresAt = deadline
+	in.mu.Unlock()
+}
+
+// Exec runs code on a live instance.
+func (m *Manager) Exec(ctx context.Context, req *runtime.ExecRequest) (*runtime.ExecResponse, error) {
+	in, err := m.live(req.InstanceID, req.Owner)
+	if err != nil {
+		return nil, err
+	}
+	timeout := time.Duration(in.spec.Limits.ExecTimeoutMs) * time.Millisecond
+	if req.TimeoutMs > 0 {
+		d := time.Duration(req.TimeoutMs) * time.Millisecond
+		if m.limits.MaxExecTimeout > 0 && d > m.limits.MaxExecTimeout {
+			return nil, runtime.Errf(runtime.ErrBadSpec, "timeout_ms exceeds server max %d", m.limits.MaxExecTimeout.Milliseconds())
+		}
+		timeout = d
+	}
+	in.out.Reset()
+	res := m.eng.Exec(ctx, in.sess, req.ExecID, req.Code, timeout, in.spec.Limits.MaxSteps, in.out.String)
+	// Defense in depth: scrub any secret value that escaped into output.
+	res.Output = in.secrets.Redact(res.Output)
+	if res.Error != nil {
+		res.Error.Message = in.secrets.Redact(res.Error.Message)
+		res.Error.Backtrace = in.secrets.Redact(res.Error.Backtrace)
+	}
+	// Exec renews the sliding TTL regardless of outcome.
+	in.renew(req.RenewedExpiresAt)
+	return &runtime.ExecResponse{
+		Result: execResult(&res),
+		Audit:  in.sink.drain(),
+	}, nil
+}
+
+func execResult(r *engine.Result) runtime.ExecResult {
+	out := runtime.ExecResult{
+		ExecID: r.ExecID, Output: r.Output,
+		DurationMs: r.DurationMs, Steps: r.Steps,
+	}
+	if r.Error != nil {
+		out.Error = &runtime.ExecError{
+			Type: r.Error.Type, Message: r.Error.Message, Backtrace: r.Error.Backtrace,
+		}
+	}
+	return out
+}
+
+// Keepalive renews the sliding TTL the API tier computed.
+func (m *Manager) Keepalive(ctx context.Context, req *runtime.KeepaliveRequest) (*runtime.KeepaliveResponse, error) {
+	in, err := m.live(req.InstanceID, req.Owner)
+	if err != nil {
+		return nil, err
+	}
+	in.renew(req.RenewedExpiresAt)
+	return &runtime.KeepaliveResponse{}, nil
+}
+
+// Prompt renders the per-capability prompt fragments for a live
+// instance. Capability factories are not serializable, so the node
+// renders and the API tier composes the final prompt.
+func (m *Manager) Prompt(ctx context.Context, req *runtime.PromptRequest) (*runtime.PromptResponse, error) {
+	in, err := m.live(req.InstanceID, req.Owner)
+	if err != nil {
+		return nil, err
+	}
+	out := &runtime.PromptResponse{
+		Env:            in.spec.Env,
+		ExecTimeoutMs:  in.spec.Limits.ExecTimeoutMs,
+		MaxSteps:       in.spec.Limits.MaxSteps,
+		MaxOutputBytes: in.spec.Limits.MaxOutputBytes,
+		TTLSeconds:     in.spec.TTLSeconds,
 	}
 	for _, name := range m.reg.Names() {
 		cfg, granted := in.capCfgs[string(name)]
@@ -636,165 +452,58 @@ func (m *Manager) PromptData(id string) (*PromptData, error) {
 			continue
 		}
 		f, _ := m.reg.Get(name)
-		d.Parts = append(d.Parts, PromptPart{Factory: f, Config: cfg})
+		out.Fragments = append(out.Fragments, runtime.PromptFragment{
+			Capability: name, Text: f.Prompt(cfg),
+		})
 	}
 	if in.secrets != nil {
 		for _, n := range in.secrets.Names() {
-			d.Secrets = append(d.Secrets, PromptSecret{Name: n, Domains: in.secrets.Domains(n)})
+			out.Secrets = append(out.Secrets, runtime.PromptSecret{Name: n, Domains: in.secrets.Domains(n)})
 		}
 	}
-	if raw := spec.Capabilities[string(types.CapNet)]; len(raw) > 0 {
+	if raw := in.spec.Capabilities[string(types.CapNet)]; len(raw) > 0 {
 		var nc struct {
 			AllowHosts []string `json:"allow_hosts"`
 		}
 		if json.Unmarshal(raw, &nc) == nil {
-			d.NetHosts = nc.AllowHosts
+			out.NetHosts = nc.AllowHosts
 		}
 	}
-	return d, nil
+	return out, nil
 }
 
-// Get returns the store record if the instance is live.
-func (m *Manager) Get(ctx context.Context, id string) (*store.Instance, error) {
-	if in, ok := m.get(id); ok {
-		return in.meta, nil
-	}
-	return m.st.GetInstance(ctx, id)
-}
-
-// List returns live instances for the user (status filter optional).
-func (m *Manager) List(ctx context.Context, userID string, status types.InstanceStatus) ([]*store.Instance, error) {
-	return m.st.ListInstances(ctx, userID, status)
-}
-
-// Keepalive bumps the sliding TTL.
-func (m *Manager) Keepalive(ctx context.Context, id string) (*store.Instance, error) {
-	in, ok := m.get(id)
-	if !ok {
-		return nil, ErrNotFound
-	}
-	if in.meta.Status != types.InstanceRunning {
-		return nil, ErrNotRunning
-	}
-	bumpTTL(ctx, m, in)
-	return in.meta, nil
-}
-
-// bumpTTL sets last_active=now and expires=last_active+spec ttl under the
-// instance meta lock.
-func bumpTTL(ctx context.Context, m *Manager, in *inst) {
-	in.metaMu.Lock()
-	defer in.metaMu.Unlock()
-	in.meta.LastActiveAt = m.now().UTC()
-	var spec Spec
-	if err := json.Unmarshal(in.meta.Spec, &spec); err == nil && spec.TTLSeconds > 0 {
-		in.meta.ExpiresAt = in.meta.LastActiveAt.Add(time.Duration(spec.TTLSeconds) * time.Second)
-	}
-	_ = m.st.UpdateInstance(ctx, in.meta)
-}
-
-// Exec runs code on a live instance.
-func (m *Manager) Exec(
-	ctx context.Context,
-	instanceId string,
-	code string,
-	timeoutOverride time.Duration,
-	record func(res *engine.Result, execID string),
-) (*engine.Result, error) {
-	in, ok := m.get(instanceId)
-	if !ok {
-		return nil, ErrNotFound
-	}
-	if in.meta.Status != types.InstanceRunning {
-		return nil, ErrNotRunning
-	}
-	timeout := time.Duration(in.limits.ExecTimeoutMs) * time.Millisecond
-	if timeoutOverride > 0 {
-		if m.limits.MaxExecTimeout > 0 && timeoutOverride > m.limits.MaxExecTimeout {
-			return nil, fmt.Errorf("timeout_ms exceeds server max %d", m.limits.MaxExecTimeout.Milliseconds())
-		}
-		timeout = timeoutOverride
-	}
-	execID := store.NewID(store.PrefixExecution)
-	in.out.Reset()
-	res := m.eng.Exec(ctx, in.sess, execID, code, timeout, in.limits.MaxSteps, in.out.String)
-	// Defense in depth: scrub any secret value that escaped into output.
-	res.Output = in.secrets.Redact(res.Output)
-	if res.Error != nil {
-		res.Error.Message = in.secrets.Redact(res.Error.Message)
-		res.Error.Backtrace = in.secrets.Redact(res.Error.Backtrace)
-	}
-	// Exec bumps the sliding TTL regardless of outcome.
-	bumpTTL(ctx, m, in)
-	if record != nil {
-		record(&res, execID)
-	}
-	return &res, nil
-}
-
-// ErrNoCapability is returned by WithConsole when the instance lacks the
-// named capability.
-var ErrNoCapability = errors.New("instance: capability not granted")
-
-// WithConsole arms the gate for a console operation and hands fn the gate
-// plus the named capability's closer. ErrNotFound / ErrNotRunning as
-// for Exec; ErrNoCapability when the instance lacks that capability.
-func (m *Manager) WithConsole(id string, cap types.CapabilityName, fn func(gate *capability.Gate, closer io.Closer) error) error {
-	in, ok := m.get(id)
-	if !ok {
-		return ErrNotFound
-	}
-	if in.meta.Status != types.InstanceRunning {
-		return ErrNotRunning
-	}
+// withConsole arms the gate for a host-side console operation and hands
+// fn the gate plus the named capability's closer.
+func (m *Manager) withConsole(in *inst, cap types.CapabilityName, fn func(gate *capability.Gate, closer io.Closer) error) error {
 	closer, ok := in.capClosers[cap]
 	if !ok {
-		return ErrNoCapability
+		return runtime.ErrNoCapability
 	}
 	in.sess.ExecMu.Lock()
 	defer in.sess.ExecMu.Unlock()
 	in.gate.Arm(capability.ExecContext{
 		ExecID:     "console",
-		InstanceID: in.meta.ID,
-		UserID:     in.userID,
-		UserEmail:  in.userMail,
-		Labels:     in.meta.Labels,
+		InstanceID: in.id,
+		UserID:     in.owner.UserID,
+		UserEmail:  in.owner.Email,
+		Labels:     in.labels,
 	})
 	defer in.gate.Disarm()
 	return fn(in.gate, closer)
 }
 
-// HasCapability reports whether the live instance has the named binding.
-func (m *Manager) HasCapability(id, name string) bool {
-	in, ok := m.get(id)
-	if !ok {
-		return false
-	}
-	_, ok = in.sess.Predeclared[name]
-	return ok
-}
-
 // Delete ends a live instance: revoke gate, close resources, snapshot
-// cleanup, store update.
-func (m *Manager) Delete(ctx context.Context, id string) error {
-	in, ok := m.get(id)
-	if !ok {
-		return ErrNotFound
+// cleanup.
+func (m *Manager) Delete(ctx context.Context, req *runtime.DeleteRequest) (*runtime.DeleteResponse, error) {
+	in, err := m.live(req.InstanceID, req.Owner)
+	if err != nil {
+		return nil, err
 	}
-	m.end(ctx, in, types.InstanceDeleted)
-	return nil
+	m.end(ctx, in)
+	return &runtime.DeleteResponse{}, nil
 }
 
-// Redact scrubs secret values out of a string destined for the caller
-// (used by the files API on file contents).
-func (m *Manager) Redact(id, s string) string {
-	if in, ok := m.get(id); ok && in.secrets != nil {
-		return in.secrets.Redact(s)
-	}
-	return s
-}
-
-func (m *Manager) end(ctx context.Context, in *inst, status types.InstanceStatus) {
+func (m *Manager) end(ctx context.Context, in *inst) {
 	in.gate.Revoke()
 	if in.secrets != nil {
 		in.secrets.Wipe()
@@ -802,31 +511,30 @@ func (m *Manager) end(ctx context.Context, in *inst, status types.InstanceStatus
 	for _, c := range in.closers {
 		_ = c.Close()
 	}
-	_ = m.snap.Delete(ctx, in.meta.ID)
-	in.metaMu.Lock()
-	now := m.now().UTC()
-	in.meta.Status = status
-	in.meta.EndedAt = &now
-	_ = m.st.UpdateInstance(ctx, in.meta)
-	in.metaMu.Unlock()
+	_ = m.snap.Delete(ctx, in.id)
 	m.mu.Lock()
-	delete(m.insts, in.meta.ID)
+	delete(m.insts, in.id)
 	m.mu.Unlock()
 }
 
-// Reap expires instances whose sliding TTL elapsed. Also called by tests.
+// Reap reclaims instances the API tier has stopped renewing. Expiry as
+// a *status* is the API tier's call; this only bounds memory on a node
+// whose API tier went away, so it waits out a grace period first.
 func (m *Manager) Reap(ctx context.Context) {
-	now := m.now()
+	cutoff := m.now().Add(-m.reapGrace)
 	var doomed []*inst
 	m.mu.Lock()
 	for _, in := range m.insts {
-		if in.meta.Status == types.InstanceRunning && !in.meta.ExpiresAt.After(now) {
+		in.mu.Lock()
+		exp := in.expiresAt
+		in.mu.Unlock()
+		if !exp.IsZero() && !exp.After(cutoff) {
 			doomed = append(doomed, in)
 		}
 	}
 	m.mu.Unlock()
 	for _, in := range doomed {
-		m.end(ctx, in, types.InstanceExpired)
+		m.end(ctx, in)
 	}
 }
 

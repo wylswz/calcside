@@ -45,22 +45,30 @@ func newDevEnv(t *testing.T, cipher *secrets.Cipher) *env {
 	rec := audit.NewRecorder(st)
 	e.rec = rec
 	t.Cleanup(func() { e.rec.Close() })
-	limits := instance.ServerLimits{
-		MaxInstancesPerUser: 10, DefaultTTL: 15 * time.Minute,
-		MaxTTL: 24 * time.Hour, MaxExecTimeout: 5 * time.Minute,
+	limits := capability.ServerLimits{
+		DefaultTTL: 15 * time.Minute,
+		MaxTTL:     24 * time.Hour, MaxExecTimeout: 5 * time.Minute,
 		MaxFSQuotaBytes: 256 << 20,
 	}
-	mgr := instance.New(st, engine.New(8), reg, rec, "", time.Second, limits, nil, cipher, nil, time.Hour)
+	mgr := instance.New(instance.Options{
+		Engine: engine.New(8), Registry: reg, Limits: limits,
+		EvalTimeout: time.Second, ReapInterval: time.Hour,
+	})
 	e.mgr = mgr
+	vaultSvc := vault.New(st, cipher)
+	e.sbx = sandbox.New(sandbox.Options{
+		Store: st, Runtime: mgr, Secrets: vaultSvc, Audit: rec,
+		Registry: reg, Limits: limits, MaxInstancesPerUser: 10,
+	})
 	svc := auth.NewService(st, false)
 	anon, err := st.UpsertUserByEmail(context.Background(), "anonymous@localhost", "anonymous", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	h := Handler(Deps{
-		IAM: iam.New(st, nil), Vault: vault.New(st, cipher),
+		IAM: iam.New(st, nil), Vault: vaultSvc,
 		Policy: policysvc.New(st), Audit: auditsvc.New(st),
-		Catalog: catalog.New(reg), Sandbox: sandbox.New(st, mgr),
+		Catalog: catalog.New(reg), Sandbox: e.sbx,
 		Auth: svc, Dev: true, Anonymous: anon,
 	})
 	e.srv = httptest.NewServer(h)
