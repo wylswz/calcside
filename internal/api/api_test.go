@@ -21,6 +21,12 @@ import (
 	"calcside/internal/engine"
 	"calcside/internal/instance"
 	"calcside/internal/secrets"
+	auditsvc "calcside/internal/service/audit"
+	"calcside/internal/service/catalog"
+	"calcside/internal/service/iam"
+	policysvc "calcside/internal/service/policy"
+	"calcside/internal/service/sandbox"
+	"calcside/internal/service/vault"
 	"calcside/internal/store"
 	_ "calcside/internal/store/gormstore"
 )
@@ -68,7 +74,12 @@ func newEnvWith(t *testing.T, cipher *secrets.Cipher) *env {
 	mgr := instance.New(st, engine.New(8), reg, rec, "", time.Second, limits, nil, cipher, nil, time.Hour)
 	e.mgr = mgr
 	svc := auth.NewService(st, false)
-	h := Handler(Deps{Store: st, Manager: mgr, Registry: reg, Auth: svc, Cipher: cipher})
+	h := Handler(Deps{
+		IAM: iam.New(st, nil), Vault: vault.New(st, cipher),
+		Policy: policysvc.New(st), Audit: auditsvc.New(st),
+		Catalog: catalog.New(reg), Sandbox: sandbox.New(st, mgr),
+		Auth: svc,
+	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	e.srv = srv

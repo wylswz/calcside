@@ -19,6 +19,12 @@ import (
 	"calcside/internal/client"
 	"calcside/internal/engine"
 	"calcside/internal/instance"
+	auditsvc "calcside/internal/service/audit"
+	"calcside/internal/service/catalog"
+	"calcside/internal/service/iam"
+	policysvc "calcside/internal/service/policy"
+	"calcside/internal/service/sandbox"
+	"calcside/internal/service/vault"
 	"calcside/internal/store"
 	_ "calcside/internal/store/gormstore"
 	"calcside/internal/types"
@@ -49,7 +55,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	mgr := instance.New(st, engine.New(8), reg, rec, "", time.Second, limits, nil, nil, nil, time.Hour)
 	svc := auth.NewService(st, false)
-	h := api.Handler(api.Deps{Store: st, Manager: mgr, Registry: reg, Auth: svc})
+	h := api.Handler(api.Deps{
+		IAM: iam.New(st, nil), Vault: vault.New(st, nil),
+		Policy: policysvc.New(st), Audit: auditsvc.New(st),
+		Catalog: catalog.New(reg), Sandbox: sandbox.New(st, mgr),
+		Auth: svc,
+	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 

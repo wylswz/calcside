@@ -13,6 +13,12 @@ import (
 	capio "calcside/internal/capability/io"
 	"calcside/internal/engine"
 	"calcside/internal/instance"
+	auditsvc "calcside/internal/service/audit"
+	"calcside/internal/service/catalog"
+	"calcside/internal/service/iam"
+	policysvc "calcside/internal/service/policy"
+	"calcside/internal/service/sandbox"
+	"calcside/internal/service/vault"
 	"calcside/internal/store"
 	_ "calcside/internal/store/gormstore"
 )
@@ -37,7 +43,12 @@ func TestListExtensions(t *testing.T) {
 		MaxTTL: 24 * time.Hour, MaxExecTimeout: 5 * time.Minute,
 	}, nil, nil, nil, time.Hour)
 	svc := auth.NewService(st, false)
-	h := Handler(Deps{Store: st, Manager: mgr, Registry: reg, Auth: svc})
+	h := Handler(Deps{
+		IAM: iam.New(st, nil), Vault: vault.New(st, nil),
+		Policy: policysvc.New(st), Audit: auditsvc.New(st),
+		Catalog: catalog.New(reg), Sandbox: sandbox.New(st, mgr),
+		Auth: svc,
+	})
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 	e := &env{t: t, st: st, srv: srv}

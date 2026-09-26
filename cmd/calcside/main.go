@@ -24,6 +24,12 @@ import (
 	"calcside/internal/engine"
 	"calcside/internal/instance"
 	"calcside/internal/secrets"
+	auditsvc "calcside/internal/service/audit"
+	"calcside/internal/service/catalog"
+	"calcside/internal/service/iam"
+	policysvc "calcside/internal/service/policy"
+	"calcside/internal/service/sandbox"
+	"calcside/internal/service/vault"
 	"calcside/internal/store"
 	_ "calcside/internal/store/gormstore"
 	webpkg "calcside/web"
@@ -135,8 +141,10 @@ func serve(cfg config.Config) error {
 		webFS = sub
 	}
 	mux := api.Handler(api.Deps{
-		Store: st, Manager: mgr, Registry: reg, Auth: svc,
-		Web: webFS, GoogleEnabled: flow != nil, Cipher: cipher,
+		IAM: iam.New(st, nil), Vault: vault.New(st, cipher),
+		Policy: policysvc.New(st), Audit: auditsvc.New(st),
+		Catalog: catalog.New(reg), Sandbox: sandbox.New(st, mgr),
+		Auth: svc, Web: webFS, GoogleEnabled: flow != nil,
 		Dev: cfg.Dev, Anonymous: anon,
 	})
 	if flow != nil {

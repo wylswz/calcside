@@ -3,21 +3,15 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"net/http"
-	"regexp"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"go.starlark.net/starlark"
 
 	"calcside/internal/api/gen"
 	"calcside/internal/auth"
-	"calcside/internal/secrets"
 	"calcside/internal/service"
 	auditsvc "calcside/internal/service/audit"
-	"calcside/internal/store"
 	"calcside/internal/types"
 )
 
@@ -64,21 +58,6 @@ func needAuth(ctx context.Context) (*auth.Principal, *rawJSON) {
 	}
 	e := fail(&service.Error{Code: types.ErrCodeUnauthorized, Msg: "authentication required"})
 	return nil, &e
-}
-
-// needSession rejects api-key principals for key/secret management; dev
-// anonymous counts as a session.
-func needSession(ctx context.Context) (*auth.Principal, *rawJSON) {
-	p := principal(ctx)
-	if p == nil {
-		e := fail(&service.Error{Code: types.ErrCodeUnauthorized, Msg: "authentication required"})
-		return nil, &e
-	}
-	if p.ViaKey() {
-		e := fail(service.Forbidden("session required to manage API keys"))
-		return nil, &e
-	}
-	return p, nil
 }
 
 // actorOf maps the transport principal onto the service-layer actor.
@@ -374,19 +353,6 @@ func (s *strictImpl) CreateInstance(ctx context.Context, req gen.CreateInstanceR
 	return createInstanceResp{rawJSON{201, map[string]any{"instance": meta}}}, nil
 }
 
-// ownedInstance fetches the instance enforcing ownership: other users'
-// resources are 404.
-func (s *strictImpl) ownedInstance(ctx context.Context, id string) (*store.Instance, *rawJSON) {
-	ctx = realCtx(ctx)
-	p := principal(ctx)
-	in, err := s.d.Manager.Get(ctx, id)
-	if err != nil || in.UserID != p.User.ID {
-		e := fail(service.NotFound("instance not found"))
-		return nil, &e
-	}
-	return in, nil
-}
-
 func (s *strictImpl) GetInstance(ctx context.Context, req gen.GetInstanceRequestObject) (gen.GetInstanceResponseObject, error) {
 	ctx = realCtx(ctx)
 	if _, e := needAuth(ctx); e != nil {
@@ -446,8 +412,6 @@ func (s *strictImpl) Exec(ctx context.Context, req gen.ExecRequestObject) (gen.E
 	return execResp{rawJSON{200, res}}, nil
 }
 
-var toolPrefixRe = regexp.MustCompile(`^[A-Za-z0-9_]{0,32}$`)
-
 // InstancePrompt renders the server-side agent system prompt for a live
 // instance.
 func (s *strictImpl) InstancePrompt(ctx context.Context, req gen.InstancePromptRequestObject) (gen.InstancePromptResponseObject, error) {
@@ -472,14 +436,6 @@ func (s *strictImpl) InstancePrompt(ctx context.Context, req gen.InstancePromptR
 	}}}, nil
 }
 
-func capNamesToStrings(in []types.CapabilityName) []string {
-	out := make([]string, len(in))
-	for i, n := range in {
-		out[i] = string(n)
-	}
-	return out
-}
-
 // files serves GET /instances/{id}/files?path=/work/... through the fs
 // capability binding inside a gated "console" session.
 func (s *strictImpl) Files(ctx context.Context, req gen.FilesRequestObject) (gen.FilesResponseObject, error) {
@@ -502,53 +458,6 @@ func (s *strictImpl) Files(ctx context.Context, req gen.FilesRequestObject) (gen
 	return filesResp{rawJSON{200, map[string]any{
 		"path": v.Path, "content": v.Content,
 	}}}, nil
-}
-
-// toGo converts starlark dict/list primitives to Go values.
-func toGo(v starlark.Value) (map[string]any, error) {
-	switch t := v.(type) {
-	case *starlark.Dict:
-		out := map[string]any{}
-		for _, item := range t.Items() {
-			k, _ := starlark.AsString(item[0])
-			gv, err := toGoAny(item[1])
-			if err != nil {
-				return nil, err
-			}
-			out[k] = gv
-		}
-		return out, nil
-	}
-	return nil, errors.New("not a dict")
-}
-
-func toGoAny(v starlark.Value) (any, error) {
-	switch t := v.(type) {
-	case starlark.String:
-		return string(t), nil
-	case starlark.Bool:
-		return bool(t), nil
-	case starlark.Int:
-		n, ok := t.Int64()
-		if !ok {
-			return nil, errors.New("int too large")
-		}
-		return n, nil
-	case *starlark.List:
-		out := make([]any, t.Len())
-		for i := 0; i < t.Len(); i++ {
-			gv, err := toGoAny(t.Index(i))
-			if err != nil {
-				return nil, err
-			}
-			out[i] = gv
-		}
-		return out, nil
-	case *starlark.Dict:
-		return toGo(t)
-	default:
-		return t.String(), nil
-	}
 }
 
 func (s *strictImpl) ListExecutions(ctx context.Context, req gen.ListExecutionsRequestObject) (gen.ListExecutionsResponseObject, error) {
@@ -705,11 +614,6 @@ func (s *strictImpl) DeletePolicy(ctx context.Context, req gen.DeletePolicyReque
 
 // --- secrets vault (session only) ---
 
-func secretsDisabled() *rawJSON {
-	e := fail(service.Errf(types.ErrCodeSecretsDisabled, "secrets vault disabled (no --secret-key)"))
-	return &e
-}
-
 func (s *strictImpl) ListSecrets(ctx context.Context, _ gen.ListSecretsRequestObject) (gen.ListSecretsResponseObject, error) {
 	ctx = realCtx(ctx)
 	p, e := needAuth(ctx)
@@ -721,22 +625,6 @@ func (s *strictImpl) ListSecrets(ctx context.Context, _ gen.ListSecretsRequestOb
 		return listSecretsResp{fail(err)}, nil
 	}
 	return listSecretsResp{rawJSON{200, map[string]any{"secrets": lst}}}, nil
-}
-
-func validateSecretInput(name, value string, domains []string) error {
-	if !secrets.ValidName(name) {
-		return fmt.Errorf("invalid secret name %q (want [A-Z_][A-Z0-9_])", name)
-	}
-	if len(value) == 0 {
-		return fmt.Errorf("value required")
-	}
-	if len(value) > secrets.MaxValueBytes {
-		return fmt.Errorf("value exceeds %d bytes", secrets.MaxValueBytes)
-	}
-	if _, err := secrets.ValidateDomains(domains); err != nil {
-		return err
-	}
-	return nil
 }
 
 func (s *strictImpl) CreateSecret(ctx context.Context, req gen.CreateSecretRequestObject) (gen.CreateSecretResponseObject, error) {

@@ -18,6 +18,12 @@ import (
 	"calcside/internal/engine"
 	"calcside/internal/instance"
 	"calcside/internal/secrets"
+	auditsvc "calcside/internal/service/audit"
+	"calcside/internal/service/catalog"
+	"calcside/internal/service/iam"
+	policysvc "calcside/internal/service/policy"
+	"calcside/internal/service/sandbox"
+	"calcside/internal/service/vault"
 	"calcside/internal/store"
 	_ "calcside/internal/store/gormstore"
 	"calcside/internal/types"
@@ -52,8 +58,10 @@ func newDevEnv(t *testing.T, cipher *secrets.Cipher) *env {
 		t.Fatal(err)
 	}
 	h := Handler(Deps{
-		Store: st, Manager: mgr, Registry: reg, Auth: svc,
-		Cipher: cipher, Dev: true, Anonymous: anon,
+		IAM: iam.New(st, nil), Vault: vault.New(st, cipher),
+		Policy: policysvc.New(st), Audit: auditsvc.New(st),
+		Catalog: catalog.New(reg), Sandbox: sandbox.New(st, mgr),
+		Auth: svc, Dev: true, Anonymous: anon,
 	})
 	e.srv = httptest.NewServer(h)
 	t.Cleanup(e.srv.Close)

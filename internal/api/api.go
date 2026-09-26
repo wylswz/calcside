@@ -19,9 +19,6 @@ import (
 
 	"calcside/internal/api/gen"
 	"calcside/internal/auth"
-	"calcside/internal/capability"
-	"calcside/internal/instance"
-	"calcside/internal/secrets"
 	auditsvc "calcside/internal/service/audit"
 	"calcside/internal/service/catalog"
 	"calcside/internal/service/iam"
@@ -43,13 +40,9 @@ type Deps struct {
 	Catalog *catalog.Service
 	Sandbox *sandbox.Service
 
-	Store         store.Store
-	Manager       *instance.Manager
-	Registry      *capability.Registry
 	Auth          *auth.Service
 	Web           fs.FS           // static files served at /; nil for now
 	GoogleEnabled bool            // reported by /api/v1/auth/config
-	Cipher        *secrets.Cipher // nil = vault secrets disabled
 	Dev           bool            // anonymous dev mode
 	Anonymous     *store.User     // dev-mode anonymous principal's user
 	Now           func() time.Time
@@ -150,24 +143,6 @@ func Handler(d Deps) http.Handler {
 	r.HandleMethodNotAllowed = true
 	r.Use(gin.Recovery(), requestLogger())
 
-	if d.IAM == nil {
-		d.IAM = iam.New(d.Store, d.Now)
-	}
-	if d.Vault == nil {
-		d.Vault = vault.New(d.Store, d.Cipher)
-	}
-	if d.Policy == nil {
-		d.Policy = policysvc.New(d.Store)
-	}
-	if d.Audit == nil {
-		d.Audit = auditsvc.New(d.Store)
-	}
-	if d.Catalog == nil {
-		d.Catalog = catalog.New(d.Registry)
-	}
-	if d.Sandbox == nil {
-		d.Sandbox = sandbox.New(d.Store, d.Manager)
-	}
 	impl := &strictImpl{d: d}
 	strict := gen.NewStrictHandlerWithOptions(impl, nil, gen.StrictGinServerOptions{
 		RequestErrorHandlerFunc: func(c *gin.Context, err error) {
