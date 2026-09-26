@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"calcside/internal/api/dto"
 	"calcside/internal/api/gen"
 	"calcside/internal/auth"
 	"calcside/internal/service"
@@ -221,15 +222,13 @@ func (r deleteSecretResp) VisitDeleteSecretResponse(w http.ResponseWriter) error
 
 func (s *strictImpl) Healthz(ctx context.Context, _ gen.HealthzRequestObject) (gen.HealthzResponseObject, error) {
 	ctx = realCtx(ctx)
-	return healthzResp{rawJSON{http.StatusOK, map[string]any{"ok": true}}}, nil
+	return healthzResp{rawJSON{http.StatusOK, dto.OK{OK: true}}}, nil
 }
 
 func (s *strictImpl) AuthConfig(ctx context.Context, _ gen.AuthConfigRequestObject) (gen.AuthConfigResponseObject, error) {
 	ctx = realCtx(ctx)
-	return authConfigResp{rawJSON{http.StatusOK, map[string]any{
-		"google":   s.d.GoogleEnabled,
-		"dev_mode": s.d.Dev,
-		"secrets":  s.d.Vault.Enabled(),
+	return authConfigResp{rawJSON{http.StatusOK, dto.AuthConfig{
+		Google: s.d.GoogleEnabled, DevMode: s.d.Dev, Secrets: s.d.Vault.Enabled(),
 	}}}, nil
 }
 
@@ -239,8 +238,8 @@ func (s *strictImpl) Me(ctx context.Context, _ gen.MeRequestObject) (gen.MeRespo
 	if e != nil {
 		return meResp{*e}, nil
 	}
-	return meResp{rawJSON{http.StatusOK, map[string]any{
-		"user": p.User, "via_key": p.ViaKey(), "kind": p.Kind,
+	return meResp{rawJSON{http.StatusOK, dto.Me{
+		User: dto.NewUser(p.User), ViaKey: p.ViaKey(), Kind: p.Kind,
 	}}}, nil
 }
 
@@ -251,7 +250,7 @@ func (s *strictImpl) Capabilities(ctx context.Context, _ gen.CapabilitiesRequest
 	if _, e := needAuth(ctx); e != nil {
 		return capabilitiesResp{*e}, nil
 	}
-	return capabilitiesResp{rawJSON{http.StatusOK, map[string]any{"capabilities": s.d.Catalog.Capabilities()}}}, nil
+	return capabilitiesResp{rawJSON{http.StatusOK, dto.CapabilitiesEnvelope{Capabilities: s.d.Catalog.Capabilities()}}}, nil
 }
 
 func (s *strictImpl) ListExtensions(ctx context.Context, _ gen.ListExtensionsRequestObject) (gen.ListExtensionsResponseObject, error) {
@@ -259,7 +258,7 @@ func (s *strictImpl) ListExtensions(ctx context.Context, _ gen.ListExtensionsReq
 	if _, e := needAuth(ctx); e != nil {
 		return listExtensionsResp{*e}, nil
 	}
-	return listExtensionsResp{rawJSON{http.StatusOK, s.d.Catalog.Extensions()}}, nil
+	return listExtensionsResp{rawJSON{http.StatusOK, dto.ExtensionsEnvelope(s.d.Catalog.Extensions())}}, nil
 }
 
 // --- api keys (session only) ---
@@ -274,7 +273,7 @@ func (s *strictImpl) ListKeys(ctx context.Context, _ gen.ListKeysRequestObject) 
 	if err != nil {
 		return listKeysResp{fail(err)}, nil
 	}
-	return listKeysResp{rawJSON{200, map[string]any{"keys": keys}}}, nil
+	return listKeysResp{rawJSON{200, dto.KeysEnvelope{Keys: dto.NewAPIKeys(keys)}}}, nil
 }
 
 func (s *strictImpl) CreateKey(ctx context.Context, req gen.CreateKeyRequestObject) (gen.CreateKeyResponseObject, error) {
@@ -295,7 +294,7 @@ func (s *strictImpl) CreateKey(ctx context.Context, req gen.CreateKeyRequestObje
 	if err != nil {
 		return createKeyResp{fail(err)}, nil
 	}
-	return createKeyResp{rawJSON{201, map[string]any{"key": key, "secret": secret}}}, nil
+	return createKeyResp{rawJSON{201, dto.CreatedKey{Key: dto.NewAPIKey(key), Secret: secret}}}, nil
 }
 
 func (s *strictImpl) DeleteKey(ctx context.Context, req gen.DeleteKeyRequestObject) (gen.DeleteKeyResponseObject, error) {
@@ -307,7 +306,7 @@ func (s *strictImpl) DeleteKey(ctx context.Context, req gen.DeleteKeyRequestObje
 	if err := s.d.IAM.RevokeKey(ctx, actorOf(p), req.Id); err != nil {
 		return deleteKeyResp{fail(err)}, nil
 	}
-	return deleteKeyResp{rawJSON{200, map[string]any{"ok": true}}}, nil
+	return deleteKeyResp{rawJSON{200, dto.OK{OK: true}}}, nil
 }
 
 // --- instances ---
@@ -329,7 +328,7 @@ func (s *strictImpl) ListInstances(ctx context.Context, req gen.ListInstancesReq
 	if err != nil {
 		return listInstancesResp{fail(err)}, nil
 	}
-	return listInstancesResp{rawJSON{200, map[string]any{"instances": lst}}}, nil
+	return listInstancesResp{rawJSON{200, dto.InstancesEnvelope{Instances: dto.NewInstances(lst)}}}, nil
 }
 
 func (s *strictImpl) CreateInstance(ctx context.Context, req gen.CreateInstanceRequestObject) (gen.CreateInstanceResponseObject, error) {
@@ -350,7 +349,7 @@ func (s *strictImpl) CreateInstance(ctx context.Context, req gen.CreateInstanceR
 	if err != nil {
 		return createInstanceResp{fail(err)}, nil
 	}
-	return createInstanceResp{rawJSON{201, map[string]any{"instance": meta}}}, nil
+	return createInstanceResp{rawJSON{201, dto.InstanceEnvelope{Instance: dto.NewInstance(meta)}}}, nil
 }
 
 func (s *strictImpl) GetInstance(ctx context.Context, req gen.GetInstanceRequestObject) (gen.GetInstanceResponseObject, error) {
@@ -363,7 +362,7 @@ func (s *strictImpl) GetInstance(ctx context.Context, req gen.GetInstanceRequest
 	if err != nil {
 		return getInstanceResp{fail(err)}, nil
 	}
-	return getInstanceResp{rawJSON{200, map[string]any{"instance": in}}}, nil
+	return getInstanceResp{rawJSON{200, dto.InstanceEnvelope{Instance: dto.NewInstance(in)}}}, nil
 }
 
 func (s *strictImpl) DeleteInstance(ctx context.Context, req gen.DeleteInstanceRequestObject) (gen.DeleteInstanceResponseObject, error) {
@@ -375,7 +374,7 @@ func (s *strictImpl) DeleteInstance(ctx context.Context, req gen.DeleteInstanceR
 	if err := s.d.Sandbox.Delete(ctx, actorOf(p), req.Id); err != nil {
 		return deleteInstanceResp{fail(err)}, nil
 	}
-	return deleteInstanceResp{rawJSON{200, map[string]any{"ok": true}}}, nil
+	return deleteInstanceResp{rawJSON{200, dto.OK{OK: true}}}, nil
 }
 
 func (s *strictImpl) Keepalive(ctx context.Context, req gen.KeepaliveRequestObject) (gen.KeepaliveResponseObject, error) {
@@ -388,7 +387,7 @@ func (s *strictImpl) Keepalive(ctx context.Context, req gen.KeepaliveRequestObje
 	if err != nil {
 		return keepaliveResp{fail(err)}, nil
 	}
-	return keepaliveResp{rawJSON{200, map[string]any{"instance": meta}}}, nil
+	return keepaliveResp{rawJSON{200, dto.InstanceEnvelope{Instance: dto.NewInstance(meta)}}}, nil
 }
 
 // Exec a code snippet
@@ -412,7 +411,7 @@ func (s *strictImpl) Exec(ctx context.Context, req gen.ExecRequestObject) (gen.E
 	if err != nil {
 		return execResp{fail(err)}, nil
 	}
-	return execResp{rawJSON{200, res}}, nil
+	return execResp{rawJSON{200, dto.NewExecResult(res)}}, nil
 }
 
 // InstancePrompt renders the server-side agent system prompt for a live
@@ -431,12 +430,7 @@ func (s *strictImpl) InstancePrompt(ctx context.Context, req gen.InstancePromptR
 	if err != nil {
 		return instancePromptResp{fail(err)}, nil
 	}
-	return instancePromptResp{rawJSON{200, map[string]any{
-		"instance_id":  v.InstanceID,
-		"prompt":       v.Prompt,
-		"capabilities": v.Capabilities,
-		"tools":        v.Tools,
-	}}}, nil
+	return instancePromptResp{rawJSON{200, dto.NewInstancePrompt(v)}}, nil
 }
 
 // files serves GET /instances/{id}/files?path=/work/... through the fs
@@ -456,11 +450,9 @@ func (s *strictImpl) Files(ctx context.Context, req gen.FilesRequestObject) (gen
 		return filesResp{fail(err)}, nil
 	}
 	if v.IsDir {
-		return filesResp{rawJSON{200, map[string]any{"entries": v.Entries}}}, nil
+		return filesResp{rawJSON{200, dto.FilesDir{Entries: dto.NewFileEntries(v.Entries)}}}, nil
 	}
-	return filesResp{rawJSON{200, map[string]any{
-		"path": v.Path, "content": v.Content,
-	}}}, nil
+	return filesResp{rawJSON{200, dto.FilesFile{Path: v.Path, Content: v.Content}}}, nil
 }
 
 func (s *strictImpl) ListExecutions(ctx context.Context, req gen.ListExecutionsRequestObject) (gen.ListExecutionsResponseObject, error) {
@@ -477,7 +469,7 @@ func (s *strictImpl) ListExecutions(ctx context.Context, req gen.ListExecutionsR
 	if err != nil {
 		return listExecutionsResp{fail(err)}, nil
 	}
-	return listExecutionsResp{rawJSON{200, map[string]any{"executions": lst}}}, nil
+	return listExecutionsResp{rawJSON{200, dto.ExecutionsEnvelope{Executions: dto.NewExecutions(lst)}}}, nil
 }
 
 // GetExecution returns one execution with its full code. Ownership is
@@ -492,7 +484,7 @@ func (s *strictImpl) GetExecution(ctx context.Context, req gen.GetExecutionReque
 	if err != nil {
 		return getExecutionResp{fail(err)}, nil
 	}
-	return getExecutionResp{rawJSON{200, map[string]any{"execution": ex, "code": ex.Code}}}, nil
+	return getExecutionResp{rawJSON{200, dto.ExecutionDetail{Execution: dto.NewExecution(ex), Code: ex.Code}}}, nil
 }
 
 // --- audit ---
@@ -521,7 +513,7 @@ func (s *strictImpl) ListAudit(ctx context.Context, req gen.ListAuditRequestObje
 	if err != nil {
 		return listAuditResp{fail(err)}, nil
 	}
-	return listAuditResp{rawJSON{200, map[string]any{"events": lst}}}, nil
+	return listAuditResp{rawJSON{200, dto.AuditEnvelope{Events: dto.NewAuditEvents(lst)}}}, nil
 }
 
 // --- policies ---
@@ -536,7 +528,7 @@ func (s *strictImpl) ListPolicies(ctx context.Context, _ gen.ListPoliciesRequest
 	if err != nil {
 		return listPoliciesResp{fail(err)}, nil
 	}
-	return listPoliciesResp{rawJSON{200, map[string]any{"policies": lst}}}, nil
+	return listPoliciesResp{rawJSON{200, dto.PoliciesEnvelope{Policies: dto.NewPolicies(lst)}}}, nil
 }
 
 func (s *strictImpl) CreatePolicy(ctx context.Context, req gen.CreatePolicyRequestObject) (gen.CreatePolicyResponseObject, error) {
@@ -555,7 +547,7 @@ func (s *strictImpl) CreatePolicy(ctx context.Context, req gen.CreatePolicyReque
 	if err != nil {
 		return createPolicyResp{fail(err)}, nil
 	}
-	return createPolicyResp{rawJSON{201, map[string]any{"policy": pol}}}, nil
+	return createPolicyResp{rawJSON{201, dto.PolicyEnvelope{Policy: dto.NewPolicy(pol)}}}, nil
 }
 
 func (s *strictImpl) ValidatePolicy(ctx context.Context, req gen.ValidatePolicyRequestObject) (gen.ValidatePolicyResponseObject, error) {
@@ -568,9 +560,9 @@ func (s *strictImpl) ValidatePolicy(ctx context.Context, req gen.ValidatePolicyR
 		rego = req.Body.Rego
 	}
 	if err := s.d.Policy.ValidateRego(rego); err != nil {
-		return validatePolicyResp{rawJSON{200, map[string]any{"valid": false, "error": err.Error()}}}, nil
+		return validatePolicyResp{rawJSON{200, dto.ValidationResult{Valid: false, Error: err.Error()}}}, nil
 	}
-	return validatePolicyResp{rawJSON{200, map[string]any{"valid": true}}}, nil
+	return validatePolicyResp{rawJSON{200, dto.ValidationResult{Valid: true}}}, nil
 }
 
 func (s *strictImpl) GetPolicy(ctx context.Context, req gen.GetPolicyRequestObject) (gen.GetPolicyResponseObject, error) {
@@ -583,7 +575,7 @@ func (s *strictImpl) GetPolicy(ctx context.Context, req gen.GetPolicyRequestObje
 	if err != nil {
 		return getPolicyResp{fail(err)}, nil
 	}
-	return getPolicyResp{rawJSON{200, map[string]any{"policy": pol}}}, nil
+	return getPolicyResp{rawJSON{200, dto.PolicyEnvelope{Policy: dto.NewPolicy(pol)}}}, nil
 }
 
 func (s *strictImpl) UpdatePolicy(ctx context.Context, req gen.UpdatePolicyRequestObject) (gen.UpdatePolicyResponseObject, error) {
@@ -601,7 +593,7 @@ func (s *strictImpl) UpdatePolicy(ctx context.Context, req gen.UpdatePolicyReque
 	if err != nil {
 		return updatePolicyResp{fail(err)}, nil
 	}
-	return updatePolicyResp{rawJSON{200, map[string]any{"policy": pol}}}, nil
+	return updatePolicyResp{rawJSON{200, dto.PolicyEnvelope{Policy: dto.NewPolicy(pol)}}}, nil
 }
 
 func (s *strictImpl) DeletePolicy(ctx context.Context, req gen.DeletePolicyRequestObject) (gen.DeletePolicyResponseObject, error) {
@@ -613,7 +605,7 @@ func (s *strictImpl) DeletePolicy(ctx context.Context, req gen.DeletePolicyReque
 	if err := s.d.Policy.Delete(ctx, actorOf(p), req.Id); err != nil {
 		return deletePolicyResp{fail(err)}, nil
 	}
-	return deletePolicyResp{rawJSON{200, map[string]any{"ok": true}}}, nil
+	return deletePolicyResp{rawJSON{200, dto.OK{OK: true}}}, nil
 }
 
 // --- secrets vault (session only) ---
@@ -628,7 +620,7 @@ func (s *strictImpl) ListSecrets(ctx context.Context, _ gen.ListSecretsRequestOb
 	if err != nil {
 		return listSecretsResp{fail(err)}, nil
 	}
-	return listSecretsResp{rawJSON{200, map[string]any{"secrets": lst}}}, nil
+	return listSecretsResp{rawJSON{200, dto.SecretsEnvelope{Secrets: dto.NewSecrets(lst)}}}, nil
 }
 
 func (s *strictImpl) CreateSecret(ctx context.Context, req gen.CreateSecretRequestObject) (gen.CreateSecretResponseObject, error) {
@@ -649,7 +641,7 @@ func (s *strictImpl) CreateSecret(ctx context.Context, req gen.CreateSecretReque
 	if err != nil {
 		return createSecretResp{fail(err)}, nil
 	}
-	return createSecretResp{rawJSON{201, map[string]any{"secret": sec}}}, nil
+	return createSecretResp{rawJSON{201, dto.SecretEnvelope{Secret: dto.NewSecret(sec)}}}, nil
 }
 
 func (s *strictImpl) UpdateSecret(ctx context.Context, req gen.UpdateSecretRequestObject) (gen.UpdateSecretResponseObject, error) {
@@ -667,7 +659,7 @@ func (s *strictImpl) UpdateSecret(ctx context.Context, req gen.UpdateSecretReque
 	if err != nil {
 		return updateSecretResp{fail(err)}, nil
 	}
-	return updateSecretResp{rawJSON{200, map[string]any{"secret": sec}}}, nil
+	return updateSecretResp{rawJSON{200, dto.SecretEnvelope{Secret: dto.NewSecret(sec)}}}, nil
 }
 
 func (s *strictImpl) DeleteSecret(ctx context.Context, req gen.DeleteSecretRequestObject) (gen.DeleteSecretResponseObject, error) {
@@ -679,5 +671,5 @@ func (s *strictImpl) DeleteSecret(ctx context.Context, req gen.DeleteSecretReque
 	if err := s.d.Vault.Delete(ctx, actorOf(p), req.Id); err != nil {
 		return deleteSecretResp{fail(err)}, nil
 	}
-	return deleteSecretResp{rawJSON{200, map[string]any{"ok": true}}}, nil
+	return deleteSecretResp{rawJSON{200, dto.OK{OK: true}}}, nil
 }

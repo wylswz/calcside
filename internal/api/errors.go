@@ -4,12 +4,13 @@ import (
 	"errors"
 	"net/http"
 
+	"calcside/internal/api/dto"
 	"calcside/internal/service"
 	"calcside/internal/types"
 )
 
 func errEnv(code types.APIErrorCode, msg string) any {
-	return map[string]any{"error": map[string]string{"code": string(code), "message": msg}}
+	return dto.ErrorEnvelope{Error: dto.APIError{Code: code, Message: msg}}
 }
 
 // statusByCode maps wire error codes to HTTP status; codes absent from

@@ -17,6 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"calcside/internal/api/dto"
 	"calcside/internal/api/gen"
 	"calcside/internal/auth"
 	auditsvc "calcside/internal/service/audit"
@@ -54,7 +55,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func writeErr(w http.ResponseWriter, status int, code types.APIErrorCode, msg string) {
-	writeJSON(w, status, map[string]any{"error": map[string]string{"code": string(code), "message": msg}})
+	writeJSON(w, status, dto.ErrorEnvelope{Error: dto.APIError{Code: code, Message: msg}})
 }
 
 // requestLogger is a slog-based access log (replaces gin's default
