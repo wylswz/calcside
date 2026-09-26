@@ -355,10 +355,11 @@ func (s *strictImpl) CreateInstance(ctx context.Context, req gen.CreateInstanceR
 
 func (s *strictImpl) GetInstance(ctx context.Context, req gen.GetInstanceRequestObject) (gen.GetInstanceResponseObject, error) {
 	ctx = realCtx(ctx)
-	if _, e := needAuth(ctx); e != nil {
+	p, e := needAuth(ctx)
+	if e != nil {
 		return getInstanceResp{*e}, nil
 	}
-	in, err := s.d.Sandbox.Get(ctx, actorOf(principal(ctx)), req.Id)
+	in, err := s.d.Sandbox.Get(ctx, actorOf(p), req.Id)
 	if err != nil {
 		return getInstanceResp{fail(err)}, nil
 	}
@@ -367,10 +368,11 @@ func (s *strictImpl) GetInstance(ctx context.Context, req gen.GetInstanceRequest
 
 func (s *strictImpl) DeleteInstance(ctx context.Context, req gen.DeleteInstanceRequestObject) (gen.DeleteInstanceResponseObject, error) {
 	ctx = realCtx(ctx)
-	if _, e := needAuth(ctx); e != nil {
+	p, e := needAuth(ctx)
+	if e != nil {
 		return deleteInstanceResp{*e}, nil
 	}
-	if err := s.d.Sandbox.Delete(ctx, actorOf(principal(ctx)), req.Id); err != nil {
+	if err := s.d.Sandbox.Delete(ctx, actorOf(p), req.Id); err != nil {
 		return deleteInstanceResp{fail(err)}, nil
 	}
 	return deleteInstanceResp{rawJSON{200, map[string]any{"ok": true}}}, nil
@@ -378,10 +380,11 @@ func (s *strictImpl) DeleteInstance(ctx context.Context, req gen.DeleteInstanceR
 
 func (s *strictImpl) Keepalive(ctx context.Context, req gen.KeepaliveRequestObject) (gen.KeepaliveResponseObject, error) {
 	ctx = realCtx(ctx)
-	if _, e := needAuth(ctx); e != nil {
+	p, e := needAuth(ctx)
+	if e != nil {
 		return keepaliveResp{*e}, nil
 	}
-	meta, err := s.d.Sandbox.Keepalive(ctx, actorOf(principal(ctx)), req.Id)
+	meta, err := s.d.Sandbox.Keepalive(ctx, actorOf(p), req.Id)
 	if err != nil {
 		return keepaliveResp{fail(err)}, nil
 	}
@@ -462,14 +465,15 @@ func (s *strictImpl) Files(ctx context.Context, req gen.FilesRequestObject) (gen
 
 func (s *strictImpl) ListExecutions(ctx context.Context, req gen.ListExecutionsRequestObject) (gen.ListExecutionsResponseObject, error) {
 	ctx = realCtx(ctx)
-	if _, e := needAuth(ctx); e != nil {
+	p, e := needAuth(ctx)
+	if e != nil {
 		return listExecutionsResp{*e}, nil
 	}
 	limit := 0
 	if req.Params.Limit != nil {
 		limit = *req.Params.Limit
 	}
-	lst, err := s.d.Sandbox.ListExecutions(ctx, actorOf(principal(ctx)), req.Id, limit)
+	lst, err := s.d.Sandbox.ListExecutions(ctx, actorOf(p), req.Id, limit)
 	if err != nil {
 		return listExecutionsResp{fail(err)}, nil
 	}

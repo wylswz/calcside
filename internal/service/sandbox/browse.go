@@ -39,8 +39,8 @@ func (s *Service) Browse(ctx context.Context, a service.Actor, id, path string) 
 	var stat map[string]any
 	var listing []any
 	var content string
-	err = s.mgr.WithSession(in.ID, func(s *engine.Session, gate *capability.Gate) error {
-		fsv, ok := s.Predeclared[string(types.CapFS)]
+	err = s.mgr.WithSession(in.ID, func(sess *engine.Session, gate *capability.Gate) error {
+		fsv, ok := sess.Predeclared[string(types.CapFS)]
 		if !ok {
 			return errors.New("no fs binding")
 		}

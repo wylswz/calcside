@@ -45,14 +45,6 @@ type Deps struct {
 	GoogleEnabled bool            // reported by /api/v1/auth/config
 	Dev           bool            // anonymous dev mode
 	Anonymous     *store.User     // dev-mode anonymous principal's user
-	Now           func() time.Time
-}
-
-func (d Deps) now() time.Time {
-	if d.Now != nil {
-		return d.Now()
-	}
-	return time.Now()
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -134,6 +126,18 @@ func bodyLimit() gin.HandlerFunc {
 // Handler builds the Gin engine: contract routes via the generated
 // strict handler, raw auth routes, static SPA.
 func Handler(d Deps) http.Handler {
+	// All dependencies are programmer-supplied; a missing one is a
+	// wiring bug, so fail fast instead of panicking mid-request.
+	for name, ok := range map[string]bool{
+		"IAM": d.IAM != nil, "Vault": d.Vault != nil,
+		"Policy": d.Policy != nil, "Audit": d.Audit != nil,
+		"Catalog": d.Catalog != nil, "Sandbox": d.Sandbox != nil,
+		"Auth": d.Auth != nil,
+	} {
+		if !ok {
+			panic("api: Deps." + name + " is nil")
+		}
+	}
 	if d.Dev {
 		gin.SetMode(gin.DebugMode)
 	} else {
