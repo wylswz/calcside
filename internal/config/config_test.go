@@ -37,3 +37,20 @@ func TestParseDevFlags(t *testing.T) {
 		t.Fatalf("cfg: %+v", c)
 	}
 }
+
+func TestParseNetAllowCIDRs(t *testing.T) {
+	c, err := Parse([]string{"--net-allow-cidrs", "198.18.0.0/15, 10.0.0.0/8"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.NetAllowCIDRs) != 2 || c.NetAllowCIDRs[0].String() != "198.18.0.0/15" {
+		t.Fatalf("cidrs: %v", c.NetAllowCIDRs)
+	}
+	c, err = Parse([]string{"--net-allow-cidrs="})
+	if err != nil || len(c.NetAllowCIDRs) != 0 {
+		t.Fatalf("empty flag: %v %+v", err, c.NetAllowCIDRs)
+	}
+	if _, err = Parse([]string{"--net-allow-cidrs", "bogus"}); err == nil {
+		t.Fatal("expected invalid CIDR error")
+	}
+}

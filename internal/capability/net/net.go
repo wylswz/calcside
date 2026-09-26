@@ -1,8 +1,10 @@
 // Package net implements the "net" capability: HTTP requests gated by a
-// host allowlist, with DNS resolution done in-process and connections
-// pinned to vetted IPs to resist SSRF and DNS-rebinding. It also
-// substitutes {{secrets.NAME}} placeholders at send time; plaintext
-// secret values never reach the script, audit, or policy input.
+// host allowlist (empty = any host), with DNS resolution done in-process
+// and connections pinned to vetted IPs to resist SSRF and DNS-rebinding
+// (private/reserved addresses stay blocked unless the server opts in via
+// --net-allow-private). It also substitutes {{secrets.NAME}} placeholders
+// at send time; plaintext secret values never reach the script, audit, or
+// policy input.
 package net
 
 import (
@@ -30,6 +32,7 @@ import (
 
 // Config configures one instance's net capability.
 type Config struct {
+	// AllowHosts bounds request hosts; empty = any host.
 	AllowHosts       []string           `json:"allow_hosts"`
 	Methods          []types.HTTPMethod `json:"methods"`
 	MaxResponseBytes int64              `json:"max_response_bytes"`
@@ -51,8 +54,27 @@ type client struct {
 	rules        []hostmatch.Rule
 	allowPrivate bool
 	allowHTTP    bool
+	allowCIDRs   []*gonet.IPNet
 	secrets      *secrets.Set
 	hc           *http.Client
+}
+
+// blocked reports whether ip must not be dialed: addresses inside an
+// allowed CIDR (--net-allow-cidrs) are exempt, everything else defers to
+// isBlockedIP.
+func (c *client) blocked(ip gonet.IP) bool {
+	if ip == nil {
+		return true
+	}
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	for _, n := range c.allowCIDRs {
+		if n.Contains(ip) {
+			return false
+		}
+	}
+	return isBlockedIP(ip)
 }
 
 // injectedKey carries the names of secrets injected into a request so the
@@ -97,8 +119,10 @@ func (c *client) authorize(method, rawURL string) (host, effPort string, err err
 	if !ok {
 		return "", "", fmt.Errorf("net: method %s not in methods %v", m, c.cfg.Methods)
 	}
+	// Empty allow_hosts = unrestricted at the host-name layer; the dialer
+	// still blocks private/reserved addresses unless --net-allow-private.
 	if len(c.rules) == 0 {
-		return "", "", fmt.Errorf("net: no hosts permitted (empty allow_hosts)")
+		return host, effPort, nil
 	}
 	for i := range c.rules {
 		if c.rules[i].Matches(host, effPort) {
@@ -163,7 +187,7 @@ func (c *client) transport() *http.Transport {
 			if ip := gonet.ParseIP(hostPort); ip != nil {
 				// IP-literal hosts must be explicitly opted in via allowlist
 				// AND the server must permit private/reserved addresses.
-				if !c.allowPrivate && isBlockedIP(ip) {
+				if !c.allowPrivate && c.blocked(ip) {
 					return nil, fmt.Errorf("net: dialing disallowed IP %s", ip)
 				}
 				return dialer.DialContext(ctx, network, addr)
@@ -175,7 +199,7 @@ func (c *client) transport() *http.Transport {
 			var lastErr error
 			dialed := false
 			for _, ia := range ips {
-				if isBlockedIP(ia.IP) {
+				if c.blocked(ia.IP) {
 					return nil, fmt.Errorf("net: host %q resolves to disallowed address %s", hostPort, ia.IP)
 				}
 				conn, derr := dialer.DialContext(ctx, network, gonet.JoinHostPort(ia.IP.String(), port))
@@ -468,7 +492,7 @@ func (factory) Ops() []capability.OpInfo {
 
 func (factory) ConfigFields() []capability.FieldDoc {
 	return []capability.FieldDoc{
-		{Name: "allow_hosts", Type: types.FieldStringList, Doc: "exact host, *.suffix wildcard, or host:port; IP literals allowed for testing", Default: []string{}},
+		{Name: "allow_hosts", Type: types.FieldStringList, Doc: "exact host, *.suffix wildcard, or host:port; empty = any public host (private/reserved IPs still blocked unless --net-allow-private)", Default: []string{}},
 		{Name: "methods", Type: types.FieldStringList, Doc: "permitted HTTP methods", Default: []string{"GET", "POST"}},
 		{Name: "max_response_bytes", Type: types.FieldInt, Doc: "response body cap", Default: defaultMaxResponse},
 		{Name: "timeout_ms", Type: types.FieldInt, Doc: "request timeout", Default: defaultTimeoutMs},
@@ -490,7 +514,7 @@ func (factory) Validate(raw json.RawMessage, limits capability.ServerLimits) (an
 		// IP-literal entries are only meaningful when private addresses are
 		// allowed (tests, internal services); reject blocked literals.
 		if r.IsIP && !limits.NetAllowPrivate {
-			if ip := gonet.ParseIP(r.Host); ip != nil && isBlockedIP(ip) {
+			if ip := gonet.ParseIP(r.Host); ip != nil && isBlockedIP(ip) && !inCIDRs(limits.NetAllowCIDRs, ip) {
 				return nil, fmt.Errorf("net config: IP-literal allow_hosts entry %q in a blocked range (set --net-allow-private to permit)", h)
 			}
 		}
@@ -510,7 +534,21 @@ func (factory) Validate(raw json.RawMessage, limits capability.ServerLimits) (an
 	if limits.MaxExecTimeout > 0 && cfg.TimeoutMs > limits.MaxExecTimeout.Milliseconds() {
 		cfg.TimeoutMs = limits.MaxExecTimeout.Milliseconds()
 	}
-	return validated{Config: cfg, allowPrivate: limits.NetAllowPrivate, allowHTTP: limits.SecretsAllowHTTP}, nil
+	return validated{Config: cfg, allowPrivate: limits.NetAllowPrivate, allowHTTP: limits.SecretsAllowHTTP, allowCIDRs: limits.NetAllowCIDRs}, nil
+}
+
+// inCIDRs reports whether ip falls inside any of the given networks
+// (IPv4-mapped addresses are normalized first).
+func inCIDRs(ns []*gonet.IPNet, ip gonet.IP) bool {
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	for _, n := range ns {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // validated carries the parsed config plus server policy the binding needs.
@@ -518,6 +556,7 @@ type validated struct {
 	Config
 	allowPrivate bool
 	allowHTTP    bool
+	allowCIDRs   []*gonet.IPNet
 }
 
 func (f factory) Prompt(cfgAny any) string {
@@ -529,6 +568,8 @@ func (f factory) Prompt(cfgAny any) string {
 	}
 	if len(cfg.AllowHosts) > 0 {
 		fmt.Fprintf(&b, "- Allowed hosts: %s\n", strings.Join(cfg.AllowHosts, ", "))
+	} else {
+		b.WriteString("- Allowed hosts: any public host\n")
 	}
 	if len(cfg.Methods) > 0 {
 		methods := make([]string, len(cfg.Methods))
@@ -550,7 +591,7 @@ func (factory) New(cfgAny any, env capability.InstanceEnv) (starlark.Value, io.C
 	if !ok {
 		return nil, nil, fmt.Errorf("net: config must come from Validate")
 	}
-	c := &client{cfg: v.Config, allowPrivate: v.allowPrivate, allowHTTP: v.allowHTTP, secrets: env.Secrets}
+	c := &client{cfg: v.Config, allowPrivate: v.allowPrivate, allowHTTP: v.allowHTTP, allowCIDRs: v.allowCIDRs, secrets: env.Secrets}
 	rules, err := hostmatch.ParseAll(v.AllowHosts)
 	if err != nil {
 		return nil, nil, err

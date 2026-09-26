@@ -16,6 +16,7 @@ import (
 	"calcside/internal/audit"
 	"calcside/internal/auth"
 	"calcside/internal/capability"
+	capext "calcside/internal/capability/ext"
 	capfs "calcside/internal/capability/fs"
 	capio "calcside/internal/capability/io"
 	capnet "calcside/internal/capability/net"
@@ -58,6 +59,12 @@ func serve(cfg config.Config) error {
 	reg.Register(capfs.Factory())
 	reg.Register(capnet.Factory())
 	reg.Register(capio.Factory())
+	reg.Register(capext.Factory(capext.Options{
+		AllowSources: cfg.ExtAllowSources,
+		LocalRoots:   cfg.ExtLocalRoots,
+		CacheDir:     cfg.ExtCacheDir,
+		FetchTimeout: cfg.ExtFetchTimeout,
+	}))
 
 	rec := audit.NewRecorder(st)
 	defer rec.Close()
@@ -73,8 +80,12 @@ func serve(cfg config.Config) error {
 		MaxFSQuotaBytes:     256 << 20,
 		MaxOutputBytes:      cfg.MaxOutputBytes,
 		NetAllowPrivate:     cfg.NetAllowPrivate,
+		NetAllowCIDRs:       cfg.NetAllowCIDRs,
 		MaxNetResponseBytes: cfg.MaxNetResponseBytes,
 		SecretsAllowHTTP:    cfg.SecretsAllowHTTP,
+	}
+	if len(cfg.NetAllowCIDRs) > 0 {
+		slog.Warn("net: private/reserved address blocking relaxed", "cidrs", cfg.NetAllowCIDRs)
 	}
 	var cipher *secrets.Cipher
 	if cfg.SecretKey != "" {

@@ -160,9 +160,12 @@ const (
 	CapFS  CapabilityName = "fs"
 	CapNet CapabilityName = "net"
 	CapIO  CapabilityName = "io"
+	CapExt CapabilityName = "ext"
 )
 
-func AllCapabilityNames() []CapabilityName { return []CapabilityName{CapFS, CapNet, CapIO} }
+func AllCapabilityNames() []CapabilityName {
+	return []CapabilityName{CapFS, CapNet, CapIO, CapExt}
+}
 
 func (n CapabilityName) Valid() bool { return valid(n, AllCapabilityNames()) }
 

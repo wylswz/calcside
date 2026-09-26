@@ -74,6 +74,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/CapabilityCatalog'
         '401': { $ref: '#/components/responses/Error' }
+  /api/v1/extensions:
+    get:
+      operationId: listExtensions
+      tags: [meta]
+      responses:
+        '200':
+          description: loadable extensions under the server's ext roots
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtensionCatalog'
+        '401': { $ref: '#/components/responses/Error' }
   /api/v1/keys:
     get:
       operationId: listKeys
@@ -563,7 +575,7 @@ components:
       enum: ['', before, after]
     CapabilityName:
       type: string
-      enum: [fs, net, io]
+      enum: [fs, net, io, ext]
     HTTPMethod:
       type: string
       enum: [GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS]
@@ -649,6 +661,40 @@ components:
         capabilities:
           type: array
           items: { $ref: '#/components/schemas/CapabilityDoc' }
+    ExtConfigField:
+      type: object
+      required: [name, type]
+      properties:
+        name: { type: string }
+        type: { type: string, description: 'a FieldType value or "secret"' }
+        doc: { type: string }
+        default: { }
+    ExtensionInfo:
+      type: object
+      required: [source, name, dependencies, ops, config]
+      properties:
+        source: { type: string }
+        name: { type: string }
+        version: { type: string }
+        description: { type: string }
+        dependencies:
+          type: array
+          items: { $ref: '#/components/schemas/CapabilityName' }
+        ops:
+          type: array
+          items: { $ref: '#/components/schemas/OpDoc' }
+        config:
+          type: array
+          items: { $ref: '#/components/schemas/ExtConfigField' }
+    ExtensionCatalog:
+      type: object
+      required: [extensions, remote_enabled, local_enabled]
+      properties:
+        extensions:
+          type: array
+          items: { $ref: '#/components/schemas/ExtensionInfo' }
+        remote_enabled: { type: boolean }
+        local_enabled: { type: boolean }
     APIKey:
       type: object
       required: [id, user_id, name, prefix, created_at]
@@ -686,6 +732,7 @@ components:
         allowed_domains:
           type: array
           items: { type: string }
+          description: optional; empty = any host permitted by net allow_hosts
         source: { $ref: '#/components/schemas/SecretSource' }
     Limits:
       type: object
@@ -890,17 +937,19 @@ components:
         allowed_domains:
           type: array
           items: { type: string }
+          description: optional; empty = any host permitted by net allow_hosts
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     CreateSecretRequest:
       type: object
-      required: [name, value, allowed_domains]
+      required: [name, value]
       properties:
         name: { type: string }
         value: { type: string, description: write-only; never returned }
         allowed_domains:
           type: array
           items: { type: string }
+          description: optional; empty = any host permitted by net allow_hosts
     UpdateSecretRequest:
       type: object
       properties:
@@ -908,6 +957,7 @@ components:
         allowed_domains:
           type: array
           items: { type: string }
+          description: optional; empty = any host permitted by net allow_hosts
     SecretResponse:
       type: object
       properties:

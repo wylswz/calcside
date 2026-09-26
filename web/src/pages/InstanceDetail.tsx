@@ -277,6 +277,19 @@ export default function InstanceDetail() {
             <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">Files</h3>
             <FileBrowser id={id} />
           </div>
+          {Object.keys(inst.spec?.capabilities?.ext ?? {}).length > 0 && (
+            <div>
+              <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">Extensions</h3>
+              <div className="rounded border border-gray-200 dark:border-gray-800 p-2 text-xs font-mono space-y-1">
+                {(Object.entries(inst.spec.capabilities?.ext ?? {}) as [string, { source?: string; sum?: string }][]).map(([alias, e]) => (
+                  <div key={alias}>
+                    <span className="text-gray-500">{alias}</span> → {e.source}
+                    {e.sum && <span className="text-gray-400"> ({e.sum})</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {(Object.keys(inst.spec?.env ?? {}).length > 0 || Object.keys(inst.spec?.secrets ?? {}).length > 0) && (
             <div>
               <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">Env & Secrets</h3>
@@ -287,7 +300,7 @@ export default function InstanceDetail() {
                 {(Object.entries(inst.spec.secrets ?? {}) as [string, SpecSecret][]).map(([k, v]) => (
                   <div key={k}>
                     <span className="text-gray-500">{k}</span>
-                    <span className="text-gray-400"> {v.source === 'vault' ? `→vault:${v.ref}` : '(inline)'} {(v.allowed_domains ?? []).join(', ')}</span>
+                    <span className="text-gray-400"> {v.source === 'vault' ? `→vault:${v.ref}` : '(inline)'} {(v.allowed_domains ?? []).join(', ') || 'any'}</span>
                   </div>
                 ))}
               </div>

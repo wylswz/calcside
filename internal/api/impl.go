@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"calcside/internal/api/gen"
 	"calcside/internal/auth"
 	"calcside/internal/capability"
+	"calcside/internal/capability/ext"
 	"calcside/internal/engine"
 	"calcside/internal/instance"
 	"calcside/internal/policy"
@@ -108,6 +110,12 @@ func (r meResp) VisitMeResponse(w http.ResponseWriter) error { return r.write(w)
 type capabilitiesResp struct{ rawJSON }
 
 func (r capabilitiesResp) VisitCapabilitiesResponse(w http.ResponseWriter) error {
+	return r.write(w)
+}
+
+type listExtensionsResp struct{ rawJSON }
+
+func (r listExtensionsResp) VisitListExtensionsResponse(w http.ResponseWriter) error {
 	return r.write(w)
 }
 
@@ -275,6 +283,23 @@ func (s *strictImpl) Capabilities(ctx context.Context, _ gen.CapabilitiesRequest
 		})
 	}
 	return capabilitiesResp{rawJSON{http.StatusOK, map[string]any{"capabilities": out}}}, nil
+}
+
+func (s *strictImpl) ListExtensions(ctx context.Context, _ gen.ListExtensionsRequestObject) (gen.ListExtensionsResponseObject, error) {
+	ctx = realCtx(ctx)
+	if _, e := needAuth(ctx); e != nil {
+		return listExtensionsResp{*e}, nil
+	}
+	out := map[string]any{"extensions": []any{}, "remote_enabled": false, "local_enabled": false}
+	if f, ok := s.d.Registry.Get(types.CapExt); ok {
+		if av, ok := f.(interface{ Available() ext.Catalog }); ok {
+			c := av.Available()
+			out["extensions"] = c.Extensions
+			out["remote_enabled"] = c.RemoteEnabled
+			out["local_enabled"] = c.LocalEnabled
+		}
+	}
+	return listExtensionsResp{rawJSON{http.StatusOK, out}}, nil
 }
 
 // --- api keys (session only) ---
@@ -556,6 +581,9 @@ func (s *strictImpl) InstancePrompt(ctx context.Context, req gen.InstancePromptR
 	var netHost string
 	if len(data.NetHosts) > 0 {
 		netHost = data.NetHosts[0]
+	} else if slices.Contains(capNamesToStrings(names), "net") {
+		// Unrestricted net: still show a worked example.
+		netHost = "api.example.com"
 	}
 	text, err := promptpkg.Render(promptpkg.Input{
 		InstanceID:     in.ID,
@@ -965,7 +993,9 @@ func (s *strictImpl) CreateSecret(ctx context.Context, req gen.CreateSecretReque
 	var domains []string
 	if req.Body != nil {
 		name, value = req.Body.Name, req.Body.Value
-		domains = req.Body.AllowedDomains
+		if req.Body.AllowedDomains != nil {
+			domains = *req.Body.AllowedDomains
+		}
 	}
 	if err := validateSecretInput(name, value, domains); err != nil {
 		return createSecretResp{rawJSON{400, errEnv(types.ErrCodeBadSecret, err.Error())}}, nil
@@ -973,6 +1003,9 @@ func (s *strictImpl) CreateSecret(ctx context.Context, req gen.CreateSecretReque
 	ct, err := s.d.Cipher.Seal([]byte(value), p.User.ID+"/"+name)
 	if err != nil {
 		return createSecretResp{rawJSON{500, errEnv(types.ErrCodeInternal, err.Error())}}, nil
+	}
+	if domains == nil {
+		domains = []string{} // unrestricted; responses always carry an array
 	}
 	sec := &store.Secret{UserID: p.User.ID, Name: name, Ciphertext: ct, AllowedDomains: domains}
 	if err := s.d.Store.CreateSecret(ctx, sec); err != nil {

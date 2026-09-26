@@ -68,6 +68,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/extensions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listExtensions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/keys": {
         parameters: {
             query?: never;
@@ -385,7 +401,7 @@ export interface components {
          */
         Phase: "" | "before" | "after";
         /** @enum {string} */
-        CapabilityName: "fs" | "net" | "io";
+        CapabilityName: "fs" | "net" | "io" | "ext";
         /** @enum {string} */
         HTTPMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
         /** @enum {string} */
@@ -446,6 +462,27 @@ export interface components {
         CapabilityCatalog: {
             capabilities?: components["schemas"]["CapabilityDoc"][];
         };
+        ExtConfigField: {
+            name: string;
+            /** @description a FieldType value or "secret" */
+            type: string;
+            doc?: string;
+            default?: unknown;
+        };
+        ExtensionInfo: {
+            source: string;
+            name: string;
+            version?: string;
+            description?: string;
+            dependencies: components["schemas"]["CapabilityName"][];
+            ops: components["schemas"]["OpDoc"][];
+            config: components["schemas"]["ExtConfigField"][];
+        };
+        ExtensionCatalog: {
+            extensions: components["schemas"]["ExtensionInfo"][];
+            remote_enabled: boolean;
+            local_enabled: boolean;
+        };
         APIKey: {
             id: string;
             user_id: string;
@@ -478,6 +515,7 @@ export interface components {
             ref?: string;
             /** @description inline secret value (never persisted) */
             value?: string;
+            /** @description optional; empty = any host permitted by net allow_hosts */
             allowed_domains?: string[];
             source?: components["schemas"]["SecretSource"];
         };
@@ -654,6 +692,7 @@ export interface components {
             id: string;
             user_id: string;
             name: string;
+            /** @description optional; empty = any host permitted by net allow_hosts */
             allowed_domains: string[];
             /** Format: date-time */
             created_at: string;
@@ -664,10 +703,12 @@ export interface components {
             name: string;
             /** @description write-only; never returned */
             value: string;
-            allowed_domains: string[];
+            /** @description optional; empty = any host permitted by net allow_hosts */
+            allowed_domains?: string[];
         };
         UpdateSecretRequest: {
             value?: string;
+            /** @description optional; empty = any host permitted by net allow_hosts */
             allowed_domains?: string[];
         };
         SecretResponse: {
@@ -774,6 +815,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CapabilityCatalog"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    listExtensions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description loadable extensions under the server's ext roots */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtensionCatalog"];
                 };
             };
             401: components["responses"]["Error"];
@@ -1450,7 +1512,7 @@ export const execStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["
 export const execErrorTypeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExecErrorType"]> = ["syntax", "runtime", "policy_denied", "out_of_scope", "timeout", "step_limit", "memory_limit"];
 export const decisionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Decision"]> = ["allow", "deny"];
 export const phaseValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Phase"]> = ["", "before", "after"];
-export const capabilityNameValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CapabilityName"]> = ["fs", "net", "io"];
+export const capabilityNameValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CapabilityName"]> = ["fs", "net", "io", "ext"];
 export const hTTPMethodValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HTTPMethod"]> = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
 export const secretSourceValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SecretSource"]> = ["vault", "inline"];
 export const aPIErrorCodeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["APIErrorCode"]> = ["auth_failed", "bad_capability", "bad_policy", "bad_request", "bad_secret", "bad_spec", "conflict", "csrf", "forbidden", "fs_error", "internal", "method_not_allowed", "no_fs", "not_found", "not_running", "secrets_disabled", "too_large", "too_many", "unauthorized"];

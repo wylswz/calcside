@@ -151,11 +151,104 @@ func TestMethodNotAllowed(t *testing.T) {
 	}
 }
 
-func TestEmptyAllowlistDeniesAll(t *testing.T) {
+func TestEmptyAllowlistAllowsAny(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "hello")
+	}))
+	defer ts.Close()
+	c := newClient(t, Config{}) // empty allow_hosts = any host
+	r, err := c.do(context.Background(), "GET", ts.URL+"/x", "", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != 200 || r.Body != "hello" {
+		t.Fatalf("bad response %+v", r)
+	}
+}
+
+func TestEmptyAllowlistStillBlocksPrivateIPs(t *testing.T) {
+	// Empty allow_hosts opens the host check but the SSRF dialer still
+	// refuses private/reserved addresses without --net-allow-private.
+	c := &client{cfg: Config{Methods: []types.HTTPMethod{types.MethodGet}}, allowPrivate: false}
+	c.hc = c.newHTTPClient()
+	for _, u := range []string{"http://127.0.0.1:8080/", "http://localhost/"} {
+		_, err := c.do(context.Background(), "GET", u, "", nil, "")
+		if err == nil || !strings.Contains(err.Error(), "disallowed") {
+			t.Fatalf("expected SSRF block for %s, got %v", u, err)
+		}
+	}
+}
+
+func TestEmptyAllowlistRedirectFollowed(t *testing.T) {
+	b := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "B")
+	}))
+	defer b.Close()
+	a := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, b.URL, http.StatusFound)
+	}))
+	defer a.Close()
 	c := newClient(t, Config{})
-	_, err := c.do(context.Background(), "GET", "http://example.com/", "", nil, "")
-	if err == nil {
-		t.Fatal("expected denial with empty allowlist")
+	r, err := c.do(context.Background(), "GET", a.URL, "", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Body != "B" {
+		t.Fatalf("redirect to another host not followed: %q", r.Body)
+	}
+}
+
+// --net-allow-cidrs exempts addresses from private/reserved blocking in
+// both the IP-literal and resolved-address dialer paths.
+func TestAllowCIDRs(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "hi")
+	}))
+	defer ts.Close()
+	_, v4cidr, err := gonet.ParseCIDR("127.0.0.0/8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, v6cidr, err := gonet.ParseCIDR("::1/128")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cidrs := []*gonet.IPNet{v4cidr, v6cidr}
+	cfg := Config{Methods: []types.HTTPMethod{types.MethodGet}}
+	_, port := hostPort(ts)
+
+	mk := func(cidrs []*gonet.IPNet) *client {
+		c := &client{cfg: cfg, allowPrivate: false, allowCIDRs: cidrs}
+		c.hc = c.newHTTPClient()
+		return c
+	}
+
+	// Without the exemption, both literal and resolved loopback are blocked.
+	for _, u := range []string{ts.URL, "http://localhost:" + port + "/"} {
+		if _, err := mk(nil).do(context.Background(), "GET", u, "", nil, ""); err == nil ||
+			!strings.Contains(err.Error(), "disallowed") {
+			t.Fatalf("expected SSRF block for %s, got %v", u, err)
+		}
+	}
+	// With the exemption both paths dial fine.
+	for _, u := range []string{ts.URL, "http://localhost:" + port + "/"} {
+		r, err := mk(cidrs).do(context.Background(), "GET", u, "", nil, "")
+		if err != nil {
+			t.Fatalf("%s: %v", u, err)
+		}
+		if r.Body != "hi" {
+			t.Fatalf("%s: bad body %q", u, r.Body)
+		}
+	}
+
+	// The IP-literal allow_hosts Validate check also honors the CIDR.
+	f := factory{}
+	b, _ := json.Marshal(Config{AllowHosts: []string{"127.0.0.1:" + port}})
+	if _, err := f.Validate(b, capability.ServerLimits{NetAllowCIDRs: cidrs}); err != nil {
+		t.Fatalf("literal in allowed CIDR should validate: %v", err)
+	}
+	if _, err := f.Validate(b, capability.ServerLimits{}); err == nil {
+		t.Fatal("literal outside allowed CIDRs should still be rejected")
 	}
 }
 

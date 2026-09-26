@@ -467,7 +467,7 @@ func (c *Client) ListSecrets(ctx context.Context) ([]*store.Secret, error) {
 
 func (c *Client) CreateSecret(ctx context.Context, name, value string, domains []string) (*store.Secret, error) {
 	resp, err := c.gc.CreateSecretWithResponse(ctx, gen.CreateSecretRequest{
-		Name: name, Value: value, AllowedDomains: domains,
+		Name: name, Value: value, AllowedDomains: &domains,
 	})
 	if err != nil {
 		return nil, err

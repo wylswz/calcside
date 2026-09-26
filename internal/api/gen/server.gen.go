@@ -107,6 +107,7 @@ func (e AuthKind) Valid() bool {
 
 // Defines values for CapabilityName.
 const (
+	Ext CapabilityName = "ext"
 	Fs  CapabilityName = "fs"
 	Io  CapabilityName = "io"
 	Net CapabilityName = "net"
@@ -115,6 +116,8 @@ const (
 // Valid indicates whether the value is a known member of the CapabilityName enum.
 func (e CapabilityName) Valid() bool {
 	switch e {
+	case Ext:
+		return true
 	case Fs:
 		return true
 	case Io:
@@ -361,8 +364,9 @@ type CreateKeyRequest struct {
 
 // CreateSecretRequest defines model for CreateSecretRequest.
 type CreateSecretRequest struct {
-	AllowedDomains []string `json:"allowed_domains"`
-	Name           string   `json:"name"`
+	// AllowedDomains optional; empty = any host permitted by net allow_hosts
+	AllowedDomains *[]string `json:"allowed_domains,omitempty"`
+	Name           string    `json:"name"`
 
 	// Value write-only; never returned
 	Value string `json:"value"`
@@ -433,6 +437,34 @@ type Execution struct {
 // ExecutionsResponse defines model for ExecutionsResponse.
 type ExecutionsResponse struct {
 	Executions *[]Execution `json:"executions,omitempty"`
+}
+
+// ExtConfigField defines model for ExtConfigField.
+type ExtConfigField struct {
+	Default interface{} `json:"default,omitempty"`
+	Doc     *string     `json:"doc,omitempty"`
+	Name    string      `json:"name"`
+
+	// Type a FieldType value or "secret"
+	Type string `json:"type"`
+}
+
+// ExtensionCatalog defines model for ExtensionCatalog.
+type ExtensionCatalog struct {
+	Extensions    []ExtensionInfo `json:"extensions"`
+	LocalEnabled  bool            `json:"local_enabled"`
+	RemoteEnabled bool            `json:"remote_enabled"`
+}
+
+// ExtensionInfo defines model for ExtensionInfo.
+type ExtensionInfo struct {
+	Config       []ExtConfigField `json:"config"`
+	Dependencies []CapabilityName `json:"dependencies"`
+	Description  *string          `json:"description,omitempty"`
+	Name         string           `json:"name"`
+	Ops          []OpDoc          `json:"ops"`
+	Source       string           `json:"source"`
+	Version      *string          `json:"version,omitempty"`
 }
 
 // FieldDoc defines model for FieldDoc.
@@ -585,6 +617,7 @@ type PolicyUpdateRequest struct {
 
 // Secret defines model for Secret.
 type Secret struct {
+	// AllowedDomains optional; empty = any host permitted by net allow_hosts
 	AllowedDomains []string  `json:"allowed_domains"`
 	CreatedAt      time.Time `json:"created_at"`
 	Id             string    `json:"id"`
@@ -603,6 +636,7 @@ type SecretSource string
 
 // SecretSpec defines model for SecretSpec.
 type SecretSpec struct {
+	// AllowedDomains optional; empty = any host permitted by net allow_hosts
 	AllowedDomains *[]string `json:"allowed_domains,omitempty"`
 
 	// Ref vault secret name (mutually exclusive with value)
@@ -620,6 +654,7 @@ type SecretsResponse struct {
 
 // UpdateSecretRequest defines model for UpdateSecretRequest.
 type UpdateSecretRequest struct {
+	// AllowedDomains optional; empty = any host permitted by net allow_hosts
 	AllowedDomains *[]string `json:"allowed_domains,omitempty"`
 	Value          *string   `json:"value,omitempty"`
 }
@@ -715,6 +750,9 @@ type ServerInterface interface {
 
 	// (GET /api/v1/capabilities)
 	Capabilities(c *gin.Context)
+
+	// (GET /api/v1/extensions)
+	ListExtensions(c *gin.Context)
 
 	// (GET /api/v1/instances)
 	ListInstances(c *gin.Context, params ListInstancesParams)
@@ -873,6 +911,19 @@ func (siw *ServerInterfaceWrapper) Capabilities(c *gin.Context) {
 	}
 
 	siw.Handler.Capabilities(c)
+}
+
+// ListExtensions operation middleware
+func (siw *ServerInterfaceWrapper) ListExtensions(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListExtensions(c)
 }
 
 // ListInstances operation middleware
@@ -1421,6 +1472,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/auth/config", wrapper.AuthConfig)
 	router.GET(options.BaseURL+"/api/v1/me", wrapper.Me)
 	router.GET(options.BaseURL+"/api/v1/capabilities", wrapper.Capabilities)
+	router.GET(options.BaseURL+"/api/v1/extensions", wrapper.ListExtensions)
 	router.GET(options.BaseURL+"/api/v1/keys", wrapper.ListKeys)
 	router.POST(options.BaseURL+"/api/v1/keys", wrapper.CreateKey)
 	router.DELETE(options.BaseURL+"/api/v1/keys/:id", wrapper.DeleteKey)
@@ -1529,6 +1581,41 @@ func (response Capabilities200JSONResponse) VisitCapabilitiesResponse(w http.Res
 type Capabilities401JSONResponse struct{ ErrorJSONResponse }
 
 func (response Capabilities401JSONResponse) VisitCapabilitiesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListExtensionsRequestObject struct {
+}
+
+type ListExtensionsResponseObject interface {
+	VisitListExtensionsResponse(w http.ResponseWriter) error
+}
+
+type ListExtensions200JSONResponse ExtensionCatalog
+
+func (response ListExtensions200JSONResponse) VisitListExtensionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListExtensions401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListExtensions401JSONResponse) VisitListExtensionsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -2991,6 +3078,9 @@ type StrictServerInterface interface {
 	// (GET /api/v1/capabilities)
 	Capabilities(ctx context.Context, request CapabilitiesRequestObject) (CapabilitiesResponseObject, error)
 
+	// (GET /api/v1/extensions)
+	ListExtensions(ctx context.Context, request ListExtensionsRequestObject) (ListExtensionsResponseObject, error)
+
 	// (GET /api/v1/instances)
 	ListInstances(ctx context.Context, request ListInstancesRequestObject) (ListInstancesResponseObject, error)
 
@@ -3188,6 +3278,30 @@ func (sh *strictHandler) Capabilities(ctx *gin.Context) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(CapabilitiesResponseObject); ok {
 		if err := validResponse.VisitCapabilitiesResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListExtensions operation middleware
+func (sh *strictHandler) ListExtensions(ctx *gin.Context) {
+	var request ListExtensionsRequestObject
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListExtensions(ctx, request.(ListExtensionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListExtensions")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ListExtensionsResponseObject); ok {
+		if err := validResponse.VisitListExtensionsResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

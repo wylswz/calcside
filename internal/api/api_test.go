@@ -382,10 +382,14 @@ func TestSecretsAPI(t *testing.T) {
 	if code != 400 {
 		t.Fatalf("bad name: expected 400, got %d", code)
 	}
-	code, _, _ = e.req("POST", "/api/v1/secrets",
+	// no domains = unrestricted (net allow_hosts still bounds requests)
+	code, m, _ = e.req("POST", "/api/v1/secrets",
 		`{"name":"V","value":"v"}`, csrf, cookies)
-	if code != 400 {
-		t.Fatalf("no domains: expected 400, got %d", code)
+	if code != 201 {
+		t.Fatalf("no domains: expected 201, got %d", code)
+	}
+	if ad, ok := m["secret"].(map[string]any)["allowed_domains"].([]any); !ok || len(ad) != 0 {
+		t.Fatalf("no domains: want allowed_domains [], got %v", m["secret"])
 	}
 	// list: never contains value
 	code, m, _ = e.req("GET", "/api/v1/secrets", "", nil, cookies)

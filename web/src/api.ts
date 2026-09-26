@@ -18,6 +18,9 @@ export type Policy = components['schemas']['Policy']
 export type APIKey = components['schemas']['APIKey']
 export type AuthConfig = components['schemas']['AuthConfig']
 export type Secret = components['schemas']['Secret']
+export type ExtensionCatalog = components['schemas']['ExtensionCatalog']
+export type ExtensionInfo = components['schemas']['ExtensionInfo']
+export type ExtConfigField = components['schemas']['ExtConfigField']
 
 // --- enum types (values live in schema.ts *Values consts) ---
 

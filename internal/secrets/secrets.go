@@ -31,10 +31,11 @@ const (
 // ValidName reports whether s is a legal env/secret name.
 func ValidName(s string) bool { return NamePattern.MatchString(s) }
 
-// ValidateDomains parses a domain allowlist; must be non-empty.
+// ValidateDomains parses a domain allowlist; empty = unrestricted (the
+// secret may go to any host the instance's net allow_hosts permits).
 func ValidateDomains(domains []string) ([]hostmatch.Rule, error) {
 	if len(domains) == 0 {
-		return nil, fmt.Errorf("allowed_domains must be non-empty")
+		return nil, nil
 	}
 	if len(domains) > MaxDomains {
 		return nil, fmt.Errorf("allowed_domains exceeds %d entries", MaxDomains)
@@ -131,7 +132,11 @@ func (s *Set) Lookup(name string) *Secret { return s.m[name] }
 func (sec *Secret) Value() []byte { return sec.value }
 
 // Allows reports whether host at effPort matches this secret's rules.
+// An empty rule set is unrestricted.
 func (sec *Secret) Allows(host, effPort string) bool {
+	if len(sec.rules) == 0 {
+		return true
+	}
 	for _, r := range sec.rules {
 		if r.Matches(host, effPort) {
 			return true

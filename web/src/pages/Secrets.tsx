@@ -28,7 +28,7 @@ function SecretForm({ onClose }: { onClose: () => void }) {
           <textarea className={inputCls + ' font-mono text-xs'} rows={2} value={value}
             onChange={(e) => setValue(e.target.value)} autoComplete="off" spellCheck={false} />
         </Field>
-        <Field label="Allowed domains (one per line; *.suffix or host:port)">
+        <Field label="Allowed domains (optional; one per line; empty = any host allowed by net)">
           <textarea className={inputCls + ' font-mono text-xs'} rows={3} value={domains}
             onChange={(e) => setDomains(e.target.value)} placeholder="api.github.com" />
         </Field>
@@ -59,7 +59,7 @@ function EditDomains({ s, onClose }: { s: Secret; onClose: () => void }) {
   return (
     <Modal title={`Edit ${s.name}`} onClose={onClose}>
       <div className="space-y-3">
-        <Field label="Allowed domains">
+        <Field label="Allowed domains (optional; one per line; empty = any host allowed by net)">
           <textarea className={inputCls + ' font-mono text-xs'} rows={3} value={domains} onChange={(e) => setDomains(e.target.value)} />
         </Field>
         <Field label="Rotate value (optional — write-only)">
@@ -115,7 +115,7 @@ export default function Secrets() {
               {(data?.secrets ?? []).map((s) => (
                 <tr key={s.id}>
                   <td className="px-3 py-2 font-mono text-xs">{s.name}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{s.allowed_domains.join(', ')}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{s.allowed_domains.length ? s.allowed_domains.join(', ') : <span className="text-gray-400">any</span>}</td>
                   <td className="px-3 py-2 text-xs">{fmtTime(s.updated_at)}</td>
                   <td className="px-3 py-2 text-right space-x-2">
                     <Button className="!px-2 !py-1 text-xs" onClick={() => setEditing(s)}>Edit</Button>

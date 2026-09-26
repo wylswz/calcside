@@ -41,6 +41,8 @@ CALCSIDE_SECRET_KEY ?= MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
 
 DEV_API_PORT ?= 8787
 DEV_DSN ?= calcside-dev.db
+DEV_EXT_ROOTS ?= $(CURDIR)/examples/capabilities
+DEV_NET_ALLOW_CIDRS ?= 198.18.0.0/15
 export VITE_API_TARGET ?= http://127.0.0.1:$(DEV_API_PORT)
 
 # One command: backend (--dev, anonymous) + Vite frontend. Ctrl-C kills both.
@@ -51,7 +53,8 @@ dev:
 	@trap 'kill 0' INT TERM EXIT; \
 	( bin/calcside-dev serve --dev --addr 127.0.0.1:$(DEV_API_PORT) \
 	    --policy-dir policies/examples --secret-key $(CALCSIDE_SECRET_KEY) \
-	    --dsn $(DEV_DSN) ) & \
+	    --dsn $(DEV_DSN) --ext-local-roots $(DEV_EXT_ROOTS) \
+	    --net-allow-cidrs=$(DEV_NET_ALLOW_CIDRS) ) & \
 	backend_pid=$$!; \
 	healthy=0; \
 	for i in $$(seq 1 240); do \
@@ -74,7 +77,8 @@ dev:
 serve-dev:
 	go run ./cmd/calcside serve --dev --addr 127.0.0.1:$(DEV_API_PORT) \
 	  --policy-dir policies/examples --secret-key $(CALCSIDE_SECRET_KEY) \
-	  --dsn $(DEV_DSN)
+	  --dsn $(DEV_DSN) --ext-local-roots $(DEV_EXT_ROOTS) \
+	  --net-allow-cidrs=$(DEV_NET_ALLOW_CIDRS)
 
 tidy:
 	go mod tidy

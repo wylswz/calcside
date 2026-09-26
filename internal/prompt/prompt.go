@@ -46,8 +46,9 @@ type Input struct {
 	MaxSteps       uint64
 	MaxOutputBytes int64
 	TTLSeconds     int64
-	// NetExampleHost is the first net allow_hosts entry, for the worked
-	// example; empty when net is not granted.
+	// NetExampleHost is the first net allow_hosts entry (or a placeholder
+	// host when net is unrestricted), for the worked example; empty when
+	// net is not granted.
 	NetExampleHost string
 	// Persistent marks a reused (cross-run) instance.
 	Persistent bool

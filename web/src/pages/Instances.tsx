@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Instance, Secret } from '../api'
-import type { SecretSource } from '../api'
+import type { SecretSource, ExtensionCatalog, ExtensionInfo, ExtConfigField } from '../api'
 import { Badge, Button, Field, Modal, StatusBadge, fmtCountdown, fmtTime, inputCls } from '../components/ui'
 
 interface SpecDraft {
@@ -21,6 +21,158 @@ interface SecretRow {
   value: string      // inline only
   domains: string    // comma/space separated; optional for vault (narrows)
 }
+interface ExtRow {
+  source: string                  // catalog entry source or custom text
+  custom: boolean                 // free-form source/sum inputs
+  sum: string                     // remote h1: sum (custom only)
+  alias: string
+  config: Record<string, string>  // only keys the user set; '' = default
+}
+
+const aliasRe = /^[A-Za-z_][A-Za-z0-9_]*$/
+const secretRefRe = /\{\{\s*secrets\.([A-Z_][A-Z0-9_]{0,63})\s*\}\}/
+
+// extCfgValue converts a config form string to its JSON value per the
+// manifest field type.
+function extCfgValue(type: string, v: string): any {
+  switch (type) {
+    case 'int':
+      return Number(v)
+    case 'bool':
+      return v === 'true'
+    case 'string_list':
+      return v.split('\n').map((s) => s.trim()).filter(Boolean)
+    case 'string_map': {
+      const m: Record<string, string> = {}
+      for (const line of v.split('\n')) {
+        const i = line.indexOf('=')
+        if (i > 0) m[line.slice(0, i).trim()] = line.slice(i + 1).trim()
+      }
+      return m
+    }
+    default:
+      return v
+  }
+}
+
+// ExtRowEditor edits one extension alias row: catalog pick or custom
+// source, alias, per-manifest config form, ops + dependency hints.
+function ExtRowEditor({ row, catalog, secretNames, netOn, fsOn, onChange, onRemove }: {
+  row: ExtRow
+  catalog: ExtensionInfo[]
+  secretNames: string[]
+  netOn: boolean
+  fsOn: boolean
+  onChange: (r: ExtRow) => void
+  onRemove: () => void
+}) {
+  const set = (patch: Partial<ExtRow>) => onChange({ ...row, ...patch })
+  const entry = catalog.find((x) => x.source === row.source)
+  const setCfg = (k: string, v: string) => set({ config: { ...row.config, [k]: v } })
+  const secretOpts = [...new Set(secretNames)]
+  return (
+    <div className="mb-2 rounded border border-gray-200 dark:border-gray-800 p-2 space-y-1">
+      <div className="flex gap-1 items-center">
+        <select className={inputCls + ' font-mono text-xs'} value={row.custom ? '__custom__' : row.source}
+          onChange={(e) => {
+            if (e.target.value === '__custom__') {
+              set({ custom: true, source: '', alias: row.alias, config: {} })
+            } else {
+              const en = catalog.find((x) => x.source === e.target.value)
+              set({ custom: false, source: e.target.value, alias: row.alias || en?.name || '', config: {} })
+            }
+          }}>
+          <option value="">pick…</option>
+          {catalog.map((x) => (
+            <option key={x.source} value={x.source}>{x.name} {x.version} — {x.description}</option>
+          ))}
+          <option value="__custom__">custom…</option>
+        </select>
+        <input className={inputCls + ' !w-24 font-mono text-xs'} placeholder="alias" value={row.alias}
+          onChange={(e) => set({ alias: e.target.value })} />
+        <button className="ml-auto text-xs text-gray-400" onClick={onRemove}>×</button>
+      </div>
+      {row.alias && !aliasRe.test(row.alias) && (
+        <p className="text-xs text-red-600">alias must be a starlark identifier</p>
+      )}
+      {row.custom && (
+        <>
+          <input className={inputCls + ' font-mono text-xs'} placeholder="source (domain/group/name@version or /path)" value={row.source}
+            onChange={(e) => set({ source: e.target.value })} />
+          <input className={inputCls + ' font-mono text-xs'} placeholder="h1:… (required for remote)" value={row.sum}
+            onChange={(e) => set({ sum: e.target.value })} />
+        </>
+      )}
+      {entry && (entry.ops ?? []).length > 0 && (
+        <p className="text-xs text-gray-500 font-mono">
+          {(entry.ops ?? []).map((o) => `ext.${row.alias || '?'}.${o.name}(${(o.params ?? []).join(', ')})`).join('  ')}
+        </p>
+      )}
+      {entry && (entry.dependencies ?? []).map((d) => {
+        const granted = (d === 'net' && netOn) || (d === 'fs' && fsOn) || d === 'io'
+        return granted ? null : (
+          <p key={d} className="text-xs text-amber-600 dark:text-amber-400">requires {d} — enable it below/above</p>
+        )
+      })}
+      {entry && (entry.config ?? []).map((f) => (
+        <ExtCfgInput key={f.name} f={f} secretNames={secretOpts}
+          value={row.config[f.name] ?? ''} onChange={(v) => setCfg(f.name, v)} />
+      ))}
+      {entry && (entry.config ?? []).map((f) => {
+        if (f.type !== 'secret') return null
+        const m = String(f.default ?? '').match(secretRefRe)
+        const need = row.config[f.name]?.match(secretRefRe)?.[1] ?? m?.[1]
+        if (need && !secretOpts.includes(need)) {
+          return <p key={'s' + f.name} className="text-xs text-amber-600 dark:text-amber-400">add secret {need}</p>
+        }
+        return null
+      })}
+    </div>
+  )
+}
+
+// ExtCfgInput renders one manifest config field.
+function ExtCfgInput({ f, value, secretNames, onChange }: {
+  f: ExtConfigField
+  value: string
+  secretNames: string[]
+  onChange: (v: string) => void
+}) {
+  const ph = f.default != null ? `default: ${typeof f.default === 'object' ? JSON.stringify(f.default) : f.default}` : ''
+  const label = (
+    <span className="text-xs text-gray-500" title={f.doc}>{f.name}{f.doc ? ' — ' + f.doc : ''}</span>
+  )
+  switch (f.type) {
+    case 'int':
+      return <div>{label}<input type="number" className={inputCls + ' text-xs'} placeholder={ph} value={value} onChange={(e) => onChange(e.target.value)} /></div>
+    case 'bool':
+      return (
+        <label className="flex items-center gap-2 text-xs">
+          <input type="checkbox" checked={value === 'true'} onChange={(e) => onChange(e.target.checked ? 'true' : 'false')} />
+          {label}
+        </label>
+      )
+    case 'string_list':
+      return <div>{label}<textarea className={inputCls + ' font-mono text-xs'} rows={2} placeholder={ph + ' (one per line)'} value={value} onChange={(e) => onChange(e.target.value)} /></div>
+    case 'string_map':
+      return <div>{label}<textarea className={inputCls + ' font-mono text-xs'} rows={2} placeholder={ph + ' (k=v per line)'} value={value} onChange={(e) => onChange(e.target.value)} /></div>
+    case 'secret':
+      return (
+        <div>
+          {label}
+          <select className={inputCls + ' font-mono text-xs'} value={value}
+            onChange={(e) => onChange(e.target.value)}>
+            <option value="">{ph ? `default (${String(f.default)})` : 'default'}</option>
+            {secretNames.map((n) => (
+              <option key={n} value={`{{secrets.${n}}}`}>{`{{secrets.${n}}}`}</option>
+            ))}
+          </select>
+        </div>
+      )
+    default:
+      return <div>{label}<input className={inputCls + ' font-mono text-xs'} placeholder={ph} value={value} onChange={(e) => onChange(e.target.value)} /></div>
+  }
+}
 
 function NewInstanceDialog({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient()
@@ -30,6 +182,8 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
   const [netOn, setNetOn] = useState(false)
   const [netHosts, setNetHosts] = useState('')
   const [netMethods, setNetMethods] = useState('GET,POST')
+  const [extOn, setExtOn] = useState(false)
+  const [extRows, setExtRows] = useState<ExtRow[]>([])
   const [labelsText, setLabelsText] = useState('')
   const [envRows, setEnvRows] = useState<EnvRow[]>([])
   const [secretRows, setSecretRows] = useState<SecretRow[]>([])
@@ -39,6 +193,12 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
   const { data: vault } = useQuery({
     queryKey: ['secrets'],
     queryFn: () => api.get<{ secrets: Secret[] }>('/api/v1/secrets'),
+    retry: false,
+  })
+  const { data: extCat } = useQuery({
+    queryKey: ['extensions'],
+    queryFn: () => api.get<ExtensionCatalog>('/api/v1/extensions'),
+    enabled: extOn,
     retry: false,
   })
 
@@ -71,6 +231,24 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
       }
     }
     if (Object.keys(secs).length) draft.secrets = secs
+    if (extOn) {
+      const exts: Record<string, any> = {}
+      for (const r of extRows) {
+        if (!r.alias || !aliasRe.test(r.alias) || !r.source) continue
+        const e: Record<string, any> = { source: r.source }
+        if (r.sum) e.sum = r.sum
+        const entry = extCat?.extensions.find((x) => x.source === r.source)
+        const cfg: Record<string, any> = {}
+        for (const [k, v] of Object.entries(r.config)) {
+          if (v === '') continue
+          const f = entry?.config.find((f) => f.name === k)
+          cfg[k] = extCfgValue(f?.type ?? 'string', v)
+        }
+        if (Object.keys(cfg).length) e.config = cfg
+        exts[r.alias] = e
+      }
+      if (Object.keys(exts).length) caps.ext = exts
+    }
     return draft
   }
 
@@ -78,7 +256,7 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
     if (jsonDirty) return jsonText
     return JSON.stringify(specFromForm(), null, 2)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jsonDirty, ttlMin, fsOn, fsQuota, netOn, netHosts, netMethods, labelsText, envRows, secretRows])
+  }, [jsonDirty, ttlMin, fsOn, fsQuota, netOn, netHosts, netMethods, extOn, extRows, extCat, labelsText, envRows, secretRows])
 
   const create = useMutation({
     mutationFn: (spec: any) => api.post<{ instance: Instance }>('/api/v1/instances', spec),
@@ -127,13 +305,36 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
           </label>
           {netOn && (
             <>
-              <Field label="allow_hosts (one per line; *.suffix or host:port)">
+              <Field label="allow_hosts (one per line; *.suffix or host:port; empty = any public host)">
                 <textarea className={inputCls + ' font-mono text-xs'} rows={3} value={netHosts} onChange={(e) => { setJsonDirty(false); setNetHosts(e.target.value) }} />
               </Field>
               <Field label="methods">
                 <input className={inputCls} value={netMethods} onChange={(e) => { setJsonDirty(false); setNetMethods(e.target.value) }} />
               </Field>
             </>
+          )}
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={extOn} onChange={(e) => { setJsonDirty(false); setExtOn(e.target.checked) }} />
+            ext capability
+          </label>
+          {extOn && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-medium text-gray-600 dark:text-gray-400">extensions</span>
+                <button type="button" className="text-xs text-blue-600 dark:text-blue-400"
+                  onClick={() => { setJsonDirty(false); setExtRows([...extRows, { source: '', custom: false, sum: '', alias: '', config: {} }]) }}>+ add</button>
+              </div>
+              {extCat && !extCat.remote_enabled && !extCat.local_enabled && (
+                <p className="mb-1 text-xs text-gray-500">server has no ext sources enabled (--ext-local-roots / --ext-allow-sources)</p>
+              )}
+              {extRows.map((r, i) => (
+                <ExtRowEditor key={i} row={r} catalog={extCat?.extensions ?? []}
+                  secretNames={secretRows.map((s) => s.name).filter(Boolean)}
+                  netOn={netOn} fsOn={fsOn}
+                  onChange={(nr) => { setJsonDirty(false); const rs = [...extRows]; rs[i] = nr; setExtRows(rs) }}
+                  onRemove={() => { setJsonDirty(false); setExtRows(extRows.filter((_, j) => j !== i)) }} />
+              ))}
+            </div>
           )}
           <Field label="labels (k=v, comma separated)">
             <input className={inputCls} value={labelsText} onChange={(e) => { setJsonDirty(false); setLabelsText(e.target.value) }} placeholder="team=agents, env=dev" />
@@ -188,7 +389,7 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
                     <input type="password" className={inputCls + ' font-mono text-xs'} placeholder="value (never persisted)" value={r.value} onChange={(e) => set({ value: e.target.value })} autoComplete="new-password" />
                   )}
                   <input className={inputCls + ' font-mono text-xs'} value={r.domains} onChange={(e) => set({ domains: e.target.value })}
-                    placeholder={r.kind === 'vault' ? 'narrow domains (optional)' : 'allowed domains (required)'} />
+                    placeholder={r.kind === 'vault' ? 'narrow domains (optional)' : 'allowed domains (optional; empty = any)'} />
                 </div>
               )
             })}
@@ -255,7 +456,11 @@ export default function Instances() {
                   <Link to={`/instances/${i.id}`} className="text-blue-600 dark:text-blue-400 hover:underline">{i.id}</Link>
                 </td>
                 <td className="px-3 py-2"><StatusBadge status={i.status} /></td>
-                <td className="px-3 py-2 text-xs">{Object.keys(i.spec?.capabilities ?? {}).join(', ') || '—'}</td>
+                <td className="px-3 py-2 text-xs">
+                  {Object.entries(i.spec?.capabilities ?? {}).map(([k, v]) =>
+                    k === 'ext' ? `ext(${Object.keys(v ?? {}).join(', ')})` : k
+                  ).join(', ') || '—'}
+                </td>
                 <td className="px-3 py-2 text-xs">
                   {Object.entries(i.labels ?? {}).map(([k, v]) => (
                     <Badge key={k} tone="gray">{k}={v}</Badge>

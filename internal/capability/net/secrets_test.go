@@ -101,6 +101,55 @@ func TestSecretHostNotAllowed(t *testing.T) {
 	}
 }
 
+// Unrestricted secrets (no domains) inject into any host the net
+// allow_hosts already permits; net still rejects unlisted hosts.
+func TestSecretUnrestricted(t *testing.T) {
+	ts := echoSrv(t)
+	defer ts.Close()
+	host, port := hostPort(ts)
+	set := secretSet(t, "T", "s3cr3t-value") // no domains = unrestricted
+	c := tlsClient(t, ts, Config{AllowHosts: []string{host + ":" + port}}, set, false)
+
+	r, err := c.do(context.Background(), "GET", ts.URL+"/h", "",
+		map[string]string{"X-Token": "{{secrets.T}}"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Headers["X-Echo"] != "[REDACTED:T]" || strings.Contains(r.Body, "s3cr3t-value") {
+		t.Fatalf("injection/redaction failed: %v %q", r.Headers, r.Body)
+	}
+
+	// A host outside net allow_hosts is still rejected (net, not the
+	// secret, is the outer bound).
+	ts2 := echoSrv(t)
+	defer ts2.Close()
+	_, err = c.do(context.Background(), "GET", ts2.URL+"/h", "",
+		map[string]string{"X-Token": "{{secrets.T}}"}, "")
+	if err == nil || !strings.Contains(err.Error(), "not in allow_hosts") {
+		t.Fatalf("expected allow_hosts denial, got %v", err)
+	}
+	if strings.Contains(err.Error(), "s3cr3t-value") {
+		t.Fatal("error leaked secret value")
+	}
+}
+
+// A domain-restricted secret is still denied on a non-matching host even
+// when net allow_hosts is empty (unrestricted at the host layer).
+func TestSecretDeniedOnEmptyAllowlist(t *testing.T) {
+	ts := echoSrv(t)
+	defer ts.Close()
+	set := secretSet(t, "T", "s3cr3t-value", "api.other.com")
+	c := tlsClient(t, ts, Config{}, set, false)
+	_, err := c.do(context.Background(), "GET", ts.URL, "",
+		map[string]string{"X-Token": "{{secrets.T}}"}, "")
+	if err == nil || !strings.Contains(err.Error(), "not allowed for host") {
+		t.Fatalf("expected secret host denial, got %v", err)
+	}
+	if strings.Contains(err.Error(), "s3cr3t-value") {
+		t.Fatal("error leaked secret value")
+	}
+}
+
 func TestSecretInHostRejected(t *testing.T) {
 	c := tlsClient(t, nil, Config{AllowHosts: []string{"*.x.com"}},
 		secretSet(t, "T", "v", "x.com"), false)

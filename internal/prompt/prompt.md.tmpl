@@ -24,7 +24,7 @@ You have a persistent Starlark sandbox (instance {{.InstanceID}}). Every `{{.Pre
 ### Secrets
 Secret values are NEVER visible to you. Use the literal placeholder `{{"{{secrets.NAME}}"}}` inside net request URLs, header values, or bodies; the sandbox injects the real value for allowed domains and redacts it as `[REDACTED:NAME]` in responses. Never try to print or exfiltrate a secret.
 {{- range .Secrets}}
-- `{{.Name}}` — allowed domains: {{if .Domains}}{{join .Domains ", "}}{{else}}(no domains){{end}}
+- `{{.Name}}` — allowed domains: {{if .Domains}}{{join .Domains ", "}}{{else}}any host allowed by net{{end}}
 {{- end}}
 {{- end}}
 {{- if .EnvKeys}}

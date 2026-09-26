@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -80,7 +83,7 @@ func TestSecretSpecResolution(t *testing.T) {
 		{"widened", `{"secrets":{"T":{"ref":"GH_TOKEN","allowed_domains":["other.com"]}}}`, "not covered"},
 		{"widened bare", `{"secrets":{"T":{"ref":"GH_TOKEN","allowed_domains":["github.com"]}}}`, "not covered"},
 		{"unknown ref", `{"secrets":{"T":{"ref":"NOPE"}}}`, "unknown vault ref"},
-		{"inline no domains", `{"secrets":{"T":{"value":"v"}}}`, "allowed_domains must be non-empty"},
+		{"inline no domains", `{"secrets":{"T":{"value":"v"}}}`, ""},
 		{"inline ok", `{"secrets":{"T":{"value":"v","allowed_domains":["x.com"]}}}`, ""},
 		{"both ref+value", `{"secrets":{"T":{"ref":"GH_TOKEN","value":"v","allowed_domains":["x.com"]}}}`, "exactly one"},
 		{"neither", `{"secrets":{"T":{}}}`, "exactly one"},
@@ -172,6 +175,67 @@ func TestSecretWipeOnDelete(t *testing.T) {
 	}
 	if string(stored) != strings.Repeat("\x00", len("wipe-me")) {
 		t.Fatalf("secret not wiped: %q", stored)
+	}
+}
+
+// Vault secret with no domains (unrestricted): a spec may narrow it, and
+// without narrowing it injects into any host net allow_hosts permits.
+func TestVaultUnrestrictedSecret(t *testing.T) {
+	ctx := context.Background()
+	c := testCipher(t)
+	m, st, u := secretsMgr(t, c)
+	addVaultSecret(t, st, c, u, "WIDE", "vault-secret-1", nil)
+
+	var echoTok string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		echoTok = r.Header.Get("X-Token")
+	}))
+	defer srv.Close()
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer other.Close()
+	host := strings.TrimPrefix(srv.URL, "http://")
+	host2 := strings.TrimPrefix(other.URL, "http://")
+
+	// Narrowed to srv: host2 must be denied even though the vault secret
+	// itself is unrestricted.
+	meta, err := m.Create(ctx, u, []byte(fmt.Sprintf(
+		`{"capabilities":{"net":{"allow_hosts":[%q,%q]}},
+		"secrets":{"T":{"ref":"WIDE","allowed_domains":[%q]}}}`, host, host2, host)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := m.Exec(ctx, meta.ID, fmt.Sprintf(
+		`net.get(url=%q, headers={"X-Token":"{{secrets.T}}"})`, srv.URL), 0, nil)
+	if err != nil || res.Error != nil {
+		t.Fatalf("narrowed allowed host: %v %+v", err, res.Error)
+	}
+	if echoTok != "vault-secret-1" {
+		t.Fatalf("header: %q", echoTok)
+	}
+	res, err = m.Exec(ctx, meta.ID, fmt.Sprintf(
+		`net.get(url=%q, headers={"X-Token":"{{secrets.T}}"})`, other.URL), 0, nil)
+	if err != nil || res.Error == nil || !strings.Contains(res.Error.Message, "not allowed for host") {
+		t.Fatalf("narrowed other host should be denied: %v %+v", err, res.Error)
+	}
+	if res.Error != nil && strings.Contains(res.Error.Message, "vault-secret-1") {
+		t.Fatal("error leaked secret value")
+	}
+
+	// No narrowing: unrestricted.
+	meta2, err := m.Create(ctx, u, []byte(fmt.Sprintf(
+		`{"capabilities":{"net":{"allow_hosts":[%q]}},
+		"secrets":{"T":{"ref":"WIDE"}}}`, host)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	echoTok = ""
+	res, err = m.Exec(ctx, meta2.ID, fmt.Sprintf(
+		`net.get(url=%q, headers={"X-Token":"{{secrets.T}}"})`, srv.URL), 0, nil)
+	if err != nil || res.Error != nil {
+		t.Fatalf("unrestricted: %v %+v", err, res.Error)
+	}
+	if echoTok != "vault-secret-1" {
+		t.Fatalf("header: %q", echoTok)
 	}
 }
 

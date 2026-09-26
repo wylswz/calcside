@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"sort"
 	"sync"
 	"time"
@@ -72,6 +73,7 @@ type ServerLimits struct {
 	MaxFSQuotaBytes     int64
 	MaxOutputBytes      int64
 	NetAllowPrivate     bool
+	NetAllowCIDRs       []*net.IPNet
 	MaxNetResponseBytes int64
 	SecretsAllowHTTP    bool
 }
@@ -249,6 +251,7 @@ func (m *Manager) ParseSpec(raw []byte) (*Spec, map[string]any, error) {
 		MaxSteps:            m.limits.MaxSteps,
 		MaxOutputBytes:      m.limits.MaxOutputBytes,
 		NetAllowPrivate:     m.limits.NetAllowPrivate,
+		NetAllowCIDRs:       m.limits.NetAllowCIDRs,
 		MaxNetResponseBytes: m.limits.MaxNetResponseBytes,
 		SecretsAllowHTTP:    m.limits.SecretsAllowHTTP,
 	}
@@ -334,7 +337,12 @@ func (m *Manager) resolveSecrets(ctx context.Context, userID string, spec *Spec)
 				if err != nil {
 					return nil, nil, fmt.Errorf("secret %s: %w", name, err)
 				}
+				// An unrestricted vault secret (no domains) may always be
+				// narrowed by the spec.
 				for _, nr := range narrowed {
+					if len(vaultRules) == 0 {
+						break
+					}
 					covered := false
 					for _, vr := range vaultRules {
 						if hostmatch.Covers(vr, nr) {
@@ -489,12 +497,19 @@ func (m *Manager) Create(ctx context.Context, user *store.User, rawSpec []byte) 
 
 	names := make([]string, 0, len(caps))
 	for n := range caps {
-		names = append(names, n)
+		if n != string(types.CapExt) {
+			names = append(names, n)
+		}
 	}
 	sort.Strings(names)
+	// ext is built last: its bindings compose the other capabilities.
+	if _, ok := caps[string(types.CapExt)]; ok {
+		names = append(names, string(types.CapExt))
+	}
+	bindings := map[types.CapabilityName]starlark.Value{}
 	for _, name := range names {
 		f, _ := m.reg.Get(types.CapabilityName(name))
-		val, closer, err := f.New(typed[name], capability.InstanceEnv{Gate: gate, Secrets: secSet})
+		val, closer, err := f.New(typed[name], capability.InstanceEnv{Gate: gate, Secrets: secSet, Bindings: bindings, MaxSteps: spec.Limits.MaxSteps})
 		if err != nil {
 			for _, c := range closers {
 				_ = c.Close()
@@ -511,6 +526,7 @@ func (m *Manager) Create(ctx context.Context, user *store.User, rawSpec []byte) 
 			}
 		}
 		predeclared[name] = val
+		bindings[types.CapabilityName(name)] = val
 	}
 	if outBuf == nil {
 		outBuf = capio.NewBuffer(spec.Limits.MaxOutputBytes)

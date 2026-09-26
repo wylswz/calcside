@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -40,7 +41,7 @@ type Call struct {
 	UserID         string
 	UserEmail      string
 	InstanceLabels map[string]string
-	Capability     types.CapabilityName // "fs" | "net" | "io"
+	Capability     types.CapabilityName // "fs" | "net" | "io" | "ext"
 	Op             types.Op             // e.g. "read", "write", "get"
 	Args           map[string]any
 }
@@ -275,11 +276,16 @@ type Factory interface {
 }
 
 // InstanceEnv carries per-instance resources capability bindings need
-// beyond their config: the gate, and the resolved secret set (may be nil,
-// treated as empty).
+// beyond their config: the gate, the resolved secret set (may be nil,
+// treated as empty), and the already-built bindings of other capabilities
+// (for ext, which composes them).
 type InstanceEnv struct {
-	Gate    *Gate
-	Secrets *secrets.Set
+	Gate     *Gate
+	Secrets  *secrets.Set
+	Bindings map[types.CapabilityName]starlark.Value
+	// MaxSteps caps the starlark steps allowed during extension module
+	// init (extension ops run on the exec thread with its own cap).
+	MaxSteps uint64
 }
 
 // ServerLimits bounds what instance specs may request.
@@ -290,9 +296,10 @@ type ServerLimits struct {
 	MaxExecTimeout      time.Duration
 	MaxSteps            uint64
 	MaxOutputBytes      int64
-	NetAllowPrivate     bool  // allow private/reserved IPs in net allowlists
-	MaxNetResponseBytes int64 // clamp for net.max_response_bytes
-	SecretsAllowHTTP    bool  // allow secret injection into plain http:// URLs
+	NetAllowPrivate     bool         // allow private/reserved IPs in net allowlists
+	NetAllowCIDRs       []*net.IPNet // CIDRs exempt from private/reserved blocking
+	MaxNetResponseBytes int64        // clamp for net.max_response_bytes
+	SecretsAllowHTTP    bool         // allow secret injection into plain http:// URLs
 }
 
 // Registry holds capability factories by name.

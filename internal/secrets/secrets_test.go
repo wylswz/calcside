@@ -117,6 +117,24 @@ func TestExpandAndRefs(t *testing.T) {
 	}
 }
 
+func TestUnrestrictedDomains(t *testing.T) {
+	rs, err := ValidateDomains(nil)
+	if err != nil || rs != nil {
+		t.Fatalf("empty domains: %v %v", rs, err)
+	}
+	s := NewSet()
+	s.Add("U", []byte("v"), nil)
+	if !s.Lookup("U").Allows("anything.example", "443") {
+		t.Fatal("unrestricted secret should allow any host")
+	}
+	if s.Lookup("U").Allows("127.0.0.1", "1") == false {
+		t.Fatal("unrestricted secret should allow IP hosts")
+	}
+	if got := s.Domains("U"); len(got) != 0 {
+		t.Fatalf("Domains of unrestricted: %v", got)
+	}
+}
+
 func TestWipe(t *testing.T) {
 	s := NewSet()
 	s.Add("W", []byte("live"), rules(t, "x.com"))

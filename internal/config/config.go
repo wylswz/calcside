@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -38,9 +39,14 @@ type Config struct {
 	MaxOutputBytes       int64
 	ExecMemoryLimit      uint64
 	NetAllowPrivate      bool
+	NetAllowCIDRs        []*net.IPNet
 	MaxNetResponseBytes  int64
 	SecretKey            string
 	SecretsAllowHTTP     bool
+	ExtAllowSources      []string
+	ExtLocalRoots        []string
+	ExtCacheDir          string
+	ExtFetchTimeout      time.Duration
 }
 
 func envOr(key, def string) string {
@@ -48,6 +54,13 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func defaultExtCacheDir() string {
+	if d, err := os.UserCacheDir(); err == nil {
+		return filepath.Join(d, "calcside", "ext")
+	}
+	return filepath.Join(os.TempDir(), "calcside-ext")
 }
 
 func envDur(key string, def time.Duration) time.Duration {
@@ -105,9 +118,16 @@ func Parse(args []string) (Config, error) {
 	fs.Int64Var(&c.MaxOutputBytes, "max-output-bytes", int64(envInt("MAX_OUTPUT_BYTES", 4<<20)), "max captured output bytes per exec")
 	fs.Uint64Var(&c.ExecMemoryLimit, "exec-memory-limit", uint64(envInt("EXEC_MEMORY_LIMIT", 2<<30)), "heap watchdog limit in bytes (0 disables)")
 	fs.BoolVar(&c.NetAllowPrivate, "net-allow-private", envBool("NET_ALLOW_PRIVATE", false), "allow private/reserved IPs in net allowlists")
+	var netCIDRs string
+	fs.StringVar(&netCIDRs, "net-allow-cidrs", envOr("NET_ALLOW_CIDRS", ""), "comma-separated CIDRs exempt from net's private/reserved-address blocking, e.g. 198.18.0.0/15 for fake-ip proxies")
 	fs.Int64Var(&c.MaxNetResponseBytes, "max-net-response-bytes", int64(envInt("MAX_NET_RESPONSE_BYTES", 32<<20)), "clamp for net.max_response_bytes")
 	fs.StringVar(&c.SecretKey, "secret-key", envOr("SECRET_KEY", ""), "base64-encoded 32-byte key encrypting vault secrets")
 	fs.BoolVar(&c.SecretsAllowHTTP, "secrets-allow-http", envBool("SECRETS_ALLOW_HTTP", false), "allow secret injection into http:// URLs (INSECURE)")
+	var extSources, extRoots string
+	fs.StringVar(&extSources, "ext-allow-sources", envOr("EXT_ALLOW_SOURCES", ""), "comma-separated allowed remote ext source prefixes (empty disables remote ext)")
+	fs.StringVar(&extRoots, "ext-local-roots", envOr("EXT_LOCAL_ROOTS", ""), "comma-separated local dirs ext sources may live under (empty disables local ext)")
+	fs.StringVar(&c.ExtCacheDir, "ext-cache-dir", envOr("EXT_CACHE_DIR", defaultExtCacheDir()), "extension fetch cache dir")
+	fs.DurationVar(&c.ExtFetchTimeout, "ext-fetch-timeout", envDur("EXT_FETCH_TIMEOUT", 30*time.Second), "ext remote fetch timeout")
 	if err := fs.Parse(args); err != nil {
 		return c, err
 	}
@@ -122,6 +142,25 @@ func Parse(args []string) (Config, error) {
 		d = strings.TrimSpace(d)
 		if d != "" {
 			c.GoogleAllowedDomains = append(c.GoogleAllowedDomains, d)
+		}
+	}
+	for _, s := range strings.Split(extSources, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			c.ExtAllowSources = append(c.ExtAllowSources, s)
+		}
+	}
+	for _, s := range strings.Split(extRoots, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			c.ExtLocalRoots = append(c.ExtLocalRoots, s)
+		}
+	}
+	for _, s := range strings.Split(netCIDRs, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			_, n, err := net.ParseCIDR(s)
+			if err != nil {
+				return c, fmt.Errorf("--net-allow-cidrs: invalid CIDR %q", s)
+			}
+			c.NetAllowCIDRs = append(c.NetAllowCIDRs, n)
 		}
 	}
 	if c.DefaultTTL <= 0 || c.MaxTTL <= 0 {

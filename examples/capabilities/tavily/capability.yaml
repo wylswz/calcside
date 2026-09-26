@@ -1,0 +1,23 @@
+name: tavily
+version: 0.1.0
+description: Tavily web search
+dependencies: [net]
+ops:
+  - name: search
+    doc: Search the web; returns list of {title,url,content}
+    params: [query, max_results]
+config:
+  - name: base_url
+    type: string
+    doc: Tavily API base URL
+    default: https://api.tavily.com
+  - name: api_key
+    type: secret
+    doc: Tavily API key (secret reference)
+    default: "{{secrets.TAVILY_API_KEY}}"
+  - name: max_results
+    type: int
+    default: 5
+  - name: search_depth
+    type: string
+    default: basic

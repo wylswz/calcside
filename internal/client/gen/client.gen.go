@@ -109,6 +109,7 @@ func (e AuthKind) Valid() bool {
 
 // Defines values for CapabilityName.
 const (
+	Ext CapabilityName = "ext"
 	Fs  CapabilityName = "fs"
 	Io  CapabilityName = "io"
 	Net CapabilityName = "net"
@@ -117,6 +118,8 @@ const (
 // Valid indicates whether the value is a known member of the CapabilityName enum.
 func (e CapabilityName) Valid() bool {
 	switch e {
+	case Ext:
+		return true
 	case Fs:
 		return true
 	case Io:
@@ -363,8 +366,9 @@ type CreateKeyRequest struct {
 
 // CreateSecretRequest defines model for CreateSecretRequest.
 type CreateSecretRequest struct {
-	AllowedDomains []string `json:"allowed_domains"`
-	Name           string   `json:"name"`
+	// AllowedDomains optional; empty = any host permitted by net allow_hosts
+	AllowedDomains *[]string `json:"allowed_domains,omitempty"`
+	Name           string    `json:"name"`
 
 	// Value write-only; never returned
 	Value string `json:"value"`
@@ -435,6 +439,34 @@ type Execution struct {
 // ExecutionsResponse defines model for ExecutionsResponse.
 type ExecutionsResponse struct {
 	Executions *[]Execution `json:"executions,omitempty"`
+}
+
+// ExtConfigField defines model for ExtConfigField.
+type ExtConfigField struct {
+	Default interface{} `json:"default,omitempty"`
+	Doc     *string     `json:"doc,omitempty"`
+	Name    string      `json:"name"`
+
+	// Type a FieldType value or "secret"
+	Type string `json:"type"`
+}
+
+// ExtensionCatalog defines model for ExtensionCatalog.
+type ExtensionCatalog struct {
+	Extensions    []ExtensionInfo `json:"extensions"`
+	LocalEnabled  bool            `json:"local_enabled"`
+	RemoteEnabled bool            `json:"remote_enabled"`
+}
+
+// ExtensionInfo defines model for ExtensionInfo.
+type ExtensionInfo struct {
+	Config       []ExtConfigField `json:"config"`
+	Dependencies []CapabilityName `json:"dependencies"`
+	Description  *string          `json:"description,omitempty"`
+	Name         string           `json:"name"`
+	Ops          []OpDoc          `json:"ops"`
+	Source       string           `json:"source"`
+	Version      *string          `json:"version,omitempty"`
 }
 
 // FieldDoc defines model for FieldDoc.
@@ -587,6 +619,7 @@ type PolicyUpdateRequest struct {
 
 // Secret defines model for Secret.
 type Secret struct {
+	// AllowedDomains optional; empty = any host permitted by net allow_hosts
 	AllowedDomains []string  `json:"allowed_domains"`
 	CreatedAt      time.Time `json:"created_at"`
 	Id             string    `json:"id"`
@@ -605,6 +638,7 @@ type SecretSource string
 
 // SecretSpec defines model for SecretSpec.
 type SecretSpec struct {
+	// AllowedDomains optional; empty = any host permitted by net allow_hosts
 	AllowedDomains *[]string `json:"allowed_domains,omitempty"`
 
 	// Ref vault secret name (mutually exclusive with value)
@@ -622,6 +656,7 @@ type SecretsResponse struct {
 
 // UpdateSecretRequest defines model for UpdateSecretRequest.
 type UpdateSecretRequest struct {
+	// AllowedDomains optional; empty = any host permitted by net allow_hosts
 	AllowedDomains *[]string `json:"allowed_domains,omitempty"`
 	Value          *string   `json:"value,omitempty"`
 }
@@ -789,6 +824,9 @@ type ClientInterface interface {
 	// Capabilities performs a GET /api/v1/capabilities (the `Capabilities` operationId) request.
 	Capabilities(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListExtensions performs a GET /api/v1/extensions (the `ListExtensions` operationId) request.
+	ListExtensions(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListInstances performs a GET /api/v1/instances (the `ListInstances` operationId) request.
 	ListInstances(ctx context.Context, params *ListInstancesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -953,6 +991,19 @@ func (c *Client) AuthConfig(ctx context.Context, reqEditors ...RequestEditorFn) 
 // Capabilities performs a GET /api/v1/capabilities (the `Capabilities` operationId) request.
 func (c *Client) Capabilities(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCapabilitiesRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListExtensions performs a GET /api/v1/extensions (the `ListExtensions` operationId) request.
+func (c *Client) ListExtensions(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListExtensionsRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -1544,6 +1595,33 @@ func NewCapabilitiesRequest(server string) (*http.Request, error) {
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/capabilities")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListExtensionsRequest constructs an http.Request for the ListExtensions method
+func NewListExtensionsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/extensions")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -2571,6 +2649,11 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	CapabilitiesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*CapabilitiesResponse, error)
 
+	// ListExtensionsWithResponse performs a GET /api/v1/extensions (the `ListExtensions` operationId) request.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ListExtensionsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListExtensionsResponse, error)
+
 	// ListInstancesWithResponse performs a GET /api/v1/instances (the `ListInstances` operationId) request.
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -2885,6 +2968,54 @@ func (r CapabilitiesResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r CapabilitiesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListExtensionsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ExtensionCatalog
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListExtensionsResponse) GetJSON200() *ExtensionCatalog {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ListExtensionsResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetBody returns the raw response body bytes
+func (r ListExtensionsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListExtensionsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListExtensionsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListExtensionsResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -4363,6 +4494,17 @@ func (c *ClientWithResponses) CapabilitiesWithResponse(ctx context.Context, reqE
 	return ParseCapabilitiesResponse(rsp)
 }
 
+// ListExtensionsWithResponse performs a GET /api/v1/extensions (the `ListExtensions` operationId) request.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ListExtensionsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListExtensionsResponse, error) {
+	rsp, err := c.ListExtensions(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListExtensionsResponse(rsp)
+}
+
 // ListInstancesWithResponse performs a GET /api/v1/instances (the `ListInstances` operationId) request.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -4812,6 +4954,39 @@ func ParseCapabilitiesResponse(rsp *http.Response) (*CapabilitiesResponse, error
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest CapabilityCatalog
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListExtensionsResponse parses an HTTP response from a ListExtensionsWithResponse call
+func ParseListExtensionsResponse(rsp *http.Response) (*ListExtensionsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListExtensionsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ExtensionCatalog
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
