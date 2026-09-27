@@ -83,9 +83,27 @@ type inst struct {
 	secrets    *secrets.Set
 	sink       *auditSink
 
-	mu        sync.Mutex // guards expiresAt
+	mu        sync.Mutex // guards expiresAt and execLog
 	expiresAt time.Time
+	// epoch is the fencing token of the binding this instance was
+	// created under; a request carrying any other epoch is rejected.
+	epoch int64
+	// execLog deduplicates Exec by exec_id: a transport retry replays
+	// the recorded result instead of running external side effects
+	// twice. Bounded FIFO; entries live at most as long as the instance.
+	execLog   map[string]*execEntry
+	execOrder []string
 }
+
+// execEntry is one in-flight or completed exec. Duplicates arriving
+// while the first attempt still runs wait on done and share its result.
+type execEntry struct {
+	done chan struct{}
+	resp *runtime.ExecResponse
+	err  error
+}
+
+const maxExecLog = 128
 
 // Manager owns all live instances on this node.
 type Manager struct {
@@ -329,6 +347,8 @@ func (m *Manager) Create(ctx context.Context, req *runtime.CreateRequest) (*runt
 		secrets:    secSet,
 		sink:       sink,
 		expiresAt:  req.ExpiresAt,
+		epoch:      req.Epoch,
+		execLog:    map[string]*execEntry{},
 	}
 	in.sess = &engine.Session{
 		Gate:        gate,
@@ -356,7 +376,7 @@ func (m *Manager) Create(ctx context.Context, req *runtime.CreateRequest) (*runt
 // is re-checked here even though the API tier already did: a node is
 // reachable by anything on the internal network, so it must not treat
 // the caller's word as sufficient.
-func (m *Manager) live(id string, owner runtime.Owner) (*inst, error) {
+func (m *Manager) live(id string, owner runtime.Owner, epoch int64) (*inst, error) {
 	m.mu.Lock()
 	in, ok := m.insts[id]
 	m.mu.Unlock()
@@ -365,6 +385,11 @@ func (m *Manager) live(id string, owner runtime.Owner) (*inst, error) {
 	}
 	if owner.UserID != "" && in.owner.UserID != owner.UserID {
 		return nil, runtime.ErrNotOwner
+	}
+	// An instance created under a binding checks every request's epoch;
+	// instances created before fencing (epoch 0) skip the check.
+	if in.epoch != 0 && epoch != in.epoch {
+		return nil, runtime.ErrStaleEpoch
 	}
 	return in, nil
 }
@@ -378,12 +403,44 @@ func (in *inst) renew(deadline time.Time) {
 	in.mu.Unlock()
 }
 
-// Exec runs code on a live instance.
+// Exec runs code on a live instance. The exec_id is the idempotency
+// key: a repeated request replays the recorded result — or waits for
+// the in-flight attempt — instead of running the code twice.
 func (m *Manager) Exec(ctx context.Context, req *runtime.ExecRequest) (*runtime.ExecResponse, error) {
-	in, err := m.live(req.InstanceID, req.Owner)
+	in, err := m.live(req.InstanceID, req.Owner, req.Epoch)
 	if err != nil {
 		return nil, err
 	}
+
+	in.mu.Lock()
+	if e, ok := in.execLog[req.ExecID]; ok {
+		in.mu.Unlock()
+		select {
+		case <-e.done:
+			return e.resp, e.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	e := &execEntry{done: make(chan struct{})}
+	in.execLog[req.ExecID] = e
+	in.execOrder = append(in.execOrder, req.ExecID)
+	for len(in.execOrder) > maxExecLog {
+		oldest := in.execOrder[0]
+		in.execOrder = in.execOrder[1:]
+		// Evicting an in-flight entry is harmless: a late duplicate
+		// would re-run, same as if dedup were off.
+		delete(in.execLog, oldest)
+	}
+	in.mu.Unlock()
+	defer close(e.done)
+
+	resp, err := m.exec(ctx, req, in)
+	e.resp, e.err = resp, err
+	return resp, err
+}
+
+func (m *Manager) exec(ctx context.Context, req *runtime.ExecRequest, in *inst) (*runtime.ExecResponse, error) {
 	timeout := time.Duration(in.spec.Limits.ExecTimeoutMs) * time.Millisecond
 	if req.TimeoutMs > 0 {
 		d := time.Duration(req.TimeoutMs) * time.Millisecond
@@ -423,7 +480,7 @@ func execResult(r *engine.Result) runtime.ExecResult {
 
 // Keepalive renews the sliding TTL the API tier computed.
 func (m *Manager) Keepalive(ctx context.Context, req *runtime.KeepaliveRequest) (*runtime.KeepaliveResponse, error) {
-	in, err := m.live(req.InstanceID, req.Owner)
+	in, err := m.live(req.InstanceID, req.Owner, req.Epoch)
 	if err != nil {
 		return nil, err
 	}
@@ -435,7 +492,7 @@ func (m *Manager) Keepalive(ctx context.Context, req *runtime.KeepaliveRequest) 
 // instance. Capability factories are not serializable, so the node
 // renders and the API tier composes the final prompt.
 func (m *Manager) Prompt(ctx context.Context, req *runtime.PromptRequest) (*runtime.PromptResponse, error) {
-	in, err := m.live(req.InstanceID, req.Owner)
+	in, err := m.live(req.InstanceID, req.Owner, req.Epoch)
 	if err != nil {
 		return nil, err
 	}
@@ -495,7 +552,7 @@ func (m *Manager) withConsole(in *inst, cap types.CapabilityName, fn func(gate *
 // Delete ends a live instance: revoke gate, close resources, snapshot
 // cleanup.
 func (m *Manager) Delete(ctx context.Context, req *runtime.DeleteRequest) (*runtime.DeleteResponse, error) {
-	in, err := m.live(req.InstanceID, req.Owner)
+	in, err := m.live(req.InstanceID, req.Owner, req.Epoch)
 	if err != nil {
 		return nil, err
 	}

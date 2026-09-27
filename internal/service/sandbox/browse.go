@@ -27,7 +27,7 @@ func (s *Service) Browse(ctx context.Context, a service.Actor, id, path string) 
 		return nil, err
 	}
 	resp, err := s.rt.Browse(ctx, &runtime.BrowseRequest{
-		InstanceID: in.ID, Owner: owner(a), Path: path,
+		InstanceID: in.ID, Owner: owner(a), Path: path, Epoch: in.LeaseEpoch,
 	})
 	// A failed browse can still have produced audit events.
 	if resp != nil {

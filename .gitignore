@@ -4,6 +4,9 @@ web/node_modules
 web/dist/*
 !web/dist/README.txt
 calcside-dev.db*
+docker/data/
+docker/worker-cache/
+docker/.env
 .venv/
 __pycache__/
 

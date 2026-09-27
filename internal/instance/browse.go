@@ -22,7 +22,7 @@ import (
 // tier's to persist. It is nil only when the request never reached an
 // instance at all.
 func (m *Manager) Browse(ctx context.Context, req *runtime.BrowseRequest) (*runtime.BrowseResponse, error) {
-	in, err := m.live(req.InstanceID, req.Owner)
+	in, err := m.live(req.InstanceID, req.Owner, req.Epoch)
 	if err != nil {
 		return nil, err
 	}

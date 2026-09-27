@@ -147,7 +147,7 @@ func (n *node) audit() []runtime.AuditEvent {
 // ttlOf reads the instance's configured TTL, the way the API tier does
 // from the persisted spec.
 func (n *node) ttlOf(id string) time.Duration {
-	in, err := n.m.live(id, n.owner)
+	in, err := n.m.live(id, n.owner, 0)
 	if err != nil {
 		return 0
 	}

@@ -2,6 +2,7 @@
 package config
 
 import (
+	"calcside/internal/capability"
 	"calcside/internal/types"
 
 	"flag"
@@ -28,6 +29,9 @@ type Config struct {
 	GoogleClientSecret   string
 	GoogleAllowedDomains []string
 	CookieSecure         bool
+	NodeID               string
+	Workers              string
+	WorkerKey            string
 	MaxInstancesPerUser  int
 	MaxInstancesPerNode  int
 	DefaultTTL           time.Duration
@@ -108,6 +112,9 @@ func Parse(args []string) (Config, error) {
 	fs.BoolVar(&c.CookieSecure, "cookie-secure", envBool("COOKIE_SECURE", false), "set Secure on cookies")
 	fs.BoolVar(&c.Dev, "dev", envBool("DEV", false), "dev mode: no login, anonymous principal (INSECURE)")
 	fs.BoolVar(&c.DevAllowRemote, "dev-allow-remote", envBool("DEV_ALLOW_REMOTE", false), "allow --dev on non-loopback addr (INSECURE)")
+	fs.StringVar(&c.NodeID, "node-id", envOr("NODE_ID", "local"), "stable identity of this execution node; keep it constant across restarts so orphaned bindings can be reclaimed")
+	fs.StringVar(&c.Workers, "workers", envOr("WORKERS", ""), "comma-separated worker list nodeID=host:port; empty runs execution in-process")
+	fs.StringVar(&c.WorkerKey, "worker-key", envOr("WORKER_SHARED_KEY", ""), "shared HMAC secret authenticating API↔worker calls")
 	fs.IntVar(&c.MaxInstancesPerUser, "max-instances-per-user", envInt("MAX_INSTANCES_PER_USER", 10), "max live instances per user (cluster-wide, counted from the store)")
 	fs.IntVar(&c.MaxInstancesPerNode, "max-instances-per-node", envInt("MAX_INSTANCES_PER_NODE", 0), "max live instances on this execution node (0 = unlimited)")
 	fs.DurationVar(&c.DefaultTTL, "default-ttl", envDur("DEFAULT_TTL", 15*time.Minute), "default instance TTL")
@@ -193,4 +200,122 @@ func CheckDevAddr(addr string, allowRemote bool) error {
 		return nil
 	}
 	return fmt.Errorf("dev mode refuses non-loopback --addr %q (pass --dev-allow-remote to override)", addr)
+}
+
+// WorkerConfig is calcside-worker's configuration — a separate shape
+// from the API tier's Config because the two processes share execution
+// limits but nothing else.
+type WorkerConfig struct {
+	Addr                string
+	NodeID              string
+	NodeIDFile          string
+	SharedKey           string
+	APIAddr             string
+	MaxInstances        int
+	ReaperInterval      time.Duration
+	PolicyEvalTimeout   time.Duration
+	DefaultTTL          time.Duration
+	MaxTTL              time.Duration
+	MaxExecTimeout      time.Duration
+	MaxConcurrentExecs  int
+	MaxSteps            uint64
+	MaxOutputBytes      int64
+	ExecMemoryLimit     uint64
+	NetAllowPrivate     bool
+	NetAllowCIDRs       []*net.IPNet
+	MaxNetResponseBytes int64
+	SecretsAllowHTTP    bool
+	ExtAllowSources     []string
+	ExtLocalRoots       []string
+	ExtCacheDir         string
+	ExtFetchTimeout     time.Duration
+}
+
+// ParseWorker parses calcside-worker's flags. Everything about limits
+// and extension policy must match the API tier, or the same spec would
+// behave differently depending on placement.
+func ParseWorker(args []string) (WorkerConfig, error) {
+	var c WorkerConfig
+	fs := flag.NewFlagSet("calcside-worker", flag.ContinueOnError)
+	fs.StringVar(&c.Addr, "listen", envOr("WORKER_LISTEN", ":8090"), "listen address (private network only)")
+	fs.StringVar(&c.NodeID, "node-id", envOr("NODE_ID", ""), "stable node identity; takes precedence over --node-id-file")
+	fs.StringVar(&c.NodeIDFile, "node-id-file", envOr("NODE_ID_FILE", ""), "file holding the stable node id; created on first boot")
+	fs.StringVar(&c.SharedKey, "shared-key", envOr("WORKER_SHARED_KEY", ""), "shared HMAC secret authenticating API-worker calls (required)")
+	fs.StringVar(&c.APIAddr, "api-addr", envOr("API_ADDR", ""), "API tier address (http://host:port) used to resolve local ext sources; empty disables local ext")
+	fs.IntVar(&c.MaxInstances, "max-instances-per-node", envInt("MAX_INSTANCES_PER_NODE", 0), "max live instances on this node (0 = unlimited)")
+	fs.DurationVar(&c.ReaperInterval, "reaper-interval", envDur("REAPER_INTERVAL", 10*time.Second), "local memory-reclaim sweep interval")
+	fs.DurationVar(&c.PolicyEvalTimeout, "policy-eval-timeout", envDur("POLICY_EVAL_TIMEOUT", 100*time.Millisecond), "per-policy eval timeout")
+	fs.DurationVar(&c.DefaultTTL, "default-ttl", envDur("DEFAULT_TTL", 15*time.Minute), "default instance TTL (must match API)")
+	fs.DurationVar(&c.MaxTTL, "max-ttl", envDur("MAX_TTL", 24*time.Hour), "max instance TTL (must match API)")
+	fs.DurationVar(&c.MaxExecTimeout, "max-exec-timeout", envDur("MAX_EXEC_TIMEOUT", 5*time.Minute), "max exec timeout (must match API)")
+	fs.IntVar(&c.MaxConcurrentExecs, "max-concurrent-execs", envInt("MAX_CONCURRENT_EXECS", 64), "global exec concurrency")
+	fs.Uint64Var(&c.MaxSteps, "max-steps", uint64(envInt("MAX_STEPS", 100000000)), "max starlark execution steps per exec")
+	fs.Int64Var(&c.MaxOutputBytes, "max-output-bytes", int64(envInt("MAX_OUTPUT_BYTES", 4<<20)), "max captured output bytes per exec")
+	fs.Uint64Var(&c.ExecMemoryLimit, "exec-memory-limit", uint64(envInt("EXEC_MEMORY_LIMIT", 2<<30)), "heap watchdog limit in bytes (0 disables)")
+	fs.BoolVar(&c.NetAllowPrivate, "net-allow-private", envBool("NET_ALLOW_PRIVATE", false), "allow private/reserved IPs in net allowlists")
+	var netCIDRs string
+	fs.StringVar(&netCIDRs, "net-allow-cidrs", envOr("NET_ALLOW_CIDRS", ""), "comma-separated CIDRs exempt from net's private/reserved-address blocking")
+	fs.Int64Var(&c.MaxNetResponseBytes, "max-net-response-bytes", int64(envInt("MAX_NET_RESPONSE_BYTES", 32<<20)), "clamp for net.max_response_bytes")
+	fs.BoolVar(&c.SecretsAllowHTTP, "secrets-allow-http", envBool("SECRETS_ALLOW_HTTP", false), "allow secret injection into http:// URLs (INSECURE)")
+	var extSources, extRoots string
+	fs.StringVar(&extSources, "ext-allow-sources", envOr("EXT_ALLOW_SOURCES", ""), "comma-separated allowed remote ext source prefixes")
+	fs.StringVar(&extRoots, "ext-local-roots", envOr("EXT_LOCAL_ROOTS", ""), "comma-separated local dirs ext sources may live under")
+	fs.StringVar(&c.ExtCacheDir, "ext-cache-dir", envOr("EXT_CACHE_DIR", defaultExtCacheDir()), "extension fetch/resolve cache dir")
+	fs.DurationVar(&c.ExtFetchTimeout, "ext-fetch-timeout", envDur("EXT_FETCH_TIMEOUT", 30*time.Second), "remote ext fetch timeout")
+	if err := fs.Parse(args); err != nil {
+		return c, err
+	}
+	for _, s := range strings.Split(extSources, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			c.ExtAllowSources = append(c.ExtAllowSources, s)
+		}
+	}
+	for _, s := range strings.Split(extRoots, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			c.ExtLocalRoots = append(c.ExtLocalRoots, s)
+		}
+	}
+	for _, s := range strings.Split(netCIDRs, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			_, n, err := net.ParseCIDR(s)
+			if err != nil {
+				return c, fmt.Errorf("--net-allow-cidrs: invalid CIDR %q", s)
+			}
+			c.NetAllowCIDRs = append(c.NetAllowCIDRs, n)
+		}
+	}
+	return c, nil
+}
+
+// ExecLimits maps the worker config onto the capability server limits.
+func (c WorkerConfig) ExecLimits() capability.ServerLimits {
+	return capability.ServerLimits{
+		DefaultTTL:          c.DefaultTTL,
+		MaxTTL:              c.MaxTTL,
+		MaxExecTimeout:      c.MaxExecTimeout,
+		MaxSteps:            c.MaxSteps,
+		MaxFSQuotaBytes:     256 << 20,
+		MaxOutputBytes:      c.MaxOutputBytes,
+		NetAllowPrivate:     c.NetAllowPrivate,
+		NetAllowCIDRs:       c.NetAllowCIDRs,
+		MaxNetResponseBytes: c.MaxNetResponseBytes,
+		SecretsAllowHTTP:    c.SecretsAllowHTTP,
+	}
+}
+
+// ExecLimits maps the config onto the capability server limits shared
+// by the API tier and every worker node.
+func (c Config) ExecLimits() capability.ServerLimits {
+	return capability.ServerLimits{
+		DefaultTTL:          c.DefaultTTL,
+		MaxTTL:              c.MaxTTL,
+		MaxExecTimeout:      c.MaxExecTimeout,
+		MaxSteps:            c.MaxSteps,
+		MaxFSQuotaBytes:     256 << 20,
+		MaxOutputBytes:      c.MaxOutputBytes,
+		NetAllowPrivate:     c.NetAllowPrivate,
+		NetAllowCIDRs:       c.NetAllowCIDRs,
+		MaxNetResponseBytes: c.MaxNetResponseBytes,
+		SecretsAllowHTTP:    c.SecretsAllowHTTP,
+	}
 }

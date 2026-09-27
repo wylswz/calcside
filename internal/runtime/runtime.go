@@ -28,6 +28,10 @@ var (
 	ErrNoCapability  = errors.New("runtime: capability not granted")
 	ErrNotOwner      = errors.New("runtime: instance belongs to another user")
 	ErrBadSpec       = errors.New("runtime: invalid spec")
+	// ErrStaleEpoch means the request's fencing epoch no longer matches
+	// the binding the node holds — the caller is working from a stale
+	// placement claim and must not be allowed to act.
+	ErrStaleEpoch = errors.New("runtime: stale placement epoch")
 	// ErrNoSuchPath is a browse against a path the instance's VFS does
 	// not have. It is a distinct sentinel so the API tier never has to
 	// match on filesystem error strings across the wire.

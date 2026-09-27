@@ -15,6 +15,7 @@
 - User Rego policies run with a restricted capability set (see `internal/policy`); keep dangerous builtins out.
 - Store changes: update the interface, the GORM impl (`internal/store/gormstore`), and `internal/store/storetest` conformance suite.
 - API changes: edit `api/openapi.yaml` first, then `make gen`; never hand-edit generated files (`internal/api/gen`, `internal/client/gen`, `web/src/api/schema.ts`).
+- Worker protocol changes: edit `api/worker.openapi.yaml`, then `make gen`. Worker-served ops generate into `internal/runtime/remote/gen`; `api-callback`-tagged ops (worker→API reverse calls, e.g. ext tree resolution) generate the API-side strict server into `internal/api/intgen` and the worker's client into `internal/runtime/remote/apiclient`. Request/response bodies map via `x-go-type` onto `internal/runtime` contract types — payloads change in the contract package, not the spec.
 - Extensions (`ext` capability): Starlark-only (never native binaries); they compose base capabilities and every op must route through `Gate.Invoke` (nested base-cap calls inherit allowlists, secrets, hooks, audit). Remote sources require an explicit `@version` and an `h1:` sum; git CLI is required at runtime for fetches. Server opt-in flags: `--ext-allow-sources` / `--ext-local-roots` / `--ext-cache-dir`.
 - Pin dependency versions published at least 7 days ago.
 - `web/dist/README.txt` is a committed placeholder so Go builds work without Node.

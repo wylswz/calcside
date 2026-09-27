@@ -230,7 +230,7 @@ func (s *Service) Create(ctx context.Context, a service.Actor, rawSpec []byte) (
 	// actually holds is the worse failure to be left with; an instance
 	// the store never learned about is reclaimed by the node's own
 	// grace timer.
-	if _, err := s.rt.Create(ctx, &runtime.CreateRequest{
+	cresp, err := s.rt.Create(ctx, &runtime.CreateRequest{
 		InstanceID: meta.ID,
 		Owner:      owner(a),
 		Labels:     meta.Labels,
@@ -238,11 +238,19 @@ func (s *Service) Create(ctx context.Context, a service.Actor, rawSpec []byte) (
 		Policies:   runtime.PolicyBundle{Global: s.globalPols, User: userPols},
 		Secrets:    resolved,
 		ExpiresAt:  meta.ExpiresAt,
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, fail(err)
 	}
+	// A remote runtime reports which node took the instance and under
+	// what fencing epoch; persist the binding so later requests route
+	// and fence correctly. An in-process runtime returns zeros.
+	if cresp != nil {
+		meta.NodeID = cresp.NodeID
+		meta.LeaseEpoch = cresp.Epoch
+	}
 	if err := s.st.CreateInstance(ctx, meta); err != nil {
-		_, _ = s.rt.Delete(ctx, &runtime.DeleteRequest{InstanceID: meta.ID, Owner: owner(a)})
+		_, _ = s.rt.Delete(ctx, &runtime.DeleteRequest{InstanceID: meta.ID, Owner: owner(a), Epoch: meta.LeaseEpoch})
 		return nil, service.Internal(err)
 	}
 	return meta, nil
@@ -257,7 +265,7 @@ func (s *Service) Delete(ctx context.Context, a service.Actor, id string) error 
 	if err != nil {
 		return err
 	}
-	if _, err := s.rt.Delete(ctx, &runtime.DeleteRequest{InstanceID: in.ID, Owner: owner(a)}); err != nil {
+	if _, err := s.rt.Delete(ctx, &runtime.DeleteRequest{InstanceID: in.ID, Owner: owner(a), Epoch: in.LeaseEpoch}); err != nil {
 		// A node that no longer knows the instance is not a client
 		// error: settle the row either way.
 		if !errors.Is(err, runtime.ErrNotFound) {
@@ -286,7 +294,7 @@ func (s *Service) Keepalive(ctx context.Context, a service.Actor, id string) (*s
 	now := s.now().UTC()
 	deadline := renewal(in, now)
 	if _, err := s.rt.Keepalive(ctx, &runtime.KeepaliveRequest{
-		InstanceID: in.ID, Owner: owner(a), RenewedExpiresAt: deadline,
+		InstanceID: in.ID, Owner: owner(a), RenewedExpiresAt: deadline, Epoch: in.LeaseEpoch,
 	}); err != nil {
 		return nil, fail(err)
 	}
@@ -317,6 +325,7 @@ func (s *Service) Exec(ctx context.Context, a service.Actor, id, code string, ti
 		Code:             code,
 		TimeoutMs:        timeout.Milliseconds(),
 		RenewedExpiresAt: deadline,
+		Epoch:            in.LeaseEpoch,
 	})
 	// Audit first and unconditionally: a denied or failed call is
 	// exactly what the audit log is for, and the batch is only ever
@@ -393,6 +402,7 @@ func (s *Service) ExpireDue(ctx context.Context, limit int) (int, error) {
 		_, err := s.rt.Delete(ctx, &runtime.DeleteRequest{
 			InstanceID: in.ID,
 			Owner:      runtime.Owner{UserID: in.UserID},
+			Epoch:      in.LeaseEpoch,
 		})
 		if err != nil && !errors.Is(err, runtime.ErrNotFound) {
 			continue

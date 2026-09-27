@@ -148,13 +148,41 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		if err != nil || len(due) != 1 || due[0].ID != in2.ID {
 			t.Fatalf("ListExpiredInstances due: %v %+v", err, due)
 		}
-		n, err := s.MarkRunningAsLost(ctx)
+		// A binding belongs to node A; sweeping node B must leave it alone.
+		epoch, ok, err := s.BindInstance(ctx, in2.ID, "node-a")
+		if err != nil || !ok || epoch != 1 {
+			t.Fatalf("BindInstance: %v ok=%v epoch=%d", err, ok, epoch)
+		}
+		if n, err := s.MarkRunningAsLostForNode(ctx, "node-b"); err != nil || n != 0 {
+			t.Fatalf("MarkRunningAsLostForNode other node: %v n=%d", err, n)
+		}
+		// A stale epoch cannot release a newer binding.
+		if ok, err := s.ReleaseInstance(ctx, in2.ID, "node-a", epoch+9); err != nil || ok {
+			t.Fatalf("ReleaseInstance stale epoch: %v ok=%v", err, ok)
+		}
+		if ok, err := s.ReleaseInstance(ctx, in2.ID, "node-a", epoch); err != nil || !ok {
+			t.Fatalf("ReleaseInstance: %v ok=%v", err, ok)
+		}
+		// Unbound again: an orphan any node may sweep.
+		n, err := s.MarkRunningAsLostForNode(ctx, "node-b")
 		if err != nil || n != 1 {
-			t.Fatalf("MarkRunningAsLost: %v n=%d", err, n)
+			t.Fatalf("MarkRunningAsLostForNode orphan: %v n=%d", err, n)
 		}
 		got, _ = s.GetInstance(ctx, in2.ID)
 		if got.Status != types.InstanceLost || got.EndedAt == nil {
 			t.Fatalf("expected lost: %+v", got)
+		}
+		// Binding is a claim: a second node loses, a lost row binds nobody.
+		in3 := &store.Instance{UserID: u.ID, Spec: []byte(`{}`), Status: types.InstanceRunning,
+			CreatedAt: now, LastActiveAt: now, ExpiresAt: now.Add(time.Minute)}
+		if err := s.CreateInstance(ctx, in3); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok, err := s.BindInstance(ctx, in3.ID, "node-a"); err != nil || !ok {
+			t.Fatalf("BindInstance in3: %v ok=%v", err, ok)
+		}
+		if _, ok, err := s.BindInstance(ctx, in3.ID, "node-b"); err != nil || ok {
+			t.Fatalf("BindInstance conflict: %v ok=%v", err, ok)
 		}
 	})
 

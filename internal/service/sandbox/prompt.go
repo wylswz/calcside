@@ -38,7 +38,7 @@ func (s *Service) Prompt(ctx context.Context, a service.Actor, id, toolPrefix st
 	if err != nil {
 		return nil, err
 	}
-	data, err := s.rt.Prompt(ctx, &runtime.PromptRequest{InstanceID: in.ID, Owner: owner(a)})
+	data, err := s.rt.Prompt(ctx, &runtime.PromptRequest{InstanceID: in.ID, Owner: owner(a), Epoch: in.LeaseEpoch})
 	if err != nil {
 		return nil, fail(err)
 	}

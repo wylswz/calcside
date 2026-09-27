@@ -9,21 +9,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"calcside/internal/api"
 	"calcside/internal/audit"
 	"calcside/internal/auth"
-	"calcside/internal/capability"
-	capext "calcside/internal/capability/ext"
-	capfs "calcside/internal/capability/fs"
-	capio "calcside/internal/capability/io"
-	capnet "calcside/internal/capability/net"
 	"calcside/internal/config"
-	"calcside/internal/engine"
-	"calcside/internal/instance"
+	"calcside/internal/node"
+	"calcside/internal/placement"
 	"calcside/internal/policy"
+	"calcside/internal/runtime"
+	"calcside/internal/runtime/remote"
 	"calcside/internal/secrets"
 	auditsvc "calcside/internal/service/audit"
 	"calcside/internal/service/catalog"
@@ -62,34 +60,10 @@ func serve(cfg config.Config) error {
 	}
 	defer st.Close()
 
-	reg := capability.NewRegistry()
-	reg.Register(capfs.Factory())
-	reg.Register(capnet.Factory())
-	reg.Register(capio.Factory())
-	reg.Register(capext.Factory(capext.Options{
-		AllowSources: cfg.ExtAllowSources,
-		LocalRoots:   cfg.ExtLocalRoots,
-		CacheDir:     cfg.ExtCacheDir,
-		FetchTimeout: cfg.ExtFetchTimeout,
-	}))
-
 	rec := audit.NewRecorder(st)
 	defer rec.Close()
 
-	eng := engine.New(cfg.MaxConcurrentExecs, engine.WithMemoryLimit(cfg.ExecMemoryLimit))
-	defer eng.Close()
-	limits := capability.ServerLimits{
-		DefaultTTL:          cfg.DefaultTTL,
-		MaxTTL:              cfg.MaxTTL,
-		MaxExecTimeout:      cfg.MaxExecTimeout,
-		MaxSteps:            cfg.MaxSteps,
-		MaxFSQuotaBytes:     256 << 20,
-		MaxOutputBytes:      cfg.MaxOutputBytes,
-		NetAllowPrivate:     cfg.NetAllowPrivate,
-		NetAllowCIDRs:       cfg.NetAllowCIDRs,
-		MaxNetResponseBytes: cfg.MaxNetResponseBytes,
-		SecretsAllowHTTP:    cfg.SecretsAllowHTTP,
-	}
+	limits := cfg.ExecLimits()
 	if len(cfg.NetAllowCIDRs) > 0 {
 		slog.Warn("net: private/reserved address blocking relaxed", "cidrs", cfg.NetAllowCIDRs)
 	}
@@ -103,23 +77,53 @@ func serve(cfg config.Config) error {
 		slog.Warn("secrets vault disabled (no --secret-key)")
 	}
 
-	// Execution tier. It is in-process in this binary, but the API tier
-	// below reaches it only through runtime.Runtime and it holds no
-	// store handle, so the same code serves a separate worker.
-	mgr := instance.New(instance.Options{
-		Engine:       eng,
-		Registry:     reg,
-		Limits:       limits,
-		EvalTimeout:  cfg.PolicyEvalTimeout,
-		MaxInstances: cfg.MaxInstancesPerNode,
-		ReapInterval: cfg.ReaperInterval,
+	// Execution tier. In-process by default; --workers switches the API
+	// tier to forward to remote worker nodes instead.
+	nd := node.Build(node.Config{
+		Limits:             limits,
+		ExtAllowSources:    cfg.ExtAllowSources,
+		ExtLocalRoots:      cfg.ExtLocalRoots,
+		ExtCacheDir:        cfg.ExtCacheDir,
+		ExtFetchTimeout:    cfg.ExtFetchTimeout,
+		MaxConcurrentExecs: cfg.MaxConcurrentExecs,
+		ExecMemoryLimit:    cfg.ExecMemoryLimit,
+		EvalTimeout:        cfg.PolicyEvalTimeout,
+		MaxInstances:       cfg.MaxInstancesPerNode,
+		ReapInterval:       cfg.ReaperInterval,
 	})
-	mgr.StartReaper()
-	defer mgr.StopReaper()
+	defer nd.Close()
 
-	// Instances a previous process owned cannot be recovered: their
-	// Starlark globals lived in that process's memory.
-	if n, err := st.MarkRunningAsLost(ctx); err != nil {
+	var rt runtime.Runtime = nd.Manager
+	if cfg.Workers != "" {
+		if cfg.WorkerKey == "" {
+			return fmt.Errorf("--workers requires --worker-key")
+		}
+		nodes, err := parseWorkers(cfg.Workers)
+		if err != nil {
+			return err
+		}
+		slog.Info("remote execution tier", "workers", len(nodes))
+		rt = remote.NewClient(
+			[]byte(cfg.WorkerKey),
+			cfg.NodeID,
+			func(context.Context) ([]placement.NodeRef, error) { return nodes, nil },
+			func(ctx context.Context, id string) (*placement.Binding, error) {
+				in, err := st.GetInstance(ctx, id)
+				if err != nil {
+					return nil, err
+				}
+				if in.NodeID == "" {
+					return nil, placement.ErrNotBound
+				}
+				return &placement.Binding{InstanceID: id, NodeID: in.NodeID, Epoch: in.LeaseEpoch}, nil
+			})
+	} else {
+		nd.Manager.StartReaper()
+	}
+
+	// Instances a previous incarnation of this node owned cannot be
+	// recovered: their Starlark globals lived in that process's memory.
+	if n, err := st.MarkRunningAsLostForNode(ctx, cfg.NodeID); err != nil {
 		return fmt.Errorf("recover: %w", err)
 	} else if n > 0 {
 		slog.Warn("marked lost instances", "count", n)
@@ -135,10 +139,10 @@ func serve(cfg config.Config) error {
 	vaultSvc := vault.New(st, cipher)
 	sandboxSvc := sandbox.New(sandbox.Options{
 		Store:               st,
-		Runtime:             mgr,
+		Runtime:             rt,
 		Secrets:             vaultSvc,
 		Audit:               rec,
-		Registry:            reg,
+		Registry:            nd.Registry,
 		Limits:              limits,
 		GlobalPolicies:      globalPolicies,
 		MaxInstancesPerUser: cfg.MaxInstancesPerUser,
@@ -178,10 +182,19 @@ func serve(cfg config.Config) error {
 	mux := api.Handler(api.Deps{
 		IAM: iam.New(st, nil), Vault: vaultSvc,
 		Policy: policysvc.New(st), Audit: auditsvc.New(st),
-		Catalog: catalog.New(reg), Sandbox: sandboxSvc,
+		Catalog: catalog.New(nd.Registry), Sandbox: sandboxSvc,
 		Auth: svc, Web: webFS, GoogleEnabled: flow != nil,
 		Dev: cfg.Dev, Anonymous: anon,
 	})
+	if cfg.Workers != "" {
+		// Workers resolve local extension sources through the API —
+		// they have no filesystem roots of their own. Signed with the
+		// same shared key as the runtime protocol.
+		mux2 := http.NewServeMux()
+		mux2.Handle(remote.ExtTreePath, remote.ExtTreeHandler(cfg.ExtLocalRoots, []byte(cfg.WorkerKey)))
+		mux2.Handle("/", mux)
+		mux = mux2
+	}
 	if flow != nil {
 		flow.Bind(svc)
 		mux2 := http.NewServeMux()
@@ -206,6 +219,19 @@ func serve(cfg config.Config) error {
 	}
 	rec.Close()
 	return nil
+}
+
+// parseWorkers parses --workers entries of the form "nodeID=host:port".
+func parseWorkers(spec string) ([]placement.NodeRef, error) {
+	var out []placement.NodeRef
+	for _, ent := range strings.Split(spec, ",") {
+		id, addr, ok := strings.Cut(strings.TrimSpace(ent), "=")
+		if !ok || id == "" || addr == "" {
+			return nil, fmt.Errorf("--workers: bad entry %q, want nodeID=host:port", ent)
+		}
+		out = append(out, placement.NodeRef{NodeID: id, Addr: addr})
+	}
+	return out, nil
 }
 
 // expireLoop sweeps instances whose sliding TTL elapsed. Nodes reclaim

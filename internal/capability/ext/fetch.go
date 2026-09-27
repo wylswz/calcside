@@ -30,6 +30,11 @@ type Options struct {
 	// LocalRoots bounds local (absolute path) sources; identifiers must
 	// resolve inside one of these roots. Empty disables local sources.
 	LocalRoots []string
+	// LocalResolver, when set, replaces filesystem access for local
+	// sources: it returns a directory containing the source tree. A
+	// worker node resolves local identifiers through the API tier over
+	// the wire instead of reading a filesystem it does not have.
+	LocalResolver func(ctx context.Context, p ParsedIdentifier) (dir string, err error)
 	// CacheDir holds fetched remote trees ({domain}/{group}/{name}@{ver}).
 	CacheDir string
 	// FetchTimeout bounds each remote fetch; default 30s.
@@ -247,6 +252,29 @@ func (o *Options) fetchRemote(ctx context.Context, p ParsedIdentifier, wantSum s
 		return "", "", fmt.Errorf("ext: caching extension: %w", err)
 	}
 	return dest, commit, nil
+}
+
+// ReadLocalTree loads a local source dir as an in-memory tree for the
+// API tier to serve to worker nodes. Containment, file caps, and the
+// h1 sum all match what resolveLocal enforces.
+func ReadLocalTree(roots []string, path string) (files map[string][]byte, sum string, err error) {
+	o := Options{LocalRoots: roots}
+	root, err := o.localRoot(ParsedIdentifier{Local: filepath.Clean(path)})
+	if err != nil {
+		return nil, "", err
+	}
+	if err := checkTree(root); err != nil {
+		return nil, "", err
+	}
+	files, err = readSources(root)
+	if err != nil {
+		return nil, "", fmt.Errorf("ext: reading %q: %w", path, err)
+	}
+	sum, err = hashTree(root)
+	if err != nil {
+		return nil, "", err
+	}
+	return files, sum, nil
 }
 
 // resolveLocal validates a local source dir and verifies sum if given.

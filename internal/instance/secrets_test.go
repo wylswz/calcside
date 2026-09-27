@@ -33,7 +33,7 @@ func netNode(t *testing.T) *node {
 func TestSecretWipeOnDelete(t *testing.T) {
 	n := netNode(t)
 	id := n.mustCreate(`{"secrets":{"INL":{"value":"wipe-me","allowed_domains":["x.com"]}}}`)
-	in, err := n.m.live(id, n.owner)
+	in, err := n.m.live(id, n.owner, 0)
 	if err != nil || in.secrets.Lookup("INL") == nil {
 		t.Fatalf("secret not resolved: %v", err)
 	}

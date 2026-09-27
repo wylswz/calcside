@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/oapi-codegen/oapi-codegen/v2.8.0/configuration-schema.json
+# Run via `go generate` (CWD = internal/runtime/remote/gen) or `make gen`.
+# The worker-served runtime protocol; api-callback ops are excluded —
+# the API tier serves those (see internal/api/intgen). skip-prune keeps
+# component schemas the api-callback client (apiclient.gen.go) needs.
+package: gen
+output: worker.gen.go
+generate:
+  models: true
+  gin-server: true
+  strict-server: true
+  client: true
+output-options:
+  exclude-tags:
+    - api-callback
+  skip-prune: true

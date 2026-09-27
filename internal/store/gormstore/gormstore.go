@@ -175,6 +175,8 @@ type instanceRow struct {
 	LastActiveAt time.Time
 	ExpiresAt    time.Time
 	EndedAt      *time.Time
+	NodeID       string `gorm:"index:idx_instances_node"`
+	LeaseEpoch   int64
 }
 
 func (instanceRow) TableName() string { return "instances" }
@@ -186,6 +188,8 @@ func (r instanceRow) toStore() *store.Instance {
 		CreatedAt:    r.CreatedAt.UTC(),
 		LastActiveAt: r.LastActiveAt.UTC(),
 		ExpiresAt:    r.ExpiresAt.UTC(),
+		NodeID:       r.NodeID,
+		LeaseEpoch:   r.LeaseEpoch,
 	}
 	if in.Labels == nil {
 		in.Labels = map[string]string{}
@@ -449,6 +453,7 @@ func (d *sqlDB) CreateInstance(ctx context.Context, in *store.Instance) error {
 		Status:    string(in.Status),
 		CreatedAt: in.CreatedAt.UTC(), LastActiveAt: in.LastActiveAt.UTC(),
 		ExpiresAt: in.ExpiresAt.UTC(), EndedAt: in.EndedAt,
+		NodeID: in.NodeID, LeaseEpoch: in.LeaseEpoch,
 	})
 }
 
@@ -518,13 +523,41 @@ func (d *sqlDB) UpdateInstance(ctx context.Context, in *store.Instance) error {
 	return err
 }
 
-func (d *sqlDB) MarkRunningAsLost(ctx context.Context) (int, error) {
+func (d *sqlDB) MarkRunningAsLostForNode(ctx context.Context, nodeID string) (int, error) {
 	return gorm.G[instanceRow](d.g).
-		Where("status = ?", string(types.InstanceRunning)).
+		Where("status = ? AND (node_id = ? OR node_id = '')", string(types.InstanceRunning), nodeID).
 		Set(
 			col("status", string(types.InstanceLost)),
 			col("ended_at", time.Now().UTC()),
 		).Update(ctx)
+}
+
+func (d *sqlDB) BindInstance(ctx context.Context, id, nodeID string) (int64, bool, error) {
+	n, err := gorm.G[instanceRow](d.g).
+		Where("id = ? AND status = ? AND (node_id = '' OR node_id = ?)",
+			id, string(types.InstanceRunning), nodeID).
+		Set(
+			col("node_id", nodeID),
+			col("lease_epoch", gorm.Expr("lease_epoch + 1")),
+		).Update(ctx)
+	if err != nil || n == 0 {
+		return 0, false, err
+	}
+	row, err := gorm.G[instanceRow](d.g).Select("lease_epoch").Where("id = ?", id).Take(ctx)
+	if err != nil {
+		return 0, false, mapNotFound(err)
+	}
+	return row.LeaseEpoch, true, nil
+}
+
+func (d *sqlDB) ReleaseInstance(ctx context.Context, id, nodeID string, epoch int64) (bool, error) {
+	n, err := gorm.G[instanceRow](d.g).
+		Where("id = ? AND node_id = ? AND lease_epoch = ?", id, nodeID, epoch).
+		Set(col("node_id", "")).Update(ctx)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // --- executions ---

@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/oapi-codegen/oapi-codegen/v2.8.0/configuration-schema.json
+# Run via `go generate` (CWD = internal/api/intgen) or `make gen`.
+# The api-callback endpoints of the worker protocol — served by the API
+# tier, called by workers.
+package: intgen
+output: api.gen.go
+generate:
+  models: true
+  gin-server: true
+  strict-server: true
+output-options:
+  include-tags:
+    - api-callback

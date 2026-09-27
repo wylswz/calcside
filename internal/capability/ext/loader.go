@@ -50,6 +50,11 @@ func (l *CapabilityLoader) Load(ctx context.Context) (*Module, error) {
 			l.locks = &fetchLocks{}
 		}
 		root, commit, err = l.Options.fetchRemote(ctx, p, l.Sum, l.locks)
+	} else if l.Options.LocalResolver != nil {
+		root, err = l.Options.LocalResolver(ctx, p)
+		if err == nil && l.Sum != "" {
+			err = verifySum(root, l.Sum)
+		}
 	} else {
 		root, err = l.Options.resolveLocal(p, l.Sum)
 	}

@@ -83,6 +83,12 @@ type Instance struct {
 	LastActiveAt time.Time            `json:"last_active_at"`
 	ExpiresAt    time.Time            `json:"expires_at"`
 	EndedAt      *time.Time           `json:"ended_at,omitempty"`
+
+	// Placement: the node holding this instance's live state and the
+	// fencing epoch of that binding. Internal only — never serialized
+	// to API clients (dto.NewInstance maps fields explicitly).
+	NodeID     string `json:"-"`
+	LeaseEpoch int64  `json:"-"`
 }
 
 type Execution struct {
@@ -169,7 +175,17 @@ type Store interface {
 	// status transition — an execution node cannot write it — so this
 	// drives the reaper.
 	ListExpiredInstances(ctx context.Context, before time.Time, limit int) ([]*Instance, error)
-	MarkRunningAsLost(ctx context.Context) (int, error)
+	// MarkRunningAsLostForNode marks running instances bound to nodeID —
+	// plus unbound orphans, which no node can own — as lost. Any node may
+	// sweep orphans; a bound instance is never another node's to mark.
+	MarkRunningAsLostForNode(ctx context.Context, nodeID string) (int, error)
+	// BindInstance atomically claims a running instance for a node,
+	// bumping the fencing epoch. Returns ok=false when the instance is
+	// missing, not running, or already bound to another node.
+	BindInstance(ctx context.Context, id, nodeID string) (epoch int64, ok bool, err error)
+	// ReleaseInstance drops a binding, but only when nodeID and epoch
+	// still match — a stale holder cannot release a newer binding.
+	ReleaseInstance(ctx context.Context, id, nodeID string, epoch int64) (ok bool, err error)
 
 	CreateExecution(ctx context.Context, e *Execution) error
 	GetExecution(ctx context.Context, id string) (*Execution, error)

@@ -1,0 +1,281 @@
+openapi: 3.0.3
+info:
+  title: Calcside Worker Protocol
+  version: "1.0"
+  description: |
+    Internal API↔worker protocol. Private network only.
+
+    Every operation is a POST carrying one self-contained request from
+    the runtime contract (`internal/runtime`); workers hold no store
+    handle and learn nothing outside the request body.
+
+    One operation runs the other direction: `GET /internal/v1/ext/tree`
+    is served by the API tier and called by workers to resolve local
+    extension sources — workers deliberately have no filesystem roots.
+
+    Authentication is a shared-secret HMAC, not user auth — user
+    authentication already happened on the API tier and its result
+    travels inside the request as `owner`. The signature covers
+    `METHOD\nREQUEST_URI\nUNIX_TS\nSHA256(BODY)`:
+
+    - `X-Calcside-Node`: caller node id
+    - `X-Calcside-Time`: unix seconds, ±60s window
+    - `X-Calcside-Signature`: hex HMAC-SHA256
+
+    Errors use one envelope: `{"error":{"kind","message"}}`. `kind` is
+    the stable token the API tier maps back onto runtime sentinels;
+    `message` is the caller-safe text.
+paths:
+  /runtime/v1/create:
+    post:
+      operationId: runtimeCreate
+      summary: Create a live instance on this node.
+      description: >
+        The request carries the full instance context — normalized spec,
+        policy snapshot, resolved secrets, expiry — and the fencing
+        epoch of the placement binding it is created under. Never
+        retried by the caller: a node that already holds the instance id
+        is expected to fail rather than duplicate.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRequest'
+      responses:
+        '200':
+          description: Instance created; reports the binding it took.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /runtime/v1/exec:
+    post:
+      operationId: runtimeExec
+      summary: Run Starlark on a live instance.
+      description: >
+        `exec_id` is the idempotency key: the node deduplicates on it and
+        replays the recorded result for a repeated request. Exec can
+        produce external side effects (secret-bearing net calls), so the
+        caller never retries transparently — a duplicate arrives only
+        because the first answer was lost in flight.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecRequest'
+      responses:
+        '200':
+          description: Execution result plus the audit batch it produced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /runtime/v1/keepalive:
+    post:
+      operationId: runtimeKeepalive
+      summary: Renew the instance's sliding TTL deadline.
+      description: Read-only with respect to script state; may be retried.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KeepaliveRequest'
+      responses:
+        '200':
+          description: Deadline accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KeepaliveResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /runtime/v1/delete:
+    post:
+      operationId: runtimeDelete
+      summary: Destroy the live instance and release its resources.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteRequest'
+      responses:
+        '200':
+          description: Instance destroyed (or already gone).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /runtime/v1/browse:
+    post:
+      operationId: runtimeBrowse
+      summary: List a directory or read one file in the instance VFS.
+      description: Read-only; may be retried.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowseRequest'
+      responses:
+        '200':
+          description: Listing or redacted file content plus audit batch.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowseResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /runtime/v1/prompt:
+    post:
+      operationId: runtimePrompt
+      summary: Render the per-capability prompt fragments for an instance.
+      description: Read-only; may be retried.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromptRequest'
+      responses:
+        '200':
+          description: Prompt fragments and limits for composition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /internal/v1/ext/tree:
+    get:
+      operationId: extTree
+      tags: [api-callback]
+      summary: (worker → API) Fetch a local extension source tree.
+      description: >
+        Reverse-direction call: the worker asks the API tier to read a
+        local extension directory — workers carry no filesystem roots.
+        The API enforces the same containment and size caps the
+        filesystem path would, and returns the tree plus its h1 sum so
+        the worker can cache it. Signed with the same HMAC scheme.
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Absolute local identifier path to resolve.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The source tree and its content sum.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtTree'
+        default:
+          $ref: '#/components/responses/Error'
+components:
+  responses:
+    Error:
+      description: Error envelope. `kind` maps to a runtime sentinel.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [kind, message]
+          properties:
+            kind:
+              type: string
+              enum:
+                - not_found
+                - not_running
+                - too_many
+                - bad_capability
+                - no_capability
+                - not_owner
+                - bad_spec
+                - no_such_path
+                - fs_error
+                - stale_epoch
+                - internal
+            message:
+              type: string
+    ExtTree:
+      type: object
+      required: [sum, files]
+      properties:
+        sum:
+          type: string
+          description: "h1: dirhash of the source tree."
+        files:
+          type: object
+          description: Slash-relative path to file contents.
+          additionalProperties:
+            type: string
+            format: byte
+    # Message bodies are owned by the runtime contract package — the
+    # spec is authoritative for paths, methods, headers, and the error
+    # envelope; the Go types are authoritative for payload shape.
+    CreateRequest:
+      type: object
+      x-go-type: rt.CreateRequest
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    CreateResponse:
+      type: object
+      x-go-type: rt.CreateResponse
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    ExecRequest:
+      type: object
+      x-go-type: rt.ExecRequest
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    ExecResponse:
+      type: object
+      x-go-type: rt.ExecResponse
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    KeepaliveRequest:
+      type: object
+      x-go-type: rt.KeepaliveRequest
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    KeepaliveResponse:
+      type: object
+      x-go-type: rt.KeepaliveResponse
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    DeleteRequest:
+      type: object
+      x-go-type: rt.DeleteRequest
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    DeleteResponse:
+      type: object
+      x-go-type: rt.DeleteResponse
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    BrowseRequest:
+      type: object
+      x-go-type: rt.BrowseRequest
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    BrowseResponse:
+      type: object
+      x-go-type: rt.BrowseResponse
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    PromptRequest:
+      type: object
+      x-go-type: rt.PromptRequest
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    PromptResponse:
+      type: object
+      x-go-type: rt.PromptResponse
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}

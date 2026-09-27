@@ -71,6 +71,11 @@ type CreateRequest struct {
 	// ExpiresAt is computed by the API tier, which owns the clock. The
 	// node keeps it only to drive a local memory-reclaim safety net.
 	ExpiresAt time.Time `json:"expires_at"`
+	// Epoch is the fencing token of the placement binding under which
+	// this instance was created. Every later request for the instance
+	// must carry the same epoch; a mismatch means the caller holds a
+	// stale claim and the node rejects it.
+	Epoch int64 `json:"epoch,omitempty"`
 }
 
 func (r *CreateRequest) LogValue() slog.Value {
@@ -85,6 +90,12 @@ type CreateResponse struct {
 	// Capabilities granted to the instance, in registry order, including
 	// implicitly granted ones such as io.
 	Capabilities []types.CapabilityName `json:"capabilities,omitempty"`
+	// NodeID and Epoch report which placement binding the instance was
+	// created under; the API tier persists them on the instance row so
+	// later requests route to the same node and carry the fencing token.
+	// Zero values mean an in-process runtime with no placement.
+	NodeID string `json:"node_id,omitempty"`
+	Epoch  int64  `json:"epoch,omitempty"`
 }
 
 // ExecRequest runs one chunk of Starlark.
@@ -103,6 +114,7 @@ type ExecRequest struct {
 	// RenewedExpiresAt is the sliding TTL deadline the API tier has
 	// computed for after this exec.
 	RenewedExpiresAt time.Time `json:"renewed_expires_at"`
+	Epoch            int64     `json:"epoch,omitempty"`
 }
 
 func (r *ExecRequest) LogValue() slog.Value {
@@ -166,6 +178,7 @@ type KeepaliveRequest struct {
 	InstanceID       string    `json:"instance_id"`
 	Owner            Owner     `json:"owner"`
 	RenewedExpiresAt time.Time `json:"renewed_expires_at"`
+	Epoch            int64     `json:"epoch,omitempty"`
 }
 
 type KeepaliveResponse struct{}
@@ -173,6 +186,7 @@ type KeepaliveResponse struct{}
 type DeleteRequest struct {
 	InstanceID string `json:"instance_id"`
 	Owner      Owner  `json:"owner"`
+	Epoch      int64  `json:"epoch,omitempty"`
 }
 
 type DeleteResponse struct{}
@@ -181,6 +195,7 @@ type BrowseRequest struct {
 	InstanceID string `json:"instance_id"`
 	Owner      Owner  `json:"owner"`
 	Path       string `json:"path"`
+	Epoch      int64  `json:"epoch,omitempty"`
 }
 
 // FileEntry mirrors one VFS directory entry.
@@ -205,6 +220,7 @@ type BrowseResponse struct {
 type PromptRequest struct {
 	InstanceID string `json:"instance_id"`
 	Owner      Owner  `json:"owner"`
+	Epoch      int64  `json:"epoch,omitempty"`
 }
 
 // PromptSecret names a secret and the hosts it may be sent to. Values

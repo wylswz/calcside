@@ -89,6 +89,15 @@ Instance spec (`POST /api/v1/instances`):
  "limits": {"exec_timeout_ms": 30000, "max_steps": 10000000, "max_output_bytes": 1048576}}
 ```
 
+## Run with Docker
+
+```bash
+make docker-env                    # first run: generates docker/.env with a random shared key
+docker compose -f docker/docker-compose.yml up --build
+```
+
+Compose starts the API (`:8080`) plus one execution worker; the API forwards instance execution to it over an HMAC-authenticated internal protocol. Drop local extensions into `docker/data/ext/` (bind-mounted) — workers resolve them through the API. See `docker/.env.example` for the remaining env knobs.
+
 ## Security model and known limits
 
 - The Starlark language has no I/O. All side effects go through capabilities, and every capability call is gated, policy-checked, and audited.

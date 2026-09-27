@@ -5,30 +5,32 @@ services:
       dockerfile: docker/Dockerfile
     image: calcside:latest
     ports:
-      - "${CALCSIDE_PORT:-8080}:8080"
+      - "8080:8080"
+    # User config flows wholesale from docker/.env (run `make
+    # docker-env` once, or copy .env.example). Only structural wiring
+    # is spelled out below.
+    env_file:
+      - path: .env
+        required: false
     environment:
       CALCSIDE_ADDR: ":8080"
       CALCSIDE_DSN: /data/calcside.db
       CALCSIDE_BASE_URL: ${CALCSIDE_BASE_URL:-http://localhost:8080}
-      # Secrets vault key: `openssl rand -base64 32`. Without it the vault is disabled.
-      CALCSIDE_SECRET_KEY: ${CALCSIDE_SECRET_KEY:-}
-      # Google SSO — leave empty to run without the login flow.
-      CALCSIDE_GOOGLE_CLIENT_ID: ${CALCSIDE_GOOGLE_CLIENT_ID:-}
-      CALCSIDE_GOOGLE_CLIENT_SECRET: ${CALCSIDE_GOOGLE_CLIENT_SECRET:-}
-      CALCSIDE_GOOGLE_ALLOWED_DOMAINS: ${CALCSIDE_GOOGLE_ALLOWED_DOMAINS:-}
-      # Dev mode (INSECURE, anonymous access):
-      #   CALCSIDE_DEV=true CALCSIDE_DEV_ALLOW_REMOTE=true docker compose up
-      CALCSIDE_DEV: ${CALCSIDE_DEV:-false}
-      CALCSIDE_DEV_ALLOW_REMOTE: ${CALCSIDE_DEV_ALLOW_REMOTE:-false}
+      # Remote execution tier: worker list nodeID=host:port plus the
+      # shared HMAC key both sides must carry.
+      CALCSIDE_WORKERS: ${CALCSIDE_WORKERS:-worker-1=worker:8090}
+      CALCSIDE_WORKER_SHARED_KEY: ${CALCSIDE_WORKER_SHARED_KEY:?run `make docker-env` first, or set CALCSIDE_WORKER_SHARED_KEY}
+    depends_on:
+      worker:
+        condition: service_healthy
     volumes:
-      # Single volume holds the sqlite db plus all mutable config:
-      #   /data/policies  global .rego files (CALCSIDE_POLICY_DIR)
-      #   /data/ext       local ext capability dirs (CALCSIDE_EXT_LOCAL_ROOTS)
-      #   /data/ext-cache remote ext fetch cache
-      # Load config in, e.g.:
-      #   docker compose -f docker/docker-compose.yml cp ../policies/examples/. calcside:/data/policies/
-      #   docker compose -f docker/docker-compose.yml cp -r ../examples/capabilities/tavily calcside:/data/ext/
-      - calcside-data:/data
+      # Bind mount (host dir docker/data) holds the sqlite db plus all
+      # mutable config — copy things straight in:
+      #   data/policies  global .rego files (CALCSIDE_POLICY_DIR)
+      #   data/ext       local ext capability dirs (CALCSIDE_EXT_LOCAL_ROOTS)
+      #   data/ext-cache remote ext fetch cache
+      # e.g.: cp -r examples/capabilities/tavily docker/data/ext/
+      - ./data:/data
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
       interval: 30s
@@ -37,5 +39,36 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-volumes:
-  calcside-data:
+  # Execution node: same image, different entrypoint. Private only —
+  # no published port; the API reaches it over the compose network.
+  worker:
+    image: calcside:latest
+    entrypoint: ["calcside-worker"]
+    command: ["serve"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      CALCSIDE_WORKER_LISTEN: ":8090"
+      # Stable identity across container restarts; must match the id
+      # the API's CALCSIDE_WORKERS list names for this node.
+      CALCSIDE_NODE_ID: worker-1
+      CALCSIDE_WORKER_SHARED_KEY: ${CALCSIDE_WORKER_SHARED_KEY:?run `make docker-env` first, or set CALCSIDE_WORKER_SHARED_KEY}
+      # Local ext sources are resolved through the API over the shared
+      # key — the worker deliberately has no mount of the API's /data.
+      # The image ENV sets EXT_LOCAL_ROOTS for the API; clear it here.
+      CALCSIDE_API_ADDR: http://calcside:8080
+      CALCSIDE_EXT_LOCAL_ROOTS: ""
+      CALCSIDE_EXT_CACHE_DIR: /cache/ext
+    volumes:
+      # The worker's own cache dir (bind-mounted for easy inspection):
+      # fetched remote trees and API-resolved local sources. Nothing
+      # here is authoritative — safe to wipe.
+      - ./worker-cache:/cache
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8090/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
