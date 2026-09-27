@@ -251,3 +251,13 @@ type PromptResponse struct {
 	// NetHosts is the raw allow_hosts list, used for the worked example.
 	NetHosts []string `json:"net_hosts,omitempty"`
 }
+
+type InspectRequest struct {
+	InstanceID string `json:"instance_id"`
+	Owner      Owner  `json:"owner"`
+	Epoch      int64  `json:"epoch,omitempty"`
+}
+
+type InspectResponse struct {
+	Variables map[string]string `json:"variables,omitempty"`
+}

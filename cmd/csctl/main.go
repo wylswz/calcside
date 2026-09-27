@@ -98,6 +98,8 @@ func run(args []string) int {
 		return cmdRun(ctx, c, rest[1:])
 	case "files":
 		return cmdFiles(ctx, c, rest[1:])
+	case "inspect":
+		return cmdInspect(ctx, c, rest[1:])
 	case "audit":
 		return cmdAudit(ctx, c, rest[1:])
 	case "policies":
@@ -123,6 +125,7 @@ func usage() {
   exec <id> [-f file | -c code]
   run [create flags] [-f file | -c code]
   files <id> [path]
+  inspect <id>
   audit [--instance ID] [--exec ID] [--limit N]
   policies ls|get|apply|rm|validate`)
 }
@@ -547,6 +550,41 @@ func cmdFiles(ctx context.Context, c *client.Client, args []string) int {
 		return 0
 	}
 	fmt.Fprint(stdout, content)
+	return 0
+}
+
+// --- inspect ---
+
+func cmdInspect(ctx context.Context, c *client.Client, args []string) int {
+	if len(args) < 1 {
+		fmt.Fprintln(stderr, "inspect: instance id required")
+		return 2
+	}
+	fs := flag.NewFlagSet("inspect", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var out types.OutputFormat
+	fs.TextVar(&out, "o", types.FormatText, "output format (json)")
+	if err := fs.Parse(args[1:]); err != nil {
+		return 2
+	}
+	vars, err := c.Inspect(ctx, args[0])
+	if err != nil {
+		return fail(err)
+	}
+	if out == types.FormatJSON {
+		return outputJSON(vars)
+	}
+	names := make([]string, 0, len(vars))
+	for name := range vars {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	tw := newTabWriter()
+	fmt.Fprintln(tw, "NAME\tVALUE")
+	for _, name := range names {
+		fmt.Fprintf(tw, "%s\t%s\n", name, vars[name])
+	}
+	tw.Flush()
 	return 0
 }
 

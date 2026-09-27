@@ -144,6 +144,12 @@ func NewInstancePrompt(v *sandbox.PromptView) InstancePrompt {
 	}
 }
 
+// InstanceInspect is the /inspect response body: variable name to its
+// Starlark repr (secret-scrubbed on the node).
+type InstanceInspect struct {
+	Variables map[string]string `json:"variables"`
+}
+
 // FileEntry mirrors the runtime contract's entry wire shape.
 type FileEntry struct {
 	Name  string `json:"name"`

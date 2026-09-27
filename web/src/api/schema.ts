@@ -216,6 +216,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instances/{id}/inspect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Snapshot of the instance's live Starlark globals: variable name to its repr, with secret values scrubbed. The instance must be live and running; a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec). */
+        get: operations["instanceInspect"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/executions": {
         parameters: {
             query?: never;
@@ -629,6 +646,12 @@ export interface components {
             entries?: components["schemas"]["FileEntry"][];
             path?: string;
             content?: string;
+        };
+        /** @description live globals snapshot; values are reprs, secret-scrubbed */
+        InstanceInspect: {
+            variables: {
+                [key: string]: string;
+            };
         };
         Execution: {
             id: string;
@@ -1144,6 +1167,31 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    instanceInspect: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description variable name to repr */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstanceInspect"];
+                };
+            };
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];

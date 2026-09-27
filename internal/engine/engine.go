@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"runtime"
 	"runtime/metrics"
 	"sync"
@@ -47,6 +48,23 @@ func (s *Session) execContext(execID string) capability.ExecContext {
 	}
 }
 
+// Inspect snapshots the session globals: variable name to its Starlark
+// repr. It takes ExecMu so the snapshot cannot observe a globals dict
+// mid-mutation; values are rendered with String, so they are already
+// safe to show — the caller still scrubs secret values as it does for
+// exec output.
+func (s *Session) Inspect(ctx context.Context) *InspectResult {
+	s.ExecMu.Lock()
+	defer s.ExecMu.Unlock()
+	vars := map[string]string{}
+	for varName, g := range s.Globals {
+		vars[varName] = g.String()
+	}
+	return &InspectResult{
+		Variables: vars,
+	}
+}
+
 // Error is the structured script error in an ExecResult.
 type Error struct {
 	Type      types.ExecErrorType `json:"type"` // syntax|runtime|policy_denied|out_of_scope|timeout|step_limit|memory_limit
@@ -61,6 +79,10 @@ type Result struct {
 	Error      *Error `json:"error"`
 	DurationMs int64  `json:"duration_ms"`
 	Steps      uint64 `json:"steps"`
+}
+
+type InspectResult struct {
+	Variables map[string]string `json:"variables"`
 }
 
 // ErrMemoryLimit is the cancel cause when the watchdog kills execs.
@@ -250,9 +272,7 @@ func (e *Engine) Exec(ctx context.Context, s *Session, execID, code string, time
 
 	// Re-inject capability bindings + modules so exec N-1 shadowing does
 	// not leak into exec N.
-	for k, v := range s.Predeclared {
-		s.Globals[k] = v
-	}
+	maps.Copy(s.Globals, s.Predeclared)
 
 	f, err := fileOpts.Parse(execID+".star", code, 0)
 	if err == nil {

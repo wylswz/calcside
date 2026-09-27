@@ -516,6 +516,11 @@ type Instance struct {
 	UserId       string            `json:"user_id"`
 }
 
+// InstanceInspect live globals snapshot; values are reprs, secret-scrubbed
+type InstanceInspect struct {
+	Variables map[string]string `json:"variables"`
+}
+
 // InstancePrompt defines model for InstancePrompt.
 type InstancePrompt struct {
 	Capabilities []CapabilityName `json:"capabilities"`
@@ -870,6 +875,11 @@ type ClientInterface interface {
 	// Files performs a GET /api/v1/instances/{id}/files (the `Files` operationId) request.
 	Files(ctx context.Context, id IdPath, params *FilesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// InstanceInspect performs a GET /api/v1/instances/{id}/inspect (the `InstanceInspect` operationId) request.
+	//
+	// Snapshot of the instance's live Starlark globals: variable name to its repr, with secret values scrubbed. The instance must be live and running; a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec).
+	InstanceInspect(ctx context.Context, id IdPath, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// Keepalive performs a POST /api/v1/instances/{id}/keepalive (the `Keepalive` operationId) request.
 	Keepalive(ctx context.Context, id IdPath, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -1152,6 +1162,21 @@ func (c *Client) ListExecutions(ctx context.Context, id IdPath, params *ListExec
 // Files performs a GET /api/v1/instances/{id}/files (the `Files` operationId) request.
 func (c *Client) Files(ctx context.Context, id IdPath, params *FilesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewFilesRequest(c.Server, id, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// InstanceInspect performs a GET /api/v1/instances/{id}/inspect (the `InstanceInspect` operationId) request.
+//
+// Snapshot of the instance's live Starlark globals: variable name to its repr, with secret values scrubbed. The instance must be live and running; a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec).
+func (c *Client) InstanceInspect(ctx context.Context, id IdPath, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInstanceInspectRequest(c.Server, id)
 	if err != nil {
 		return nil, err
 	}
@@ -2031,6 +2056,40 @@ func NewFilesRequest(server string, id IdPath, params *FilesParams) (*http.Reque
 	return req, nil
 }
 
+// NewInstanceInspectRequest constructs an http.Request for the InstanceInspect method
+func NewInstanceInspectRequest(server string, id IdPath) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/instances/%s/inspect", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewKeepaliveRequest constructs an http.Request for the Keepalive method
 func NewKeepaliveRequest(server string, id IdPath) (*http.Request, error) {
 	var err error
@@ -2766,6 +2825,13 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	FilesWithResponse(ctx context.Context, id IdPath, params *FilesParams, reqEditors ...RequestEditorFn) (*FilesResponse, error)
+
+	// InstanceInspectWithResponse performs a GET /api/v1/instances/{id}/inspect (the `InstanceInspect` operationId) request.
+	//
+	// Snapshot of the instance's live Starlark globals: variable name to its repr, with secret values scrubbed. The instance must be live and running; a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec).
+	//
+	// Returns a wrapper object for the known response body format(s).
+	InstanceInspectWithResponse(ctx context.Context, id IdPath, reqEditors ...RequestEditorFn) (*InstanceInspectResponse, error)
 
 	// KeepaliveWithResponse performs a POST /api/v1/instances/{id}/keepalive (the `Keepalive` operationId) request.
 	//
@@ -3566,6 +3632,68 @@ func (r FilesResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r FilesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type InstanceInspectResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *InstanceInspect
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r InstanceInspectResponse) GetJSON200() *InstanceInspect {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r InstanceInspectResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r InstanceInspectResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r InstanceInspectResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r InstanceInspectResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r InstanceInspectResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InstanceInspectResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r InstanceInspectResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -4740,6 +4868,19 @@ func (c *ClientWithResponses) FilesWithResponse(ctx context.Context, id IdPath, 
 	return ParseFilesResponse(rsp)
 }
 
+// InstanceInspectWithResponse performs a GET /api/v1/instances/{id}/inspect (the `InstanceInspect` operationId) request.
+//
+// Snapshot of the instance's live Starlark globals: variable name to its repr, with secret values scrubbed. The instance must be live and running; a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec).
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) InstanceInspectWithResponse(ctx context.Context, id IdPath, reqEditors ...RequestEditorFn) (*InstanceInspectResponse, error) {
+	rsp, err := c.InstanceInspect(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInstanceInspectResponse(rsp)
+}
+
 // KeepaliveWithResponse performs a POST /api/v1/instances/{id}/keepalive (the `Keepalive` operationId) request.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -5475,6 +5616,53 @@ func ParseFilesResponse(rsp *http.Response) (*FilesResponse, error) {
 			return nil, err
 		}
 		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseInstanceInspectResponse parses an HTTP response from a InstanceInspectWithResponse call
+func ParseInstanceInspectResponse(rsp *http.Response) (*InstanceInspectResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InstanceInspectResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InstanceInspect
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Error

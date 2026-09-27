@@ -514,6 +514,11 @@ type Instance struct {
 	UserId       string            `json:"user_id"`
 }
 
+// InstanceInspect live globals snapshot; values are reprs, secret-scrubbed
+type InstanceInspect struct {
+	Variables map[string]string `json:"variables"`
+}
+
 // InstancePrompt defines model for InstancePrompt.
 type InstancePrompt struct {
 	Capabilities []CapabilityName `json:"capabilities"`
@@ -784,6 +789,9 @@ type ServerInterface interface {
 
 	// (GET /api/v1/instances/{id}/files)
 	Files(c *gin.Context, id IdPath, params FilesParams)
+
+	// (GET /api/v1/instances/{id}/inspect)
+	InstanceInspect(c *gin.Context, id IdPath)
 
 	// (POST /api/v1/instances/{id}/keepalive)
 	Keepalive(c *gin.Context, id IdPath)
@@ -1146,6 +1154,31 @@ func (siw *ServerInterfaceWrapper) Files(c *gin.Context) {
 	}
 
 	siw.Handler.Files(c, id, params)
+}
+
+// InstanceInspect operation middleware
+func (siw *ServerInterfaceWrapper) InstanceInspect(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.InstanceInspect(c, id)
 }
 
 // Keepalive operation middleware
@@ -1519,6 +1552,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/api/v1/instances/:id/exec", wrapper.Exec)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/files", wrapper.Files)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/prompt", wrapper.InstancePrompt)
+	router.GET(options.BaseURL+"/api/v1/instances/:id/inspect", wrapper.InstanceInspect)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/executions", wrapper.ListExecutions)
 	router.GET(options.BaseURL+"/api/v1/executions/:id", wrapper.GetExecution)
 	router.GET(options.BaseURL+"/api/v1/audit", wrapper.ListAudit)
@@ -2139,6 +2173,70 @@ func (response Files404JSONResponse) VisitFilesResponse(w http.ResponseWriter) e
 type Files409JSONResponse ErrorEnvelope
 
 func (response Files409JSONResponse) VisitFilesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InstanceInspectRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type InstanceInspectResponseObject interface {
+	VisitInstanceInspectResponse(w http.ResponseWriter) error
+}
+
+type InstanceInspect200JSONResponse InstanceInspect
+
+func (response InstanceInspect200JSONResponse) VisitInstanceInspectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InstanceInspect401JSONResponse struct{ ErrorJSONResponse }
+
+func (response InstanceInspect401JSONResponse) VisitInstanceInspectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InstanceInspect404JSONResponse ErrorEnvelope
+
+func (response InstanceInspect404JSONResponse) VisitInstanceInspectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InstanceInspect409JSONResponse ErrorEnvelope
+
+func (response InstanceInspect409JSONResponse) VisitInstanceInspectResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -3191,6 +3289,9 @@ type StrictServerInterface interface {
 	// (GET /api/v1/instances/{id}/files)
 	Files(ctx context.Context, request FilesRequestObject) (FilesResponseObject, error)
 
+	// (GET /api/v1/instances/{id}/inspect)
+	InstanceInspect(ctx context.Context, request InstanceInspectRequestObject) (InstanceInspectResponseObject, error)
+
 	// (POST /api/v1/instances/{id}/keepalive)
 	Keepalive(ctx context.Context, request KeepaliveRequestObject) (KeepaliveResponseObject, error)
 
@@ -3613,6 +3714,32 @@ func (sh *strictHandler) Files(ctx *gin.Context, id IdPath, params FilesParams) 
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(FilesResponseObject); ok {
 		if err := validResponse.VisitFilesResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// InstanceInspect operation middleware
+func (sh *strictHandler) InstanceInspect(ctx *gin.Context, id IdPath) {
+	var request InstanceInspectRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.InstanceInspect(ctx, request.(InstanceInspectRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InstanceInspect")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(InstanceInspectResponseObject); ok {
+		if err := validResponse.VisitInstanceInspectResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

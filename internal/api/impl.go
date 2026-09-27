@@ -144,6 +144,12 @@ func (r instancePromptResp) VisitInstancePromptResponse(w http.ResponseWriter) e
 	return r.write(w)
 }
 
+type instanceInspectResp struct{ rawJSON }
+
+func (r instanceInspectResp) VisitInstanceInspectResponse(w http.ResponseWriter) error {
+	return r.write(w)
+}
+
 type listExecutionsResp struct{ rawJSON }
 
 func (r listExecutionsResp) VisitListExecutionsResponse(w http.ResponseWriter) error {
@@ -431,6 +437,21 @@ func (s *strictImpl) InstancePrompt(ctx context.Context, req gen.InstancePromptR
 		return instancePromptResp{fail(err)}, nil
 	}
 	return instancePromptResp{rawJSON{200, dto.NewInstancePrompt(v)}}, nil
+}
+
+// InstanceInspect snapshots a live instance's globals for the console's
+// variables view.
+func (s *strictImpl) InstanceInspect(ctx context.Context, req gen.InstanceInspectRequestObject) (gen.InstanceInspectResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return instanceInspectResp{*e}, nil
+	}
+	vars, err := s.d.Sandbox.Inspect(ctx, actorOf(p), req.Id)
+	if err != nil {
+		return instanceInspectResp{fail(err)}, nil
+	}
+	return instanceInspectResp{rawJSON{200, dto.InstanceInspect{Variables: vars}}}, nil
 }
 
 // files serves GET /instances/{id}/files?path=/work/... through the fs

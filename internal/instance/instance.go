@@ -529,6 +529,33 @@ func (m *Manager) Prompt(ctx context.Context, req *runtime.PromptRequest) (*runt
 	return out, nil
 }
 
+// Inspect reports the instance's live globals. The session serializes
+// the snapshot against in-flight execs; secret values are scrubbed on
+// the way out, same as exec output.
+func (m *Manager) Inspect(ctx context.Context, req *runtime.InspectRequest) (*runtime.InspectResponse, error) {
+	in, err := m.live(req.InstanceID, req.Owner, req.Epoch)
+	if err != nil {
+		return nil, err
+	}
+	res := in.sess.Inspect(ctx)
+	for name, v := range res.Variables {
+		res.Variables[name] = truncate(in.secrets.Redact(v), maxInspectValueBytes)
+	}
+	return &runtime.InspectResponse{Variables: res.Variables}, nil
+}
+
+// maxInspectValueBytes bounds one rendered variable's repr: a global
+// can hold an arbitrarily large structure, but inspect is a debug view
+// and the response must stay small.
+const maxInspectValueBytes = 8 << 10
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…(truncated)"
+}
+
 // withConsole arms the gate for a host-side console operation and hands
 // fn the gate plus the named capability's closer.
 func (m *Manager) withConsole(in *inst, cap types.CapabilityName, fn func(gate *capability.Gate, closer io.Closer) error) error {

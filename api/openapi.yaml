@@ -288,6 +288,26 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
+  /api/v1/instances/{id}/inspect:
+    get:
+      operationId: instanceInspect
+      tags: [instances]
+      description: >-
+        Snapshot of the instance's live Starlark globals: variable name
+        to its repr, with secret values scrubbed. The instance must be
+        live and running; a deleted/expired instance returns 409
+        not_running (404 when it no longer exists at all, same as exec).
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: variable name to repr
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstanceInspect'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
   /api/v1/instances/{id}/executions:
     get:
       operationId: listExecutions
@@ -853,6 +873,14 @@ components:
           items: { $ref: '#/components/schemas/FileEntry' }
         path: { type: string }
         content: { type: string }
+    InstanceInspect:
+      type: object
+      required: [variables]
+      description: live globals snapshot; values are reprs, secret-scrubbed
+      properties:
+        variables:
+          type: object
+          additionalProperties: { type: string }
     Execution:
       type: object
       required: [id, instance_id, user_id, code_sha256, code_snippet, status, duration_ms, steps, output_bytes, created_at]

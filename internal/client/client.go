@@ -280,6 +280,22 @@ func (c *Client) Files(ctx context.Context, id, path string) (entries []FileEntr
 	return nil, s, nil
 }
 
+// Inspect returns the instance's live globals: variable name to repr,
+// secret-scrubbed by the node.
+func (c *Client) Inspect(ctx context.Context, id string) (map[string]string, error) {
+	resp, err := c.gc.InstanceInspectWithResponse(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	var m struct {
+		Variables map[string]string `json:"variables"`
+	}
+	if err := unwrap(resp, resp.Body, &m); err != nil {
+		return nil, err
+	}
+	return m.Variables, nil
+}
+
 func (c *Client) ListExecutions(ctx context.Context, id string, limit int) ([]*store.Execution, error) {
 	params := &gen.ListExecutionsParams{}
 	if limit > 0 {

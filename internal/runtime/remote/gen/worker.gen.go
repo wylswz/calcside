@@ -107,6 +107,12 @@ type ExtTree struct {
 	Sum string `json:"sum"`
 }
 
+// InspectRequest defines model for InspectRequest.
+type InspectRequest = rt.InspectRequest
+
+// InspectResponse defines model for InspectResponse.
+type InspectResponse = rt.InspectResponse
+
 // KeepaliveRequest defines model for KeepaliveRequest.
 type KeepaliveRequest = rt.KeepaliveRequest
 
@@ -133,6 +139,9 @@ type RuntimeDeleteJSONRequestBody = DeleteRequest
 
 // RuntimeExecJSONRequestBody defines body for RuntimeExec for application/json ContentType.
 type RuntimeExecJSONRequestBody = ExecRequest
+
+// RuntimeInspectJSONRequestBody defines body for RuntimeInspect for application/json ContentType.
+type RuntimeInspectJSONRequestBody = InspectRequest
 
 // RuntimeKeepaliveJSONRequestBody defines body for RuntimeKeepalive for application/json ContentType.
 type RuntimeKeepaliveJSONRequestBody = KeepaliveRequest
@@ -281,6 +290,24 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /runtime/v1/exec (the `RuntimeExec` operationId).
 	RuntimeExec(ctx context.Context, body RuntimeExecJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RuntimeInspectWithBody Snapshot a live instance's globals (variable reprs).
+	//
+	// Read-only; may be retried.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /runtime/v1/inspect (the `RuntimeInspect` operationId).
+	RuntimeInspectWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RuntimeInspect Snapshot a live instance's globals (variable reprs).
+	//
+	// Read-only; may be retried.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /runtime/v1/inspect (the `RuntimeInspect` operationId).
+	RuntimeInspect(ctx context.Context, body RuntimeInspectJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RuntimeKeepaliveWithBody Renew the instance's sliding TTL deadline.
 	//
@@ -457,6 +484,44 @@ func (c *Client) RuntimeExecWithBody(ctx context.Context, contentType string, bo
 // Corresponds with POST /runtime/v1/exec (the `RuntimeExec` operationId).
 func (c *Client) RuntimeExec(ctx context.Context, body RuntimeExecJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRuntimeExecRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RuntimeInspectWithBody Snapshot a live instance's globals (variable reprs).
+//
+// Read-only; may be retried.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /runtime/v1/inspect (the `RuntimeInspect` operationId).
+func (c *Client) RuntimeInspectWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRuntimeInspectRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RuntimeInspect Snapshot a live instance's globals (variable reprs).
+//
+// Read-only; may be retried.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /runtime/v1/inspect (the `RuntimeInspect` operationId).
+func (c *Client) RuntimeInspect(ctx context.Context, body RuntimeInspectJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRuntimeInspectRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -703,6 +768,46 @@ func NewRuntimeExecRequestWithBody(server string, contentType string, body io.Re
 	return req, nil
 }
 
+// NewRuntimeInspectRequest calls the generic RuntimeInspect builder with application/json body
+func NewRuntimeInspectRequest(server string, body RuntimeInspectJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRuntimeInspectRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewRuntimeInspectRequestWithBody constructs an http.Request for the RuntimeInspect method, with any body, and a specified content type
+func NewRuntimeInspectRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/runtime/v1/inspect")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewRuntimeKeepaliveRequest calls the generic RuntimeKeepalive builder with application/json body
 func NewRuntimeKeepaliveRequest(server string, body RuntimeKeepaliveJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -894,6 +999,24 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /runtime/v1/exec (the `RuntimeExec` operationId).
 	RuntimeExecWithResponse(ctx context.Context, body RuntimeExecJSONRequestBody, reqEditors ...RequestEditorFn) (*RuntimeExecResponse, error)
+
+	// RuntimeInspectWithBodyWithResponse Snapshot a live instance's globals (variable reprs).
+	//
+	// Read-only; may be retried.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /runtime/v1/inspect (the `RuntimeInspect` operationId).
+	RuntimeInspectWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RuntimeInspectResponse, error)
+
+	// RuntimeInspectWithResponse Snapshot a live instance's globals (variable reprs).
+	//
+	// Read-only; may be retried.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /runtime/v1/inspect (the `RuntimeInspect` operationId).
+	RuntimeInspectWithResponse(ctx context.Context, body RuntimeInspectJSONRequestBody, reqEditors ...RequestEditorFn) (*RuntimeInspectResponse, error)
 
 	// RuntimeKeepaliveWithBodyWithResponse Renew the instance's sliding TTL deadline.
 	//
@@ -1124,6 +1247,54 @@ func (r RuntimeExecResponse) ContentType() string {
 	return ""
 }
 
+type RuntimeInspectResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *InspectResponse
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RuntimeInspectResponse) GetJSON200() *InspectResponse {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RuntimeInspectResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RuntimeInspectResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RuntimeInspectResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RuntimeInspectResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RuntimeInspectResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type RuntimeKeepaliveResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -1336,6 +1507,36 @@ func (c *ClientWithResponses) RuntimeExecWithResponse(ctx context.Context, body 
 	return ParseRuntimeExecResponse(rsp)
 }
 
+// RuntimeInspectWithBodyWithResponse Snapshot a live instance's globals (variable reprs).
+//
+// Read-only; may be retried.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /runtime/v1/inspect (the `RuntimeInspect` operationId).
+func (c *ClientWithResponses) RuntimeInspectWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RuntimeInspectResponse, error) {
+	rsp, err := c.RuntimeInspectWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRuntimeInspectResponse(rsp)
+}
+
+// RuntimeInspectWithResponse Snapshot a live instance's globals (variable reprs).
+//
+// Read-only; may be retried.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /runtime/v1/inspect (the `RuntimeInspect` operationId).
+func (c *ClientWithResponses) RuntimeInspectWithResponse(ctx context.Context, body RuntimeInspectJSONRequestBody, reqEditors ...RequestEditorFn) (*RuntimeInspectResponse, error) {
+	rsp, err := c.RuntimeInspect(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRuntimeInspectResponse(rsp)
+}
+
 // RuntimeKeepaliveWithBodyWithResponse Renew the instance's sliding TTL deadline.
 //
 // Read-only with respect to script state; may be retried.
@@ -1528,6 +1729,39 @@ func ParseRuntimeExecResponse(rsp *http.Response) (*RuntimeExecResponse, error) 
 	return response, nil
 }
 
+// ParseRuntimeInspectResponse parses an HTTP response from a RuntimeInspectWithResponse call
+func ParseRuntimeInspectResponse(rsp *http.Response) (*RuntimeInspectResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RuntimeInspectResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InspectResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseRuntimeKeepaliveResponse parses an HTTP response from a RuntimeKeepaliveWithResponse call
 func ParseRuntimeKeepaliveResponse(rsp *http.Response) (*RuntimeKeepaliveResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -1608,6 +1842,9 @@ type ServerInterface interface {
 	// RuntimeExec Run Starlark on a live instance.
 	// (POST /runtime/v1/exec)
 	RuntimeExec(c *gin.Context)
+	// RuntimeInspect Snapshot a live instance's globals (variable reprs).
+	// (POST /runtime/v1/inspect)
+	RuntimeInspect(c *gin.Context)
 	// RuntimeKeepalive Renew the instance's sliding TTL deadline.
 	// (POST /runtime/v1/keepalive)
 	RuntimeKeepalive(c *gin.Context)
@@ -1677,6 +1914,19 @@ func (siw *ServerInterfaceWrapper) RuntimeExec(c *gin.Context) {
 	siw.Handler.RuntimeExec(c)
 }
 
+// RuntimeInspect operation middleware
+func (siw *ServerInterfaceWrapper) RuntimeInspect(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RuntimeInspect(c)
+}
+
 // RuntimeKeepalive operation middleware
 func (siw *ServerInterfaceWrapper) RuntimeKeepalive(c *gin.Context) {
 
@@ -1736,6 +1986,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/runtime/v1/delete", wrapper.RuntimeDelete)
 	router.POST(options.BaseURL+"/runtime/v1/browse", wrapper.RuntimeBrowse)
 	router.POST(options.BaseURL+"/runtime/v1/prompt", wrapper.RuntimePrompt)
+	router.POST(options.BaseURL+"/runtime/v1/inspect", wrapper.RuntimeInspect)
 }
 
 type ErrorJSONResponse ErrorEnvelope
@@ -1896,6 +2147,45 @@ func (response RuntimeExecdefaultJSONResponse) VisitRuntimeExecResponse(w http.R
 	return err
 }
 
+type RuntimeInspectRequestObject struct {
+	Body *RuntimeInspectJSONRequestBody
+}
+
+type RuntimeInspectResponseObject interface {
+	VisitRuntimeInspectResponse(w http.ResponseWriter) error
+}
+
+type RuntimeInspect200JSONResponse InspectResponse
+
+func (response RuntimeInspect200JSONResponse) VisitRuntimeInspectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RuntimeInspectdefaultJSONResponse struct {
+	Body       ErrorEnvelope
+	StatusCode int
+}
+
+func (response RuntimeInspectdefaultJSONResponse) VisitRuntimeInspectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RuntimeKeepaliveRequestObject struct {
 	Body *RuntimeKeepaliveJSONRequestBody
 }
@@ -1988,6 +2278,9 @@ type StrictServerInterface interface {
 	// RuntimeExec Run Starlark on a live instance.
 	// (POST /runtime/v1/exec)
 	RuntimeExec(ctx context.Context, request RuntimeExecRequestObject) (RuntimeExecResponseObject, error)
+	// RuntimeInspect Snapshot a live instance's globals (variable reprs).
+	// (POST /runtime/v1/inspect)
+	RuntimeInspect(ctx context.Context, request RuntimeInspectRequestObject) (RuntimeInspectResponseObject, error)
 	// RuntimeKeepalive Renew the instance's sliding TTL deadline.
 	// (POST /runtime/v1/keepalive)
 	RuntimeKeepalive(ctx context.Context, request RuntimeKeepaliveRequestObject) (RuntimeKeepaliveResponseObject, error)
@@ -2170,6 +2463,37 @@ func (sh *strictHandler) RuntimeExec(ctx *gin.Context) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(RuntimeExecResponseObject); ok {
 		if err := validResponse.VisitRuntimeExecResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RuntimeInspect operation middleware
+func (sh *strictHandler) RuntimeInspect(ctx *gin.Context) {
+	var request RuntimeInspectRequestObject
+
+	var body RuntimeInspectJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.RuntimeInspect(ctx, request.(RuntimeInspectRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RuntimeInspect")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(RuntimeInspectResponseObject); ok {
+		if err := validResponse.VisitRuntimeInspectResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

@@ -22,9 +22,9 @@ import (
 // binding and call that node's address. The wire itself is the client
 // generated from api/worker.openapi.yaml.
 //
-// Retry semantics follow the contract: only Keepalive, Browse, and
-// Prompt re-resolve and retry once on a stale route; Create, Exec, and
-// Delete carry external side effects and fail through.
+// Retry semantics follow the contract: only Keepalive, Browse, Prompt,
+// and Inspect re-resolve and retry once on a stale route; Create, Exec,
+// and Delete carry external side effects and fail through.
 type Client struct {
 	// Key is the shared API↔worker HMAC secret. Required.
 	Key []byte
@@ -234,6 +234,20 @@ func (c *Client) Prompt(ctx context.Context, req *runtime.PromptRequest) (*runti
 			return nil, err
 		}
 		resp, err := c.forNode(rt.addr).RuntimePromptWithResponse(ctx, *req)
+		if err != nil {
+			return nil, err
+		}
+		return respOf(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
+	})
+}
+
+func (c *Client) Inspect(ctx context.Context, req *runtime.InspectRequest) (*runtime.InspectResponse, error) {
+	return retryOnStaleRoute(c, ctx, req.InstanceID, func() (*runtime.InspectResponse, error) {
+		rt, err := c.routed(ctx, req.InstanceID)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := c.forNode(rt.addr).RuntimeInspectWithResponse(ctx, *req)
 		if err != nil {
 			return nil, err
 		}

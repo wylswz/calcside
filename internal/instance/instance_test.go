@@ -3,6 +3,7 @@ package instance
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -152,5 +153,38 @@ func TestDeleteReleasesInstance(t *testing.T) {
 	}
 	if err := n.delete(id); !errors.Is(err, runtime.ErrNotFound) {
 		t.Fatalf("second delete: expected ErrNotFound, got %v", err)
+	}
+}
+
+// Inspect snapshots globals for the console: user variables show up as
+// reprs, a secret value that ended up in a variable is scrubbed like
+// exec output, and owner/epoch are re-checked like every other op.
+func TestInspect(t *testing.T) {
+	now := time.Now()
+	n := newNode(t, Options{Limits: defaultLimits()}, &now)
+	ctx := context.Background()
+	id := n.mustCreate(`{"capabilities":{"fs":{}},"secrets":{"TOK":{"value":"s3cr3t"}}}`)
+	n.mustExec(id, "x = 41\ndata = [1, 2]\nleak = \"prefix s3cr3t suffix\"")
+
+	resp, err := n.m.Inspect(ctx, &runtime.InspectRequest{InstanceID: id, Owner: n.owner})
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	if got := resp.Variables["x"]; got != "41" {
+		t.Fatalf("x = %q, want %q", got, "41")
+	}
+	if got := resp.Variables["data"]; got != "[1, 2]" {
+		t.Fatalf("data = %q, want %q", got, "[1, 2]")
+	}
+	if strings.Contains(resp.Variables["leak"], "s3cr3t") {
+		t.Fatalf("secret value survived into inspect: %q", resp.Variables["leak"])
+	}
+
+	// Unknown instance and foreign owner are rejected like exec is.
+	if _, err := n.m.Inspect(ctx, &runtime.InspectRequest{InstanceID: "ins_nope", Owner: n.owner}); !errors.Is(err, runtime.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+	if _, err := n.m.Inspect(ctx, &runtime.InspectRequest{InstanceID: id, Owner: runtime.Owner{UserID: "usr_other"}}); !errors.Is(err, runtime.ErrNotOwner) {
+		t.Fatalf("expected ErrNotOwner, got %v", err)
 	}
 }

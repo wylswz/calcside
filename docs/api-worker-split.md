@@ -13,8 +13,8 @@ remains to put a network boundary between them.
 ## Decisions already made
 
 - No standalone gateway. API nodes are stateless peers and forward only
-  execution-dependent ops (`create`, `exec`, `delete`, `files`, `prompt`) to the
-  owning worker.
+  execution-dependent ops (`create`, `exec`, `delete`, `files`, `prompt`,
+  `inspect`) to the owning worker.
 - No API↔API forwarding. Ever.
 - Authoritative `instance_id → node_id` binding lives in Postgres, next to the
   instance lifecycle it is part of. Redis holds node liveness keys, route

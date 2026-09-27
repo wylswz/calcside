@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
-import { api, AuditEvent, ExecResult, Execution, FileEntry, Instance } from '../api'
+import { api, AuditEvent, ExecResult, Execution, FileEntry, Instance, InstanceInspect } from '../api'
 import type { SecretSource } from '../api'
 
 interface SpecSecret { ref?: string; source?: SecretSource; allowed_domains?: string[] }
@@ -71,6 +71,45 @@ function AuditTab({ id }: { id: string }) {
   return <AuditTable events={data?.events ?? []} />
 }
 
+function VariablesTab({ id, running }: { id: string; running: boolean }) {
+  const { data, error, refetch, isFetching } = useQuery({
+    queryKey: ['inspect', id],
+    queryFn: () => api.get<InstanceInspect>(`/api/v1/instances/${id}/inspect`),
+    enabled: running,
+    retry: false,
+  })
+  const names = Object.keys(data?.variables ?? {}).sort()
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center text-xs">
+        <span className="text-gray-500">live globals on this instance (reprs; secrets scrubbed)</span>
+        <button className="ml-auto text-gray-500" onClick={() => refetch()} disabled={!running}>
+          {isFetching ? 'refreshing…' : 'refresh'}
+        </button>
+      </div>
+      {!running && <p className="text-xs text-gray-500">instance is not running — nothing to inspect</p>}
+      {error && <p className="text-xs text-red-600">{(error as Error).message}</p>}
+      {data && (
+        <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-800">
+          <table className="w-full text-xs">
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-800 font-mono">
+              {names.map((name) => (
+                <tr key={name}>
+                  <td className="px-2 py-1 align-top whitespace-nowrap text-gray-600 dark:text-gray-400">{name}</td>
+                  <td className="px-2 py-1 whitespace-pre-wrap break-all">{data.variables[name]}</td>
+                </tr>
+              ))}
+              {names.length === 0 && (
+                <tr><td className="px-2 py-2 text-gray-500">no variables yet — run some code first</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface PromptResponse {
   instance_id: string
   prompt: string
@@ -123,7 +162,7 @@ export default function InstanceDetail() {
   const [code, setCode] = useState(DEFAULT_CODE)
   const [result, setResult] = useState<ExecResult | null>(null)
   const [running, setRunning] = useState(false)
-  const [tab, setTab] = useState<'execs' | 'audit' | 'prompt'>('execs')
+  const [tab, setTab] = useState<'execs' | 'audit' | 'vars' | 'prompt'>('execs')
   const [openExec, setOpenExec] = useState<string | null>(null)
 
   const { data: inst } = useQuery({
@@ -145,6 +184,7 @@ export default function InstanceDetail() {
       refetchExecs()
       qc.invalidateQueries({ queryKey: ['audit', id] })
       qc.invalidateQueries({ queryKey: ['files', id] })
+      qc.invalidateQueries({ queryKey: ['inspect', id] })
     } catch (e: any) {
       setResult({ exec_id: '', output: '', error: { type: 'runtime', message: e.message }, duration_ms: 0, steps: 0 })
     } finally {
@@ -223,6 +263,7 @@ export default function InstanceDetail() {
           <div className="flex gap-2 border-b border-gray-200 dark:border-gray-800 text-sm">
             <button className={`px-3 py-1.5 ${tab === 'execs' ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`} onClick={() => setTab('execs')}>Executions</button>
             <button className={`px-3 py-1.5 ${tab === 'audit' ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`} onClick={() => setTab('audit')}>Audit</button>
+            <button className={`px-3 py-1.5 ${tab === 'vars' ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`} onClick={() => setTab('vars')}>Variables</button>
             <button className={`px-3 py-1.5 ${tab === 'prompt' ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`} onClick={() => setTab('prompt')}>Agent prompt</button>
           </div>
           {tab === 'execs' && (
@@ -259,6 +300,7 @@ export default function InstanceDetail() {
             </div>
           )}
           {tab === 'audit' && <AuditTab id={id} />}
+          {tab === 'vars' && <VariablesTab id={id} running={inst.status === 'running'} />}
           {tab === 'prompt' && <PromptTab id={id} running={inst.status === 'running'} />}
         </div>
 

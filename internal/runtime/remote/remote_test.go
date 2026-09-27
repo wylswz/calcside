@@ -106,6 +106,12 @@ func TestRemoteExecRoundTrip(t *testing.T) {
 	if err != nil || resp.Result.Output != "1\n" {
 		t.Fatalf("dedup replay: %v out=%q", err, resp.Result.Output)
 	}
+
+	// Inspect rides the same authenticated transport.
+	vars, err := rt.Inspect(ctx, &runtime.InspectRequest{InstanceID: "ins_1", Owner: owner, Epoch: 1})
+	if err != nil || vars.Variables["calls"] != "1" {
+		t.Fatalf("inspect: %v vars=%v", err, vars.Variables)
+	}
 }
 
 func TestRemoteRejectsStaleEpochAndForeignOwner(t *testing.T) {

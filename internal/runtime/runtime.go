@@ -67,8 +67,8 @@ func Errf(kind error, format string, args ...any) *Error {
 // Retry semantics differ per method and are part of the contract:
 // Create, Exec and Delete have side effects and must never be retried
 // transparently — an Exec may have injected secrets into outbound
-// requests before failing. Keepalive, Browse and Prompt are read-only
-// with respect to script state and may be retried.
+// requests before failing. Keepalive, Browse, Prompt and Inspect are
+// read-only with respect to script state and may be retried.
 type Runtime interface {
 	Create(ctx context.Context, req *CreateRequest) (*CreateResponse, error)
 	Exec(ctx context.Context, req *ExecRequest) (*ExecResponse, error)
@@ -76,4 +76,5 @@ type Runtime interface {
 	Delete(ctx context.Context, req *DeleteRequest) (*DeleteResponse, error)
 	Browse(ctx context.Context, req *BrowseRequest) (*BrowseResponse, error)
 	Prompt(ctx context.Context, req *PromptRequest) (*PromptResponse, error)
+	Inspect(ctx context.Context, req *InspectRequest) (*InspectResponse, error)
 }

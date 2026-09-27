@@ -203,6 +203,16 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("files read: %d %v", code, m)
 	}
 
+	// inspect: globals snapshot shows variables set by earlier execs
+	code, m, _ = e.req("POST", "/api/v1/instances/"+instID+"/exec", `{"code":"answer = 42"}`, bearer, nil)
+	if code != 200 {
+		t.Fatalf("exec2: %d %v", code, m)
+	}
+	code, m, _ = e.req("GET", "/api/v1/instances/"+instID+"/inspect", "", bearer, nil)
+	if code != 200 || m["variables"].(map[string]any)["answer"] != "42" {
+		t.Fatalf("inspect: %d %v", code, m)
+	}
+
 	// audit: flush then list
 	e.rec.Close()
 	e.rec = nil
@@ -228,7 +238,7 @@ func TestEndToEnd(t *testing.T) {
 
 	// executions list
 	code, m, _ = e.req("GET", "/api/v1/instances/"+instID+"/executions", "", bearer, nil)
-	if code != 200 || len(m["executions"].([]any)) != 1 {
+	if code != 200 || len(m["executions"].([]any)) != 2 {
 		t.Fatalf("executions: %d %v", code, m)
 	}
 

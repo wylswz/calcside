@@ -131,6 +131,14 @@ func (s strict) RuntimePrompt(ctx context.Context, req gen.RuntimePromptRequestO
 	return gen.RuntimePrompt200JSONResponse(*resp), nil
 }
 
+func (s strict) RuntimeInspect(ctx context.Context, req gen.RuntimeInspectRequestObject) (gen.RuntimeInspectResponseObject, error) {
+	resp, err := s.rt.Inspect(ctx, req.Body)
+	if err != nil {
+		return gen.RuntimeInspectdefaultJSONResponse{Body: envelope(err), StatusCode: statusOf(err)}, nil
+	}
+	return gen.RuntimeInspect200JSONResponse(*resp), nil
+}
+
 func writeErr(c *gin.Context, err error) {
 	writeErrStatus(c, statusOf(err), kindOf(err), err.Error())
 }

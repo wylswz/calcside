@@ -155,6 +155,26 @@ paths:
                 $ref: '#/components/schemas/PromptResponse'
         default:
           $ref: '#/components/responses/Error'
+  /runtime/v1/inspect:
+    post:
+      operationId: runtimeInspect
+      summary: Snapshot a live instance's globals (variable reprs).
+      description: Read-only; may be retried.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InspectRequest'
+      responses:
+        '200':
+          description: Variable name to repr, secret-scrubbed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InspectResponse'
+        default:
+          $ref: '#/components/responses/Error'
   /internal/v1/ext/tree:
     get:
       operationId: extTree
@@ -278,4 +298,12 @@ components:
     PromptResponse:
       type: object
       x-go-type: rt.PromptResponse
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    InspectRequest:
+      type: object
+      x-go-type: rt.InspectRequest
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    InspectResponse:
+      type: object
+      x-go-type: rt.InspectResponse
       x-go-type-import: {name: rt, path: calcside/internal/runtime}

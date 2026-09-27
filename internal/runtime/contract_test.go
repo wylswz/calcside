@@ -72,6 +72,8 @@ func TestMessagesRoundTrip(t *testing.T) {
 			ExecTimeoutMs: 30000, MaxSteps: 10, MaxOutputBytes: 1024,
 			TTLSeconds: 900, NetHosts: []string{"x.com"},
 		},
+		&InspectRequest{InstanceID: "ins_1", Owner: Owner{UserID: "usr_1"}, Epoch: 3},
+		&InspectResponse{Variables: map[string]string{"x": "1", "items": "[1, 2]"}},
 	}
 	for _, want := range cases {
 		b, err := json.Marshal(want)
