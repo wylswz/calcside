@@ -12,6 +12,7 @@ import (
 	"calcside/internal/capability"
 	capfs "calcside/internal/capability/fs"
 	capio "calcside/internal/capability/io"
+	"calcside/internal/secrets"
 	"calcside/internal/types"
 )
 
@@ -194,33 +195,52 @@ func TestCapabilityShadowResetEachExec(t *testing.T) {
 	}
 }
 
-func TestMemoryWatchdog(t *testing.T) {
-	e := New(4,
-		WithMemoryLimit(1), // any heap read trips it
-		WithHeapSampler(func() uint64 { return 1 << 30 }),
-		WithWatchdogInterval(5*time.Millisecond),
-	)
-	defer e.Close()
-	s, buf := newSession(t, nil, 1<<20)
-	res := e.Exec(context.Background(), s, "x", "while True:\n  pass", 30*time.Second, 1<<60, buf.String)
-	if res.Error == nil || res.Error.Type != types.ErrMemoryLimit {
-		t.Fatalf("expected memory_limit, got %+v", res.Error)
+func TestNewSessionFromValues(t *testing.T) {
+	reg := capability.NewRegistry()
+	reg.Register(capfs.Factory())
+	reg.Register(capio.Factory())
+	limits := capability.ServerLimits{MaxFSQuotaBytes: 256 << 20, MaxOutputBytes: 1 << 20}
+	fsCfg, err := capfs.Factory().Validate([]byte(`{}`), limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := secrets.NewSet()
+	set.Add("API_KEY", []byte("s3cret"), nil)
+
+	s, err := NewSession(SessionDeps{Registry: reg, Limits: limits, Secrets: set}, SessionCreation{
+		InstanceID:     "ins_t",
+		UserID:         "u",
+		Capabilities:   map[string]any{"fs": fsCfg},
+		Env:            map[string]string{"A": "1"},
+		MaxSteps:       1 << 20,
+		MaxOutputBytes: 1 << 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, ok := s.Capabilities["io"]; !ok {
+		t.Fatalf("io not implicitly granted: %v", s.Capabilities)
+	}
+	if _, ok := s.Closers[types.CapFS]; !ok || s.Out == nil {
+		t.Fatalf("fs closer / output buffer not wired")
+	}
+
+	e := New(4)
+	code := "fs.write('/work/a.txt', 'x')\nprint(env['A'], secrets.names(), fs.read('/work/a.txt'))"
+	res := e.Exec(context.Background(), s, "x", code, 0, 1<<20, s.Out.String)
+	if res.Error != nil || res.Output != "1 [\"API_KEY\"] x\n" {
+		t.Fatalf("exec: err=%+v out=%q", res.Error, res.Output)
 	}
 }
 
-func TestMemoryWatchdogRealHeap(t *testing.T) {
-	if testing.Short() {
-		t.Skip("short mode")
-	}
-	e := New(4,
-		WithMemoryLimit(64<<20),
-		WithWatchdogInterval(10*time.Millisecond),
-	)
-	defer e.Close()
-	s, buf := newSession(t, nil, 1<<20)
-	code := "x = []\nwhile True:\n  x.append(\"a\" * 1000000)"
-	res := e.Exec(context.Background(), s, "x", code, 60*time.Second, 1<<60, buf.String)
-	if res.Error == nil || res.Error.Type != types.ErrMemoryLimit {
-		t.Fatalf("expected memory_limit, got %+v", res.Error)
+func TestNewSessionUnknownCapability(t *testing.T) {
+	reg := capability.NewRegistry()
+	reg.Register(capio.Factory())
+	_, err := NewSession(SessionDeps{Registry: reg}, SessionCreation{
+		Capabilities: map[string]any{"nope": nil},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown capability nope") {
+		t.Fatalf("want unknown capability error, got %v", err)
 	}
 }

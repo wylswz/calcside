@@ -16,16 +16,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 	"sync"
 	"time"
 
-	starjson "go.starlark.net/lib/json"
-	"go.starlark.net/lib/math"
-	"go.starlark.net/starlark"
-
 	"calcside/internal/capability"
-	capio "calcside/internal/capability/io"
 	"calcside/internal/engine"
 	"calcside/internal/policy"
 	"calcside/internal/runtime"
@@ -71,17 +65,9 @@ type inst struct {
 	labels map[string]string
 
 	sess    *engine.Session
-	gate    *capability.Gate
-	closers []io.Closer
-	// capClosers indexes capability closers by capability name, for
-	// host-side access (console file browse) without starlark types.
-	capClosers map[types.CapabilityName]io.Closer
-	out        *capio.Buffer
-	vfs        interface{ Files() map[string][]byte } // *fs.Closer V, kept loose to avoid import
-	capCfgs    map[string]any                         // validated capability configs, incl. implicit io
-	spec       *runtime.Spec                          // normalized spec
-	secrets    *secrets.Set
-	sink       *auditSink
+	spec    *runtime.Spec // normalized spec
+	secrets *secrets.Set
+	sink    *auditSink
 
 	mu        sync.Mutex // guards expiresAt and execLog
 	expiresAt time.Time
@@ -105,7 +91,9 @@ type execEntry struct {
 
 const maxExecLog = 128
 
-// Manager owns all live instances on this node.
+// Manager is an in-memory implementation of runtime.Runtime
+// where each instance is a starlark.Thread
+// In isolated mode, each process owns a Manager instance
 type Manager struct {
 	eng          *engine.Engine
 	reg          *capability.Registry
@@ -239,125 +227,38 @@ func (m *Manager) Create(ctx context.Context, req *runtime.CreateRequest) (*runt
 		return nil, runtime.Errf(runtime.ErrBadSpec, "%s", err)
 	}
 
-	labels := req.Labels
-	if labels == nil {
-		labels = map[string]string{}
-	}
 	sink := &auditSink{}
-	gate := capability.NewGate(capability.GateOwner{
-		InstanceID: req.InstanceID,
-		UserID:     req.Owner.UserID,
-		UserEmail:  req.Owner.Email,
-		Labels:     labels,
-	}, []capability.Hook{hook}, sink)
-
-	predeclared := starlark.StringDict{
-		"json": starjson.Module,
-		"math": math.Module,
-	}
-
-	// env: frozen dict (env.get / env["X"] / env.keys()); secrets: names
-	// only. Neither goes through the gate.
-	envDict := starlark.NewDict(len(spec.Env))
-	for k, v := range spec.Env {
-		_ = envDict.SetKey(starlark.String(k), starlark.String(v))
-	}
-	envDict.Freeze()
-	predeclared["env"] = envDict
-	predeclared["secrets"] = secretsStruct{set: secSet}
-	var closers []io.Closer
-	var outBuf *capio.Buffer
-	var vfs interface{ Files() map[string][]byte }
-
-	// io is always granted, even when not listed in the spec.
-	caps := map[string]json.RawMessage{}
-	for k, v := range spec.Capabilities {
-		caps[k] = v
-	}
-	ioName := string(types.CapIO)
-	if _, ok := caps[ioName]; !ok {
-		caps[ioName] = nil
-		if f, ok2 := m.reg.Get(types.CapIO); ok2 {
-			cfg, err := f.Validate(json.RawMessage(fmt.Sprintf(`{"max_output_bytes":%d}`, spec.Limits.MaxOutputBytes)), m.limits)
-			if err != nil {
-				return nil, runtime.Errf(runtime.ErrBadSpec, "%s", err)
-			}
-			typed[ioName] = cfg
-		}
-	}
-
-	names := make([]string, 0, len(caps))
-	for n := range caps {
-		if n != string(types.CapExt) {
-			names = append(names, n)
-		}
-	}
-	sort.Strings(names)
-	// ext is built last: its bindings compose the other capabilities.
-	if _, ok := caps[string(types.CapExt)]; ok {
-		names = append(names, string(types.CapExt))
-	}
-	bindings := map[types.CapabilityName]starlark.Value{}
-	capClosers := map[types.CapabilityName]io.Closer{}
-	for _, name := range names {
-		f, _ := m.reg.Get(types.CapabilityName(name))
-		val, closer, err := f.New(typed[name], capability.InstanceEnv{Gate: gate, Secrets: secSet, Bindings: bindings, MaxSteps: spec.Limits.MaxSteps})
-		if err != nil {
-			for _, c := range closers {
-				_ = c.Close()
-			}
-			return nil, runtime.Errf(runtime.ErrBadSpec, "capability %s: %s", name, err)
-		}
-		if closer != nil {
-			closers = append(closers, closer)
-			capClosers[types.CapabilityName(name)] = closer
-			switch c := closer.(type) {
-			case *capio.Closer:
-				outBuf = c.B
-			case interface{ Files() map[string][]byte }:
-				vfs = c
-			}
-		}
-		predeclared[name] = val
-		bindings[types.CapabilityName(name)] = val
-	}
-	if outBuf == nil {
-		outBuf = capio.NewBuffer(spec.Limits.MaxOutputBytes)
-	}
-	predeclared["print"] = capio.PrintBuiltin(outBuf, gate)
-
-	if err := engine.ValidatePredeclared(predeclared); err != nil {
-		for _, c := range closers {
-			_ = c.Close()
-		}
+	sess, err := engine.NewSession(engine.SessionDeps{
+		Registry: m.reg,
+		Limits:   m.limits,
+		Hooks:    []capability.Hook{hook},
+		Observer: sink,
+		Secrets:  secSet,
+	}, engine.SessionCreation{
+		InstanceID:     req.InstanceID,
+		UserID:         req.Owner.UserID,
+		UserEmail:      req.Owner.Email,
+		Labels:         req.Labels,
+		Capabilities:   typed,
+		Env:            spec.Env,
+		MaxSteps:       spec.Limits.MaxSteps,
+		MaxOutputBytes: spec.Limits.MaxOutputBytes,
+	})
+	if err != nil {
 		return nil, runtime.Errf(runtime.ErrBadSpec, "%s", err)
 	}
 
 	in := &inst{
-		id:         req.InstanceID,
-		owner:      req.Owner,
-		labels:     labels,
-		gate:       gate,
-		closers:    closers,
-		capClosers: capClosers,
-		out:        outBuf,
-		vfs:        vfs,
-		capCfgs:    typed,
-		spec:       spec,
-		secrets:    secSet,
-		sink:       sink,
-		expiresAt:  req.ExpiresAt,
-		epoch:      req.Epoch,
-		execLog:    map[string]*execEntry{},
-	}
-	in.sess = &engine.Session{
-		Gate:        gate,
-		Predeclared: predeclared,
-		Globals:     starlark.StringDict{},
-		InstanceID:  req.InstanceID,
-		UserID:      req.Owner.UserID,
-		UserEmail:   req.Owner.Email,
-		Labels:      labels,
+		id:        req.InstanceID,
+		owner:     req.Owner,
+		labels:    sess.Labels,
+		sess:      sess,
+		spec:      spec,
+		secrets:   secSet,
+		sink:      sink,
+		expiresAt: req.ExpiresAt,
+		epoch:     req.Epoch,
+		execLog:   map[string]*execEntry{},
 	}
 	m.mu.Lock()
 	m.insts[req.InstanceID] = in
@@ -365,7 +266,7 @@ func (m *Manager) Create(ctx context.Context, req *runtime.CreateRequest) (*runt
 
 	granted := make([]types.CapabilityName, 0, len(m.reg.Names()))
 	for _, name := range m.reg.Names() {
-		if _, ok := typed[string(name)]; ok {
+		if _, ok := sess.Capabilities[string(name)]; ok {
 			granted = append(granted, name)
 		}
 	}
@@ -449,8 +350,8 @@ func (m *Manager) exec(ctx context.Context, req *runtime.ExecRequest, in *inst) 
 		}
 		timeout = d
 	}
-	in.out.Reset()
-	res := m.eng.Exec(ctx, in.sess, req.ExecID, req.Code, timeout, in.spec.Limits.MaxSteps, in.out.String)
+	in.sess.Out.Reset()
+	res := m.eng.Exec(ctx, in.sess, req.ExecID, req.Code, timeout, in.spec.Limits.MaxSteps, in.sess.Out.String)
 	// Defense in depth: scrub any secret value that escaped into output.
 	res.Output = in.secrets.Redact(res.Output)
 	if res.Error != nil {
@@ -504,7 +405,7 @@ func (m *Manager) Prompt(ctx context.Context, req *runtime.PromptRequest) (*runt
 		TTLSeconds:     in.spec.TTLSeconds,
 	}
 	for _, name := range m.reg.Names() {
-		cfg, granted := in.capCfgs[string(name)]
+		cfg, granted := in.sess.Capabilities[string(name)]
 		if !granted {
 			continue
 		}
@@ -559,21 +460,21 @@ func truncate(s string, max int) string {
 // withConsole arms the gate for a host-side console operation and hands
 // fn the gate plus the named capability's closer.
 func (m *Manager) withConsole(in *inst, cap types.CapabilityName, fn func(gate *capability.Gate, closer io.Closer) error) error {
-	closer, ok := in.capClosers[cap]
+	closer, ok := in.sess.Closers[cap]
 	if !ok {
 		return runtime.ErrNoCapability
 	}
 	in.sess.ExecMu.Lock()
 	defer in.sess.ExecMu.Unlock()
-	in.gate.Arm(capability.ExecContext{
+	in.sess.Gate.Arm(capability.ExecContext{
 		ExecID:     "console",
 		InstanceID: in.id,
 		UserID:     in.owner.UserID,
 		UserEmail:  in.owner.Email,
 		Labels:     in.labels,
 	})
-	defer in.gate.Disarm()
-	return fn(in.gate, closer)
+	defer in.sess.Gate.Disarm()
+	return fn(in.sess.Gate, closer)
 }
 
 // Delete ends a live instance: revoke gate, close resources, snapshot
@@ -588,12 +489,9 @@ func (m *Manager) Delete(ctx context.Context, req *runtime.DeleteRequest) (*runt
 }
 
 func (m *Manager) end(ctx context.Context, in *inst) {
-	in.gate.Revoke()
+	in.sess.Close()
 	if in.secrets != nil {
 		in.secrets.Wipe()
-	}
-	for _, c := range in.closers {
-		_ = c.Close()
 	}
 	_ = m.snap.Delete(ctx, in.id)
 	m.mu.Lock()
@@ -628,36 +526,3 @@ func (m *Manager) Count() int {
 	defer m.mu.Unlock()
 	return len(m.insts)
 }
-
-// secretsStruct is the predeclared `secrets` global: exposes only
-// names() — values are never reachable from Starlark.
-type secretsStruct struct{ set *secrets.Set }
-
-func (s secretsStruct) String() string        { return "<secrets>" }
-func (s secretsStruct) Type() string          { return "secrets" }
-func (s secretsStruct) Freeze()               {}
-func (s secretsStruct) Truth() starlark.Bool  { return true }
-func (s secretsStruct) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable: secrets") }
-
-func (s secretsStruct) Attr(name string) (starlark.Value, error) {
-	if name == "names" {
-		set := s.set
-		return starlark.NewBuiltin("secrets.names", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-			if err := starlark.UnpackArgs("secrets.names", args, kwargs); err != nil {
-				return nil, err
-			}
-			var names []string
-			if set != nil {
-				names = set.Names()
-			}
-			l := starlark.NewList(make([]starlark.Value, len(names)))
-			for i, n := range names {
-				l.SetIndex(i, starlark.String(n))
-			}
-			return l, nil
-		}), nil
-	}
-	return nil, nil
-}
-
-func (s secretsStruct) AttrNames() []string { return []string{"names"} }

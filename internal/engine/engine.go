@@ -7,20 +7,27 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
 	"runtime"
 	"runtime/metrics"
+	"sort"
 	"sync"
 	"time"
 
+	starjson "go.starlark.net/lib/json"
+	"go.starlark.net/lib/math"
 	"go.starlark.net/resolve"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
 
 	"calcside/internal/capability"
+	capio "calcside/internal/capability/io"
+	"calcside/internal/secrets"
 	"calcside/internal/types"
 )
 
@@ -35,6 +42,15 @@ type Session struct {
 	UserID     string
 	UserEmail  string
 	Labels     map[string]string
+
+	// Out captures print/io output; the caller resets it per exec.
+	Out *capio.Buffer
+	// Capabilities are the granted typed configs, including implicit io.
+	Capabilities map[string]any
+	// Closers indexes capability closers by name, for host-side access
+	// (console file browse) without starlark types.
+	Closers map[types.CapabilityName]io.Closer
+	closers []io.Closer // build order, for Close
 }
 
 // execContext builds the gate's ExecContext for one exec.
@@ -63,6 +79,147 @@ func (s *Session) Inspect(ctx context.Context) *InspectResult {
 	return &InspectResult{
 		Variables: vars,
 	}
+}
+
+// Close revokes the gate and releases capability resources.
+func (s *Session) Close() {
+	s.Gate.Revoke()
+	for _, c := range s.closers {
+		_ = c.Close()
+	}
+}
+
+// SessionCreation is the plain-data description of a session: whose it
+// is and what it is granted. Everything in it derives from a
+// runtime.CreateRequest after capability.NormalizeSpec.
+type SessionCreation struct {
+	InstanceID string
+	UserID     string
+	UserEmail  string
+	Labels     map[string]string
+
+	// Capabilities maps capability name to its validated, typed config.
+	// io is granted even when absent.
+	Capabilities   map[string]any
+	Env            map[string]string
+	MaxSteps       uint64
+	MaxOutputBytes int64
+}
+
+// SessionDeps are the live collaborators a session is wired to — the
+// part of session creation that is not data.
+type SessionDeps struct {
+	Registry *capability.Registry
+	Limits   capability.ServerLimits
+	Hooks    []capability.Hook
+	Observer capability.Observer
+	// Secrets backs secret injection and the `secrets` global; may be nil.
+	Secrets *secrets.Set
+}
+
+// NewSession builds the gate, capability bindings and predeclared
+// globals for one instance. On error every capability built so far is
+// closed.
+func NewSession(d SessionDeps, c SessionCreation) (*Session, error) {
+	labels := c.Labels
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	gate := capability.NewGate(capability.GateOwner{
+		InstanceID: c.InstanceID,
+		UserID:     c.UserID,
+		UserEmail:  c.UserEmail,
+		Labels:     labels,
+	}, d.Hooks, d.Observer)
+
+	// env: frozen dict (env.get / env["X"] / env.keys()); secrets: names
+	// only. Neither goes through the gate.
+	envDict := starlark.NewDict(len(c.Env))
+	for k, v := range c.Env {
+		_ = envDict.SetKey(starlark.String(k), starlark.String(v))
+	}
+	envDict.Freeze()
+	predeclared := starlark.StringDict{
+		"json":    starjson.Module,
+		"math":    math.Module,
+		"env":     envDict,
+		"secrets": secretsStruct{set: d.Secrets},
+	}
+
+	// io is always granted, even when not listed in the spec.
+	caps := maps.Clone(c.Capabilities)
+	if caps == nil {
+		caps = map[string]any{}
+	}
+	ioName := string(types.CapIO)
+	if _, ok := caps[ioName]; !ok {
+		if f, ok := d.Registry.Get(types.CapIO); ok {
+			cfg, err := f.Validate(json.RawMessage(fmt.Sprintf(`{"max_output_bytes":%d}`, c.MaxOutputBytes)), d.Limits)
+			if err != nil {
+				return nil, err
+			}
+			caps[ioName] = cfg
+		}
+	}
+
+	names := make([]string, 0, len(caps))
+	for n := range caps {
+		if n != string(types.CapExt) {
+			names = append(names, n)
+		}
+	}
+	sort.Strings(names)
+	// ext is built last: its bindings compose the other capabilities.
+	if _, ok := caps[string(types.CapExt)]; ok {
+		names = append(names, string(types.CapExt))
+	}
+
+	s := &Session{
+		Gate:         gate,
+		Predeclared:  predeclared,
+		Globals:      starlark.StringDict{},
+		InstanceID:   c.InstanceID,
+		UserID:       c.UserID,
+		UserEmail:    c.UserEmail,
+		Labels:       labels,
+		Capabilities: caps,
+		Closers:      map[types.CapabilityName]io.Closer{},
+	}
+	fail := func(err error) (*Session, error) {
+		for _, cl := range s.closers {
+			_ = cl.Close()
+		}
+		return nil, err
+	}
+	bindings := map[types.CapabilityName]starlark.Value{}
+	for _, name := range names {
+		f, ok := d.Registry.Get(types.CapabilityName(name))
+		if !ok {
+			return fail(fmt.Errorf("unknown capability %s", name))
+		}
+		val, closer, err := f.New(caps[name], capability.InstanceEnv{Gate: gate, Secrets: d.Secrets, Bindings: bindings, MaxSteps: c.MaxSteps})
+		if err != nil {
+			return fail(fmt.Errorf("capability %s: %s", name, err))
+		}
+		if closer != nil {
+			s.closers = append(s.closers, closer)
+			s.Closers[types.CapabilityName(name)] = closer
+			if ioc, ok := closer.(*capio.Closer); ok {
+				s.Out = ioc.B
+			}
+		}
+		predeclared[name] = val
+		bindings[types.CapabilityName(name)] = val
+	}
+	if s.Out == nil {
+		s.Out = capio.NewBuffer(c.MaxOutputBytes)
+	}
+	predeclared["print"] = capio.PrintBuiltin(s.Out, gate)
+
+	if err := ValidatePredeclared(predeclared); err != nil {
+		return fail(err)
+	}
+	return s, nil
 }
 
 // Error is the structured script error in an ExecResult.
@@ -105,21 +262,6 @@ type Engine struct {
 
 // Option configures the engine.
 type Option func(*Engine)
-
-// WithMemoryLimit sets the heap watchdog limit in bytes; 0 disables.
-func WithMemoryLimit(bytes uint64) Option {
-	return func(e *Engine) { e.memLimit = bytes }
-}
-
-// WithHeapSampler overrides the heap sampler (tests).
-func WithHeapSampler(f func() uint64) Option {
-	return func(e *Engine) { e.sampler = f }
-}
-
-// WithWatchdogInterval overrides the 100ms watchdog tick (tests).
-func WithWatchdogInterval(d time.Duration) Option {
-	return func(e *Engine) { e.interval = d }
-}
 
 func defaultHeapSampler() func() uint64 {
 	return func() uint64 {
@@ -215,7 +357,14 @@ type OutputReader func() string
 // mutable values (lists, dicts) persist and stay mutable across execs.
 // Capability bindings are re-injected each exec so user code cannot
 // permanently shadow them.
-func (e *Engine) Exec(ctx context.Context, s *Session, execID, code string, timeout time.Duration, maxSteps uint64, output OutputReader) Result {
+func (e *Engine) Exec(
+	ctx context.Context,
+	s *Session, execID,
+	code string,
+	timeout time.Duration,
+	maxSteps uint64,
+	output OutputReader,
+) Result {
 	start := time.Now()
 	res := Result{ExecID: execID}
 

@@ -90,6 +90,14 @@ Additive; no behaviour change yet.
    over `GET /internal/v1/ext/tree` (same HMAC scheme) into the worker's own
    cache dir, keyed by path and invalidated by the tree's h1 sum.
 
+## Phase 3b — one process per instance  ✅ landed
+
+The worker no longer runs Starlark itself: `subproc.Supervisor` gives every
+instance its own OS process speaking the same protocol over a unix socket,
+because Starlark heap memory cannot be isolated within one Go process. See
+[execution-routing.md](execution-routing.md) for the full
+API → worker → instance process → Manager path.
+
 ## Phase 4 — idempotency & fencing  ✅ landed (worker-side dedup + epoch check)
 
 `net` calls inject secrets into real external APIs; a retried `exec` is a

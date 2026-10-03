@@ -13,3 +13,5 @@ __pycache__/
 *.pckl
 
 .idea/
+
+*.DS_Store

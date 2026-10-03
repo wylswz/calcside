@@ -25,7 +25,9 @@ type Config struct {
 	ExtLocalRoots   []string
 	// ExtLocalResolver replaces filesystem local-source resolution when
 	// set — a remote worker resolves local identifiers through the API.
-	ExtLocalResolver   func(ctx context.Context, p capext.ParsedIdentifier) (string, error)
+	// It is not serializable; an instance process rebuilds it from its
+	// own config (see internal/node/subproc).
+	ExtLocalResolver   func(ctx context.Context, p capext.ParsedIdentifier) (string, error) `json:"-"`
 	ExtCacheDir        string
 	ExtFetchTimeout    time.Duration
 	MaxConcurrentExecs int
@@ -55,7 +57,7 @@ func Build(c Config) *Node {
 		CacheDir:      c.ExtCacheDir,
 		FetchTimeout:  c.ExtFetchTimeout,
 	}))
-	eng := engine.New(c.MaxConcurrentExecs, engine.WithMemoryLimit(c.ExecMemoryLimit))
+	eng := engine.New(c.MaxConcurrentExecs)
 	mgr := instance.New(instance.Options{
 		Engine:       eng,
 		Registry:     reg,

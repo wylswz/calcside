@@ -18,10 +18,19 @@ import (
 
 	"calcside/internal/config"
 	"calcside/internal/node"
+	"calcside/internal/node/subproc"
+	"calcside/internal/runtime"
 	"calcside/internal/runtime/remote"
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == subproc.ChildArg {
+		if err := subproc.RunChild(os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "instance:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) < 2 || os.Args[1] != "serve" {
 		fmt.Fprintln(os.Stderr, "usage: calcside-worker serve [flags]")
 		os.Exit(2)
@@ -99,9 +108,32 @@ func serve(cfg config.WorkerConfig) error {
 		// them over the wire into our own cache volume.
 		ncfg.ExtLocalResolver = remote.LocalExtResolver(cfg.APIAddr, nodeID, []byte(cfg.SharedKey), cfg.ExtCacheDir)
 	}
-	nd := node.Build(ncfg)
-	defer nd.Close()
-	nd.Manager.StartReaper()
+	var rt runtime.Runtime
+	if cfg.InstanceIsolation == config.IsolationProcess {
+		sup, err := subproc.New(subproc.Options{
+			Child: subproc.ChildConfig{
+				Node:    ncfg,
+				APIAddr: cfg.APIAddr,
+				NodeID:  nodeID,
+				APIKey:  []byte(cfg.SharedKey),
+			},
+			MaxInstances:       cfg.MaxInstances,
+			MaxConcurrentExecs: cfg.MaxConcurrentExecs,
+			ReapInterval:       cfg.ReaperInterval,
+		})
+		if err != nil {
+			return err
+		}
+		defer sup.Close()
+		sup.StartReaper()
+		rt = sup
+	} else {
+		nd := node.Build(ncfg)
+		defer nd.Close()
+		nd.Manager.StartReaper()
+		rt = nd.Manager
+	}
+	slog.Info("instance isolation", "mode", cfg.InstanceIsolation)
 
 	// /healthz is operational, not protocol: it lives outside the
 	// authenticated handler so orchestrators can probe without a key.
@@ -109,7 +141,7 @@ func serve(cfg config.WorkerConfig) error {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	mux.Handle("/", remote.NewHandler(nd.Manager, []byte(cfg.SharedKey)))
+	mux.Handle("/", remote.NewHandler(rt, []byte(cfg.SharedKey)))
 
 	srv := &http.Server{
 		Addr:        cfg.Addr,

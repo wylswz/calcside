@@ -60,9 +60,16 @@ func Errf(kind error, format string, args ...any) *Error {
 	return &Error{Kind: kind, Msg: fmt.Sprintf(format, args...)}
 }
 
-// Runtime is the execution tier as seen by the API tier. Implementations
-// are an in-process adapter over the instance manager (single binary and
-// tests) or a client that resolves the owning node and forwards.
+// Runtime is the execution tier as seen by the API tier. Every hop on
+// the execution path implements it, so each hop is a router in front of
+// the next (see docs/execution-routing.md):
+//
+//	API tier          remote.Client         resolves the owning worker
+//	worker            subproc.Supervisor    one OS process per instance
+//	instance process  *instance.Manager     in-memory state, runs Starlark
+//
+// remote.Direct carries the worker→instance-process hop; the single
+// binary and tests use *instance.Manager directly.
 //
 // Retry semantics differ per method and are part of the contract:
 // Create, Exec and Delete have side effects and must never be retried

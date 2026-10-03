@@ -52,6 +52,7 @@ type Config struct {
 	ExtLocalRoots        []string
 	ExtCacheDir          string
 	ExtFetchTimeout      time.Duration
+	InstanceIsolation    string
 }
 
 func envOr(key, def string) string {
@@ -93,6 +94,21 @@ func envBool(key string, def bool) bool {
 		}
 	}
 	return def
+}
+
+// Instance isolation modes: inproc runs every instance inside the
+// node's own process; process gives each instance its own OS process
+// (see internal/node/subproc).
+const (
+	IsolationInproc  = "inproc"
+	IsolationProcess = "process"
+)
+
+func checkIsolation(v string) error {
+	if v != IsolationInproc && v != IsolationProcess {
+		return fmt.Errorf("--instance-isolation: must be %q or %q, got %q", IsolationInproc, IsolationProcess, v)
+	}
+	return nil
 }
 
 // Parse builds the config from args like ["serve", "--addr", ...]. Flags
@@ -137,7 +153,11 @@ func Parse(args []string) (Config, error) {
 	fs.StringVar(&extRoots, "ext-local-roots", envOr("EXT_LOCAL_ROOTS", ""), "comma-separated local dirs ext sources may live under (empty disables local ext)")
 	fs.StringVar(&c.ExtCacheDir, "ext-cache-dir", envOr("EXT_CACHE_DIR", defaultExtCacheDir()), "extension fetch cache dir")
 	fs.DurationVar(&c.ExtFetchTimeout, "ext-fetch-timeout", envDur("EXT_FETCH_TIMEOUT", 30*time.Second), "ext remote fetch timeout")
+	fs.StringVar(&c.InstanceIsolation, "instance-isolation", envOr("INSTANCE_ISOLATION", IsolationInproc), "in-process execution tier: inproc runs instances in this process, process gives each instance its own OS process")
 	if err := fs.Parse(args); err != nil {
+		return c, err
+	}
+	if err := checkIsolation(c.InstanceIsolation); err != nil {
 		return c, err
 	}
 	addrSet := false
@@ -229,6 +249,7 @@ type WorkerConfig struct {
 	ExtLocalRoots       []string
 	ExtCacheDir         string
 	ExtFetchTimeout     time.Duration
+	InstanceIsolation   string
 }
 
 // ParseWorker parses calcside-worker's flags. Everything about limits
@@ -262,7 +283,11 @@ func ParseWorker(args []string) (WorkerConfig, error) {
 	fs.StringVar(&extRoots, "ext-local-roots", envOr("EXT_LOCAL_ROOTS", ""), "comma-separated local dirs ext sources may live under")
 	fs.StringVar(&c.ExtCacheDir, "ext-cache-dir", envOr("EXT_CACHE_DIR", defaultExtCacheDir()), "extension fetch/resolve cache dir")
 	fs.DurationVar(&c.ExtFetchTimeout, "ext-fetch-timeout", envDur("EXT_FETCH_TIMEOUT", 30*time.Second), "remote ext fetch timeout")
+	fs.StringVar(&c.InstanceIsolation, "instance-isolation", envOr("INSTANCE_ISOLATION", IsolationProcess), "process gives each instance its own OS process; inproc runs instances in the worker process")
 	if err := fs.Parse(args); err != nil {
+		return c, err
+	}
+	if err := checkIsolation(c.InstanceIsolation); err != nil {
 		return c, err
 	}
 	for _, s := range strings.Split(extSources, ",") {

@@ -145,7 +145,7 @@ func (c *Client) forNode(addr string) *gen.ClientWithResponses {
 	}
 	cl, err := gen.NewClientWithResponses("http://"+addr,
 		gen.WithHTTPClient(c.HTTP),
-		gen.WithRequestEditorFn(c.signEditor))
+		gen.WithRequestEditorFn(signEditor(c.Key, c.NodeID, c.now)))
 	if err != nil {
 		// Only reachable on a malformed base URL; fall back to a client
 		// that errors at call time rather than panicking here.
@@ -156,14 +156,16 @@ func (c *Client) forNode(addr string) *gen.ClientWithResponses {
 }
 
 // signEditor signs the serialized request body per worker.openapi.yaml.
-func (c *Client) signEditor(ctx context.Context, req *http.Request) error {
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		return err
+func signEditor(key []byte, callerNode string, now func() time.Time) gen.RequestEditorFn {
+	return func(ctx context.Context, req *http.Request) error {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return err
+		}
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		SignRequest(key, callerNode, req, body, now())
+		return nil
 	}
-	req.Body = io.NopCloser(bytes.NewReader(body))
-	SignRequest(c.Key, c.NodeID, req, body, c.now())
-	return nil
 }
 
 func (c *Client) Exec(ctx context.Context, req *runtime.ExecRequest) (*runtime.ExecResponse, error) {

@@ -18,6 +18,7 @@ import (
 	"calcside/internal/auth"
 	"calcside/internal/config"
 	"calcside/internal/node"
+	"calcside/internal/node/subproc"
 	"calcside/internal/placement"
 	"calcside/internal/policy"
 	"calcside/internal/runtime"
@@ -35,6 +36,13 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == subproc.ChildArg {
+		if err := subproc.RunChild(os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "instance:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) < 2 || os.Args[1] != "serve" {
 		fmt.Fprintln(os.Stderr, "usage: calcside serve [flags]")
 		os.Exit(2)
@@ -79,7 +87,7 @@ func serve(cfg config.Config) error {
 
 	// Execution tier. In-process by default; --workers switches the API
 	// tier to forward to remote worker nodes instead.
-	nd := node.Build(node.Config{
+	ncfg := node.Config{
 		Limits:             limits,
 		ExtAllowSources:    cfg.ExtAllowSources,
 		ExtLocalRoots:      cfg.ExtLocalRoots,
@@ -90,7 +98,8 @@ func serve(cfg config.Config) error {
 		EvalTimeout:        cfg.PolicyEvalTimeout,
 		MaxInstances:       cfg.MaxInstancesPerNode,
 		ReapInterval:       cfg.ReaperInterval,
-	})
+	}
+	nd := node.Build(ncfg)
 	defer nd.Close()
 
 	var rt runtime.Runtime = nd.Manager
@@ -117,6 +126,20 @@ func serve(cfg config.Config) error {
 				}
 				return &placement.Binding{InstanceID: id, NodeID: in.NodeID, Epoch: in.LeaseEpoch}, nil
 			})
+	} else if cfg.InstanceIsolation == config.IsolationProcess {
+		sup, err := subproc.New(subproc.Options{
+			Child:              subproc.ChildConfig{Node: ncfg},
+			MaxInstances:       cfg.MaxInstancesPerNode,
+			MaxConcurrentExecs: cfg.MaxConcurrentExecs,
+			ReapInterval:       cfg.ReaperInterval,
+		})
+		if err != nil {
+			return err
+		}
+		defer sup.Close()
+		sup.StartReaper()
+		slog.Info("instance isolation", "mode", cfg.InstanceIsolation)
+		rt = sup
 	} else {
 		nd.Manager.StartReaper()
 	}
