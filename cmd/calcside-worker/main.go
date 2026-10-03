@@ -120,6 +120,8 @@ func serve(cfg config.WorkerConfig) error {
 			MaxInstances:       cfg.MaxInstances,
 			MaxConcurrentExecs: cfg.MaxConcurrentExecs,
 			ReapInterval:       cfg.ReaperInterval,
+			MemoryMax:          cfg.InstanceMemoryMax,
+			CgroupParent:       cfg.InstanceCgroupParent,
 		})
 		if err != nil {
 			return err

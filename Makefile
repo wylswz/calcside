@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 BINARIES := bin/calcside bin/csctl bin/calcside-worker
 
-.PHONY: build test lint web dev serve-dev tidy gen gen-check sdk-test sdk-lint docker-env
+.PHONY: build test test-cgroup lint web dev serve-dev tidy gen gen-check sdk-test sdk-lint docker-env
 
 # First-run compose setup: generate docker/.env with a random shared
 # key, or copy docker/.env.example to fill in yourself.
@@ -28,6 +28,20 @@ web:
 
 test:
 	go test -race ./...
+
+# Per-instance cgroup memory limit test (Linux, root). Runs the test binary
+# in a throwaway privileged container; the container's processes move to
+# /init first, since cgroup v2 only delegates controllers from a group
+# that has no member processes.
+test-cgroup:
+	CGO_ENABLED=0 GOOS=linux GOARCH=$$(docker version -f '{{.Server.Arch}}') \
+	  go test -c -o bin/subproc.linux.test ./internal/node/subproc
+	docker run --rm --privileged --cgroupns=private -v $(CURDIR)/bin:/t:ro \
+	  --entrypoint sh alpine:3.22 -c '\
+	    mkdir /sys/fs/cgroup/init && \
+	    for p in $$(cat /sys/fs/cgroup/cgroup.procs); do echo $$p > /sys/fs/cgroup/init/cgroup.procs 2>/dev/null; done; \
+	    CALCSIDE_TEST_CGROUP=1 CALCSIDE_TEST_CGROUP_PARENT=/calcside-test \
+	      exec /t/subproc.linux.test -test.v -test.run Cgroup'
 
 lint: gen-check
 	go vet ./...

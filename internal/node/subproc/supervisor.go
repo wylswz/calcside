@@ -51,6 +51,16 @@ type Options struct {
 	ReapInterval time.Duration
 	ReapGrace    time.Duration
 	Now          func() time.Time
+	// MemoryMax caps each instance process's memory through its own
+	// cgroup v2 group (memory.max, swap disabled); 0 is unlimited. If no
+	// usable cgroup v2 hierarchy exists (or off Linux) the cap is skipped
+	// with a warning.
+	MemoryMax int64
+	// CgroupParent is the cgroup v2 group, relative to /sys/fs/cgroup,
+	// that per-instance groups are created under. Empty means the
+	// supervisor's own group, after moving itself into a "supervisor"
+	// leaf of it.
+	CgroupParent string
 }
 
 // Supervisor is the worker-side runtime.Runtime that gives every
@@ -60,6 +70,7 @@ type Options struct {
 type Supervisor struct {
 	o   Options
 	sem chan struct{}
+	cg  *cgroupTree // nil when instances run without a memory cap
 
 	mu       sync.Mutex
 	procs    map[string]*proc
@@ -123,9 +134,17 @@ func New(o Options) (*Supervisor, error) {
 	// A child hosts exactly one instance and never reaps on its own:
 	// lifecycle belongs to the supervisor.
 	o.Child.Node.MaxInstances = 1
+	var cg *cgroupTree
+	if o.MemoryMax > 0 {
+		var err error
+		if cg, err = newCgroupTree(o.CgroupParent, o.MemoryMax); err != nil {
+			slog.Warn("per-instance memory limit disabled", "memory_max", o.MemoryMax, "err", err)
+		}
+	}
 	return &Supervisor{
 		o:        o,
 		sem:      make(chan struct{}, o.MaxConcurrentExecs),
+		cg:       cg,
 		procs:    map[string]*proc{},
 		starting: map[string]bool{},
 		stop:     make(chan struct{}),
@@ -245,22 +264,46 @@ func (s *Supervisor) spawn(ctx context.Context, id string) (*proc, error) {
 	cfg.Socket = filepath.Join(dir, "s")
 	cfg.Key = key
 
+	cg, err := s.cg.create(filepath.Base(dir))
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, fmt.Errorf("subproc: instance cgroup: %w", err)
+	}
+	cleanup := func() {
+		cg.remove()
+		_ = os.RemoveAll(dir)
+	}
+
 	cmd := exec.Command(s.o.Path, s.o.Args...)
-	cmd.Env = append(os.Environ(), s.o.Env...)
+	env := os.Environ()
+	if cg != nil {
+		// Have the child's GC work hard before the kernel OOM-kills it.
+		env = append(env, fmt.Sprintf("GOMEMLIMIT=%d", s.o.MemoryMax/10*9))
+	}
+	cmd.Env = append(env, s.o.Env...)
 	cmd.Stderr = os.Stderr
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		_ = os.RemoveAll(dir)
+		cleanup()
 		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		_ = os.RemoveAll(dir)
+		cleanup()
 		return nil, err
 	}
+
 	if err := cmd.Start(); err != nil {
-		_ = os.RemoveAll(dir)
+		cleanup()
 		return nil, fmt.Errorf("subproc: start instance process: %w", err)
+	}
+	// The child does nothing until it reads its config from stdin, so
+	// joining the cgroup after Start still precedes any instance work.
+	if err := cg.add(cmd.Process.Pid); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		cleanup()
+		return nil, fmt.Errorf("subproc: join instance cgroup: %w", err)
 	}
 
 	sock := cfg.Socket
@@ -274,7 +317,7 @@ func (s *Supervisor) spawn(ctx context.Context, id string) (*proc, error) {
 	if err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
-		_ = os.RemoveAll(dir)
+		cleanup()
 		return nil, err
 	}
 	p := &proc{id: id, cmd: cmd, stdin: stdin, rt: rt, done: make(chan struct{})}
@@ -298,7 +341,7 @@ func (s *Supervisor) spawn(ctx context.Context, id string) (*proc, error) {
 		if s.forget(p) {
 			slog.Warn("instance process exited unexpectedly", "instance_id", id, "err", err)
 		}
-		_ = os.RemoveAll(dir)
+		cleanup()
 		close(p.done)
 	}()
 

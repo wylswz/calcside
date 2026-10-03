@@ -177,10 +177,14 @@ instance.
 
 ## Known gaps
 
-- **No per-instance memory limit yet.** `--exec-memory-limit` is parsed but no
-  longer enforced since the in-process watchdog was removed. Next step: apply
-  it per child (rlimit/cgroup, or a watchdog inside the child, which now
-  affects only that instance).
+- **Per-instance memory limits need cgroup v2.** `--instance-memory-max`
+  (default 64 MiB, `0` disables) gives each child its own cgroup under
+  `--instance-cgroup-parent` (default: the supervisor's own group, which it
+  leaves for a `supervisor` leaf) with `memory.max` set and swap disabled, and
+  sets the child's `GOMEMLIMIT` to 90% of it. Off Linux, or without a writable
+  cgroup v2 hierarchy (e.g. an unprivileged container), the supervisor logs a
+  warning and runs children uncapped. `--exec-memory-limit` is still parsed
+  but not enforced.
 - **The child holds the API shared key** so it can resolve local ext sources
   over `/internal/v1/ext/tree`. The supervisor could proxy this instead.
 - **Browse audit events are lost on error.** Over the wire, a failed `Browse`

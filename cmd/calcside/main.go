@@ -132,6 +132,8 @@ func serve(cfg config.Config) error {
 			MaxInstances:       cfg.MaxInstancesPerNode,
 			MaxConcurrentExecs: cfg.MaxConcurrentExecs,
 			ReapInterval:       cfg.ReaperInterval,
+			MemoryMax:          cfg.InstanceMemoryMax,
+			CgroupParent:       cfg.InstanceCgroupParent,
 		})
 		if err != nil {
 			return err

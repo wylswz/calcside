@@ -53,6 +53,8 @@ type Config struct {
 	ExtCacheDir          string
 	ExtFetchTimeout      time.Duration
 	InstanceIsolation    string
+	InstanceMemoryMax    int64
+	InstanceCgroupParent string
 }
 
 func envOr(key, def string) string {
@@ -154,6 +156,8 @@ func Parse(args []string) (Config, error) {
 	fs.StringVar(&c.ExtCacheDir, "ext-cache-dir", envOr("EXT_CACHE_DIR", defaultExtCacheDir()), "extension fetch cache dir")
 	fs.DurationVar(&c.ExtFetchTimeout, "ext-fetch-timeout", envDur("EXT_FETCH_TIMEOUT", 30*time.Second), "ext remote fetch timeout")
 	fs.StringVar(&c.InstanceIsolation, "instance-isolation", envOr("INSTANCE_ISOLATION", IsolationInproc), "in-process execution tier: inproc runs instances in this process, process gives each instance its own OS process")
+	fs.Int64Var(&c.InstanceMemoryMax, "instance-memory-max", int64(envInt("INSTANCE_MEMORY_MAX", 64<<20)), "per-instance memory cap in bytes with --instance-isolation=process (Linux cgroup v2; 0 disables)")
+	fs.StringVar(&c.InstanceCgroupParent, "instance-cgroup-parent", envOr("INSTANCE_CGROUP_PARENT", ""), "cgroup v2 group (relative to /sys/fs/cgroup) holding per-instance groups; empty uses this process's own group")
 	if err := fs.Parse(args); err != nil {
 		return c, err
 	}
@@ -226,30 +230,32 @@ func CheckDevAddr(addr string, allowRemote bool) error {
 // from the API tier's Config because the two processes share execution
 // limits but nothing else.
 type WorkerConfig struct {
-	Addr                string
-	NodeID              string
-	NodeIDFile          string
-	SharedKey           string
-	APIAddr             string
-	MaxInstances        int
-	ReaperInterval      time.Duration
-	PolicyEvalTimeout   time.Duration
-	DefaultTTL          time.Duration
-	MaxTTL              time.Duration
-	MaxExecTimeout      time.Duration
-	MaxConcurrentExecs  int
-	MaxSteps            uint64
-	MaxOutputBytes      int64
-	ExecMemoryLimit     uint64
-	NetAllowPrivate     bool
-	NetAllowCIDRs       []*net.IPNet
-	MaxNetResponseBytes int64
-	SecretsAllowHTTP    bool
-	ExtAllowSources     []string
-	ExtLocalRoots       []string
-	ExtCacheDir         string
-	ExtFetchTimeout     time.Duration
-	InstanceIsolation   string
+	Addr                 string
+	NodeID               string
+	NodeIDFile           string
+	SharedKey            string
+	APIAddr              string
+	MaxInstances         int
+	ReaperInterval       time.Duration
+	PolicyEvalTimeout    time.Duration
+	DefaultTTL           time.Duration
+	MaxTTL               time.Duration
+	MaxExecTimeout       time.Duration
+	MaxConcurrentExecs   int
+	MaxSteps             uint64
+	MaxOutputBytes       int64
+	ExecMemoryLimit      uint64
+	NetAllowPrivate      bool
+	NetAllowCIDRs        []*net.IPNet
+	MaxNetResponseBytes  int64
+	SecretsAllowHTTP     bool
+	ExtAllowSources      []string
+	ExtLocalRoots        []string
+	ExtCacheDir          string
+	ExtFetchTimeout      time.Duration
+	InstanceIsolation    string
+	InstanceMemoryMax    int64
+	InstanceCgroupParent string
 }
 
 // ParseWorker parses calcside-worker's flags. Everything about limits
@@ -284,6 +290,8 @@ func ParseWorker(args []string) (WorkerConfig, error) {
 	fs.StringVar(&c.ExtCacheDir, "ext-cache-dir", envOr("EXT_CACHE_DIR", defaultExtCacheDir()), "extension fetch/resolve cache dir")
 	fs.DurationVar(&c.ExtFetchTimeout, "ext-fetch-timeout", envDur("EXT_FETCH_TIMEOUT", 30*time.Second), "remote ext fetch timeout")
 	fs.StringVar(&c.InstanceIsolation, "instance-isolation", envOr("INSTANCE_ISOLATION", IsolationProcess), "process gives each instance its own OS process; inproc runs instances in the worker process")
+	fs.Int64Var(&c.InstanceMemoryMax, "instance-memory-max", int64(envInt("INSTANCE_MEMORY_MAX", 64<<20)), "per-instance memory cap in bytes with --instance-isolation=process (Linux cgroup v2; 0 disables)")
+	fs.StringVar(&c.InstanceCgroupParent, "instance-cgroup-parent", envOr("INSTANCE_CGROUP_PARENT", ""), "cgroup v2 group (relative to /sys/fs/cgroup) holding per-instance groups; empty uses this process's own group")
 	if err := fs.Parse(args); err != nil {
 		return c, err
 	}
