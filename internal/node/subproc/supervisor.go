@@ -70,7 +70,7 @@ type Options struct {
 type Supervisor struct {
 	o   Options
 	sem chan struct{}
-	cg  *cgroupTree // nil when instances run without a memory cap
+	cg  iCgroupTree // nil when instances run without a memory cap
 
 	mu       sync.Mutex
 	procs    map[string]*proc
@@ -91,6 +91,7 @@ type proc struct {
 
 	mu        sync.Mutex
 	expiresAt time.Time
+	cg        iInstanceGroup // noCgroup when instances run without a memory cap
 }
 
 const stopGrace = 5 * time.Second
@@ -134,7 +135,7 @@ func New(o Options) (*Supervisor, error) {
 	// A child hosts exactly one instance and never reaps on its own:
 	// lifecycle belongs to the supervisor.
 	o.Child.Node.MaxInstances = 1
-	var cg *cgroupTree
+	var cg iCgroupTree
 	if o.MemoryMax > 0 {
 		var err error
 		if cg, err = newCgroupTree(o.CgroupParent, o.MemoryMax); err != nil {
@@ -264,10 +265,12 @@ func (s *Supervisor) spawn(ctx context.Context, id string) (*proc, error) {
 	cfg.Socket = filepath.Join(dir, "s")
 	cfg.Key = key
 
-	cg, err := s.cg.create(filepath.Base(dir))
-	if err != nil {
-		_ = os.RemoveAll(dir)
-		return nil, fmt.Errorf("subproc: instance cgroup: %w", err)
+	var cg iInstanceGroup = noCgroup{}
+	if s.cg != nil {
+		if cg, err = s.cg.create(filepath.Base(dir)); err != nil {
+			_ = os.RemoveAll(dir)
+			return nil, fmt.Errorf("subproc: instance cgroup: %w", err)
+		}
 	}
 	cleanup := func() {
 		cg.remove()
@@ -276,7 +279,7 @@ func (s *Supervisor) spawn(ctx context.Context, id string) (*proc, error) {
 
 	cmd := exec.Command(s.o.Path, s.o.Args...)
 	env := os.Environ()
-	if cg != nil {
+	if s.cg != nil {
 		// Have the child's GC work hard before the kernel OOM-kills it.
 		env = append(env, fmt.Sprintf("GOMEMLIMIT=%d", s.o.MemoryMax/10*9))
 	}
@@ -320,7 +323,14 @@ func (s *Supervisor) spawn(ctx context.Context, id string) (*proc, error) {
 		cleanup()
 		return nil, err
 	}
-	p := &proc{id: id, cmd: cmd, stdin: stdin, rt: rt, done: make(chan struct{})}
+	p := &proc{
+		id:    id,
+		cmd:   cmd,
+		stdin: stdin,
+		rt:    rt,
+		done:  make(chan struct{}),
+		cg:    cg,
+	}
 
 	ready := make(chan struct{})
 	go func() {
@@ -506,5 +516,13 @@ func (s *Supervisor) Prompt(ctx context.Context, req *runtime.PromptRequest) (*r
 }
 
 func (s *Supervisor) Inspect(ctx context.Context, req *runtime.InspectRequest) (*runtime.InspectResponse, error) {
-	return call(s, req.InstanceID, func(p *proc) (*runtime.InspectResponse, error) { return p.rt.Inspect(ctx, req) })
+	return call(s, req.InstanceID, func(p *proc) (*runtime.InspectResponse, error) {
+		resp, err := p.rt.Inspect(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		st := p.cg.inspect()
+		resp.ResourceUsages = runtime.ResourceUsages{MemoryMax: st.MemoryMax, MemoryUsage: st.MemoryUsage}
+		return resp, nil
+	})
 }

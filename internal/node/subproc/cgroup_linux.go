@@ -16,6 +16,11 @@ import (
 
 const cgroupMount = "/sys/fs/cgroup"
 
+var (
+	_ iCgroupTree    = (*cgroupTree)(nil)
+	_ iInstanceGroup = (*instanceCgroup)(nil)
+)
+
 // cgroupTree is the cgroup v2 group that per-instance groups live under.
 type cgroupTree struct {
 	parent string
@@ -25,7 +30,7 @@ type cgroupTree struct {
 // instanceCgroup is one instance process's own group.
 type instanceCgroup struct{ m *cgroup2.Manager }
 
-func newCgroupTree(parent string, max int64) (*cgroupTree, error) {
+func newCgroupTree(parent string, max int64) (iCgroupTree, error) {
 	if cgroups.Mode() != cgroups.Unified {
 		return nil, errors.New("no cgroup v2 unified hierarchy at " + cgroupMount)
 	}
@@ -72,10 +77,7 @@ func newCgroupTree(parent string, max int64) (*cgroupTree, error) {
 	return &cgroupTree{parent: parent, max: max}, nil
 }
 
-func (t *cgroupTree) create(name string) (*instanceCgroup, error) {
-	if t == nil {
-		return nil, nil
-	}
+func (t *cgroupTree) create(name string) (iInstanceGroup, error) {
 	group := path.Join(t.parent, name)
 	m, err := cgroup2.NewManager(cgroupMount, group, &cgroup2.Resources{
 		Memory: &cgroup2.Memory{Max: &t.max},
@@ -94,14 +96,19 @@ func (t *cgroupTree) create(name string) (*instanceCgroup, error) {
 }
 
 func (g *instanceCgroup) add(pid int) error {
-	if g == nil {
-		return nil
-	}
 	return g.m.AddProc(uint64(pid))
 }
 
 func (g *instanceCgroup) remove() {
-	if g != nil {
-		_ = g.m.Delete()
+	_ = g.m.Delete()
+}
+
+func (g *instanceCgroup) inspect() InspectResult {
+	st, err := g.m.StatFiltered(cgroup2.StatMemory)
+	if err != nil || st.Memory == nil {
+		return InspectResult{}
 	}
+	// UsageLimit is memory.max ("max" reads as math.MaxUint64), Usage is
+	// memory.current.
+	return InspectResult{MemoryMax: st.Memory.UsageLimit, MemoryUsage: st.Memory.Usage}
 }

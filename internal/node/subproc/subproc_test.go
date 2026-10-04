@@ -95,6 +95,15 @@ func TestGlobalsPersistAcrossExecs(t *testing.T) {
 	}
 }
 
+func TestInspectWithoutMemoryCap(t *testing.T) {
+	s := newSupervisor(t, nil)
+	create(t, s, "ins_1")
+	ins, err := s.Inspect(context.Background(), &runtime.InspectRequest{InstanceID: "ins_1", Owner: owner})
+	if err != nil || ins.ResourceUsages != (runtime.ResourceUsages{}) {
+		t.Fatalf("inspect: err=%v resp=%+v, want zero resource usages", err, ins)
+	}
+}
+
 func TestInstancesAreSeparateProcesses(t *testing.T) {
 	s := newSupervisor(t, nil)
 	create(t, s, "a")

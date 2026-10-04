@@ -258,6 +258,11 @@ type InspectRequest struct {
 	Epoch      int64  `json:"epoch,omitempty"`
 }
 
+type ResourceUsages struct {
+	MemoryUsage uint64 `json:"memory_usage"`
+	MemoryMax   uint64 `json:"memory_max"`
+}
 type InspectResponse struct {
-	Variables map[string]string `json:"variables,omitempty"`
+	Variables      map[string]string `json:"variables,omitempty"`
+	ResourceUsages ResourceUsages    `json:"resource_usages"`
 }
