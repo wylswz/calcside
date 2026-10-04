@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, Instance, Secret } from '../api'
+import { api, Instance, Policy, Secret } from '../api'
 import type { SecretSource, ExtensionCatalog, ExtensionInfo, ExtConfigField } from '../api'
 import { Button, EmptyRow, Field, Loading, Mark, Modal, PageHeader, SectionTitle, StatusBadge, Tag, fmtCountdown, fmtTime, inputCls } from '../components/ui'
 
@@ -12,6 +12,7 @@ interface SpecDraft {
   limits: { exec_timeout_ms?: number; max_steps?: number; max_output_bytes?: number }
   env?: Record<string, string>
   secrets?: Record<string, any>
+  policies?: string[]
 }
 
 interface EnvRow { k: string; v: string }
@@ -253,6 +254,7 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
   const [labelsText, setLabelsText] = useState('')
   const [envRows, setEnvRows] = useState<EnvRow[]>([])
   const [secretRows, setSecretRows] = useState<SecretRow[]>([])
+  const [policyNames, setPolicyNames] = useState<string[]>([])
   const [err, setErr] = useState('')
   const [jsonText, setJsonText] = useState('')
   const [jsonDirty, setJsonDirty] = useState(false)
@@ -260,6 +262,10 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
     queryKey: ['secrets'],
     queryFn: () => api.get<{ secrets: Secret[] }>('/api/v1/secrets'),
     retry: false,
+  })
+  const { data: library } = useQuery({
+    queryKey: ['policies'],
+    queryFn: () => api.get<{ policies: Policy[] }>('/api/v1/policies'),
   })
   const { data: extCat } = useQuery({
     queryKey: ['extensions'],
@@ -349,6 +355,7 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
       }
     }
     if (Object.keys(secs).length) draft.secrets = secs
+    if (policyNames.length) draft.policies = policyNames
     return draft
   }
 
@@ -356,7 +363,7 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
     if (jsonDirty) return jsonText
     return JSON.stringify(specFromForm(), null, 2)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jsonDirty, ttlMin, fsOn, fsQuota, netOn, netHosts, netMethods, extOn, extRows, extCat, labelsText, envRows, secretRows, vault])
+  }, [jsonDirty, ttlMin, fsOn, fsQuota, netOn, netHosts, netMethods, extOn, extRows, extCat, labelsText, envRows, secretRows, policyNames, vault])
 
   const create = useMutation({
     mutationFn: (spec: any) => api.post<{ instance: Instance }>('/api/v1/instances', spec),
@@ -521,6 +528,26 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
                 </div>
               )
             })}
+          </div>
+
+          <div>
+            <SectionTitle aside={<Link to="/policies" className="text-btn">Manage</Link>}>
+              Policies
+            </SectionTitle>
+            <p className="mb-2 text-xs text-mute">Library policies to attach. Rego is snapshotted at creation; server policies always apply.</p>
+            {library && library.policies.length === 0 && <p className="text-xs text-mute">no policies in your library</p>}
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+              {(library?.policies ?? []).map((p) => (
+                <label key={p.id} className="flex items-center gap-2 font-mono text-xs text-ink">
+                  <input type="checkbox" checked={policyNames.includes(p.name)}
+                    onChange={(e) => {
+                      setJsonDirty(false)
+                      setPolicyNames(e.target.checked ? [...policyNames, p.name] : policyNames.filter((n) => n !== p.name))
+                    }} />
+                  {p.name}
+                </label>
+              ))}
+            </div>
           </div>
         </div>
 

@@ -135,7 +135,6 @@ type Policy struct {
 	UserID    string    `json:"user_id"`
 	Name      string    `json:"name"`
 	Rego      string    `json:"rego"`
-	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

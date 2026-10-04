@@ -370,9 +370,9 @@ func (c *Client) GetPolicy(ctx context.Context, id string) (*store.Policy, error
 	return m.Policy, nil
 }
 
-func (c *Client) CreatePolicy(ctx context.Context, name, rego string, enabled bool) (*store.Policy, error) {
+func (c *Client) CreatePolicy(ctx context.Context, name, rego string) (*store.Policy, error) {
 	resp, err := c.gc.CreatePolicyWithResponse(ctx, gen.PolicyRequest{
-		Name: name, Rego: rego, Enabled: &enabled,
+		Name: name, Rego: rego,
 	})
 	if err != nil {
 		return nil, err
@@ -386,9 +386,9 @@ func (c *Client) CreatePolicy(ctx context.Context, name, rego string, enabled bo
 	return m.Policy, nil
 }
 
-func (c *Client) UpdatePolicy(ctx context.Context, id string, name *string, rego *string, enabled *bool) (*store.Policy, error) {
+func (c *Client) UpdatePolicy(ctx context.Context, id string, name *string, rego *string) (*store.Policy, error) {
 	resp, err := c.gc.UpdatePolicyWithResponse(ctx, id, gen.PolicyUpdateRequest{
-		Name: name, Rego: rego, Enabled: enabled,
+		Name: name, Rego: rego,
 	})
 	if err != nil {
 		return nil, err

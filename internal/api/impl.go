@@ -559,12 +559,10 @@ func (s *strictImpl) CreatePolicy(ctx context.Context, req gen.CreatePolicyReque
 		return createPolicyResp{*e}, nil
 	}
 	var name, rego string
-	var enabled *bool
 	if req.Body != nil {
 		name, rego = req.Body.Name, req.Body.Rego
-		enabled = req.Body.Enabled
 	}
-	pol, err := s.d.Policy.Create(ctx, actorOf(p), name, rego, enabled)
+	pol, err := s.d.Policy.Create(ctx, actorOf(p), name, rego)
 	if err != nil {
 		return createPolicyResp{fail(err)}, nil
 	}
@@ -606,11 +604,10 @@ func (s *strictImpl) UpdatePolicy(ctx context.Context, req gen.UpdatePolicyReque
 		return updatePolicyResp{*e}, nil
 	}
 	var name, rego *string
-	var enabled *bool
 	if req.Body != nil {
-		name, rego, enabled = req.Body.Name, req.Body.Rego, req.Body.Enabled
+		name, rego = req.Body.Name, req.Body.Rego
 	}
-	pol, err := s.d.Policy.Update(ctx, actorOf(p), req.Id, name, rego, enabled)
+	pol, err := s.d.Policy.Update(ctx, actorOf(p), req.Id, name, rego)
 	if err != nil {
 		return updatePolicyResp{fail(err)}, nil
 	}

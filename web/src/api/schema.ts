@@ -577,6 +577,8 @@ export interface components {
                 [key: string]: unknown;
             };
             limits?: components["schemas"]["Limits"];
+            /** @description Names of the owner's library policies to attach (at most 32). Their rego is snapshotted at creation; server policies (--policy-dir) always apply in addition. */
+            policies?: components["schemas"]["PolicyName"][];
         };
         Instance: {
             id: string;
@@ -718,26 +720,26 @@ export interface components {
         AuditResponse: {
             events?: components["schemas"]["AuditEvent"][];
         };
+        /** @description A library policy. It applies only to instances whose spec.policies names it; the rego is snapshotted at instance creation. */
         Policy: {
             id: string;
             user_id: string;
-            name: string;
+            name: components["schemas"]["PolicyName"];
             rego: string;
-            enabled: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
+        /** @description Unique per user; referenced by InstanceSpec.policies. */
+        PolicyName: string;
         PolicyRequest: {
-            name: string;
+            name: components["schemas"]["PolicyName"];
             rego: string;
-            enabled?: boolean;
         };
         PolicyUpdateRequest: {
-            name?: string;
+            name?: components["schemas"]["PolicyName"];
             rego?: string;
-            enabled?: boolean;
         };
         PolicyResponse: {
             policy?: components["schemas"]["Policy"];
@@ -1337,6 +1339,7 @@ export interface operations {
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     validatePolicy: {
@@ -1416,6 +1419,7 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     deletePolicy: {

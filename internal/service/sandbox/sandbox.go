@@ -170,18 +170,29 @@ func (s *Service) List(ctx context.Context, a service.Actor, status types.Instan
 	return lst, nil
 }
 
-// enabledPolicies snapshots the owner's enabled policies. Compilation
-// happens on the node; only sources cross the boundary.
-func (s *Service) enabledPolicies(ctx context.Context, userID string) (map[string]string, error) {
+// selectedPolicies snapshots the owner's library policies named by the
+// spec, keyed by name. An unknown name is a spec error: silently
+// creating an instance without a policy it asked for would fail open.
+// Compilation happens on the node; only sources cross the boundary.
+func (s *Service) selectedPolicies(ctx context.Context, userID string, names []string) (map[string]string, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
 	pols, err := s.st.ListPolicies(ctx, userID)
 	if err != nil {
-		return nil, err
+		return nil, service.Internal(err)
 	}
-	out := map[string]string{}
+	byName := make(map[string]string, len(pols))
 	for _, p := range pols {
-		if p.Enabled {
-			out[p.ID] = p.Rego
+		byName[p.Name] = p.Rego
+	}
+	out := make(map[string]string, len(names))
+	for _, n := range names {
+		src, ok := byName[n]
+		if !ok {
+			return nil, service.Errf(types.ErrCodeBadSpec, "policies: unknown policy %q", n)
 		}
+		out[n] = src
 	}
 	return out, nil
 }
@@ -206,9 +217,9 @@ func (s *Service) Create(ctx context.Context, a service.Actor, rawSpec []byte) (
 	if err != nil {
 		return nil, service.Errf(types.ErrCodeBadSpec, "%s", err.Error())
 	}
-	userPols, err := s.enabledPolicies(ctx, a.UserID)
+	userPols, err := s.selectedPolicies(ctx, a.UserID, spec.Policies)
 	if err != nil {
-		return nil, service.Internal(err)
+		return nil, err
 	}
 
 	now := s.now().UTC()

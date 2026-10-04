@@ -234,7 +234,7 @@ deny contains "x" if { input.op == "read" }`
 	polID := m["policies"].([]any)[0].(map[string]any)["id"].(string)
 	g.req(e, "policy_list", "GET", "/api/v1/policies", "", nil, cookies)
 	g.req(e, "policy_get", "GET", "/api/v1/policies/"+polID, "", nil, cookies)
-	g.req(e, "policy_update", "PUT", "/api/v1/policies/"+polID, `{"enabled":false}`, csrf, cookies)
+	g.req(e, "policy_update", "PUT", "/api/v1/policies/"+polID, `{"name":"p2"}`, csrf, cookies)
 	g.req(e, "policy_create_bad_rego", "POST", "/api/v1/policies", `{"name":"bad","rego":"nope"}`, csrf, cookies)
 	g.req(e, "policy_delete", "DELETE", "/api/v1/policies/"+polID, "", csrf, cookies)
 

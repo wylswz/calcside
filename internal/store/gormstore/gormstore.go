@@ -62,6 +62,14 @@ func open(_ context.Context, driver types.StoreDriver, dsn string) (store.Store,
 	if err != nil {
 		return nil, fmt.Errorf("gormstore: %w", err)
 	}
+	// policies.enabled predates per-instance policy selection. Drop it
+	// before AutoMigrate: SQLite drops columns by rebuilding the table,
+	// which would discard indexes AutoMigrate just created.
+	if g.Migrator().HasColumn(&policyRow{}, "enabled") {
+		if err := g.Migrator().DropColumn(&policyRow{}, "enabled"); err != nil {
+			return nil, fmt.Errorf("gormstore migrate: %w", err)
+		}
+	}
 	if err := g.AutoMigrate(
 		&userRow{}, &keyRow{}, &sessionRow{}, &instanceRow{},
 		&execRow{}, &auditRow{}, &policyRow{}, &secretRow{},
@@ -262,10 +270,9 @@ func (r auditRow) toStore() *store.AuditEvent {
 
 type policyRow struct {
 	ID        string `gorm:"primaryKey"`
-	UserID    string
-	Name      string
+	UserID    string `gorm:"uniqueIndex:idx_policies_user_name"`
+	Name      string `gorm:"uniqueIndex:idx_policies_user_name"`
 	Rego      string
-	Enabled   bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -275,7 +282,7 @@ func (policyRow) TableName() string { return "policies" }
 func (r policyRow) toStore() *store.Policy {
 	return &store.Policy{
 		ID: r.ID, UserID: r.UserID, Name: r.Name, Rego: r.Rego,
-		Enabled: r.Enabled, CreatedAt: r.CreatedAt.UTC(), UpdatedAt: r.UpdatedAt.UTC(),
+		CreatedAt: r.CreatedAt.UTC(), UpdatedAt: r.UpdatedAt.UTC(),
 	}
 }
 
@@ -674,10 +681,11 @@ func (d *sqlDB) CreatePolicy(ctx context.Context, p *store.Policy) error {
 		p.CreatedAt = now
 	}
 	p.UpdatedAt = now
-	return gorm.G[policyRow](d.g).Create(ctx, &policyRow{
+	err := gorm.G[policyRow](d.g).Create(ctx, &policyRow{
 		ID: p.ID, UserID: p.UserID, Name: p.Name, Rego: p.Rego,
-		Enabled: p.Enabled, CreatedAt: p.CreatedAt.UTC(), UpdatedAt: p.UpdatedAt.UTC(),
+		CreatedAt: p.CreatedAt.UTC(), UpdatedAt: p.UpdatedAt.UTC(),
 	})
+	return mapWriteErr(err)
 }
 
 func (d *sqlDB) GetPolicy(ctx context.Context, id string) (*store.Policy, error) {
@@ -706,11 +714,10 @@ func (d *sqlDB) UpdatePolicy(ctx context.Context, p *store.Policy) error {
 	n, err := gorm.G[policyRow](d.g).Where("id = ?", p.ID).Set(
 		col("name", p.Name),
 		col("rego", p.Rego),
-		col("enabled", p.Enabled),
 		col("updated_at", p.UpdatedAt),
 	).Update(ctx)
 	if err != nil {
-		return err
+		return mapWriteErr(err)
 	}
 	if n == 0 {
 		return store.ErrNotFound

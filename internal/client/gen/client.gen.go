@@ -550,8 +550,11 @@ type InstanceSpec struct {
 	Env          *map[string]string      `json:"env,omitempty"`
 	Labels       *map[string]string      `json:"labels,omitempty"`
 	Limits       *Limits                 `json:"limits,omitempty"`
-	Secrets      *map[string]SecretSpec  `json:"secrets,omitempty"`
-	TtlSeconds   *int64                  `json:"ttl_seconds,omitempty"`
+
+	// Policies Names of the owner's library policies to attach (at most 32). Their rego is snapshotted at creation; server policies (--policy-dir) always apply in addition.
+	Policies   *[]PolicyName          `json:"policies,omitempty"`
+	Secrets    *map[string]SecretSpec `json:"secrets,omitempty"`
+	TtlSeconds *int64                 `json:"ttl_seconds,omitempty"`
 }
 
 // InstanceStatus defines model for InstanceStatus.
@@ -601,34 +604,39 @@ type PoliciesResponse struct {
 	Policies *[]Policy `json:"policies,omitempty"`
 }
 
-// Policy defines model for Policy.
+// Policy A library policy. It applies only to instances whose spec.policies names it; the rego is snapshotted at instance creation.
 type Policy struct {
 	CreatedAt time.Time `json:"created_at"`
-	Enabled   bool      `json:"enabled"`
 	Id        string    `json:"id"`
-	Name      string    `json:"name"`
-	Rego      string    `json:"rego"`
-	UpdatedAt time.Time `json:"updated_at"`
-	UserId    string    `json:"user_id"`
+
+	// Name Unique per user; referenced by InstanceSpec.policies.
+	Name      PolicyName `json:"name"`
+	Rego      string     `json:"rego"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	UserId    string     `json:"user_id"`
 }
+
+// PolicyName Unique per user; referenced by InstanceSpec.policies.
+type PolicyName = string
 
 // PolicyRequest defines model for PolicyRequest.
 type PolicyRequest struct {
-	Enabled *bool  `json:"enabled,omitempty"`
-	Name    string `json:"name"`
-	Rego    string `json:"rego"`
+	// Name Unique per user; referenced by InstanceSpec.policies.
+	Name PolicyName `json:"name"`
+	Rego string     `json:"rego"`
 }
 
 // PolicyResponse defines model for PolicyResponse.
 type PolicyResponse struct {
+	// Policy A library policy. It applies only to instances whose spec.policies names it; the rego is snapshotted at instance creation.
 	Policy *Policy `json:"policy,omitempty"`
 }
 
 // PolicyUpdateRequest defines model for PolicyUpdateRequest.
 type PolicyUpdateRequest struct {
-	Enabled *bool   `json:"enabled,omitempty"`
-	Name    *string `json:"name,omitempty"`
-	Rego    *string `json:"rego,omitempty"`
+	// Name Unique per user; referenced by InstanceSpec.policies.
+	Name *PolicyName `json:"name,omitempty"`
+	Rego *string     `json:"rego,omitempty"`
 }
 
 // ResourceUsages The instance's own cgroup v2 accounting, in bytes. Absent when the instance has no group of its own (inproc isolation, or process isolation without --instance-memory-max).
@@ -4129,6 +4137,8 @@ type CreatePolicyResponse struct {
 	JSON400 *Error
 	// JSON401 the response for an HTTP 401 `application/json` response
 	JSON401 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
 }
 
 // GetJSON201 returns the response for an HTTP 201 `application/json` response
@@ -4144,6 +4154,11 @@ func (r CreatePolicyResponse) GetJSON400() *Error {
 // GetJSON401 returns the response for an HTTP 401 `application/json` response
 func (r CreatePolicyResponse) GetJSON401() *Error {
 	return r.JSON401
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r CreatePolicyResponse) GetJSON409() *Error {
+	return r.JSON409
 }
 
 // GetBody returns the raw response body bytes
@@ -4351,6 +4366,8 @@ type UpdatePolicyResponse struct {
 	JSON401 *Error
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -4371,6 +4388,11 @@ func (r UpdatePolicyResponse) GetJSON401() *Error {
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
 func (r UpdatePolicyResponse) GetJSON404() *Error {
 	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r UpdatePolicyResponse) GetJSON409() *Error {
+	return r.JSON409
 }
 
 // GetBody returns the raw response body bytes
@@ -6040,6 +6062,13 @@ func ParseCreatePolicyResponse(rsp *http.Response) (*CreatePolicyResponse, error
 		}
 		response.JSON401 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
 	}
 
 	return response, nil
@@ -6206,6 +6235,13 @@ func ParseUpdatePolicyResponse(rsp *http.Response) (*UpdatePolicyResponse, error
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	}
 

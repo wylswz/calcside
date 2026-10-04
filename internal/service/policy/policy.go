@@ -1,11 +1,15 @@
-// Package policy implements per-user rego policy CRUD plus a
-// validate-only operation used by the policies/validate endpoint.
+// Package policy implements the per-user rego policy library (CRUD plus
+// a validate-only operation used by the policies/validate endpoint).
+// Library policies apply only to instances whose spec.policies names
+// them, snapshotted at instance creation.
 package policy
 
 import (
 	"context"
+	"errors"
 
 	rego "calcside/internal/policy"
+	"calcside/internal/runtime"
 	"calcside/internal/service"
 	"calcside/internal/store"
 	"calcside/internal/types"
@@ -30,19 +34,33 @@ func (s *Service) List(ctx context.Context, a service.Actor) ([]*store.Policy, e
 	return lst, nil
 }
 
-func (s *Service) Create(ctx context.Context, a service.Actor, name, src string, enabled *bool) (*store.Policy, error) {
+func validateName(name string) error {
+	if !runtime.ValidPolicyName(name) {
+		return service.BadRequest("policy name must match [A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
+	}
+	return nil
+}
+
+func writeErr(err error) error {
+	if errors.Is(err, store.ErrConflict) {
+		return service.Conflict("policy with that name already exists")
+	}
+	return service.Internal(err)
+}
+
+func (s *Service) Create(ctx context.Context, a service.Actor, name, src string) (*store.Policy, error) {
 	if name == "" || src == "" {
 		return nil, service.BadRequest("name and rego required")
+	}
+	if err := validateName(name); err != nil {
+		return nil, err
 	}
 	if err := rego.Validate(src); err != nil {
 		return nil, service.Errf(types.ErrCodeBadPolicy, "%s", err.Error())
 	}
-	pol := &store.Policy{UserID: a.UserID, Name: name, Rego: src, Enabled: true}
-	if enabled != nil {
-		pol.Enabled = *enabled
-	}
+	pol := &store.Policy{UserID: a.UserID, Name: name, Rego: src}
 	if err := s.st.CreatePolicy(ctx, pol); err != nil {
-		return nil, service.Internal(err)
+		return nil, writeErr(err)
 	}
 	return pol, nil
 }
@@ -64,12 +82,15 @@ func (s *Service) Get(ctx context.Context, a service.Actor, id string) (*store.P
 	return pol, nil
 }
 
-func (s *Service) Update(ctx context.Context, a service.Actor, id string, name, src *string, enabled *bool) (*store.Policy, error) {
+func (s *Service) Update(ctx context.Context, a service.Actor, id string, name, src *string) (*store.Policy, error) {
 	pol, err := s.Get(ctx, a, id)
 	if err != nil {
 		return nil, err
 	}
-	if name != nil {
+	if name != nil && *name != pol.Name {
+		if err := validateName(*name); err != nil {
+			return nil, err
+		}
 		pol.Name = *name
 	}
 	if src != nil {
@@ -78,11 +99,8 @@ func (s *Service) Update(ctx context.Context, a service.Actor, id string, name, 
 		}
 		pol.Rego = *src
 	}
-	if enabled != nil {
-		pol.Enabled = *enabled
-	}
 	if err := s.st.UpdatePolicy(ctx, pol); err != nil {
-		return nil, service.Internal(err)
+		return nil, writeErr(err)
 	}
 	return pol, nil
 }

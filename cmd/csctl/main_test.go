@@ -227,3 +227,26 @@ func TestClientTyped(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRunWithPolicy(t *testing.T) {
+	env := newTestEnv(t)
+	f := filepath.Join(t.TempDir(), "p.rego")
+	src := "package calcside.hooks\ndeny contains \"no reads\" if { input.op == \"read\" }\n"
+	if err := os.WriteFile(f, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errOut := runCLI(t, env, "policies", "apply", "--name", "no_read", "-f", f); code != 0 {
+		t.Fatalf("apply: %d %q", code, errOut)
+	}
+	script := "fs.write('a','x')\nprint(fs.read('a'))"
+	code, _, errOut := runCLI(t, env, "run", "--fs", "--policy", "no_read", "-c", script)
+	if code != 2 || !bytes.Contains([]byte(errOut), []byte("policy_denied")) {
+		t.Fatalf("with policy: %d %q", code, errOut)
+	}
+	if code, out, errOut := runCLI(t, env, "run", "--fs", "-c", script); code != 0 || out != "x\n" {
+		t.Fatalf("without policy: %d %q %q", code, out, errOut)
+	}
+	if code, _, _ := runCLI(t, env, "run", "--policy", "missing", "-c", "print(1)"); code == 0 {
+		t.Fatal("unknown policy accepted")
+	}
+}

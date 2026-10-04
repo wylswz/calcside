@@ -373,13 +373,87 @@ deny contains "x" if { input.op == "read" }`
 		t.Fatalf("create policy: %d %v", code, m)
 	}
 	polID := m["policy"].(map[string]any)["id"].(string)
-	code, m, _ = e.req("PUT", "/api/v1/policies/"+polID, `{"enabled":false}`, csrf, cookies)
-	if code != 200 {
+	code, m, _ = e.req("POST", "/api/v1/policies", `{"name":"p","rego":`+jsonStr(valid)+`}`, csrf, cookies)
+	if code != 409 {
+		t.Fatalf("duplicate name: want 409, got %d %v", code, m)
+	}
+	code, m, _ = e.req("POST", "/api/v1/policies", `{"name":"has space","rego":`+jsonStr(valid)+`}`, csrf, cookies)
+	if code != 400 {
+		t.Fatalf("bad name: want 400, got %d %v", code, m)
+	}
+	code, m, _ = e.req("PUT", "/api/v1/policies/"+polID, `{"name":"no_read"}`, csrf, cookies)
+	if code != 200 || m["policy"].(map[string]any)["name"] != "no_read" {
 		t.Fatalf("update: %d %v", code, m)
 	}
 	code, _, _ = e.req("DELETE", "/api/v1/policies/"+polID, "", csrf, cookies)
 	if code != 200 {
 		t.Fatalf("delete policy: %d", code)
+	}
+}
+
+// Library policies apply only to the instances that select them, and the
+// rego is snapshotted at creation.
+func TestInstancePolicySelection(t *testing.T) {
+	e := newEnv(t)
+	cookies := login(e, "a@x.com")
+	csrf := map[string]string{"X-Requested-With": "calcside"}
+	noRead := `package calcside.hooks
+deny contains "no reads" if { input.op == "read" }`
+	code, m, _ := e.req("POST", "/api/v1/policies", `{"name":"no_read","rego":`+jsonStr(noRead)+`}`, csrf, cookies)
+	if code != 201 {
+		t.Fatalf("create policy: %d %v", code, m)
+	}
+	polID := m["policy"].(map[string]any)["id"].(string)
+
+	create := func(spec string) string {
+		t.Helper()
+		code, m, _ := e.req("POST", "/api/v1/instances", spec, csrf, cookies)
+		if code != 201 {
+			t.Fatalf("create instance %s: %d %v", spec, code, m)
+		}
+		return m["instance"].(map[string]any)["id"].(string)
+	}
+	readErr := func(id string) any {
+		t.Helper()
+		code, m, _ := e.req("POST", "/api/v1/instances/"+id+"/exec",
+			`{"code":"fs.write('a','x')\nprint(fs.read('a'))"}`, csrf, cookies)
+		if code != 200 {
+			t.Fatalf("exec: %d %v", code, m)
+		}
+		if m["error"] == nil {
+			return nil
+		}
+		return m["error"].(map[string]any)["type"]
+	}
+
+	with := create(`{"capabilities":{"fs":{}},"policies":["no_read"]}`)
+	without := create(`{"capabilities":{"fs":{}}}`)
+	if got := readErr(with); got != "policy_denied" {
+		t.Fatalf("selected policy: want policy_denied, got %v", got)
+	}
+	if got := readErr(without); got != nil {
+		t.Fatalf("unselected policy must not apply, got %v", got)
+	}
+	code, m, _ = e.req("GET", "/api/v1/instances/"+with, "", csrf, cookies)
+	pols, _ := m["instance"].(map[string]any)["spec"].(map[string]any)["policies"].([]any)
+	if code != 200 || len(pols) != 1 || pols[0] != "no_read" {
+		t.Fatalf("stored spec policies: %d %v", code, m)
+	}
+
+	// snapshot: editing or deleting the library policy leaves a live
+	// instance's enforcement unchanged
+	if code, m, _ := e.req("DELETE", "/api/v1/policies/"+polID, "", csrf, cookies); code != 200 {
+		t.Fatalf("delete policy: %d %v", code, m)
+	}
+	if got := readErr(with); got != "policy_denied" {
+		t.Fatalf("snapshot lost after delete: got %v", got)
+	}
+
+	for _, spec := range []string{`{"policies":["no_read"]}`, `{"policies":["bad name"]}`, `{"policies":["a","a"]}`} {
+		code, m, _ = e.req("POST", "/api/v1/instances", spec, csrf, cookies)
+		if code != 400 || m["error"].(map[string]any)["code"] != "bad_spec" {
+			t.Fatalf("%s: want 400 bad_spec, got %d %v", spec, code, m)
+		}
 	}
 }
 

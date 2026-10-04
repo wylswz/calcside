@@ -281,21 +281,39 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 	t.Run("policies", func(t *testing.T) {
 		s := newStore(t)
 		u, _ := s.UpsertUserByEmail(ctx, "p@x.com", "", "")
-		p := &store.Policy{UserID: u.ID, Name: "pol", Rego: "package calcside.hooks", Enabled: true}
+		p := &store.Policy{UserID: u.ID, Name: "pol", Rego: "package calcside.hooks"}
 		if err := s.CreatePolicy(ctx, p); err != nil {
 			t.Fatal(err)
 		}
 		got, err := s.GetPolicy(ctx, p.ID)
-		if err != nil || !got.Enabled {
+		if err != nil || got.Name != "pol" {
 			t.Fatalf("GetPolicy: %v %+v", err, got)
 		}
-		p.Enabled = false
+		dup := &store.Policy{UserID: u.ID, Name: "pol", Rego: "package calcside.hooks"}
+		if err := s.CreatePolicy(ctx, dup); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("duplicate name: want ErrConflict, got %v", err)
+		}
+		other, _ := s.UpsertUserByEmail(ctx, "p2@x.com", "", "")
+		if err := s.CreatePolicy(ctx, &store.Policy{UserID: other.ID, Name: "pol", Rego: "package calcside.hooks"}); err != nil {
+			t.Fatalf("same name for another user: %v", err)
+		}
+		p2 := &store.Policy{UserID: u.ID, Name: "pol2", Rego: "package calcside.hooks"}
+		if err := s.CreatePolicy(ctx, p2); err != nil {
+			t.Fatal(err)
+		}
+		p2.Name = "pol"
+		if err := s.UpdatePolicy(ctx, p2); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("rename onto existing name: want ErrConflict, got %v", err)
+		}
+		if err := s.DeletePolicy(ctx, p2.ID); err != nil {
+			t.Fatal(err)
+		}
 		p.Rego = "package calcside.hooks\nx := 1"
 		if err := s.UpdatePolicy(ctx, p); err != nil {
 			t.Fatal(err)
 		}
 		got, _ = s.GetPolicy(ctx, p.ID)
-		if got.Enabled || got.Rego != p.Rego {
+		if got.Rego != p.Rego {
 			t.Fatalf("UpdatePolicy: %+v", got)
 		}
 		lst, _ := s.ListPolicies(ctx, u.ID)

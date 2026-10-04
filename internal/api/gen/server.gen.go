@@ -548,8 +548,11 @@ type InstanceSpec struct {
 	Env          *map[string]string      `json:"env,omitempty"`
 	Labels       *map[string]string      `json:"labels,omitempty"`
 	Limits       *Limits                 `json:"limits,omitempty"`
-	Secrets      *map[string]SecretSpec  `json:"secrets,omitempty"`
-	TtlSeconds   *int64                  `json:"ttl_seconds,omitempty"`
+
+	// Policies Names of the owner's library policies to attach (at most 32). Their rego is snapshotted at creation; server policies (--policy-dir) always apply in addition.
+	Policies   *[]PolicyName          `json:"policies,omitempty"`
+	Secrets    *map[string]SecretSpec `json:"secrets,omitempty"`
+	TtlSeconds *int64                 `json:"ttl_seconds,omitempty"`
 }
 
 // InstanceStatus defines model for InstanceStatus.
@@ -599,34 +602,39 @@ type PoliciesResponse struct {
 	Policies *[]Policy `json:"policies,omitempty"`
 }
 
-// Policy defines model for Policy.
+// Policy A library policy. It applies only to instances whose spec.policies names it; the rego is snapshotted at instance creation.
 type Policy struct {
 	CreatedAt time.Time `json:"created_at"`
-	Enabled   bool      `json:"enabled"`
 	Id        string    `json:"id"`
-	Name      string    `json:"name"`
-	Rego      string    `json:"rego"`
-	UpdatedAt time.Time `json:"updated_at"`
-	UserId    string    `json:"user_id"`
+
+	// Name Unique per user; referenced by InstanceSpec.policies.
+	Name      PolicyName `json:"name"`
+	Rego      string     `json:"rego"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	UserId    string     `json:"user_id"`
 }
+
+// PolicyName Unique per user; referenced by InstanceSpec.policies.
+type PolicyName = string
 
 // PolicyRequest defines model for PolicyRequest.
 type PolicyRequest struct {
-	Enabled *bool  `json:"enabled,omitempty"`
-	Name    string `json:"name"`
-	Rego    string `json:"rego"`
+	// Name Unique per user; referenced by InstanceSpec.policies.
+	Name PolicyName `json:"name"`
+	Rego string     `json:"rego"`
 }
 
 // PolicyResponse defines model for PolicyResponse.
 type PolicyResponse struct {
+	// Policy A library policy. It applies only to instances whose spec.policies names it; the rego is snapshotted at instance creation.
 	Policy *Policy `json:"policy,omitempty"`
 }
 
 // PolicyUpdateRequest defines model for PolicyUpdateRequest.
 type PolicyUpdateRequest struct {
-	Enabled *bool   `json:"enabled,omitempty"`
-	Name    *string `json:"name,omitempty"`
-	Rego    *string `json:"rego,omitempty"`
+	// Name Unique per user; referenced by InstanceSpec.policies.
+	Name *PolicyName `json:"name,omitempty"`
+	Rego *string     `json:"rego,omitempty"`
 }
 
 // ResourceUsages The instance's own cgroup v2 accounting, in bytes. Absent when the instance has no group of its own (inproc isolation, or process isolation without --instance-memory-max).
@@ -2702,6 +2710,20 @@ func (response CreatePolicy401JSONResponse) VisitCreatePolicyResponse(w http.Res
 	return err
 }
 
+type CreatePolicy409JSONResponse ErrorEnvelope
+
+func (response CreatePolicy409JSONResponse) VisitCreatePolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ValidatePolicyRequestObject struct {
 	Body *ValidatePolicyJSONRequestBody
 }
@@ -2913,6 +2935,20 @@ func (response UpdatePolicy404JSONResponse) VisitUpdatePolicyResponse(w http.Res
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePolicy409JSONResponse ErrorEnvelope
+
+func (response UpdatePolicy409JSONResponse) VisitUpdatePolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }

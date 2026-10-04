@@ -27,7 +27,7 @@ func TestMessagesRoundTrip(t *testing.T) {
 			Spec:       json.RawMessage(`{"ttl_seconds":900,"env":null}`),
 			Policies: PolicyBundle{
 				Global: map[string]string{"deny.rego": "package calcside.hooks"},
-				User:   map[string]string{"pol_1": "package calcside.hooks"},
+				User:   map[string]string{"deny_net": "package calcside.hooks"},
 			},
 			Secrets: []Secret{{
 				Name: "TOK", Value: "s3cr3t",
@@ -165,6 +165,8 @@ func TestNormalizeRejects(t *testing.T) {
 		{"bad env name", `{"env":{"lower":"x"}}`, "invalid name"},
 		{"bad secret name", `{"secrets":{"lowercase":{"value":"v"}}}`, "invalid name"},
 		{"env/secret overlap", `{"env":{"T":"x"},"secrets":{"T":{"value":"v"}}}`, "also used by env"},
+		{"bad policy name", `{"policies":["has space"]}`, "policies: invalid name"},
+		{"duplicate policy", `{"policies":["p","p"]}`, "policies: duplicate"},
 	}
 	for _, tc := range cases {
 		var spec Spec

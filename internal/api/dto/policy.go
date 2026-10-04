@@ -12,7 +12,6 @@ type Policy struct {
 	UserID    string    `json:"user_id"`
 	Name      string    `json:"name"`
 	Rego      string    `json:"rego"`
-	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -20,7 +19,7 @@ type Policy struct {
 func NewPolicy(p *store.Policy) Policy {
 	return Policy{
 		ID: p.ID, UserID: p.UserID, Name: p.Name, Rego: p.Rego,
-		Enabled: p.Enabled, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
 }
 

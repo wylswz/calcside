@@ -15,6 +15,7 @@
 - No container / host process capabilities. New capabilities implement `capability.Factory` and must route every op through `Gate.Invoke` so hooks and audit see it.
 - Result/Call metadata passed to hooks must be JSON-able and must never contain file contents or response bodies.
 - User Rego policies run with a restricted capability set (see `internal/policy`); keep dangerous builtins out.
+- Policies are per instance: `--policy-dir` server policies always apply; user library policies (unique `(user_id, name)`) apply only when named in `spec.policies`, resolved and snapshotted by `service/sandbox` at create (`PolicyBundle.User` is keyed by name). There is no `enabled` flag.
 - Store changes: update the interface, the GORM impl (`internal/store/gormstore`), and `internal/store/storetest` conformance suite.
 - API changes: edit `api/openapi.yaml` first, then `make gen`; never hand-edit generated files (`internal/api/gen`, `internal/client/gen`, `web/src/api/schema.ts`).
 - Worker protocol changes: edit `api/worker.openapi.yaml`, then `make gen`. Worker-served ops generate into `internal/runtime/remote/gen`; `api-callback`-tagged ops (worker→API reverse calls, e.g. ext tree resolution) generate the API-side strict server into `internal/api/intgen` and the worker's client into `internal/runtime/remote/apiclient`. Request/response bodies map via `x-go-type` onto `internal/runtime` contract types — payloads change in the contract package, not the spec.

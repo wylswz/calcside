@@ -303,6 +303,7 @@ export default function InstanceDetail() {
   const ext = Object.entries(inst.spec?.capabilities?.ext ?? {}) as [string, { source?: string; sum?: string }][]
   const env = Object.entries(inst.spec?.env ?? {}) as [string, string][]
   const secrets = Object.entries(inst.spec?.secrets ?? {}) as [string, SpecSecret][]
+  const policies = inst.spec?.policies ?? []
 
   return (
     <div>
@@ -420,6 +421,17 @@ export default function InstanceDetail() {
               </dl>
             </div>
           )}
+          <div>
+            <SectionTitle>Policies</SectionTitle>
+            {policies.length === 0
+              ? <p className="text-xs text-mute">server policies only</p>
+              : (
+                <ul className="space-y-1 font-mono text-xs text-ink">
+                  {policies.map((n) => <li key={n}>{n}</li>)}
+                </ul>
+              )}
+            <p className="mt-2 text-xs text-mute">snapshotted at creation; library edits don't apply here</p>
+          </div>
           {(env.length > 0 || secrets.length > 0) && (
             <div>
               <SectionTitle>Env &amp; Secrets</SectionTitle>

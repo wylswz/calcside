@@ -30,7 +30,7 @@ flowchart LR
 
     mgr --> inst
 
-    pol["Policy — OPA/Rego<br/>global + user policies<br/>snapshot at create · fail closed"] -->|"before / after hooks"| gate
+    pol["Policy — OPA/Rego<br/>server policies + per-instance picks<br/>snapshot at create · fail closed"] -->|"before / after hooks"| gate
     gate -->|"decision + metadata"| audit[("Audit log")]
     mgr --> store[("Store — SQLite")]
 
@@ -58,10 +58,11 @@ Every capability call — including the base-capability calls an extension makes
   - **Vault refs** (`{"ref": "NAME", "allowed_domains": [narrowed]}`) resolve at creation from the user's vault. Vault secrets are encrypted at rest with `--secret-key` (AES-256-GCM, base64 32-byte key) and write-only via the session-only `/api/v1/secrets` endpoints. An instance ref may only *narrow* the vault allowlist.
   - Response redaction is best-effort defense in depth — it catches raw, base64, URL- and JSON-escaped reflections, not arbitrary server-side transforms — so `allowed_domains` must only list hosts trusted with the secret.
 - **Hook**: every op of every capability goes through the instance's Gate: `before hooks -> op -> after hooks -> audit`. Once an exec ends, the Gate is disarmed; once the instance is deleted, it is revoked. Any capability reference that leaks out of an exec then fails with `out_of_scope`.
-- **Policy**: OPA/Rego, `package calcside.hooks`, `deny contains msg if {...}`.
-  - Global policies come from `--policy-dir`.
-  - User policies are compiled and evaluated separately. They run under a restricted builtin set (no `http.send`, `opa.runtime`, `net.lookup_ip_addr`, `print`, or `trace`).
-  - Policy snapshots are taken when an instance is created. Evaluation errors or timeouts count as deny (fail closed).
+- **Policy**: OPA/Rego, `package calcside.hooks`, `deny contains msg if {...}`. Policies are bound per instance.
+  - **Server policies** come from `--policy-dir` and are attached to every instance; a spec cannot opt out of them.
+  - **Library policies** are defined once per user (`/api/v1/policies`, `csctl policies apply`, or the console) under a unique name (`[A-Za-z0-9][A-Za-z0-9_.-]{0,63}`), and an instance selects the ones it wants with `spec.policies: ["name", ...]` (up to 32). An unknown name rejects the create (`bad_spec`). A policy not listed in the spec doesn't apply to that instance.
+  - Library policies are compiled and evaluated separately from server policies, under a restricted builtin set (no `http.send`, `opa.runtime`, `net.lookup_ip_addr`, `print`, or `trace`).
+  - The selected rego is snapshotted when the instance is created, so editing or deleting a library policy only affects instances created afterwards. Evaluation errors or timeouts count as deny (fail closed).
 
 Policy input:
 
@@ -81,6 +82,8 @@ make build                 # web console + bin/calcside + bin/csctl
 make dev                   # backend (--dev, anonymous) on :8787 + Vite console on :5173 — no login
 bin/csctl login --server http://localhost:8080 --api-key cs_...
 bin/csctl run --fs -c 'fs.write("a.txt", "hi"); print(fs.read("a.txt"))'
+bin/csctl policies apply --name deny_net_hosts -f policies/examples/deny_net_hosts.rego
+bin/csctl run --net-allow exfil.bad.example --policy deny_net_hosts -c 'net.get("https://exfil.bad.example/")'  # policy_denied
 ```
 
 Instance spec (`POST /api/v1/instances`):
@@ -88,6 +91,7 @@ Instance spec (`POST /api/v1/instances`):
 ```json
 {"ttl_seconds": 900, "labels": {"team": "x"},
  "capabilities": {"fs": {"quota_bytes": 67108864}, "net": {"allow_hosts": ["api.github.com"]}, "io": {}},
+ "policies": ["deny_net_hosts"],
  "limits": {"exec_timeout_ms": 30000, "max_steps": 10000000, "max_output_bytes": 1048576}}
 ```
 

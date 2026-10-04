@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"encoding/json"
+	"regexp"
 	"time"
 
 	"calcside/internal/secrets"
@@ -18,6 +19,10 @@ type Spec struct {
 	Limits       Limits                     `json:"limits"`
 	Env          map[string]string          `json:"env"`
 	Secrets      map[string]SecretSpec      `json:"secrets"`
+	// Policies names the owner's library policies attached to this
+	// instance. The API tier snapshots their rego at create time; server
+	// policies (--policy-dir) always apply and are never listed here.
+	Policies []string `json:"policies,omitempty"`
 }
 
 // SecretSpec is one entry of spec.secrets: either a vault ref (name of a
@@ -44,7 +49,14 @@ const (
 
 	maxEnvEntries   = 64
 	maxEnvValueByte = 4 << 10
+	maxPolicies     = 32
 )
+
+var policyNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
+
+// ValidPolicyName reports whether name is a legal policy name: what a
+// spec may reference in spec.policies and what the library may store.
+func ValidPolicyName(name string) bool { return policyNameRe.MatchString(name) }
 
 // Bounds are the server-side caps a spec is normalized against. Both
 // tiers must be configured with the same values: the API tier
@@ -129,6 +141,19 @@ func (s *Spec) Normalize(b Bounds, validate CapValidator) error {
 		if _, isEnv := s.Env[name]; isEnv {
 			return Errf(ErrBadSpec, "secrets: name %q also used by env", name)
 		}
+	}
+	if len(s.Policies) > maxPolicies {
+		return Errf(ErrBadSpec, "policies: more than %d entries", maxPolicies)
+	}
+	seen := make(map[string]bool, len(s.Policies))
+	for _, name := range s.Policies {
+		if !ValidPolicyName(name) {
+			return Errf(ErrBadSpec, "policies: invalid name %q", name)
+		}
+		if seen[name] {
+			return Errf(ErrBadSpec, "policies: duplicate %q", name)
+		}
+		seen[name] = true
 	}
 	return nil
 }

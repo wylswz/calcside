@@ -2,7 +2,6 @@
   "body": {
     "policy": {
       "created_at": "\u003cts\u003e",
-      "enabled": true,
       "id": "\u003cid:pol\u003e",
       "name": "p",
       "rego": "package calcside.hooks\ndeny contains \"x\" if { input.op == \"read\" }",

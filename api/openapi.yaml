@@ -397,6 +397,7 @@ paths:
                 $ref: '#/components/schemas/PolicyResponse'
         '400': { $ref: '#/components/responses/Error' }
         '401': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
   /api/v1/policies/validate:
     post:
       operationId: validatePolicy
@@ -450,6 +451,7 @@ paths:
         '400': { $ref: '#/components/responses/Error' }
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
     delete:
       operationId: deletePolicy
       tags: [policies]
@@ -793,6 +795,14 @@ components:
           type: object
           additionalProperties: true
         limits: { $ref: '#/components/schemas/Limits' }
+        policies:
+          type: array
+          description: >-
+            Names of the owner's library policies to attach (at most 32).
+            Their rego is snapshotted at creation; server policies
+            (--policy-dir) always apply in addition.
+          maxItems: 32
+          items: { $ref: '#/components/schemas/PolicyName' }
     Instance:
       type: object
       required: [id, user_id, spec, labels, status, created_at, last_active_at, expires_at]
@@ -946,28 +956,32 @@ components:
           items: { $ref: '#/components/schemas/AuditEvent' }
     Policy:
       type: object
-      required: [id, user_id, name, rego, enabled, created_at, updated_at]
+      description: >-
+        A library policy. It applies only to instances whose spec.policies
+        names it; the rego is snapshotted at instance creation.
+      required: [id, user_id, name, rego, created_at, updated_at]
       properties:
         id: { type: string }
         user_id: { type: string }
-        name: { type: string }
+        name: { $ref: '#/components/schemas/PolicyName' }
         rego: { type: string }
-        enabled: { type: boolean }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    PolicyName:
+      type: string
+      description: Unique per user; referenced by InstanceSpec.policies.
+      pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'
     PolicyRequest:
       type: object
       required: [name, rego]
       properties:
-        name: { type: string }
+        name: { $ref: '#/components/schemas/PolicyName' }
         rego: { type: string }
-        enabled: { type: boolean }
     PolicyUpdateRequest:
       type: object
       properties:
-        name: { type: string }
+        name: { $ref: '#/components/schemas/PolicyName' }
         rego: { type: string }
-        enabled: { type: boolean }
     PolicyResponse:
       type: object
       properties:

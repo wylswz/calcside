@@ -191,6 +191,7 @@ type createFlags struct {
 	labels    strList
 	envs      strList
 	secrets   strList
+	policies  strList
 	spec      string
 	output    types.OutputFormat
 }
@@ -212,6 +213,7 @@ func registerCreateFlags(fs *flag.FlagSet, f *createFlags) {
 	fs.Var(&f.labels, "label", "k=v label (repeatable)")
 	fs.Var(&f.envs, "env", "K=V env var visible to the script (repeatable)")
 	fs.Var(&f.secrets, "secret", "NAME[=dom1,dom2] vault secret ref, optionally narrowing its domains (repeatable)")
+	fs.Var(&f.policies, "policy", "library policy name to attach (repeatable)")
 	fs.StringVar(&f.spec, "spec", "", "raw spec JSON file")
 	fs.TextVar(&f.output, "o", types.FormatText, "output format (json)")
 }
@@ -313,6 +315,9 @@ func buildSpec(f *createFlags) (client.InstanceSpec, error) {
 			secs[name] = entry
 		}
 		spec["secrets"] = secs
+	}
+	if len(f.policies) > 0 {
+		spec["policies"] = []string(f.policies)
 	}
 	return spec, nil
 }
@@ -665,9 +670,9 @@ func cmdPolicies(ctx context.Context, c *client.Client, args []string) int {
 			return fail(err)
 		}
 		tw := newTabWriter()
-		fmt.Fprintln(tw, "ID\tNAME\tENABLED\tUPDATED")
+		fmt.Fprintln(tw, "ID\tNAME\tUPDATED")
 		for _, p := range lst {
-			fmt.Fprintf(tw, "%s\t%s\t%v\t%s\n", p.ID, p.Name, p.Enabled, p.UpdatedAt.Format(time.RFC3339))
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", p.ID, p.Name, p.UpdatedAt.Format(time.RFC3339))
 		}
 		tw.Flush()
 		return 0
@@ -687,7 +692,6 @@ func cmdPolicies(ctx context.Context, c *client.Client, args []string) int {
 		fs.SetOutput(stderr)
 		file := fs.String("f", "", "rego file")
 		name := fs.String("name", "", "policy name")
-		disabled := fs.Bool("disabled", false, "create disabled")
 		if err := fs.Parse(args[1:]); err != nil {
 			return 2
 		}
@@ -707,8 +711,7 @@ func cmdPolicies(ctx context.Context, c *client.Client, args []string) int {
 		}
 		for _, p := range lst {
 			if p.Name == *name {
-				en := !*disabled
-				up, err := c.UpdatePolicy(ctx, p.ID, nil, &src, &en)
+				up, err := c.UpdatePolicy(ctx, p.ID, nil, &src)
 				if err != nil {
 					return fail(err)
 				}
@@ -716,7 +719,7 @@ func cmdPolicies(ctx context.Context, c *client.Client, args []string) int {
 				return 0
 			}
 		}
-		p, err := c.CreatePolicy(ctx, *name, src, !*disabled)
+		p, err := c.CreatePolicy(ctx, *name, src)
 		if err != nil {
 			return fail(err)
 		}

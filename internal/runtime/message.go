@@ -49,8 +49,8 @@ func (s Secret) LogValue() slog.Value {
 type PolicyBundle struct {
 	// Global maps module name to rego source, compiled with full builtins.
 	Global map[string]string `json:"global,omitempty"`
-	// User maps policy ID to rego source, compiled with the restricted
-	// builtin set.
+	// User maps policy name to rego source for the library policies the
+	// spec selected, compiled with the restricted builtin set.
 	User map[string]string `json:"user,omitempty"`
 }
 
