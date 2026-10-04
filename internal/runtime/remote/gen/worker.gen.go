@@ -225,7 +225,7 @@ type ClientInterface interface {
 
 	// RuntimeBrowseWithBody List a directory or read one file in the instance VFS.
 	//
-	// Read-only; may be retried.
+	// Read-only; may be retried. list_only requests never read file contents.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -234,7 +234,7 @@ type ClientInterface interface {
 
 	// RuntimeBrowse List a directory or read one file in the instance VFS.
 	//
-	// Read-only; may be retried.
+	// Read-only; may be retried. list_only requests never read file contents.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -291,7 +291,7 @@ type ClientInterface interface {
 	// Corresponds with POST /runtime/v1/exec (the `RuntimeExec` operationId).
 	RuntimeExec(ctx context.Context, body RuntimeExecJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// RuntimeInspectWithBody Snapshot a live instance's globals (variable reprs).
+	// RuntimeInspectWithBody Snapshot a live instance's globals or completion metadata.
 	//
 	// Read-only; may be retried.
 	//
@@ -300,7 +300,7 @@ type ClientInterface interface {
 	// Corresponds with POST /runtime/v1/inspect (the `RuntimeInspect` operationId).
 	RuntimeInspectWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// RuntimeInspect Snapshot a live instance's globals (variable reprs).
+	// RuntimeInspect Snapshot a live instance's globals or completion metadata.
 	//
 	// Read-only; may be retried.
 	//
@@ -348,7 +348,7 @@ type ClientInterface interface {
 
 // RuntimeBrowseWithBody List a directory or read one file in the instance VFS.
 //
-// Read-only; may be retried.
+// Read-only; may be retried. list_only requests never read file contents.
 //
 // Takes any type of body and a specified content type.
 //
@@ -367,7 +367,7 @@ func (c *Client) RuntimeBrowseWithBody(ctx context.Context, contentType string, 
 
 // RuntimeBrowse List a directory or read one file in the instance VFS.
 //
-// Read-only; may be retried.
+// Read-only; may be retried. list_only requests never read file contents.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -494,7 +494,7 @@ func (c *Client) RuntimeExec(ctx context.Context, body RuntimeExecJSONRequestBod
 	return c.Client.Do(req)
 }
 
-// RuntimeInspectWithBody Snapshot a live instance's globals (variable reprs).
+// RuntimeInspectWithBody Snapshot a live instance's globals or completion metadata.
 //
 // Read-only; may be retried.
 //
@@ -513,7 +513,7 @@ func (c *Client) RuntimeInspectWithBody(ctx context.Context, contentType string,
 	return c.Client.Do(req)
 }
 
-// RuntimeInspect Snapshot a live instance's globals (variable reprs).
+// RuntimeInspect Snapshot a live instance's globals or completion metadata.
 //
 // Read-only; may be retried.
 //
@@ -934,7 +934,7 @@ type ClientWithResponsesInterface interface {
 
 	// RuntimeBrowseWithBodyWithResponse List a directory or read one file in the instance VFS.
 	//
-	// Read-only; may be retried.
+	// Read-only; may be retried. list_only requests never read file contents.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -943,7 +943,7 @@ type ClientWithResponsesInterface interface {
 
 	// RuntimeBrowseWithResponse List a directory or read one file in the instance VFS.
 	//
-	// Read-only; may be retried.
+	// Read-only; may be retried. list_only requests never read file contents.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -1000,7 +1000,7 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /runtime/v1/exec (the `RuntimeExec` operationId).
 	RuntimeExecWithResponse(ctx context.Context, body RuntimeExecJSONRequestBody, reqEditors ...RequestEditorFn) (*RuntimeExecResponse, error)
 
-	// RuntimeInspectWithBodyWithResponse Snapshot a live instance's globals (variable reprs).
+	// RuntimeInspectWithBodyWithResponse Snapshot a live instance's globals or completion metadata.
 	//
 	// Read-only; may be retried.
 	//
@@ -1009,7 +1009,7 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /runtime/v1/inspect (the `RuntimeInspect` operationId).
 	RuntimeInspectWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RuntimeInspectResponse, error)
 
-	// RuntimeInspectWithResponse Snapshot a live instance's globals (variable reprs).
+	// RuntimeInspectWithResponse Snapshot a live instance's globals or completion metadata.
 	//
 	// Read-only; may be retried.
 	//
@@ -1393,7 +1393,7 @@ func (r RuntimePromptResponse) ContentType() string {
 
 // RuntimeBrowseWithBodyWithResponse List a directory or read one file in the instance VFS.
 //
-// Read-only; may be retried.
+// Read-only; may be retried. list_only requests never read file contents.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -1408,7 +1408,7 @@ func (c *ClientWithResponses) RuntimeBrowseWithBodyWithResponse(ctx context.Cont
 
 // RuntimeBrowseWithResponse List a directory or read one file in the instance VFS.
 //
-// Read-only; may be retried.
+// Read-only; may be retried. list_only requests never read file contents.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -1507,7 +1507,7 @@ func (c *ClientWithResponses) RuntimeExecWithResponse(ctx context.Context, body 
 	return ParseRuntimeExecResponse(rsp)
 }
 
-// RuntimeInspectWithBodyWithResponse Snapshot a live instance's globals (variable reprs).
+// RuntimeInspectWithBodyWithResponse Snapshot a live instance's globals or completion metadata.
 //
 // Read-only; may be retried.
 //
@@ -1522,7 +1522,7 @@ func (c *ClientWithResponses) RuntimeInspectWithBodyWithResponse(ctx context.Con
 	return ParseRuntimeInspectResponse(rsp)
 }
 
-// RuntimeInspectWithResponse Snapshot a live instance's globals (variable reprs).
+// RuntimeInspectWithResponse Snapshot a live instance's globals or completion metadata.
 //
 // Read-only; may be retried.
 //
@@ -1842,7 +1842,7 @@ type ServerInterface interface {
 	// RuntimeExec Run Starlark on a live instance.
 	// (POST /runtime/v1/exec)
 	RuntimeExec(c *gin.Context)
-	// RuntimeInspect Snapshot a live instance's globals (variable reprs).
+	// RuntimeInspect Snapshot a live instance's globals or completion metadata.
 	// (POST /runtime/v1/inspect)
 	RuntimeInspect(c *gin.Context)
 	// RuntimeKeepalive Renew the instance's sliding TTL deadline.
@@ -2278,7 +2278,7 @@ type StrictServerInterface interface {
 	// RuntimeExec Run Starlark on a live instance.
 	// (POST /runtime/v1/exec)
 	RuntimeExec(ctx context.Context, request RuntimeExecRequestObject) (RuntimeExecResponseObject, error)
-	// RuntimeInspect Snapshot a live instance's globals (variable reprs).
+	// RuntimeInspect Snapshot a live instance's globals or completion metadata.
 	// (POST /runtime/v1/inspect)
 	RuntimeInspect(ctx context.Context, request RuntimeInspectRequestObject) (RuntimeInspectResponseObject, error)
 	// RuntimeKeepalive Renew the instance's sliding TTL deadline.

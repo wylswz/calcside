@@ -5,6 +5,8 @@ package catalog
 import (
 	"calcside/internal/capability"
 	"calcside/internal/capability/ext"
+	"calcside/internal/completion"
+	"calcside/internal/policy"
 	"calcside/internal/types"
 )
 
@@ -60,4 +62,25 @@ func (s *Service) Extensions() ExtensionsView {
 		}
 	}
 	return out
+}
+
+type EditorMetadata struct {
+	Rego         []completion.Symbol `json:"rego"`
+	Capabilities []CapabilityDoc     `json:"capabilities"`
+}
+
+func (s *Service) Editor() EditorMetadata {
+	caps := s.Capabilities()
+	for i := range caps {
+		if caps[i].Name == string(types.CapIO) {
+			for _, op := range caps[i].Ops {
+				if op.Name == "println" {
+					op.Name = "print"
+					caps[i].Ops = append(caps[i].Ops, op)
+					break
+				}
+			}
+		}
+	}
+	return EditorMetadata{Rego: policy.EditorSymbols(), Capabilities: caps}
 }

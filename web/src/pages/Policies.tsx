@@ -4,19 +4,9 @@ import CodeMirror from '@uiw/react-codemirror'
 import { api, Policy } from '../api'
 import { Button, EmptyRow, Field, Modal, PageHeader, fmtTime, inputCls } from '../components/ui'
 import { cmTheme } from '../components/codemirror'
+import { useRegoEditor } from '../components/editor'
 
-const SCHEMA_DOC = `Input document available to every policy:
-
-  phase      "before" | "after"
-  user       {id, email}
-  instance   {id, labels}
-  exec_id    string
-  capability "fs" | "net" | "io"
-  op         e.g. "read", "write", "get"
-  args       normalized op args (e.g. {"path": "/work/a"})
-  result     only in "after": {error: str|null, meta: {...}}
-
-deny is a partial set of strings. Any non-empty set denies the call.
+const POLICY_DOC = `deny is a partial set of strings. Any non-empty set denies the call.
 
 Example — deny fs reads under /work/secrets:
 
@@ -38,6 +28,10 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
   const [rego, setRego] = useState(policy?.rego ?? 'package calcside.hooks\n\n')
   const [validation, setValidation] = useState<{ valid: boolean; error?: string } | null>(null)
   const [err, setErr] = useState('')
+  const [capability, setCapability] = useState('')
+  const [op, setOp] = useState('')
+  const editor = useRegoEditor(capability, op)
+  const operations = editor.metadata?.capabilities.find((c) => c.name === capability)?.ops ?? []
 
   const save = useMutation({
     mutationFn: async () => {
@@ -83,13 +77,34 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
                 </span>
               )}
             </div>
-            <CodeMirror value={rego} height="340px" onChange={setRego} theme={cmTheme} />
+            <CodeMirror value={rego} height="340px" extensions={editor.extensions} onChange={setRego} theme={cmTheme} />
+            <div className="border-t border-line px-3 py-1.5 text-[11px] text-mute">
+              Ctrl+Space to complete{editor.isFetching ? ' · Loading metadata…' : ''}
+              {editor.error && <span className="ml-3 text-warn-text">Completion metadata unavailable</span>}
+            </div>
           </div>
           {err && <p className="text-xs text-danger">{err}</p>}
         </div>
         <div className="min-w-0">
+          <div className="eyebrow mb-2">Completion context</div>
+          <div className="mb-2 grid grid-cols-2 gap-2">
+            <Field label="Capability">
+              <select className={inputCls} value={capability} onChange={(e) => { setCapability(e.target.value); setOp('') }}>
+                <option value="">Select capability</option>
+                {(editor.metadata?.capabilities ?? []).map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Operation">
+              <select className={inputCls} value={op} onChange={(e) => setOp(e.target.value)} disabled={!operations.length}>
+                <option value="">Select operation</option>
+                {operations.map((o) => <option key={o.name} value={o.name}>{o.name}</option>)}
+              </select>
+            </Field>
+          </div>
+          <p className="mb-4 text-xs text-mute">Select an operation for args / result field suggestions. This only changes completion hints; Validate compiles the policy, it does not execute it.</p>
           <div className="eyebrow mb-2">Input schema</div>
-          <pre className="pre max-h-[440px] text-sec">{SCHEMA_DOC}</pre>
+          <pre className="pre mb-4 max-h-64 text-sec">{editor.fields.length ? editor.fields.map((s) => `${s.name}  ${s.detail ?? ''}`).join('\n') : editor.error ? 'Schema unavailable' : 'Loading schema…'}</pre>
+          <pre className="pre max-h-64 text-sec">{POLICY_DOC}</pre>
         </div>
       </div>
     </Modal>

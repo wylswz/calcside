@@ -372,15 +372,15 @@ func (factory) Name() types.CapabilityName { return types.CapFS }
 
 func (factory) Ops() []capability.OpInfo {
 	return []capability.OpInfo{
-		{Name: OpRead, Doc: "read file contents as string", Params: []string{"path"}},
-		{Name: OpWrite, Doc: "write string to file, creating parents", Params: []string{"path", "content"}},
-		{Name: OpAppend, Doc: "append string to file, creating parents", Params: []string{"path", "content"}},
-		{Name: OpExists, Doc: "whether path exists", Params: []string{"path"}},
-		{Name: OpStat, Doc: "dict{name,path,is_dir,size,mtime}", Params: []string{"path"}},
-		{Name: OpList, Doc: "list direct children of dir", Params: []string{"dir"}},
-		{Name: OpWalk, Doc: "recursive listing under dir", Params: []string{"dir"}},
-		{Name: OpMkdir, Doc: "create dir and parents", Params: []string{"path"}},
-		{Name: OpDelete, Doc: "delete file or dir", Params: []string{"path", "recursive"}},
+		{Name: OpRead, PolicyArgs: map[string]string{"path": "string"}, ResultMeta: map[string]string{"bytes": "number"}, Doc: "read file contents as string", Params: []string{"path"}},
+		{Name: OpWrite, PolicyArgs: map[string]string{"path": "string", "bytes": "number"}, ResultMeta: map[string]string{"bytes": "number"}, Doc: "write string to file, creating parents", Params: []string{"path", "content"}},
+		{Name: OpAppend, PolicyArgs: map[string]string{"path": "string", "bytes": "number"}, ResultMeta: map[string]string{"bytes": "number"}, Doc: "append string to file, creating parents", Params: []string{"path", "content"}},
+		{Name: OpExists, PolicyArgs: map[string]string{"path": "string"}, Doc: "whether path exists", Params: []string{"path"}},
+		{Name: OpStat, PolicyArgs: map[string]string{"path": "string"}, ResultMeta: map[string]string{"is_dir": "boolean", "size": "number"}, Doc: "dict{name,path,is_dir,size,mtime}", Params: []string{"path"}},
+		{Name: OpList, PolicyArgs: map[string]string{"path": "string"}, ResultMeta: map[string]string{"count": "number"}, Doc: "list direct children of dir", Params: []string{"dir"}},
+		{Name: OpWalk, PolicyArgs: map[string]string{"path": "string"}, ResultMeta: map[string]string{"count": "number"}, Doc: "recursive listing under dir", Params: []string{"dir"}},
+		{Name: OpMkdir, PolicyArgs: map[string]string{"path": "string"}, Doc: "create dir and parents", Params: []string{"path"}},
+		{Name: OpDelete, PolicyArgs: map[string]string{"path": "string", "recursive": "boolean"}, ResultMeta: map[string]string{"removed": "number"}, Doc: "delete file or dir", Params: []string{"path", "recursive"}},
 	}
 }
 

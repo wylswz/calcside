@@ -114,6 +114,32 @@ func TestRemoteExecRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRemoteCompletions(t *testing.T) {
+	addr := newWorker(t, testKey)
+	bindings := map[string]*placement.Binding{}
+	rt := newClient(addr, bindings)
+	ctx := context.Background()
+	r, err := rt.Create(ctx, createReq("ins_completion"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindings["ins_completion"] = &placement.Binding{InstanceID: "ins_completion", NodeID: r.NodeID, Epoch: r.Epoch}
+	req := &runtime.InspectRequest{InstanceID: "ins_completion", Owner: runtime.Owner{UserID: "usr_1"}, Epoch: r.Epoch, CompletionsOnly: true}
+	out, err := rt.Inspect(ctx, req)
+	if err != nil || out.Completions == nil || len(out.Completions.Symbols) == 0 || out.Variables != nil {
+		t.Fatalf("completion transport: %v %+v", err, out)
+	}
+	req.Epoch++
+	if _, err := rt.Inspect(ctx, req); !errors.Is(err, runtime.ErrStaleEpoch) {
+		t.Fatalf("stale completion route: %v", err)
+	}
+	req.Epoch = r.Epoch
+	req.Owner.UserID = "usr_other"
+	if _, err := rt.Inspect(ctx, req); !errors.Is(err, runtime.ErrNotOwner) {
+		t.Fatalf("foreign completions: %v", err)
+	}
+}
+
 func TestRemoteRejectsStaleEpochAndForeignOwner(t *testing.T) {
 	addr := newWorker(t, testKey)
 	bindings := map[string]*placement.Binding{}

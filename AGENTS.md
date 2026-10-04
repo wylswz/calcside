@@ -3,6 +3,7 @@
 ## Commands
 - Go checks: `go build ./... && go vet ./... && gofmt -l . && go test -race ./...`
 - Web checks: `pnpm -C web typecheck && pnpm -C web lint && pnpm -C web build`
+- Editor completion tests: `pnpm -C web test` (Node >= 22.18, built-in test runner and TypeScript stripping; no browser needed).
 - `make gen` regenerates OpenAPI and Wire code; `make gen-check` fails if generated files drift. `make wire` regenerates the API, worker, and shared-node injectors; `make wire-check` checks them without modifying files and runs in Go CI.
 - `make lint` runs gen-check + vet + gofmt + web typecheck/lint; `make build` builds web then `bin/calcside`, `bin/calcside-worker`.
 - `make dev`/`serve-dev` pass `--net-allow-cidrs=$(DEV_NET_ALLOW_CIDRS)` (default `198.18.0.0/15`) to exempt fake-ip proxy ranges from net's SSRF blocking; set `DEV_NET_ALLOW_CIDRS=` to disable.

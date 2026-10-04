@@ -97,7 +97,7 @@ func (factory) Name() types.CapabilityName { return types.CapIO }
 
 func (factory) Ops() []capability.OpInfo {
 	return []capability.OpInfo{
-		{Name: OpPrintln, Doc: "write args to output buffer, space separated, newline terminated"},
+		{Name: OpPrintln, PolicyArgs: map[string]string{"bytes": "number"}, ResultMeta: map[string]string{"bytes": "number"}, Doc: "write args to output buffer, space separated, newline terminated"},
 	}
 }
 

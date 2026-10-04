@@ -21,13 +21,13 @@ type FileView struct {
 // The read happens on the node, inside a gated console session, so it
 // is policy-checked and audited like a scripted read, and the content
 // comes back with the instance's secrets already scrubbed.
-func (s *Service) Browse(ctx context.Context, a service.Actor, id, path string) (*FileView, error) {
+func (s *Service) Browse(ctx context.Context, a service.Actor, id, path string, listOnly bool) (*FileView, error) {
 	in, err := s.running(ctx, a, id)
 	if err != nil {
 		return nil, err
 	}
 	resp, err := s.rt.Browse(ctx, &runtime.BrowseRequest{
-		InstanceID: in.ID, Owner: owner(a), Path: path, Epoch: in.LeaseEpoch,
+		InstanceID: in.ID, Owner: owner(a), Path: path, Epoch: in.LeaseEpoch, ListOnly: listOnly,
 	})
 	// A failed browse can still have produced audit events.
 	if resp != nil {

@@ -29,7 +29,13 @@
             "name": "read",
             "params": [
               "path"
-            ]
+            ],
+            "policy_args": {
+              "path": "string"
+            },
+            "result_meta": {
+              "bytes": "number"
+            }
           },
           {
             "doc": "write string to file, creating parents",
@@ -37,7 +43,14 @@
             "params": [
               "path",
               "content"
-            ]
+            ],
+            "policy_args": {
+              "bytes": "number",
+              "path": "string"
+            },
+            "result_meta": {
+              "bytes": "number"
+            }
           },
           {
             "doc": "append string to file, creating parents",
@@ -45,42 +58,74 @@
             "params": [
               "path",
               "content"
-            ]
+            ],
+            "policy_args": {
+              "bytes": "number",
+              "path": "string"
+            },
+            "result_meta": {
+              "bytes": "number"
+            }
           },
           {
             "doc": "whether path exists",
             "name": "exists",
             "params": [
               "path"
-            ]
+            ],
+            "policy_args": {
+              "path": "string"
+            }
           },
           {
             "doc": "dict{name,path,is_dir,size,mtime}",
             "name": "stat",
             "params": [
               "path"
-            ]
+            ],
+            "policy_args": {
+              "path": "string"
+            },
+            "result_meta": {
+              "is_dir": "boolean",
+              "size": "number"
+            }
           },
           {
             "doc": "list direct children of dir",
             "name": "list",
             "params": [
               "dir"
-            ]
+            ],
+            "policy_args": {
+              "path": "string"
+            },
+            "result_meta": {
+              "count": "number"
+            }
           },
           {
             "doc": "recursive listing under dir",
             "name": "walk",
             "params": [
               "dir"
-            ]
+            ],
+            "policy_args": {
+              "path": "string"
+            },
+            "result_meta": {
+              "count": "number"
+            }
           },
           {
             "doc": "create dir and parents",
             "name": "mkdir",
             "params": [
               "path"
-            ]
+            ],
+            "policy_args": {
+              "path": "string"
+            }
           },
           {
             "doc": "delete file or dir",
@@ -88,7 +133,14 @@
             "params": [
               "path",
               "recursive"
-            ]
+            ],
+            "policy_args": {
+              "path": "string",
+              "recursive": "boolean"
+            },
+            "result_meta": {
+              "removed": "number"
+            }
           }
         ]
       },
@@ -105,7 +157,13 @@
         "ops": [
           {
             "doc": "write args to output buffer, space separated, newline terminated",
-            "name": "println"
+            "name": "println",
+            "policy_args": {
+              "bytes": "number"
+            },
+            "result_meta": {
+              "bytes": "number"
+            }
           }
         ]
       },
@@ -147,7 +205,20 @@
             "params": [
               "url",
               "headers"
-            ]
+            ],
+            "policy_args": {
+              "host": "string",
+              "method": "string",
+              "port": "string",
+              "scheme": "string",
+              "secrets": "array\u003cstring\u003e",
+              "url": "string"
+            },
+            "result_meta": {
+              "bytes": "number",
+              "secrets_injected": "number",
+              "status": "number"
+            }
           },
           {
             "doc": "HTTP POST; returns {status,headers,body}",
@@ -157,7 +228,20 @@
               "body",
               "headers",
               "content_type"
-            ]
+            ],
+            "policy_args": {
+              "host": "string",
+              "method": "string",
+              "port": "string",
+              "scheme": "string",
+              "secrets": "array\u003cstring\u003e",
+              "url": "string"
+            },
+            "result_meta": {
+              "bytes": "number",
+              "secrets_injected": "number",
+              "status": "number"
+            }
           },
           {
             "doc": "HTTP request with arbitrary method",
@@ -167,7 +251,20 @@
               "url",
               "body",
               "headers"
-            ]
+            ],
+            "policy_args": {
+              "host": "string",
+              "method": "string",
+              "port": "string",
+              "scheme": "string",
+              "secrets": "array\u003cstring\u003e",
+              "url": "string"
+            },
+            "result_meta": {
+              "bytes": "number",
+              "secrets_injected": "number",
+              "status": "number"
+            }
           }
         ]
       }

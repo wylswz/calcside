@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 
+	"calcside/internal/completion"
 	"calcside/internal/runtime"
 	"calcside/internal/service"
 )
@@ -38,4 +39,21 @@ func (s *Service) Inspect(ctx context.Context, a service.Actor, id string) (*Ins
 		v.Resources = &ru
 	}
 	return v, nil
+}
+
+func (s *Service) Completions(ctx context.Context, a service.Actor, id string) (*completion.Context, error) {
+	in, err := s.running(ctx, a, id)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.rt.Inspect(ctx, &runtime.InspectRequest{
+		InstanceID: in.ID, Owner: owner(a), Epoch: in.LeaseEpoch, CompletionsOnly: true,
+	})
+	if err != nil {
+		return nil, fail(err)
+	}
+	if resp.Completions == nil {
+		return &completion.Context{Symbols: []completion.Symbol{}, EnvKeys: []string{}}, nil
+	}
+	return resp.Completions, nil
 }

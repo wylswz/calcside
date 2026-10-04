@@ -232,9 +232,11 @@ func (g *Gate) Invoke(ctx context.Context, capability types.CapabilityName, op t
 
 // OpInfo documents one capability operation.
 type OpInfo struct {
-	Name   types.Op `json:"name"`
-	Doc    string   `json:"doc"`
-	Params []string `json:"params,omitempty"`
+	PolicyArgs map[string]string `json:"policy_args,omitempty"`
+	ResultMeta map[string]string `json:"result_meta,omitempty"`
+	Name       types.Op          `json:"name"`
+	Doc        string            `json:"doc"`
+	Params     []string          `json:"params,omitempty"`
 }
 
 // OpLine renders one op's signature line for prompt fragments:

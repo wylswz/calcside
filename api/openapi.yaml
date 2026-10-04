@@ -74,6 +74,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/CapabilityCatalog'
         '401': { $ref: '#/components/responses/Error' }
+  /api/v1/editor/metadata:
+    get:
+      operationId: editorMetadata
+      tags: [meta]
+      responses:
+        '200':
+          description: Restricted Rego symbols and registered capability documentation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EditorMetadata' }
+        '401': { $ref: '#/components/responses/Error' }
   /api/v1/extensions:
     get:
       operationId: listExtensions
@@ -246,6 +257,10 @@ paths:
         - name: path
           in: query
           schema: { type: string }
+        - name: list_only
+          in: query
+          description: Only list directories; never read file contents. Used by path completion.
+          schema: { type: boolean, default: false }
       responses:
         '200':
           description: directory listing or file content
@@ -285,6 +300,21 @@ paths:
               schema:
                 $ref: '#/components/schemas/InstancePrompt'
         '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/instances/{id}/completions:
+    get:
+      operationId: instanceCompletions
+      tags: [instances]
+      description: Bounded symbol metadata from a live owned instance; no variable or secret values.
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: Available symbols and environment key names.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompletionContext' }
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
@@ -668,6 +698,38 @@ components:
         user: { $ref: '#/components/schemas/User' }
         via_key: { type: boolean }
         kind: { $ref: '#/components/schemas/AuthKind' }
+    CompletionSymbol:
+      type: object
+      required: [name, kind]
+      properties:
+        name: { type: string }
+        kind: { type: string }
+        detail: { type: string }
+        doc: { type: string }
+        params:
+          type: array
+          items: { type: string }
+    CompletionContext:
+      type: object
+      required: [symbols, env_keys, truncated]
+      properties:
+        symbols:
+          type: array
+          items: { $ref: '#/components/schemas/CompletionSymbol' }
+        env_keys:
+          type: array
+          items: { type: string }
+        truncated: { type: boolean }
+    EditorMetadata:
+      type: object
+      required: [rego, capabilities]
+      properties:
+        rego:
+          type: array
+          items: { $ref: '#/components/schemas/CompletionSymbol' }
+        capabilities:
+          type: array
+          items: { $ref: '#/components/schemas/CapabilityDoc' }
     OpDoc:
       type: object
       properties:
@@ -676,6 +738,12 @@ components:
         params:
           type: array
           items: { type: string }
+        policy_args:
+          type: object
+          additionalProperties: { type: string }
+        result_meta:
+          type: object
+          additionalProperties: { type: string }
     FieldDoc:
       type: object
       properties:

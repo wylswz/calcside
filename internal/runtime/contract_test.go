@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"calcside/internal/completion"
 	"calcside/internal/types"
 )
 
@@ -72,7 +73,13 @@ func TestMessagesRoundTrip(t *testing.T) {
 			ExecTimeoutMs: 30000, MaxSteps: 10, MaxOutputBytes: 1024,
 			TTLSeconds: 900, NetHosts: []string{"x.com"},
 		},
+		&BrowseRequest{InstanceID: "ins_1", Owner: Owner{UserID: "usr_1"}, Epoch: 3, Path: "/work", ListOnly: true},
 		&InspectRequest{InstanceID: "ins_1", Owner: Owner{UserID: "usr_1"}, Epoch: 3},
+		&InspectRequest{InstanceID: "ins_1", Owner: Owner{UserID: "usr_1"}, Epoch: 3, CompletionsOnly: true},
+		&InspectResponse{Completions: &completion.Context{
+			Symbols: []completion.Symbol{{Name: "fs.read", Kind: "function", Params: []string{"path"}}},
+			EnvKeys: []string{"REGION"}, Truncated: true,
+		}},
 		&InspectResponse{
 			Variables:      map[string]string{"x": "1", "items": "[1, 2]"},
 			ResourceUsages: ResourceUsages{MemoryUsage: 3 << 20, MemoryPeak: 5 << 20, MemoryMax: 256 << 20},

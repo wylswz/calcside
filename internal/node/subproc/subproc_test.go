@@ -95,6 +95,24 @@ func TestGlobalsPersistAcrossExecs(t *testing.T) {
 	}
 }
 
+func TestCompletionContextThroughChild(t *testing.T) {
+	s := newSupervisor(t, nil)
+	create(t, s, "ins_completion")
+	if _, err := run(t, s, "ins_completion", "e", "counter = 1"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.Inspect(context.Background(), &runtime.InspectRequest{InstanceID: "ins_completion", Owner: owner, CompletionsOnly: true})
+	if err != nil || out.Completions == nil || out.Variables != nil {
+		t.Fatalf("child completions: %v %+v", err, out)
+	}
+	for _, symbol := range out.Completions.Symbols {
+		if symbol.Name == "counter" && symbol.Detail == "int" {
+			return
+		}
+	}
+	t.Fatal("missing child variable")
+}
+
 func TestInspectWithoutMemoryCap(t *testing.T) {
 	s := newSupervisor(t, nil)
 	create(t, s, "ins_1")

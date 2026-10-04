@@ -466,7 +466,7 @@ func (s *strictImpl) Files(ctx context.Context, req gen.FilesRequestObject) (gen
 	if req.Params.Path != nil && *req.Params.Path != "" {
 		path = *req.Params.Path
 	}
-	v, err := s.d.Sandbox.Browse(ctx, actorOf(p), req.Id, path)
+	v, err := s.d.Sandbox.Browse(ctx, actorOf(p), req.Id, path, req.Params.ListOnly != nil && *req.Params.ListOnly)
 	if err != nil {
 		return filesResp{fail(err)}, nil
 	}
@@ -690,4 +690,37 @@ func (s *strictImpl) DeleteSecret(ctx context.Context, req gen.DeleteSecretReque
 		return deleteSecretResp{fail(err)}, nil
 	}
 	return deleteSecretResp{rawJSON{200, dto.OK{OK: true}}}, nil
+}
+
+type editorMetadataResp struct{ rawJSON }
+
+func (r editorMetadataResp) VisitEditorMetadataResponse(w http.ResponseWriter) error {
+	return r.write(w)
+}
+
+type instanceCompletionsResp struct{ rawJSON }
+
+func (r instanceCompletionsResp) VisitInstanceCompletionsResponse(w http.ResponseWriter) error {
+	return r.write(w)
+}
+
+func (s *strictImpl) EditorMetadata(ctx context.Context, _ gen.EditorMetadataRequestObject) (gen.EditorMetadataResponseObject, error) {
+	ctx = realCtx(ctx)
+	if _, e := needAuth(ctx); e != nil {
+		return editorMetadataResp{*e}, nil
+	}
+	return editorMetadataResp{rawJSON{http.StatusOK, dto.EditorMetadata(s.d.Catalog.Editor())}}, nil
+}
+
+func (s *strictImpl) InstanceCompletions(ctx context.Context, req gen.InstanceCompletionsRequestObject) (gen.InstanceCompletionsResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return instanceCompletionsResp{*e}, nil
+	}
+	v, err := s.d.Sandbox.Completions(ctx, actorOf(p), req.Id)
+	if err != nil {
+		return instanceCompletionsResp{fail(err)}, nil
+	}
+	return instanceCompletionsResp{rawJSON{http.StatusOK, (*dto.CompletionContext)(v)}}, nil
 }

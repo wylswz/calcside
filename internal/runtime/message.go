@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"calcside/internal/completion"
 	"calcside/internal/types"
 )
 
@@ -192,6 +193,7 @@ type DeleteRequest struct {
 type DeleteResponse struct{}
 
 type BrowseRequest struct {
+	ListOnly   bool   `json:"list_only,omitempty"`
 	InstanceID string `json:"instance_id"`
 	Owner      Owner  `json:"owner"`
 	Path       string `json:"path"`
@@ -253,9 +255,10 @@ type PromptResponse struct {
 }
 
 type InspectRequest struct {
-	InstanceID string `json:"instance_id"`
-	Owner      Owner  `json:"owner"`
-	Epoch      int64  `json:"epoch,omitempty"`
+	CompletionsOnly bool   `json:"completions_only,omitempty"`
+	InstanceID      string `json:"instance_id"`
+	Owner           Owner  `json:"owner"`
+	Epoch           int64  `json:"epoch,omitempty"`
 }
 
 // ResourceUsages is the instance's own cgroup accounting, in bytes. All
@@ -268,6 +271,7 @@ type ResourceUsages struct {
 }
 
 type InspectResponse struct {
-	Variables      map[string]string `json:"variables,omitempty"`
-	ResourceUsages ResourceUsages    `json:"resource_usages"`
+	Completions    *completion.Context `json:"completions,omitempty"`
+	Variables      map[string]string   `json:"variables,omitempty"`
+	ResourceUsages ResourceUsages      `json:"resource_usages"`
 }

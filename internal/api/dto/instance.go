@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"calcside/internal/completion"
 	"calcside/internal/runtime"
 	"calcside/internal/service/sandbox"
 	"calcside/internal/store"
@@ -197,3 +198,5 @@ type FilesFile struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
 }
+
+type CompletionContext = completion.Context

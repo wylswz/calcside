@@ -121,6 +121,20 @@ print(r[0]["title"])`)
 		t.Fatalf("ext args: %s", extRec.Args)
 	}
 
+	completions, err := n.m.Inspect(ctx, &runtime.InspectRequest{InstanceID: id, Owner: n.owner, CompletionsOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundCompletion := false
+	for _, symbol := range completions.Completions.Symbols {
+		if symbol.Name == "ext.tavily.search" {
+			foundCompletion = symbol.Detail == "(query, max_results)"
+		}
+	}
+	if !foundCompletion {
+		t.Fatal("missing loaded extension signature")
+	}
+
 	// Prompt documents the op. Fragments are rendered on the node,
 	// because only it has the factories and the effective config.
 	pd, err := n.m.Prompt(ctx, &runtime.PromptRequest{InstanceID: id, Owner: n.owner})

@@ -68,6 +68,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/editor/metadata": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["editorMetadata"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/extensions": {
         parameters: {
             query?: never;
@@ -208,6 +224,23 @@ export interface paths {
         };
         /** @description Server-generated agent system prompt describing this instance's granted capabilities, env, secrets (names/domains only) and limits. The instance must be live and running: the prompt describes its effective in-memory config, so a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec). */
         get: operations["instancePrompt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instances/{id}/completions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Bounded symbol metadata from a live owned instance; no variable or secret values. */
+        get: operations["instanceCompletions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -477,10 +510,32 @@ export interface components {
             via_key: boolean;
             kind: components["schemas"]["AuthKind"];
         };
+        CompletionSymbol: {
+            name: string;
+            kind: string;
+            detail?: string;
+            doc?: string;
+            params?: string[];
+        };
+        CompletionContext: {
+            symbols: components["schemas"]["CompletionSymbol"][];
+            env_keys: string[];
+            truncated: boolean;
+        };
+        EditorMetadata: {
+            rego: components["schemas"]["CompletionSymbol"][];
+            capabilities: components["schemas"]["CapabilityDoc"][];
+        };
         OpDoc: {
             name?: string;
             doc?: string;
             params?: string[];
+            policy_args?: {
+                [key: string]: string;
+            };
+            result_meta?: {
+                [key: string]: string;
+            };
         };
         FieldDoc: {
             name?: string;
@@ -886,6 +941,27 @@ export interface operations {
             401: components["responses"]["Error"];
         };
     };
+    editorMetadata: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Restricted Rego symbols and registered capability documentation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditorMetadata"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
     listExtensions: {
         parameters: {
             query?: never;
@@ -1140,6 +1216,8 @@ export interface operations {
         parameters: {
             query?: {
                 path?: string;
+                /** @description Only list directories; never read file contents. Used by path completion. */
+                list_only?: boolean;
             };
             header?: never;
             path: {
@@ -1188,6 +1266,31 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    instanceCompletions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Available symbols and environment key names. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompletionContext"];
+                };
+            };
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];

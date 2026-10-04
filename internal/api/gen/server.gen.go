@@ -356,6 +356,22 @@ type CapabilityDoc struct {
 // CapabilityName defines model for CapabilityName.
 type CapabilityName string
 
+// CompletionContext defines model for CompletionContext.
+type CompletionContext struct {
+	EnvKeys   []string           `json:"env_keys"`
+	Symbols   []CompletionSymbol `json:"symbols"`
+	Truncated bool               `json:"truncated"`
+}
+
+// CompletionSymbol defines model for CompletionSymbol.
+type CompletionSymbol struct {
+	Detail *string   `json:"detail,omitempty"`
+	Doc    *string   `json:"doc,omitempty"`
+	Kind   string    `json:"kind"`
+	Name   string    `json:"name"`
+	Params *[]string `json:"params,omitempty"`
+}
+
 // CreateKeyRequest defines model for CreateKeyRequest.
 type CreateKeyRequest struct {
 	ExpiresInSeconds *int64 `json:"expires_in_seconds,omitempty"`
@@ -382,6 +398,12 @@ type CreatedKey struct {
 
 // Decision defines model for Decision.
 type Decision string
+
+// EditorMetadata defines model for EditorMetadata.
+type EditorMetadata struct {
+	Capabilities []CapabilityDoc    `json:"capabilities"`
+	Rego         []CompletionSymbol `json:"rego"`
+}
 
 // ErrorEnvelope defines model for ErrorEnvelope.
 type ErrorEnvelope struct {
@@ -589,9 +611,11 @@ type OkResponse struct {
 
 // OpDoc defines model for OpDoc.
 type OpDoc struct {
-	Doc    *string   `json:"doc,omitempty"`
-	Name   *string   `json:"name,omitempty"`
-	Params *[]string `json:"params,omitempty"`
+	Doc        *string            `json:"doc,omitempty"`
+	Name       *string            `json:"name,omitempty"`
+	Params     *[]string          `json:"params,omitempty"`
+	PolicyArgs *map[string]string `json:"policy_args,omitempty"`
+	ResultMeta *map[string]string `json:"result_meta,omitempty"`
 }
 
 // Phase audit event phase; "" = no phase (runtime error / out of scope)
@@ -741,6 +765,9 @@ type ListExecutionsParams struct {
 // FilesParams defines parameters for Files.
 type FilesParams struct {
 	Path *string `form:"path,omitempty" json:"path,omitempty"`
+
+	// ListOnly Only list directories; never read file contents. Used by path completion.
+	ListOnly *bool `form:"list_only,omitempty" json:"list_only,omitempty"`
 }
 
 // InstancePromptParams defines parameters for InstancePrompt.
@@ -785,6 +812,9 @@ type ServerInterface interface {
 	// (GET /api/v1/capabilities)
 	Capabilities(c *gin.Context)
 
+	// (GET /api/v1/editor/metadata)
+	EditorMetadata(c *gin.Context)
+
 	// (GET /api/v1/executions/{id})
 	GetExecution(c *gin.Context, id IdPath)
 
@@ -802,6 +832,9 @@ type ServerInterface interface {
 
 	// (GET /api/v1/instances/{id})
 	GetInstance(c *gin.Context, id IdPath)
+
+	// (GET /api/v1/instances/{id}/completions)
+	InstanceCompletions(c *gin.Context, id IdPath)
 
 	// (POST /api/v1/instances/{id}/exec)
 	Exec(c *gin.Context, id IdPath)
@@ -953,6 +986,19 @@ func (siw *ServerInterfaceWrapper) Capabilities(c *gin.Context) {
 	siw.Handler.Capabilities(c)
 }
 
+// EditorMetadata operation middleware
+func (siw *ServerInterfaceWrapper) EditorMetadata(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.EditorMetadata(c)
+}
+
 // GetExecution operation middleware
 func (siw *ServerInterfaceWrapper) GetExecution(c *gin.Context) {
 
@@ -1081,6 +1127,31 @@ func (siw *ServerInterfaceWrapper) GetInstance(c *gin.Context) {
 	siw.Handler.GetInstance(c, id)
 }
 
+// InstanceCompletions operation middleware
+func (siw *ServerInterfaceWrapper) InstanceCompletions(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.InstanceCompletions(c, id)
+}
+
 // Exec operation middleware
 func (siw *ServerInterfaceWrapper) Exec(c *gin.Context) {
 
@@ -1165,6 +1236,14 @@ func (siw *ServerInterfaceWrapper) Files(c *gin.Context) {
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "path", c.Request.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter path: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "list_only" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "list_only", c.Request.URL.Query(), &params.ListOnly, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter list_only: %w", err), http.StatusBadRequest)
 		return
 	}
 
@@ -1562,6 +1641,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/auth/config", wrapper.AuthConfig)
 	router.GET(options.BaseURL+"/api/v1/me", wrapper.Me)
 	router.GET(options.BaseURL+"/api/v1/capabilities", wrapper.Capabilities)
+	router.GET(options.BaseURL+"/api/v1/editor/metadata", wrapper.EditorMetadata)
 	router.GET(options.BaseURL+"/api/v1/extensions", wrapper.ListExtensions)
 	router.GET(options.BaseURL+"/api/v1/keys", wrapper.ListKeys)
 	router.POST(options.BaseURL+"/api/v1/keys", wrapper.CreateKey)
@@ -1574,6 +1654,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/api/v1/instances/:id/exec", wrapper.Exec)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/files", wrapper.Files)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/prompt", wrapper.InstancePrompt)
+	router.GET(options.BaseURL+"/api/v1/instances/:id/completions", wrapper.InstanceCompletions)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/inspect", wrapper.InstanceInspect)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/executions", wrapper.ListExecutions)
 	router.GET(options.BaseURL+"/api/v1/executions/:id", wrapper.GetExecution)
@@ -1673,6 +1754,41 @@ func (response Capabilities200JSONResponse) VisitCapabilitiesResponse(w http.Res
 type Capabilities401JSONResponse struct{ ErrorJSONResponse }
 
 func (response Capabilities401JSONResponse) VisitCapabilitiesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EditorMetadataRequestObject struct {
+}
+
+type EditorMetadataResponseObject interface {
+	VisitEditorMetadataResponse(w http.ResponseWriter) error
+}
+
+type EditorMetadata200JSONResponse EditorMetadata
+
+func (response EditorMetadata200JSONResponse) VisitEditorMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EditorMetadata401JSONResponse struct{ ErrorJSONResponse }
+
+func (response EditorMetadata401JSONResponse) VisitEditorMetadataResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -1979,6 +2095,70 @@ func (response GetInstance404JSONResponse) VisitGetInstanceResponse(w http.Respo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InstanceCompletionsRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type InstanceCompletionsResponseObject interface {
+	VisitInstanceCompletionsResponse(w http.ResponseWriter) error
+}
+
+type InstanceCompletions200JSONResponse CompletionContext
+
+func (response InstanceCompletions200JSONResponse) VisitInstanceCompletionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InstanceCompletions401JSONResponse struct{ ErrorJSONResponse }
+
+func (response InstanceCompletions401JSONResponse) VisitInstanceCompletionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InstanceCompletions404JSONResponse ErrorEnvelope
+
+func (response InstanceCompletions404JSONResponse) VisitInstanceCompletionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InstanceCompletions409JSONResponse ErrorEnvelope
+
+func (response InstanceCompletions409JSONResponse) VisitInstanceCompletionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -3312,6 +3492,9 @@ type StrictServerInterface interface {
 	// (GET /api/v1/capabilities)
 	Capabilities(ctx context.Context, request CapabilitiesRequestObject) (CapabilitiesResponseObject, error)
 
+	// (GET /api/v1/editor/metadata)
+	EditorMetadata(ctx context.Context, request EditorMetadataRequestObject) (EditorMetadataResponseObject, error)
+
 	// (GET /api/v1/executions/{id})
 	GetExecution(ctx context.Context, request GetExecutionRequestObject) (GetExecutionResponseObject, error)
 
@@ -3329,6 +3512,9 @@ type StrictServerInterface interface {
 
 	// (GET /api/v1/instances/{id})
 	GetInstance(ctx context.Context, request GetInstanceRequestObject) (GetInstanceResponseObject, error)
+
+	// (GET /api/v1/instances/{id}/completions)
+	InstanceCompletions(ctx context.Context, request InstanceCompletionsRequestObject) (InstanceCompletionsResponseObject, error)
 
 	// (POST /api/v1/instances/{id}/exec)
 	Exec(ctx context.Context, request ExecRequestObject) (ExecResponseObject, error)
@@ -3525,6 +3711,30 @@ func (sh *strictHandler) Capabilities(ctx *gin.Context) {
 	}
 }
 
+// EditorMetadata operation middleware
+func (sh *strictHandler) EditorMetadata(ctx *gin.Context) {
+	var request EditorMetadataRequestObject
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.EditorMetadata(ctx, request.(EditorMetadataRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "EditorMetadata")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(EditorMetadataResponseObject); ok {
+		if err := validResponse.VisitEditorMetadataResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetExecution operation middleware
 func (sh *strictHandler) GetExecution(ctx *gin.Context, id IdPath) {
 	var request GetExecutionRequestObject
@@ -3677,6 +3887,32 @@ func (sh *strictHandler) GetInstance(ctx *gin.Context, id IdPath) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(GetInstanceResponseObject); ok {
 		if err := validResponse.VisitGetInstanceResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// InstanceCompletions operation middleware
+func (sh *strictHandler) InstanceCompletions(ctx *gin.Context, id IdPath) {
+	var request InstanceCompletionsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.InstanceCompletions(ctx, request.(InstanceCompletionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InstanceCompletions")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(InstanceCompletionsResponseObject); ok {
+		if err := validResponse.VisitInstanceCompletionsResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

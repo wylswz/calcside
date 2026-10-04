@@ -438,6 +438,28 @@ func (m *Manager) Inspect(ctx context.Context, req *runtime.InspectRequest) (*ru
 	if err != nil {
 		return nil, err
 	}
+	if req.CompletionsOnly {
+		out, err := in.sess.Completions(ctx, m.reg)
+		if err != nil {
+			return nil, err
+		}
+		kept := out.Symbols[:0]
+		for _, symbol := range out.Symbols {
+			encoded, err := json.Marshal(symbol)
+			if err == nil && in.secrets.Redact(string(encoded)) == string(encoded) {
+				kept = append(kept, symbol)
+			}
+		}
+		out.Symbols = kept
+		keys := out.EnvKeys[:0]
+		for _, key := range out.EnvKeys {
+			if in.secrets.Redact(key) == key {
+				keys = append(keys, key)
+			}
+		}
+		out.EnvKeys = keys
+		return &runtime.InspectResponse{Completions: out}, nil
+	}
 	res := in.sess.Inspect(ctx)
 	for name, v := range res.Variables {
 		res.Variables[name] = truncate(in.secrets.Redact(v), maxInspectValueBytes)

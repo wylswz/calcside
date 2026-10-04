@@ -484,9 +484,9 @@ func (factory) Name() types.CapabilityName { return types.CapNet }
 
 func (factory) Ops() []capability.OpInfo {
 	return []capability.OpInfo{
-		{Name: OpGet, Doc: "HTTP GET; returns {status,headers,body}; supports {{secrets.NAME}} placeholders; Accept-Encoding/Range/If-Range/TE headers are rejected", Params: []string{"url", "headers"}},
-		{Name: OpPost, Doc: "HTTP POST; returns {status,headers,body}", Params: []string{"url", "body", "headers", "content_type"}},
-		{Name: OpRequest, Doc: "HTTP request with arbitrary method", Params: []string{"method", "url", "body", "headers"}},
+		{Name: OpGet, PolicyArgs: map[string]string{"method": "string", "url": "string", "host": "string", "port": "string", "scheme": "string", "secrets": "array<string>"}, ResultMeta: map[string]string{"status": "number", "bytes": "number", "secrets_injected": "number"}, Doc: "HTTP GET; returns {status,headers,body}; supports {{secrets.NAME}} placeholders; Accept-Encoding/Range/If-Range/TE headers are rejected", Params: []string{"url", "headers"}},
+		{Name: OpPost, PolicyArgs: map[string]string{"method": "string", "url": "string", "host": "string", "port": "string", "scheme": "string", "secrets": "array<string>"}, ResultMeta: map[string]string{"status": "number", "bytes": "number", "secrets_injected": "number"}, Doc: "HTTP POST; returns {status,headers,body}", Params: []string{"url", "body", "headers", "content_type"}},
+		{Name: OpRequest, PolicyArgs: map[string]string{"method": "string", "url": "string", "host": "string", "port": "string", "scheme": "string", "secrets": "array<string>"}, ResultMeta: map[string]string{"status": "number", "bytes": "number", "secrets_injected": "number"}, Doc: "HTTP request with arbitrary method", Params: []string{"method", "url", "body", "headers"}},
 	}
 }
 

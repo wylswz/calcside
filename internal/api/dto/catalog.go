@@ -16,3 +16,5 @@ type CapabilitiesEnvelope struct {
 // ExtensionsEnvelope reports the extension catalog plus whether
 // remote/local sources are enabled. Alias per the dto boundary rule.
 type ExtensionsEnvelope = catalog.ExtensionsView
+
+type EditorMetadata = catalog.EditorMetadata

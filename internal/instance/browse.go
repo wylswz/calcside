@@ -43,6 +43,9 @@ func (m *Manager) Browse(ctx context.Context, req *runtime.BrowseRequest) (*runt
 			listing, err = acc.List(ctx, req.Path)
 			return err
 		}
+		if req.ListOnly {
+			return errors.New("path is not a directory")
+		}
 		content, err = acc.Read(ctx, req.Path)
 		return err
 	})
@@ -58,11 +61,14 @@ func (m *Manager) Browse(ctx context.Context, req *runtime.BrowseRequest) (*runt
 	}
 	if stat.IsDir {
 		resp.IsDir = true
-		resp.Entries = make([]runtime.FileEntry, len(listing))
-		for i, e := range listing {
-			resp.Entries[i] = runtime.FileEntry{
-				Name: e.Name, Path: e.Path, IsDir: e.IsDir, Size: e.Size, Mtime: e.Mtime,
+		resp.Entries = make([]runtime.FileEntry, 0, len(listing))
+		for _, e := range listing {
+			if req.ListOnly && (in.secrets.Redact(e.Name) != e.Name || in.secrets.Redact(e.Path) != e.Path) {
+				continue
 			}
+			resp.Entries = append(resp.Entries, runtime.FileEntry{
+				Name: e.Name, Path: e.Path, IsDir: e.IsDir, Size: e.Size, Mtime: e.Mtime,
+			})
 		}
 		return resp, nil
 	}

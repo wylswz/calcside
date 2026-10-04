@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
-import { python } from '@codemirror/lang-python'
+import { useStarlarkEditor } from '../components/editor'
 import { api, AuditEvent, ExecResult, Execution, FileEntry, Instance, InstanceInspect, ResourceUsages } from '../api'
 import type { SecretSource } from '../api'
 
@@ -254,6 +254,7 @@ export default function InstanceDetail() {
     queryFn: () => api.get<{ instance: Instance }>(`/api/v1/instances/${id}`).then((r) => r.instance),
     refetchInterval: 15000,
   })
+  const editor = useStarlarkEditor(id, inst?.status === 'running', running)
   const { data: execs, refetch: refetchExecs } = useQuery({
     queryKey: ['executions', id],
     queryFn: () => api.get<{ executions: Execution[] }>(`/api/v1/instances/${id}/executions?limit=50`),
@@ -272,6 +273,8 @@ export default function InstanceDetail() {
     } catch (e: any) {
       setResult({ exec_id: '', output: '', error: { type: 'runtime', message: e.message }, duration_ms: 0, steps: 0 })
     } finally {
+      qc.invalidateQueries({ queryKey: ['completions', id] })
+      qc.invalidateQueries({ queryKey: ['files', id] })
       setRunning(false)
     }
   }, [code, id, running, refetchExecs, qc])
@@ -335,7 +338,14 @@ export default function InstanceDetail() {
                 {running ? 'Running…' : 'Run ▸'}
               </Button>
             </div>
-            <CodeMirror value={code} height="300px" extensions={[python()]} onChange={setCode} theme={cmTheme} />
+            <CodeMirror value={code} height="300px" extensions={editor.extensions} onChange={setCode} theme={cmTheme} />
+            <div className="flex flex-wrap gap-x-4 border-t border-line px-3 py-1.5 text-[11px] text-mute">
+              <span>Ctrl+Space to complete</span>
+              {editor.error ? <span className="text-warn-text">Live completions unavailable</span> :
+                <span>{running ? 'Using cached symbols while code runs' : editor.isFetching ? 'Refreshing symbols…' : inst.status !== 'running' ? 'Instance is not running' : 'Suggestions use this instance’s runtime'}</span>}
+              {editor.truncated && <span className="text-warn-text">Symbol limit reached; some suggestions omitted</span>}
+              <button className="text-btn ml-auto" onClick={() => editor.refetch()} disabled={running || inst.status !== 'running' || editor.isFetching}>refresh symbols</button>
+            </div>
             {result && (
               <div className="border-t border-ink">
                 <div className="flex items-center gap-4 border-b border-line bg-surface px-3 py-1.5 text-xs">

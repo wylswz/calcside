@@ -7,12 +7,15 @@
     "dev": "vite",
     "build": "vite build && echo 'placeholder so `go build` works before `pnpm -C web build` generates the real assets' > dist/README.txt",
     "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test src/components/completion.test.ts",
     "lint": "eslint .",
     "gen": "openapi-typescript ../api/openapi.yaml -o src/api/schema.ts --enum-values"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "6.20.3",
     "@codemirror/lang-python": "6.1.6",
     "@codemirror/language": "6.12.4",
+    "@codemirror/state": "6.7.6",
     "@fontsource/ibm-plex-mono": "5.3.0",
     "@fontsource/inter": "5.3.0",
     "@lezer/highlight": "1.2.4",

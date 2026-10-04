@@ -411,3 +411,17 @@ func argValue(v starlark.Value) any {
 	}
 	return "<" + v.Type() + ">"
 }
+
+func (f factory) CompletionOps(cfg any) []capability.OpInfo {
+	v, ok := cfg.(validated)
+	if !ok {
+		return nil
+	}
+	var out []capability.OpInfo
+	for alias, ac := range v {
+		for _, op := range ac.mod.Manifest.Ops {
+			out = append(out, capability.OpInfo{Name: types.Op(alias + "." + op.Name), Params: op.Params, Doc: op.Doc})
+		}
+	}
+	return out
+}
