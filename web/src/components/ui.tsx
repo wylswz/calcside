@@ -85,3 +85,15 @@ export function fmtCountdown(iso: string) {
   if (h < 24) return `${h}h${m % 60}m`
   return `${Math.floor(h / 24)}d${h % 24}h`
 }
+
+export function fmtBytes(n: number) {
+  if (n < 1024) return `${n} B`
+  const units = ['KiB', 'MiB', 'GiB', 'TiB']
+  let v = n / 1024
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v.toFixed(v < 10 ? 2 : 1)} ${units[i]}`
+}

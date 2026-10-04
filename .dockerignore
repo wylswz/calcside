@@ -24,8 +24,9 @@ blog
 examples
 sdk
 
-# Docker files themselves
+# Docker files themselves (the worker entrypoint is baked into the image)
 docker
+!docker/worker-entrypoint.sh
 .dockerignore
 
 # Editor / OS noise

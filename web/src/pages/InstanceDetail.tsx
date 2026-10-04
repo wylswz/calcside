@@ -3,11 +3,11 @@ import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
-import { api, AuditEvent, ExecResult, Execution, FileEntry, Instance, InstanceInspect } from '../api'
+import { api, AuditEvent, ExecResult, Execution, FileEntry, Instance, InstanceInspect, ResourceUsages } from '../api'
 import type { SecretSource } from '../api'
 
 interface SpecSecret { ref?: string; source?: SecretSource; allowed_domains?: string[] }
-import { Badge, Button, StatusBadge, fmtCountdown, fmtTime } from '../components/ui'
+import { Badge, Button, StatusBadge, fmtBytes, fmtCountdown, fmtTime } from '../components/ui'
 import { AuditTable, ExecCode } from '../components/AuditTable'
 
 const DEFAULT_CODE = `# Starlark. Capabilities appear as globals when granted.
@@ -71,40 +71,132 @@ function AuditTab({ id }: { id: string }) {
   return <AuditTable events={data?.events ?? []} />
 }
 
-function VariablesTab({ id, running }: { id: string; running: boolean }) {
-  const { data, error, refetch, isFetching } = useQuery({
+const HISTORY_LEN = 60
+
+function MemorySparkline({ samples, max }: { samples: number[]; max: number }) {
+  if (samples.length < 2) return null
+  const top = Math.max(max, ...samples) || 1
+  const pts = samples.map((v, i) => `${(i / (HISTORY_LEN - 1)) * 100},${30 - (v / top) * 28}`).join(' ')
+  return (
+    <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="w-full h-10 text-blue-500">
+      <polyline points={pts} fill="none" stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+    </svg>
+  )
+}
+
+function ResourcesCard({ resources, history }: { resources?: ResourceUsages; history: number[] }) {
+  if (!resources) {
+    return (
+      <p className="rounded border border-gray-200 dark:border-gray-800 p-3 text-xs text-gray-500">
+        resource usage unavailable — this instance has no cgroup of its own (inproc isolation, or process isolation
+        without <span className="font-mono">--instance-memory-max</span>)
+      </p>
+    )
+  }
+  const { memory_usage: usage, memory_peak: peak, memory_max: max } = resources
+  const pct = max > 0 ? Math.min(100, (usage / max) * 100) : 0
+  const peakPct = max > 0 ? Math.min(100, (peak / max) * 100) : 0
+  const bar = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-yellow-500' : 'bg-green-500'
+  const stat = (label: string, value: string) => (
+    <div>
+      <div className="text-gray-500">{label}</div>
+      <div className="font-mono text-sm">{value}</div>
+    </div>
+  )
+  return (
+    <div className="rounded border border-gray-200 dark:border-gray-800 p-3 space-y-2 text-xs">
+      <div className="flex items-baseline">
+        <span className="font-semibold text-gray-600 dark:text-gray-400">Memory</span>
+        {max > 0 && <span className="ml-auto font-mono">{pct.toFixed(1)}%</span>}
+      </div>
+      {max > 0 && (
+        <div className="relative h-2 rounded bg-gray-200 dark:bg-gray-800 overflow-hidden">
+          <div className={`h-full ${bar}`} style={{ width: `${pct}%` }} />
+          {peak > 0 && (
+            <div className="absolute top-0 h-full w-0.5 bg-gray-700 dark:bg-gray-300" style={{ left: `calc(${peakPct}% - 1px)` }} title={`peak ${fmtBytes(peak)}`} />
+          )}
+        </div>
+      )}
+      <div className="grid grid-cols-3 gap-2">
+        {stat('current', fmtBytes(usage))}
+        {stat('peak', peak > 0 ? fmtBytes(peak) : '—')}
+        {stat('limit', max > 0 ? fmtBytes(max) : 'unlimited')}
+      </div>
+      <MemorySparkline samples={history} max={max} />
+    </div>
+  )
+}
+
+function InspectTab({ id, running, busy }: { id: string; running: boolean; busy: boolean }) {
+  const [auto, setAuto] = useState(true)
+  const [filter, setFilter] = useState('')
+  const [history, setHistory] = useState<number[]>([])
+  // Inspect waits on the session's exec lock, so polling pauses while
+  // code runs; run() invalidates the query once the exec returns.
+  const { data, error, refetch, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ['inspect', id],
     queryFn: () => api.get<InstanceInspect>(`/api/v1/instances/${id}/inspect`),
     enabled: running,
     retry: false,
+    refetchInterval: auto && !busy ? 3000 : false,
   })
-  const names = Object.keys(data?.variables ?? {}).sort()
+  useEffect(() => {
+    const usage = data?.resources?.memory_usage
+    if (usage !== undefined) setHistory((h) => [...h, usage].slice(-HISTORY_LEN))
+  }, [data, dataUpdatedAt])
+  const q = filter.trim().toLowerCase()
+  const names = Object.keys(data?.variables ?? {})
+    .filter((n) => !q || n.toLowerCase().includes(q))
+    .sort()
   return (
-    <div className="space-y-2">
-      <div className="flex items-center text-xs">
-        <span className="text-gray-500">live globals on this instance (reprs; secrets scrubbed)</span>
-        <button className="ml-auto text-gray-500" onClick={() => refetch()} disabled={!running}>
+    <div className="space-y-3">
+      <div className="flex items-center gap-3 text-xs">
+        <span className="text-gray-500">live snapshot of this instance</span>
+        {dataUpdatedAt > 0 && <span className="text-gray-400">updated {new Date(dataUpdatedAt).toLocaleTimeString()}</span>}
+        {busy && auto && <span className="text-gray-400">paused while code runs</span>}
+        <label className="ml-auto flex items-center gap-1 text-gray-500">
+          <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} disabled={!running} />
+          auto-refresh
+        </label>
+        <button className="text-gray-500" onClick={() => refetch()} disabled={!running}>
           {isFetching ? 'refreshing…' : 'refresh'}
         </button>
       </div>
       {!running && <p className="text-xs text-gray-500">instance is not running — nothing to inspect</p>}
       {error && <p className="text-xs text-red-600">{(error as Error).message}</p>}
       {data && (
-        <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-800">
-          <table className="w-full text-xs">
-            <tbody className="divide-y divide-gray-200 dark:divide-gray-800 font-mono">
-              {names.map((name) => (
-                <tr key={name}>
-                  <td className="px-2 py-1 align-top whitespace-nowrap text-gray-600 dark:text-gray-400">{name}</td>
-                  <td className="px-2 py-1 whitespace-pre-wrap break-all">{data.variables[name]}</td>
-                </tr>
-              ))}
-              {names.length === 0 && (
-                <tr><td className="px-2 py-2 text-gray-500">no variables yet — run some code first</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <ResourcesCard resources={data.resources} history={history} />
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="font-semibold text-gray-600 dark:text-gray-400">Variables</span>
+              <span className="text-gray-400">{Object.keys(data.variables).length} globals · reprs, secrets scrubbed</span>
+              <input
+                className="ml-auto rounded border border-gray-300 dark:border-gray-700 bg-transparent px-2 py-0.5 font-mono w-40"
+                placeholder="filter"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              />
+            </div>
+            <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-800">
+              <table className="w-full text-xs">
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-800 font-mono">
+                  {names.map((name) => (
+                    <tr key={name}>
+                      <td className="px-2 py-1 align-top whitespace-nowrap text-gray-600 dark:text-gray-400">{name}</td>
+                      <td className="px-2 py-1">
+                        <div className="max-h-32 overflow-auto whitespace-pre-wrap break-all">{data.variables[name]}</div>
+                      </td>
+                    </tr>
+                  ))}
+                  {names.length === 0 && (
+                    <tr><td className="px-2 py-2 text-gray-500">{q ? 'no matching variables' : 'no variables yet — run some code first'}</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
     </div>
   )
@@ -162,7 +254,7 @@ export default function InstanceDetail() {
   const [code, setCode] = useState(DEFAULT_CODE)
   const [result, setResult] = useState<ExecResult | null>(null)
   const [running, setRunning] = useState(false)
-  const [tab, setTab] = useState<'execs' | 'audit' | 'vars' | 'prompt'>('execs')
+  const [tab, setTab] = useState<'execs' | 'audit' | 'inspect' | 'prompt'>('execs')
   const [openExec, setOpenExec] = useState<string | null>(null)
 
   const { data: inst } = useQuery({
@@ -263,7 +355,7 @@ export default function InstanceDetail() {
           <div className="flex gap-2 border-b border-gray-200 dark:border-gray-800 text-sm">
             <button className={`px-3 py-1.5 ${tab === 'execs' ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`} onClick={() => setTab('execs')}>Executions</button>
             <button className={`px-3 py-1.5 ${tab === 'audit' ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`} onClick={() => setTab('audit')}>Audit</button>
-            <button className={`px-3 py-1.5 ${tab === 'vars' ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`} onClick={() => setTab('vars')}>Variables</button>
+            <button className={`px-3 py-1.5 ${tab === 'inspect' ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`} onClick={() => setTab('inspect')}>Inspect</button>
             <button className={`px-3 py-1.5 ${tab === 'prompt' ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`} onClick={() => setTab('prompt')}>Agent prompt</button>
           </div>
           {tab === 'execs' && (
@@ -300,7 +392,7 @@ export default function InstanceDetail() {
             </div>
           )}
           {tab === 'audit' && <AuditTab id={id} />}
-          {tab === 'vars' && <VariablesTab id={id} running={inst.status === 'running'} />}
+          {tab === 'inspect' && <InspectTab key={id} id={id} running={inst.status === 'running'} busy={running} />}
           {tab === 'prompt' && <PromptTab id={id} running={inst.status === 'running'} />}
         </div>
 

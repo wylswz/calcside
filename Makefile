@@ -32,7 +32,8 @@ test:
 # Per-instance cgroup memory limit test (Linux, root). Runs the test binary
 # in a throwaway privileged container; the container's processes move to
 # /init first, since cgroup v2 only delegates controllers from a group
-# that has no member processes.
+# that has no member processes. The supervisor never writes above its
+# parent group, so memory is enabled at the root here.
 test-cgroup:
 	CGO_ENABLED=0 GOOS=linux GOARCH=$$(docker version -f '{{.Server.Arch}}') \
 	  go test -c -o bin/subproc.linux.test ./internal/node/subproc
@@ -40,13 +41,16 @@ test-cgroup:
 	  --entrypoint sh alpine:3.22 -c '\
 	    mkdir /sys/fs/cgroup/init && \
 	    for p in $$(cat /sys/fs/cgroup/cgroup.procs); do echo $$p > /sys/fs/cgroup/init/cgroup.procs 2>/dev/null; done; \
+	    echo +memory > /sys/fs/cgroup/cgroup.subtree_control && \
 	    CALCSIDE_TEST_CGROUP=1 CALCSIDE_TEST_CGROUP_PARENT=/calcside-test \
 	      exec /t/subproc.linux.test -test.v -test.run Cgroup'
 
 # Same test straight on a Linux host via sudo, with -race. The parent sits
-# under the real root cgroup, which is exempt from that constraint.
+# under the real root cgroup, which is exempt from that constraint
+# (systemd normally enables memory there already).
 test-cgroup-host:
 	go test -race -c -o bin/subproc.test ./internal/node/subproc
+	sudo sh -c 'echo +memory > /sys/fs/cgroup/cgroup.subtree_control'
 	sudo env CALCSIDE_TEST_CGROUP=1 CALCSIDE_TEST_CGROUP_PARENT=/calcside-test \
 	  bin/subproc.test -test.v -test.run Cgroup
 

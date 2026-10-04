@@ -439,19 +439,19 @@ func (s *strictImpl) InstancePrompt(ctx context.Context, req gen.InstancePromptR
 	return instancePromptResp{rawJSON{200, dto.NewInstancePrompt(v)}}, nil
 }
 
-// InstanceInspect snapshots a live instance's globals for the console's
-// variables view.
+// InstanceInspect snapshots a live instance's globals and resource
+// usage for the console's inspect view.
 func (s *strictImpl) InstanceInspect(ctx context.Context, req gen.InstanceInspectRequestObject) (gen.InstanceInspectResponseObject, error) {
 	ctx = realCtx(ctx)
 	p, e := needAuth(ctx)
 	if e != nil {
 		return instanceInspectResp{*e}, nil
 	}
-	vars, err := s.d.Sandbox.Inspect(ctx, actorOf(p), req.Id)
+	v, err := s.d.Sandbox.Inspect(ctx, actorOf(p), req.Id)
 	if err != nil {
 		return instanceInspectResp{fail(err)}, nil
 	}
-	return instanceInspectResp{rawJSON{200, dto.InstanceInspect{Variables: vars}}}, nil
+	return instanceInspectResp{rawJSON{200, dto.NewInstanceInspect(v)}}, nil
 }
 
 // files serves GET /instances/{id}/files?path=/work/... through the fs

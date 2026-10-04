@@ -516,6 +516,8 @@ type Instance struct {
 
 // InstanceInspect live globals snapshot; values are reprs, secret-scrubbed
 type InstanceInspect struct {
+	// Resources The instance's own cgroup v2 accounting, in bytes. Absent when the instance has no group of its own (inproc isolation, or process isolation without --instance-memory-max).
+	Resources *ResourceUsages   `json:"resources,omitempty"`
 	Variables map[string]string `json:"variables"`
 }
 
@@ -625,6 +627,18 @@ type PolicyUpdateRequest struct {
 	Enabled *bool   `json:"enabled,omitempty"`
 	Name    *string `json:"name,omitempty"`
 	Rego    *string `json:"rego,omitempty"`
+}
+
+// ResourceUsages The instance's own cgroup v2 accounting, in bytes. Absent when the instance has no group of its own (inproc isolation, or process isolation without --instance-memory-max).
+type ResourceUsages struct {
+	// MemoryMax memory.max; 0 means unlimited
+	MemoryMax int64 `json:"memory_max"`
+
+	// MemoryPeak memory.peak; 0 when the kernel does not report it
+	MemoryPeak int64 `json:"memory_peak"`
+
+	// MemoryUsage memory.current
+	MemoryUsage int64 `json:"memory_usage"`
 }
 
 // Secret defines model for Secret.

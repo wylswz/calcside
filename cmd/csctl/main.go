@@ -567,13 +567,25 @@ func cmdInspect(ctx context.Context, c *client.Client, args []string) int {
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
-	vars, err := c.Inspect(ctx, args[0])
+	ins, err := c.Inspect(ctx, args[0])
 	if err != nil {
 		return fail(err)
 	}
 	if out == types.FormatJSON {
-		return outputJSON(vars)
+		return outputJSON(ins)
 	}
+	if r := ins.Resources; r != nil {
+		limit := "unlimited"
+		if r.MemoryMax > 0 {
+			limit = fmtBytes(r.MemoryMax)
+		}
+		fmt.Fprintf(stdout, "memory: %s / %s", fmtBytes(r.MemoryUsage), limit)
+		if r.MemoryPeak > 0 {
+			fmt.Fprintf(stdout, " (peak %s)", fmtBytes(r.MemoryPeak))
+		}
+		fmt.Fprintln(stdout)
+	}
+	vars := ins.Variables
 	names := make([]string, 0, len(vars))
 	for name := range vars {
 		names = append(names, name)
@@ -586,6 +598,19 @@ func cmdInspect(ctx context.Context, c *client.Client, args []string) int {
 	}
 	tw.Flush()
 	return 0
+}
+
+func fmtBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
 // --- audit ---

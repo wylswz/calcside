@@ -522,7 +522,7 @@ func (s *Supervisor) Inspect(ctx context.Context, req *runtime.InspectRequest) (
 			return nil, err
 		}
 		st := p.cg.inspect()
-		resp.ResourceUsages = runtime.ResourceUsages{MemoryMax: st.MemoryMax, MemoryUsage: st.MemoryUsage}
+		resp.ResourceUsages = runtime.ResourceUsages{MemoryMax: st.MemoryMax, MemoryUsage: st.MemoryUsage, MemoryPeak: st.MemoryPeak}
 		return resp, nil
 	})
 }

@@ -293,14 +293,15 @@ paths:
       operationId: instanceInspect
       tags: [instances]
       description: >-
-        Snapshot of the instance's live Starlark globals: variable name
-        to its repr, with secret values scrubbed. The instance must be
+        Snapshot of the instance's live Starlark globals (variable name
+        to its repr, with secret values scrubbed) and, when the instance
+        runs in its own cgroup, its memory usage. The instance must be
         live and running; a deleted/expired instance returns 409
         not_running (404 when it no longer exists at all, same as exec).
       parameters: [{ $ref: '#/components/parameters/IdPath' }]
       responses:
         '200':
-          description: variable name to repr
+          description: globals snapshot and resource usage
           content:
             application/json:
               schema:
@@ -881,6 +882,18 @@ components:
         variables:
           type: object
           additionalProperties: { type: string }
+        resources: { $ref: '#/components/schemas/ResourceUsages' }
+    ResourceUsages:
+      type: object
+      required: [memory_usage, memory_peak, memory_max]
+      description: >-
+        The instance's own cgroup v2 accounting, in bytes. Absent when the
+        instance has no group of its own (inproc isolation, or process
+        isolation without --instance-memory-max).
+      properties:
+        memory_usage: { type: integer, format: int64, description: memory.current }
+        memory_peak: { type: integer, format: int64, description: memory.peak; 0 when the kernel does not report it }
+        memory_max: { type: integer, format: int64, description: memory.max; 0 means unlimited }
     Execution:
       type: object
       required: [id, instance_id, user_id, code_sha256, code_snippet, status, duration_ms, steps, output_bytes, created_at]

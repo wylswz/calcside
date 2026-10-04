@@ -212,6 +212,9 @@ func TestEndToEnd(t *testing.T) {
 	if code != 200 || m["variables"].(map[string]any)["answer"] != "42" {
 		t.Fatalf("inspect: %d %v", code, m)
 	}
+	if _, ok := m["resources"]; ok {
+		t.Fatalf("inspect: inproc instance has no cgroup, want resources omitted: %v", m)
+	}
 
 	// audit: flush then list
 	e.rec.Close()

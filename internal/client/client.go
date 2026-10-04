@@ -280,20 +280,19 @@ func (c *Client) Files(ctx context.Context, id, path string) (entries []FileEntr
 	return nil, s, nil
 }
 
-// Inspect returns the instance's live globals: variable name to repr,
-// secret-scrubbed by the node.
-func (c *Client) Inspect(ctx context.Context, id string) (map[string]string, error) {
+// Inspect returns the instance's live globals (variable name to repr,
+// secret-scrubbed by the node) and, when it runs in its own cgroup, its
+// memory usage.
+func (c *Client) Inspect(ctx context.Context, id string) (*gen.InstanceInspect, error) {
 	resp, err := c.gc.InstanceInspectWithResponse(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	var m struct {
-		Variables map[string]string `json:"variables"`
-	}
+	var m gen.InstanceInspect
 	if err := unwrap(resp, resp.Body, &m); err != nil {
 		return nil, err
 	}
-	return m.Variables, nil
+	return &m, nil
 }
 
 func (c *Client) ListExecutions(ctx context.Context, id string, limit int) ([]*store.Execution, error) {

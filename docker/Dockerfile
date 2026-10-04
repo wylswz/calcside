@@ -25,14 +25,16 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/calcside-worker ./cmd/calcside-worker
 
 # ---- Stage 3: runtime ----
-# git is required at runtime by the ext capability's remote-source fetches.
+# git is required at runtime by the ext capability's remote-source fetches;
+# su-exec lets the worker entrypoint drop root after cgroup setup.
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates tzdata git && \
+RUN apk add --no-cache ca-certificates tzdata git su-exec && \
     adduser -D -u 10001 -h /home/calcside calcside
 
 COPY --from=build /out/calcside /usr/local/bin/calcside
 COPY --from=build /out/csctl /usr/local/bin/csctl
 COPY --from=build /out/calcside-worker /usr/local/bin/calcside-worker
+COPY --chmod=0755 docker/worker-entrypoint.sh /usr/local/bin/worker-entrypoint
 
 # Everything mutable lives under /data: sqlite db, global rego policies,
 # local extension roots, and the remote-ext fetch cache. Empty dirs are

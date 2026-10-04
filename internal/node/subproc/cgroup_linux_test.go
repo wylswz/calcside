@@ -46,6 +46,8 @@ func TestCgroupMemoryMax(t *testing.T) {
 	for _, id := range []string{"hog", "bystander"} {
 		if ru := mustInspect(t, s, id); ru.MemoryMax != limit || ru.MemoryUsage == 0 || ru.MemoryUsage >= limit {
 			t.Fatalf("%s: resource usages = %+v, want max %d and 0 < usage < max (see any warning logged above)", id, ru, limit)
+		} else if ru.MemoryPeak != 0 && ru.MemoryPeak < ru.MemoryUsage {
+			t.Fatalf("%s: resource usages = %+v, want peak >= usage", id, ru)
 		}
 	}
 

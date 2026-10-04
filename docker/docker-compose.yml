@@ -43,8 +43,18 @@ services:
   # no published port; the API reaches it over the compose network.
   worker:
     image: calcside:latest
-    entrypoint: ["calcside-worker"]
+    # Starts as root only to delegate a cgroup v2 subtree for per-instance
+    # memory limits (CALCSIDE_INSTANCE_MEMORY_MAX, default 64 MiB), then
+    # drops to the calcside user — see docker/worker-entrypoint.sh.
+    # writable-cgroups (Docker Engine >= 28) mounts only the container's
+    # own cgroupfs read-write, instead of privileged / CAP_SYS_ADMIN.
+    user: root
+    entrypoint: ["worker-entrypoint", "calcside-worker"]
     command: ["serve"]
+    cgroup: private
+    security_opt:
+      - writable-cgroups=true
+      - no-new-privileges:true
     env_file:
       - path: .env
         required: false

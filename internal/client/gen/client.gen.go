@@ -518,6 +518,8 @@ type Instance struct {
 
 // InstanceInspect live globals snapshot; values are reprs, secret-scrubbed
 type InstanceInspect struct {
+	// Resources The instance's own cgroup v2 accounting, in bytes. Absent when the instance has no group of its own (inproc isolation, or process isolation without --instance-memory-max).
+	Resources *ResourceUsages   `json:"resources,omitempty"`
 	Variables map[string]string `json:"variables"`
 }
 
@@ -627,6 +629,18 @@ type PolicyUpdateRequest struct {
 	Enabled *bool   `json:"enabled,omitempty"`
 	Name    *string `json:"name,omitempty"`
 	Rego    *string `json:"rego,omitempty"`
+}
+
+// ResourceUsages The instance's own cgroup v2 accounting, in bytes. Absent when the instance has no group of its own (inproc isolation, or process isolation without --instance-memory-max).
+type ResourceUsages struct {
+	// MemoryMax memory.max; 0 means unlimited
+	MemoryMax int64 `json:"memory_max"`
+
+	// MemoryPeak memory.peak; 0 when the kernel does not report it
+	MemoryPeak int64 `json:"memory_peak"`
+
+	// MemoryUsage memory.current
+	MemoryUsage int64 `json:"memory_usage"`
 }
 
 // Secret defines model for Secret.
@@ -877,7 +891,7 @@ type ClientInterface interface {
 
 	// InstanceInspect performs a GET /api/v1/instances/{id}/inspect (the `InstanceInspect` operationId) request.
 	//
-	// Snapshot of the instance's live Starlark globals: variable name to its repr, with secret values scrubbed. The instance must be live and running; a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec).
+	// Snapshot of the instance's live Starlark globals (variable name to its repr, with secret values scrubbed) and, when the instance runs in its own cgroup, its memory usage. The instance must be live and running; a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec).
 	InstanceInspect(ctx context.Context, id IdPath, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// Keepalive performs a POST /api/v1/instances/{id}/keepalive (the `Keepalive` operationId) request.
@@ -1174,7 +1188,7 @@ func (c *Client) Files(ctx context.Context, id IdPath, params *FilesParams, reqE
 
 // InstanceInspect performs a GET /api/v1/instances/{id}/inspect (the `InstanceInspect` operationId) request.
 //
-// Snapshot of the instance's live Starlark globals: variable name to its repr, with secret values scrubbed. The instance must be live and running; a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec).
+// Snapshot of the instance's live Starlark globals (variable name to its repr, with secret values scrubbed) and, when the instance runs in its own cgroup, its memory usage. The instance must be live and running; a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec).
 func (c *Client) InstanceInspect(ctx context.Context, id IdPath, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewInstanceInspectRequest(c.Server, id)
 	if err != nil {
@@ -2828,7 +2842,7 @@ type ClientWithResponsesInterface interface {
 
 	// InstanceInspectWithResponse performs a GET /api/v1/instances/{id}/inspect (the `InstanceInspect` operationId) request.
 	//
-	// Snapshot of the instance's live Starlark globals: variable name to its repr, with secret values scrubbed. The instance must be live and running; a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec).
+	// Snapshot of the instance's live Starlark globals (variable name to its repr, with secret values scrubbed) and, when the instance runs in its own cgroup, its memory usage. The instance must be live and running; a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec).
 	//
 	// Returns a wrapper object for the known response body format(s).
 	InstanceInspectWithResponse(ctx context.Context, id IdPath, reqEditors ...RequestEditorFn) (*InstanceInspectResponse, error)
@@ -4870,7 +4884,7 @@ func (c *ClientWithResponses) FilesWithResponse(ctx context.Context, id IdPath, 
 
 // InstanceInspectWithResponse performs a GET /api/v1/instances/{id}/inspect (the `InstanceInspect` operationId) request.
 //
-// Snapshot of the instance's live Starlark globals: variable name to its repr, with secret values scrubbed. The instance must be live and running; a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec).
+// Snapshot of the instance's live Starlark globals (variable name to its repr, with secret values scrubbed) and, when the instance runs in its own cgroup, its memory usage. The instance must be live and running; a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec).
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) InstanceInspectWithResponse(ctx context.Context, id IdPath, reqEditors ...RequestEditorFn) (*InstanceInspectResponse, error) {

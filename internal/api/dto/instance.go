@@ -145,9 +145,25 @@ func NewInstancePrompt(v *sandbox.PromptView) InstancePrompt {
 }
 
 // InstanceInspect is the /inspect response body: variable name to its
-// Starlark repr (secret-scrubbed on the node).
+// Starlark repr (secret-scrubbed on the node), plus the instance's
+// cgroup accounting when it has a group of its own.
 type InstanceInspect struct {
 	Variables map[string]string `json:"variables"`
+	Resources *ResourceUsages   `json:"resources,omitempty"`
+}
+
+type ResourceUsages struct {
+	MemoryUsage uint64 `json:"memory_usage"`
+	MemoryPeak  uint64 `json:"memory_peak"`
+	MemoryMax   uint64 `json:"memory_max"`
+}
+
+func NewInstanceInspect(v *sandbox.InspectView) InstanceInspect {
+	out := InstanceInspect{Variables: v.Variables}
+	if r := v.Resources; r != nil {
+		out.Resources = &ResourceUsages{MemoryUsage: r.MemoryUsage, MemoryPeak: r.MemoryPeak, MemoryMax: r.MemoryMax}
+	}
+	return out
 }
 
 // FileEntry mirrors the runtime contract's entry wire shape.

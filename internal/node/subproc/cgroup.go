@@ -3,6 +3,7 @@ package subproc
 type InspectResult struct {
 	MemoryMax   uint64
 	MemoryUsage uint64
+	MemoryPeak  uint64
 }
 
 type iInstanceGroup interface {

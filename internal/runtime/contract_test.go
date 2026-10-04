@@ -73,7 +73,10 @@ func TestMessagesRoundTrip(t *testing.T) {
 			TTLSeconds: 900, NetHosts: []string{"x.com"},
 		},
 		&InspectRequest{InstanceID: "ins_1", Owner: Owner{UserID: "usr_1"}, Epoch: 3},
-		&InspectResponse{Variables: map[string]string{"x": "1", "items": "[1, 2]"}},
+		&InspectResponse{
+			Variables:      map[string]string{"x": "1", "items": "[1, 2]"},
+			ResourceUsages: ResourceUsages{MemoryUsage: 3 << 20, MemoryPeak: 5 << 20, MemoryMax: 256 << 20},
+		},
 	}
 	for _, want := range cases {
 		b, err := json.Marshal(want)

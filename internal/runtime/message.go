@@ -258,10 +258,15 @@ type InspectRequest struct {
 	Epoch      int64  `json:"epoch,omitempty"`
 }
 
+// ResourceUsages is the instance's own cgroup accounting, in bytes. All
+// zero when the instance has no group of its own (inproc isolation, or
+// process isolation without a memory cap); MemoryMax 0 means unlimited.
 type ResourceUsages struct {
 	MemoryUsage uint64 `json:"memory_usage"`
+	MemoryPeak  uint64 `json:"memory_peak,omitempty"`
 	MemoryMax   uint64 `json:"memory_max"`
 }
+
 type InspectResponse struct {
 	Variables      map[string]string `json:"variables,omitempty"`
 	ResourceUsages ResourceUsages    `json:"resource_usages"`

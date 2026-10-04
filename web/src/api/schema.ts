@@ -223,7 +223,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Snapshot of the instance's live Starlark globals: variable name to its repr, with secret values scrubbed. The instance must be live and running; a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec). */
+        /** @description Snapshot of the instance's live Starlark globals (variable name to its repr, with secret values scrubbed) and, when the instance runs in its own cgroup, its memory usage. The instance must be live and running; a deleted/expired instance returns 409 not_running (404 when it no longer exists at all, same as exec). */
         get: operations["instanceInspect"];
         put?: never;
         post?: never;
@@ -652,6 +652,25 @@ export interface components {
             variables: {
                 [key: string]: string;
             };
+            resources?: components["schemas"]["ResourceUsages"];
+        };
+        /** @description The instance's own cgroup v2 accounting, in bytes. Absent when the instance has no group of its own (inproc isolation, or process isolation without --instance-memory-max). */
+        ResourceUsages: {
+            /**
+             * Format: int64
+             * @description memory.current
+             */
+            memory_usage: number;
+            /**
+             * Format: int64
+             * @description memory.peak; 0 when the kernel does not report it
+             */
+            memory_peak: number;
+            /**
+             * Format: int64
+             * @description memory.max; 0 means unlimited
+             */
+            memory_max: number;
         };
         Execution: {
             id: string;
@@ -1183,7 +1202,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description variable name to repr */
+            /** @description globals snapshot and resource usage */
             200: {
                 headers: {
                     [name: string]: unknown;
