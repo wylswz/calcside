@@ -45,7 +45,7 @@ type Node struct {
 	Manager  *instance.Manager
 }
 
-func Build(c Config) *Node {
+func newRegistry(c Config) *capability.Registry {
 	reg := capability.NewRegistry()
 	reg.Register(capfs.Factory())
 	reg.Register(capnet.Factory())
@@ -57,8 +57,15 @@ func Build(c Config) *Node {
 		CacheDir:      c.ExtCacheDir,
 		FetchTimeout:  c.ExtFetchTimeout,
 	}))
-	eng := engine.New(c.MaxConcurrentExecs)
-	mgr := instance.New(instance.Options{
+	return reg
+}
+
+func newEngine(c Config) *engine.Engine {
+	return engine.New(c.MaxConcurrentExecs)
+}
+
+func managerOptions(c Config, reg *capability.Registry, eng *engine.Engine) instance.Options {
+	return instance.Options{
 		Engine:       eng,
 		Registry:     reg,
 		Limits:       c.Limits,
@@ -66,8 +73,7 @@ func Build(c Config) *Node {
 		MaxInstances: c.MaxInstances,
 		ReapInterval: c.ReapInterval,
 		ReapGrace:    c.ReapGrace,
-	})
-	return &Node{Registry: reg, Engine: eng, Manager: mgr}
+	}
 }
 
 func (n *Node) Close() {

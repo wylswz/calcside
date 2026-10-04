@@ -1,8 +1,9 @@
 SHELL := /bin/bash
 
 BINARIES := bin/calcside bin/csctl bin/calcside-worker
+WIRE_PACKAGES := ./internal/node ./cmd/calcside ./cmd/calcside-worker
 
-.PHONY: build test test-cgroup test-cgroup-host lint web dev serve-dev tidy gen gen-check migrate-new migrate-hash migrate-validate migrate-apply migrate-status test-postgres sdk-test sdk-lint docker-env
+.PHONY: build test test-cgroup test-cgroup-host lint web dev serve-dev tidy gen gen-check wire wire-check migrate-new migrate-hash migrate-validate migrate-apply migrate-status test-postgres sdk-test sdk-lint docker-env
 
 # First-run compose setup: generate docker/.env with a random shared
 # key, or copy docker/.env.example to fill in yourself.
@@ -60,14 +61,21 @@ lint: gen-check
 	pnpm -C web typecheck
 	pnpm -C web lint
 
+wire:
+	go tool wire $(WIRE_PACKAGES)
+
+wire-check:
+	go tool wire diff $(WIRE_PACKAGES)
+
 # Generated code (api/openapi.yaml and api/worker.openapi.yaml are the
 # source of truth — edit them, never the generated files).
 gen:
 	go generate ./...
 	pnpm -C web gen
 
-gen-check: gen
-	git diff --exit-code -- internal/api/gen internal/api/intgen internal/client/gen internal/runtime/remote/gen internal/runtime/remote/apiclient web/src/api/schema.ts
+gen-check: wire-check
+	$(MAKE) gen
+	git diff --exit-code -- internal/api/gen internal/api/intgen internal/client/gen internal/runtime/remote/gen internal/runtime/remote/apiclient web/src/api/schema.ts cmd/calcside/wire_gen.go cmd/calcside-worker/wire_gen.go internal/node/wire_gen.go
 
 # Store schema migrations (Atlas, see atlas.hcl): hand-written SQL, one
 # dir per dialect, same version in each. Requires the atlas CLI.

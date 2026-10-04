@@ -30,6 +30,7 @@ jobs:
           echo "db9ddcfeca89cb1183e362aab9c266bbb8ddc4faf17a4739b79db5f87fd0c2db  $RUNNER_TEMP/atlas" | sha256sum --check
           chmod +x "$RUNNER_TEMP/atlas"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - run: make wire-check
       - run: go build ./...
       - run: go vet ./...
       - name: gofmt

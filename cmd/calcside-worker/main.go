@@ -17,10 +17,7 @@ import (
 	"time"
 
 	"calcside/internal/config"
-	"calcside/internal/node"
 	"calcside/internal/node/subproc"
-	"calcside/internal/runtime"
-	"calcside/internal/runtime/remote"
 )
 
 func main() {
@@ -78,89 +75,30 @@ func randHex(n int) string {
 }
 
 func serve(cfg config.WorkerConfig) error {
-	if cfg.SharedKey == "" {
-		return fmt.Errorf("--shared-key is required: an unauthenticated worker is an open execution endpoint")
-	}
-	nodeID, err := nodeID(cfg)
-	if err != nil {
-		return err
-	}
-	bootID := randHex(8)
-	slog.Info("worker identity", "node_id", nodeID, "boot_id", bootID)
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	ncfg := node.Config{
-		Limits:             cfg.ExecLimits(),
-		ExtAllowSources:    cfg.ExtAllowSources,
-		ExtLocalRoots:      cfg.ExtLocalRoots,
-		ExtCacheDir:        cfg.ExtCacheDir,
-		ExtFetchTimeout:    cfg.ExtFetchTimeout,
-		MaxConcurrentExecs: cfg.MaxConcurrentExecs,
-		ExecMemoryLimit:    cfg.ExecMemoryLimit,
-		EvalTimeout:        cfg.PolicyEvalTimeout,
-		MaxInstances:       cfg.MaxInstances,
-		ReapInterval:       cfg.ReaperInterval,
+	app, cleanup, err := initializeWorker(cfg)
+	if err != nil {
+		return err
 	}
-	if cfg.APIAddr != "" {
-		// Local ext sources live on the API tier's filesystem; resolve
-		// them over the wire into our own cache volume.
-		ncfg.ExtLocalResolver = remote.LocalExtResolver(cfg.APIAddr, nodeID, []byte(cfg.SharedKey), cfg.ExtCacheDir)
-	}
-	var rt runtime.Runtime
-	if cfg.InstanceIsolation == config.IsolationProcess {
-		sup, err := subproc.New(subproc.Options{
-			Child: subproc.ChildConfig{
-				Node:    ncfg,
-				APIAddr: cfg.APIAddr,
-				NodeID:  nodeID,
-				APIKey:  []byte(cfg.SharedKey),
-			},
-			MaxInstances:       cfg.MaxInstances,
-			MaxConcurrentExecs: cfg.MaxConcurrentExecs,
-			ReapInterval:       cfg.ReaperInterval,
-			MemoryMax:          cfg.InstanceMemoryMax,
-			CgroupParent:       cfg.InstanceCgroupParent,
-		})
-		if err != nil {
-			return err
-		}
-		defer sup.Close()
-		sup.StartReaper()
-		rt = sup
-	} else {
-		nd := node.Build(ncfg)
-		defer nd.Close()
-		nd.Manager.StartReaper()
-		rt = nd.Manager
-	}
-	slog.Info("instance isolation", "mode", cfg.InstanceIsolation)
+	defer cleanup()
 
-	// /healthz is operational, not protocol: it lives outside the
-	// authenticated handler so orchestrators can probe without a key.
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	mux.Handle("/", remote.NewHandler(rt, []byte(cfg.SharedKey)))
-
-	srv := &http.Server{
-		Addr:        cfg.Addr,
-		Handler:     mux,
-		ReadTimeout: 30 * time.Second,
-		// WriteTimeout must exceed the longest exec, or the server
-		// truncates responses mid-flight.
-		WriteTimeout: cfg.MaxExecTimeout + 30*time.Second,
-	}
+	srv := app.Server
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-ctx.Done()
-		slog.Info("draining", "node_id", nodeID)
+		slog.Info("draining", "node_id", app.NodeID)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
 	}()
-	slog.Info("listening", "addr", cfg.Addr, "node_id", nodeID)
+	defer func() {
+		stop()
+		<-shutdownDone
+	}()
+	slog.Info("listening", "addr", srv.Addr, "node_id", app.NodeID)
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 		return err
 	}
