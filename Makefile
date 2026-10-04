@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 BINARIES := bin/calcside bin/csctl bin/calcside-worker
 
-.PHONY: build test test-cgroup lint web dev serve-dev tidy gen gen-check sdk-test sdk-lint docker-env
+.PHONY: build test test-cgroup test-cgroup-host lint web dev serve-dev tidy gen gen-check sdk-test sdk-lint docker-env
 
 # First-run compose setup: generate docker/.env with a random shared
 # key, or copy docker/.env.example to fill in yourself.
@@ -42,6 +42,13 @@ test-cgroup:
 	    for p in $$(cat /sys/fs/cgroup/cgroup.procs); do echo $$p > /sys/fs/cgroup/init/cgroup.procs 2>/dev/null; done; \
 	    CALCSIDE_TEST_CGROUP=1 CALCSIDE_TEST_CGROUP_PARENT=/calcside-test \
 	      exec /t/subproc.linux.test -test.v -test.run Cgroup'
+
+# Same test straight on a Linux host via sudo, with -race. The parent sits
+# under the real root cgroup, which is exempt from that constraint.
+test-cgroup-host:
+	go test -race -c -o bin/subproc.test ./internal/node/subproc
+	sudo env CALCSIDE_TEST_CGROUP=1 CALCSIDE_TEST_CGROUP_PARENT=/calcside-test \
+	  bin/subproc.test -test.v -test.run Cgroup
 
 lint: gen-check
 	go vet ./...

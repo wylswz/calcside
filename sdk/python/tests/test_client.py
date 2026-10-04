@@ -29,7 +29,7 @@ def test_end_to_end(server):
         assert content["content"] == "hi"
 
         caps = c.capabilities()
-        assert {cap["name"] for cap in caps} == {"fs", "net", "io"}
+        assert {cap["name"] for cap in caps} == {"fs", "net", "io", "ext"}
 
         got = c.get_instance(iid)
         assert got["status"] == "running"

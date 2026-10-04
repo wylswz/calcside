@@ -7,7 +7,8 @@
 - `make lint` runs gen-check + vet + gofmt + web typecheck/lint; `make build` builds web then `bin/calcside`, `bin/csctl`.
 - `make dev`/`serve-dev` pass `--net-allow-cidrs=$(DEV_NET_ALLOW_CIDRS)` (default `198.18.0.0/15`) to exempt fake-ip proxy ranges from net's SSRF blocking; set `DEV_NET_ALLOW_CIDRS=` to disable.
 - Dev: `make dev` starts the backend in dev mode (anonymous auth, no login) on :8787 plus the Vite dev server on :5173. `make serve-dev` runs the backend alone with the embedded UI.
-- `make test-cgroup` runs the per-instance cgroup memory-limit test (`internal/node/subproc/cgroup_linux_test.go`) as root in a privileged throwaway Docker container; plain `go test` skips it unless `CALCSIDE_TEST_CGROUP=1`.
+- `make test-cgroup` runs the per-instance cgroup memory-limit test (`internal/node/subproc/cgroup_linux_test.go`) as root in a privileged throwaway Docker container; plain `go test` skips it unless `CALCSIDE_TEST_CGROUP=1`. `make test-cgroup-host` runs it on a Linux host via sudo with `-race`.
+- CI (`.github/workflows/ci.yml`): `unit` (Go build/vet/gofmt/`test -race`), `integration-cgroup` (`make test-cgroup-host` + `make test-cgroup`), `integration-sdk` (`make sdk-test`). Actions are pinned by commit SHA.
 - Python SDK (`sdk/python`, uv project): `make sdk-test` (pytest, builds + boots a dev-mode server), `make sdk-lint` (ruff). Not part of `make test`/`make lint`.
 
 ## Conventions
