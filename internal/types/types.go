@@ -341,26 +341,3 @@ func AllAuthKinds() []AuthKind { return []AuthKind{AuthSession, AuthAPIKey, Auth
 func (k AuthKind) Valid() bool { return valid(k, AllAuthKinds()) }
 
 func (k AuthKind) MarshalText() ([]byte, error) { return []byte(k), nil }
-
-// OutputFormat is the csctl -o flag value.
-type OutputFormat string
-
-const (
-	FormatText OutputFormat = ""
-	FormatJSON OutputFormat = "json"
-)
-
-func AllOutputFormats() []OutputFormat { return []OutputFormat{FormatText, FormatJSON} }
-
-func (f OutputFormat) Valid() bool { return f == FormatText || f == FormatJSON }
-
-func (f OutputFormat) MarshalText() ([]byte, error) { return []byte(f), nil }
-
-func (f *OutputFormat) UnmarshalText(b []byte) error {
-	v := OutputFormat(b)
-	if !v.Valid() {
-		return invalid("output format", v)
-	}
-	*f = v
-	return nil
-}

@@ -111,7 +111,7 @@ def search(query, max_results=None):
 - The **alias** is the script-visible name: `ext.tavily.search("q")`. It must be a Starlark identifier; several aliases may load the same source with different config.
 - The extension's dependencies must also be granted (`net` above) — nested calls still enforce that capability's own restrictions (`allow_hosts`, methods, secret allowlists).
 
-Via `csctl`, put the spec in a file: `bin/csctl run --spec spec.json -c 'print(ext.tavily.search("hello"))'`.
+Send this spec to `POST /api/v1/instances`, or pass it to the Python SDK's `Client.create_instance`. Execute `print(ext.tavily.search("hello"))` via `POST /api/v1/instances/{id}/exec` or `Client.exec`.
 
 ## Sources and integrity
 
@@ -138,18 +138,27 @@ Extension ops produce gate records with `capability: "ext"` and `op: "<alias>.<o
 
 ## Development loop
 
+From the repository root, run `make build` once for the embedded console. Save the spec above as `spec.json`, setting the source to the extension's absolute path and supplying your own secret locally. Start the dev server, then run the API requests in another terminal. These examples use anonymous dev-mode auth; outside dev mode, include an `Authorization: Bearer` API key header.
+
 ```bash
 # serve with local sources enabled
-bin/calcside --dev --ext-local-roots "$(pwd)/examples/capabilities"
+make serve-dev DEV_EXT_ROOTS="$(pwd)/examples/capabilities"
 
 # check discovery
-curl -s localhost:8787/api/v1/extensions | jq .
+curl -fsS http://127.0.0.1:8787/api/v1/extensions | jq .
 
 # create an instance (manifest/config errors surface here) and exec
-bin/csctl run --spec spec.json -c 'print(ext.tavily.search("hello"))'
+instance_id=$(curl -fsS http://127.0.0.1:8787/api/v1/instances \
+  -H 'Content-Type: application/json' -H 'X-Requested-With: calcside' \
+  --data-binary @spec.json | jq -er '.instance.id')
+curl -fsS "http://127.0.0.1:8787/api/v1/instances/$instance_id/exec" \
+  -H 'Content-Type: application/json' -H 'X-Requested-With: calcside' \
+  -d '{"code":"print(ext.tavily.search(\"hello\"))"}' | jq .
 
 # inspect what the gate saw
-bin/csctl audit -o json
+curl -fsS "http://127.0.0.1:8787/api/v1/audit?instance_id=$instance_id" | jq .
+curl -fsS -X DELETE "http://127.0.0.1:8787/api/v1/instances/$instance_id" \
+  -H 'X-Requested-With: calcside'
 ```
 
 Local sources are re-read on each instance create, so iterate by editing files and recreating the instance — no server restart needed.

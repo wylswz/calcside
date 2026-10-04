@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-BINARIES := bin/calcside bin/csctl bin/calcside-worker
+BINARIES := bin/calcside bin/calcside-worker
 WIRE_PACKAGES := ./internal/node ./cmd/calcside ./cmd/calcside-worker
 
 .PHONY: build test test-cgroup test-cgroup-host lint web dev serve-dev tidy gen gen-check wire wire-check migrate-new migrate-hash migrate-validate migrate-apply migrate-status test-postgres sdk-test sdk-lint docker-env
@@ -16,7 +16,6 @@ build: web $(BINARIES)
 
 $(BINARIES): $(shell find cmd internal -name '*.go') web/dist/index.html
 	go build -o bin/calcside ./cmd/calcside
-	go build -o bin/csctl ./cmd/csctl
 	go build -o bin/calcside-worker ./cmd/calcside-worker
 
 # go:embed packages the console; keep the binary in sync with web builds.
@@ -75,7 +74,7 @@ gen:
 
 gen-check: wire-check
 	$(MAKE) gen
-	git diff --exit-code -- internal/api/gen internal/api/intgen internal/client/gen internal/runtime/remote/gen internal/runtime/remote/apiclient web/src/api/schema.ts cmd/calcside/wire_gen.go cmd/calcside-worker/wire_gen.go internal/node/wire_gen.go
+	git diff --exit-code -- internal/api/gen internal/api/intgen internal/runtime/remote/gen internal/runtime/remote/apiclient web/src/api/schema.ts cmd/calcside/wire_gen.go cmd/calcside-worker/wire_gen.go internal/node/wire_gen.go
 
 # Store schema migrations (Atlas, see atlas.hcl): hand-written SQL, one
 # dir per dialect, same version in each. Requires the atlas CLI.

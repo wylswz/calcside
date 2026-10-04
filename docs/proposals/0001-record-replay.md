@@ -302,8 +302,6 @@ identical to today.
 
 - `GET /api/v1/instances/{id}/tape` downloads the tape (owner-only).
 - `POST /api/v1/replays` takes `{tape | instance_id, policies?, code_overrides?, until_exec?}` and replays into a new instance, returning a report and, optionally, the live instance for fork-and-continue.
-- `csctl replay <tape.json> [--policy-dir …] [--until N]` replays offline
-  against an in-process `Manager`, with no server required.
 
 ## Security considerations
 
@@ -329,7 +327,7 @@ identical to today.
    twice and assert identical `str(env)`, headers order and stat dicts.
 2. **Gate interceptor:** the `Interceptor` interface, `OpInfo.External`, and
    `req_sha256` in net args. No behavior change without an interceptor.
-3. **Recorder / replayer and tape format,** with an offline `csctl replay`.
+3. **Recorder / replayer and tape format,** exercised through an in-process `Manager`.
    Acceptance test: record a session that mixes `net` (`httptest` server),
    `fs`, `print` and an `ext` module, shut the server down, replay from
    zero, and assert identical outputs, errors, steps, `Inspect` and VFS.

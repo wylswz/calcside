@@ -11,7 +11,7 @@ The design follows [citron](https://github.com/mishudark/citron), a Go implement
 ```mermaid
 flowchart LR
     agent([AI agent writes Starlark]) --> http
-    ui["csctl · web console · Python SDK"] --> http
+    ui["web console · Python SDK"] --> http
     http["HTTP API (Gin)<br/>OIDC session / cs_ key"] --> mgr["Instance manager"]
 
     subgraph inst["Instance"]
@@ -60,7 +60,7 @@ Every capability call — including the base-capability calls an extension makes
 - **Hook**: every op of every capability goes through the instance's Gate: `before hooks -> op -> after hooks -> audit`. Once an exec ends, the Gate is disarmed; once the instance is deleted, it is revoked. Any capability reference that leaks out of an exec then fails with `out_of_scope`.
 - **Policy**: OPA/Rego, `package calcside.hooks`, `deny contains msg if {...}`. Policies are bound per instance.
   - **Server policies** come from `--policy-dir` and are attached to every instance; a spec cannot opt out of them.
-  - **Library policies** are defined once per user (`/api/v1/policies`, `csctl policies apply`, or the console) under a unique name (`[A-Za-z0-9][A-Za-z0-9_.-]{0,63}`), and an instance selects the ones it wants with `spec.policies: ["name", ...]` (up to 32). An unknown name rejects the create (`bad_spec`). A policy not listed in the spec doesn't apply to that instance.
+  - **Library policies** are defined once per user (`/api/v1/policies` or the console) under a unique name (`[A-Za-z0-9][A-Za-z0-9_.-]{0,63}`), and an instance selects the ones it wants with `spec.policies: ["name", ...]` (up to 32). An unknown name rejects the create (`bad_spec`). A policy not listed in the spec doesn't apply to that instance.
   - Library policies are compiled and evaluated separately from server policies, under a restricted builtin set (no `http.send`, `opa.runtime`, `net.lookup_ip_addr`, `print`, or `trace`).
   - The selected rego is snapshotted when the instance is created, so editing or deleting a library policy only affects instances created afterwards. Evaluation errors or timeouts count as deny (fail closed).
 
@@ -80,13 +80,25 @@ Policy input:
 Install Atlas CLI 1.2.2 for local development and database tests. `make dev` and `make serve-dev` apply migrations before starting the API.
 
 ```bash
-make build                 # web console + bin/calcside + bin/csctl
+make build                 # web console + bin/calcside + bin/calcside-worker
 make dev                   # backend (--dev, anonymous) on :8787 + Vite console on :5173 — no login
-bin/csctl login --server http://localhost:8080 --api-key cs_...
-bin/csctl run --fs -c 'fs.write("a.txt", "hi"); print(fs.read("a.txt"))'
-bin/csctl policies apply --name deny_net_hosts -f policies/examples/deny_net_hosts.rego
-bin/csctl run --net-allow exfil.bad.example --policy deny_net_hosts -c 'net.get("https://exfil.bad.example/")'  # policy_denied
 ```
+
+Use the web console at `http://localhost:5173`, or integrate through the HTTP API or [Python SDK](sdk/python/README.md). With the SDK installed, connect to the dev server from your application:
+
+```python
+from calcside import Client
+
+with Client(base_url="http://127.0.0.1:8787", api_key="") as client:
+    instance = client.create_instance({"capabilities": {"fs": {}}, "ttl_seconds": 900})
+    try:
+        result = client.exec(instance["id"], 'fs.write("a.txt", "hi")\nprint(fs.read("a.txt"))')
+        print(result.output, end="")
+    finally:
+        client.delete_instance(instance["id"])
+```
+
+Outside dev mode, create an API key in the web console and pass it via `CALCSIDE_API_KEY` or the SDK's `api_key` argument. Manage library policies through the console or `/api/v1/policies`, then select them in the instance spec.
 
 Instance spec (`POST /api/v1/instances`):
 

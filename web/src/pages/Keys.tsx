@@ -37,7 +37,7 @@ export default function Keys() {
     <div>
       <PageHeader index="03" section="Access" title="API Keys"
         actions={<Button variant="primary" onClick={() => { setShowNew(true); setSecret(''); setName('') }}>New key</Button>}>
-        Bearer tokens (<code className="font-mono text-ink">cs_…</code>) for the SDK, csctl and agents. The secret is shown once at creation.
+        Bearer tokens (<code className="font-mono text-ink">cs_…</code>) for the SDK and agents. The secret is shown once at creation.
       </PageHeader>
       <div className="tbl-wrap">
         <table className="tbl">

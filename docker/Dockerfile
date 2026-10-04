@@ -21,7 +21,6 @@ COPY --from=web /src/web/dist ./web/dist
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/calcside ./cmd/calcside && \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/csctl ./cmd/csctl && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/calcside-worker ./cmd/calcside-worker
 
 # ---- Stage 3: runtime ----
@@ -32,7 +31,6 @@ RUN apk add --no-cache ca-certificates tzdata git su-exec && \
     adduser -D -u 10001 -h /home/calcside calcside
 
 COPY --from=build /out/calcside /usr/local/bin/calcside
-COPY --from=build /out/csctl /usr/local/bin/csctl
 COPY --from=build /out/calcside-worker /usr/local/bin/calcside-worker
 COPY --chmod=0755 docker/worker-entrypoint.sh /usr/local/bin/worker-entrypoint
 

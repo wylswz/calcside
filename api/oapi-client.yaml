@@ -1,9 +1,0 @@
-# Run via `go generate` (CWD = internal/client) or `make gen`.
-package: gen
-output: gen/client.gen.go
-generate:
-  models: true
-  client: true
-output-options:
-  exclude-tags:
-    - auth-raw
