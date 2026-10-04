@@ -2,10 +2,112 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Design tokens. Bauhaus palette: one dominant blue, red and yellow as
+   accents, black/white structure. Values are RGB triplets so Tailwind
+   opacity modifiers work. */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
+  --paper: 255 255 255;
+  --surface: 247 248 250;
+  --code: 242 244 247;
+  --ink: 0 0 0;
+  --body: 51 51 51;
+  --sec: 102 102 102;
+  --mute: 145 145 150;
+  --line: 229 234 255;
+  --line-strong: 208 213 221;
+  --accent: 0 51 255;
+  --danger: 225 37 27;
+  --warn: 255 199 0;
+  --warn-text: 150 104 0;
 }
 
-body {
-  @apply bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100;
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --paper: 12 12 14;
+    --surface: 21 22 26;
+    --code: 26 27 33;
+    --ink: 245 245 245;
+    --body: 212 212 216;
+    --sec: 160 160 168;
+    --mute: 112 112 122;
+    --line: 38 40 52;
+    --line-strong: 66 68 84;
+    --accent: 82 116 255;
+    --danger: 255 82 66;
+    --warn: 255 205 41;
+    --warn-text: 255 205 41;
+  }
+}
+
+@layer base {
+  html {
+    accent-color: rgb(var(--accent));
+  }
+  body {
+    @apply bg-paper font-sans text-body antialiased;
+    font-feature-settings: 'cv11', 'ss03';
+  }
+  ::selection {
+    background: rgb(var(--accent) / 0.2);
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--accent));
+    outline-offset: 1px;
+  }
+  code, pre, kbd {
+    @apply font-mono;
+  }
+}
+
+@layer components {
+  .eyebrow {
+    @apply text-[11px] font-medium uppercase tracking-label text-mute;
+  }
+  .input {
+    @apply w-full rounded-none border border-line-strong bg-paper px-2.5 py-1.5 text-sm text-ink transition-colors placeholder:text-mute hover:border-sec focus:border-accent focus:outline-none disabled:opacity-50;
+  }
+  .link {
+    @apply text-accent underline-offset-2 hover:underline;
+  }
+  .text-btn {
+    @apply text-xs font-medium text-sec transition-colors hover:text-accent disabled:opacity-40 disabled:hover:text-sec;
+  }
+  .panel {
+    @apply border border-line bg-paper;
+  }
+  .pre {
+    @apply overflow-auto whitespace-pre-wrap bg-code p-3 font-mono text-xs leading-relaxed text-ink;
+  }
+
+  .tbl-wrap {
+    @apply overflow-x-auto border-t-2 border-ink;
+  }
+  .tbl {
+    @apply w-full text-sm;
+    font-variant-numeric: tabular-nums;
+  }
+  .tbl th {
+    @apply whitespace-nowrap border-b border-ink px-3 py-2.5 text-left text-[11px] font-medium uppercase tracking-label text-mute;
+  }
+  .tbl td {
+    @apply border-b border-line px-3 py-2.5 align-middle;
+  }
+  .tbl-compact {
+    @apply text-xs;
+  }
+  .tbl-compact th,
+  .tbl-compact td {
+    @apply px-2 py-1.5;
+  }
+  .tbl tr.row-click {
+    @apply cursor-pointer transition-colors hover:bg-surface;
+  }
+  .tbl tr.row-hover {
+    @apply transition-colors hover:bg-surface;
+  }
+  .tbl tr.row-open {
+    @apply bg-surface;
+  }
 }

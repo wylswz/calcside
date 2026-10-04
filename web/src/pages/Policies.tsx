@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { api, Policy } from '../api'
-import { Badge, Button, Field, Modal, inputCls } from '../components/ui'
+import { Button, EmptyRow, Field, Modal, PageHeader, inputCls } from '../components/ui'
+import { cmTheme } from '../components/codemirror'
 
 const SCHEMA_DOC = `Input document available to every policy:
 
@@ -56,28 +57,35 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
   }
 
   return (
-    <Modal title={policy ? `Edit ${policy.name}` : 'New policy'} onClose={onClose}>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-3">
-          <Field label="Name"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} /></Field>
-          <div className="rounded border border-gray-300 dark:border-gray-700 overflow-hidden">
-            <CodeMirror value={rego} height="300px" onChange={setRego} theme={window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'} />
-          </div>
-          <div className="flex gap-2 items-center">
-            <Button onClick={validate}>Validate</Button>
-            {validation && (
-              <span className={`text-xs ${validation.valid ? 'text-green-600' : 'text-red-600'}`}>
-                {validation.valid ? 'valid' : validation.error}
-              </span>
-            )}
-          </div>
-          {err && <p className="text-xs text-red-600">{err}</p>}
-          <div className="flex justify-end gap-2">
-            <Button onClick={onClose}>Cancel</Button>
-            <Button variant="primary" disabled={!name || save.isPending} onClick={() => save.mutate()}>Save</Button>
-          </div>
+    <Modal title={policy ? `Edit ${policy.name}` : 'New policy'} onClose={onClose} wide footer={
+      <>
+        <Button onClick={validate}>Validate</Button>
+        <div className="ml-auto flex gap-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" disabled={!name || save.isPending} onClick={() => save.mutate()}>Save</Button>
         </div>
-        <pre className="text-xs font-mono text-gray-600 dark:text-gray-400 whitespace-pre-wrap rounded bg-gray-50 dark:bg-gray-900 p-3 max-h-[420px] overflow-y-auto">{SCHEMA_DOC}</pre>
+      </>
+    }>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+        <div className="min-w-0 space-y-4">
+          <Field label="Name"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} /></Field>
+          <div className="border border-ink">
+            <div className="flex items-center gap-3 border-b border-ink px-3 py-1.5">
+              <span className="eyebrow">Rego</span>
+              {validation && (
+                <span className={`ml-auto truncate text-xs ${validation.valid ? 'text-accent' : 'text-danger'}`}>
+                  {validation.valid ? '● valid' : validation.error}
+                </span>
+              )}
+            </div>
+            <CodeMirror value={rego} height="340px" onChange={setRego} theme={cmTheme} />
+          </div>
+          {err && <p className="text-xs text-danger">{err}</p>}
+        </div>
+        <div className="min-w-0">
+          <div className="eyebrow mb-2">Input schema</div>
+          <pre className="pre max-h-[440px] text-sec">{SCHEMA_DOC}</pre>
+        </div>
       </div>
     </Modal>
   )
@@ -102,36 +110,34 @@ export default function Policies() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
-        <h1 className="text-base font-semibold">Policies</h1>
-        <Button variant="primary" onClick={() => setShowNew(true)}>New policy</Button>
-      </div>
-      <p className="text-xs text-gray-500 mb-3">
-        Policies are snapshotted when an instance is created; changes apply to instances created afterwards.
-      </p>
-      <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-800">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-100 dark:bg-gray-900 text-left text-xs text-gray-600 dark:text-gray-400">
-            <tr><th className="px-3 py-2">Name</th><th className="px-3 py-2">Enabled</th><th className="px-3 py-2" /></tr>
+      <PageHeader index="02" section="Governance" title="Policies"
+        actions={<Button variant="primary" onClick={() => setShowNew(true)}>New policy</Button>}>
+        Rego hooks evaluated before and after every capability call; any deny vetoes the op. Policies are snapshotted when an instance is created; changes apply to instances created afterwards.
+      </PageHeader>
+      <div className="tbl-wrap">
+        <table className="tbl">
+          <thead>
+            <tr><th>Name</th><th>Enabled</th><th /></tr>
           </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+          <tbody>
             {(data?.policies ?? []).map((p) => (
-              <tr key={p.id}>
-                <td className="px-3 py-2">{p.name}</td>
-                <td className="px-3 py-2">
-                  <button onClick={() => toggle.mutate(p)}>
-                    {p.enabled ? <Badge tone="green">enabled</Badge> : <Badge tone="gray">disabled</Badge>}
+              <tr key={p.id} className="row-hover">
+                <td className="font-medium text-ink">{p.name}</td>
+                <td>
+                  <button onClick={() => toggle.mutate(p)} title="Toggle" className="inline-flex items-center gap-2">
+                    <span className={`relative h-4 w-7 border transition-colors ${p.enabled ? 'border-accent bg-accent' : 'border-line-strong bg-surface'}`}>
+                      <span className={`absolute top-0.5 h-2.5 w-2.5 transition-all ${p.enabled ? 'left-[14px] bg-white' : 'left-0.5 bg-mute'}`} />
+                    </span>
+                    {p.enabled ? <span className="text-xs font-medium text-ink">enabled</span> : <span className="text-xs text-mute">disabled</span>}
                   </button>
                 </td>
-                <td className="px-3 py-2 text-right space-x-2">
-                  <Button className="!px-2 !py-1 text-xs" onClick={() => setEditing(p)}>Edit</Button>
-                  <Button variant="danger" className="!px-2 !py-1 text-xs" onClick={() => del.mutate(p.id)}>Delete</Button>
+                <td className="space-x-2 whitespace-nowrap text-right">
+                  <Button size="sm" onClick={() => setEditing(p)}>Edit</Button>
+                  <Button variant="danger" size="sm" onClick={() => del.mutate(p.id)}>Delete</Button>
                 </td>
               </tr>
             ))}
-            {data && data.policies.length === 0 && (
-              <tr><td colSpan={3} className="px-3 py-6 text-center text-sm text-gray-500">no policies</td></tr>
-            )}
+            {data && data.policies.length === 0 && <EmptyRow cols={3}>no policies</EmptyRow>}
           </tbody>
         </table>
       </div>

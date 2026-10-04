@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, AuditEvent } from '../api'
-import { Button, Field, inputCls } from '../components/ui'
+import { Button, Field, PageHeader, inputCls } from '../components/ui'
 import { AuditTable } from '../components/AuditTable'
 
 const PAGE = 50
@@ -38,16 +38,18 @@ export default function Audit() {
 
   return (
     <div>
-      <h1 className="text-base font-semibold mb-3">Audit</h1>
-      <div className="flex gap-3 mb-3 items-end">
-        <Field label="Instance ID"><input className={inputCls + ' !w-64'} value={instFilter} onChange={(e) => { setInstFilter(e.target.value); setPage(0); setCursors([undefined]) }} placeholder="ins_…" /></Field>
-        <Field label="Exec ID"><input className={inputCls + ' !w-64'} value={execFilter} onChange={(e) => { setExecFilter(e.target.value); setPage(0); setCursors([undefined]) }} placeholder="exe_…" /></Field>
+      <PageHeader index="05" section="Record" title="Audit">
+        Every capability call — allowed or denied — with its decision, reason and duration. Click a row for full args and the executed code.
+      </PageHeader>
+      <div className="mb-6 flex items-end gap-3">
+        <Field label="Instance ID"><input className={inputCls + ' !w-64 font-mono'} value={instFilter} onChange={(e) => { setInstFilter(e.target.value); setPage(0); setCursors([undefined]) }} placeholder="ins_…" /></Field>
+        <Field label="Exec ID"><input className={inputCls + ' !w-64 font-mono'} value={execFilter} onChange={(e) => { setExecFilter(e.target.value); setPage(0); setCursors([undefined]) }} placeholder="exe_…" /></Field>
       </div>
       <AuditTable events={events} showScope />
-      <div className="mt-2 flex gap-2 items-center text-xs">
-        <Button onClick={prev} disabled={page === 0}>Prev</Button>
-        <span>page {page + 1}</span>
-        <Button onClick={next} disabled={!hasNext}>Next</Button>
+      <div className="mt-4 flex items-center gap-3 text-xs">
+        <Button size="sm" onClick={prev} disabled={page === 0}>← Prev</Button>
+        <span className="font-mono text-sec">page {String(page + 1).padStart(2, '0')}</span>
+        <Button size="sm" onClick={next} disabled={!hasNext}>Next →</Button>
       </div>
     </div>
   )

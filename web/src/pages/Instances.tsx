@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Instance, Secret } from '../api'
 import type { SecretSource, ExtensionCatalog, ExtensionInfo, ExtConfigField } from '../api'
-import { Badge, Button, Field, Modal, StatusBadge, fmtCountdown, fmtTime, inputCls } from '../components/ui'
+import { Button, EmptyRow, Field, Loading, Mark, Modal, PageHeader, SectionTitle, StatusBadge, Tag, fmtCountdown, fmtTime, inputCls } from '../components/ui'
 
 interface SpecDraft {
   ttl_seconds: number
@@ -29,6 +29,9 @@ interface ExtRow {
   alias: string
   config: Record<string, string>  // only keys the user set; '' = default
 }
+
+const capBar = { blue: 'border-accent', red: 'border-danger', yellow: 'border-warn' }
+const capShape = { blue: 'circle', red: 'square', yellow: 'triangle' } as const
 
 const aliasRe = /^[A-Za-z_][A-Za-z0-9_]*$/
 const secretRefRe = /\{\{\s*secrets\.([A-Z_][A-Z0-9_]{0,63})\s*\}\}/
@@ -73,8 +76,8 @@ function ExtRowEditor({ row, catalog, specNames, vaultNames, netOn, fsOn, onChan
   const entry = catalog.find((x) => x.source === row.source)
   const setCfg = (k: string, v: string) => set({ config: { ...row.config, [k]: v } })
   return (
-    <div className="mb-2 rounded border border-gray-200 dark:border-gray-800 p-2 space-y-1">
-      <div className="flex gap-1 items-center">
+    <div className="panel space-y-1.5 p-2.5">
+      <div className="flex items-center gap-1.5">
         <select className={inputCls + ' font-mono text-xs'} value={row.custom ? '__custom__' : row.source}
           onChange={(e) => {
             if (e.target.value === '__custom__') {
@@ -90,12 +93,12 @@ function ExtRowEditor({ row, catalog, specNames, vaultNames, netOn, fsOn, onChan
           ))}
           <option value="__custom__">custom…</option>
         </select>
-        <input className={inputCls + ' !w-24 font-mono text-xs'} placeholder="alias" value={row.alias}
+        <input className={inputCls + ' !w-28 font-mono text-xs'} placeholder="alias" value={row.alias}
           onChange={(e) => set({ alias: e.target.value })} />
-        <button className="ml-auto text-xs text-gray-400" onClick={onRemove}>×</button>
+        <button className="ml-auto px-1 text-base leading-none text-mute transition-colors hover:text-danger" aria-label="Remove" onClick={onRemove}>×</button>
       </div>
       {row.alias && !aliasRe.test(row.alias) && (
-        <p className="text-xs text-red-600">alias must be a starlark identifier</p>
+        <p className="text-xs text-danger">alias must be a starlark identifier</p>
       )}
       {row.custom && (
         <>
@@ -106,14 +109,14 @@ function ExtRowEditor({ row, catalog, specNames, vaultNames, netOn, fsOn, onChan
         </>
       )}
       {entry && (entry.ops ?? []).length > 0 && (
-        <p className="text-xs text-gray-500 font-mono">
+        <p className="font-mono text-xs text-sec">
           {(entry.ops ?? []).map((o) => `ext.${row.alias || '?'}.${o.name}(${(o.params ?? []).join(', ')})`).join('  ')}
         </p>
       )}
       {entry && (entry.dependencies ?? []).map((d) => {
         const granted = (d === 'net' && netOn) || (d === 'fs' && fsOn) || d === 'io'
         return granted ? null : (
-          <p key={d} className="text-xs text-amber-600 dark:text-amber-400">requires {d} — enable it below/above</p>
+          <p key={d} className="text-xs text-warn-text">requires {d} — enable it below/above</p>
         )
       })}
       {entry && (entry.config ?? []).map((f) => (
@@ -126,9 +129,9 @@ function ExtRowEditor({ row, catalog, specNames, vaultNames, netOn, fsOn, onChan
         const need = eff.match(secretRefRe)?.[1]
         if (!need || specNames.includes(need)) return null
         if (vaultNames.includes(need)) {
-          return <p key={'s' + f.name} className="text-xs text-gray-500">vault secret {need} will be added to the instance</p>
+          return <p key={'s' + f.name} className="text-xs text-sec">vault secret {need} will be added to the instance</p>
         }
-        return <p key={'s' + f.name} className="text-xs text-amber-600 dark:text-amber-400">secret {need} not defined — pick it above or create it inline</p>
+        return <p key={'s' + f.name} className="text-xs text-warn-text">secret {need} not defined — pick it above or create it inline</p>
       })}
     </div>
   )
@@ -145,7 +148,7 @@ function ExtCfgInput({ f, value, specNames, vaultNames, onChange, onEnsureSecret
 }) {
   const ph = f.default != null ? `default: ${typeof f.default === 'object' ? JSON.stringify(f.default) : f.default}` : ''
   const label = (
-    <span className="text-xs text-gray-500" title={f.doc}>{f.name}{f.doc ? ' — ' + f.doc : ''}</span>
+    <span className="mb-1 block text-xs text-sec" title={f.doc}>{f.name}{f.doc ? ' — ' + f.doc : ''}</span>
   )
   switch (f.type) {
     case 'int':
@@ -219,11 +222,11 @@ function SecretCfgInput({ f, label, value, specNames, vaultNames, onChange, onEn
         <option value="__new__">+ new inline secret…</option>
       </select>
       {newMode && (
-        <div className="mt-1 space-y-1 rounded border border-gray-200 dark:border-gray-800 p-2">
+        <div className="mt-1.5 space-y-1.5 border-l-2 border-line-strong pl-3">
           <input className={inputCls + ' font-mono text-xs'} placeholder="NAME" value={draft.name}
             onChange={(e) => { const d = { ...draft, name: e.target.value }; setDraft(d); applyDraft(d) }} />
           {draft.name && !secretNameRe.test(draft.name) && (
-            <p className="text-xs text-red-600">NAME must match [A-Z_][A-Z0-9_]*</p>
+            <p className="text-xs text-danger">NAME must match [A-Z_][A-Z0-9_]*</p>
           )}
           <input type="password" className={inputCls + ' font-mono text-xs'} placeholder="value (never persisted)"
             value={draft.value} autoComplete="new-password"
@@ -380,86 +383,111 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
     create.mutate(spec)
   }
 
+  const capTile = (name: string, desc: string, tone: 'blue' | 'red' | 'yellow', on: boolean, set: (v: boolean) => void) => (
+    <button type="button" aria-pressed={on} onClick={() => { setJsonDirty(false); set(!on) }}
+      className={`flex flex-col items-start gap-3 border-t-[3px] bg-paper px-4 py-3 text-left transition-colors hover:bg-surface ${on ? capBar[tone] : 'border-transparent'}`}>
+      <Mark tone={on ? tone : 'gray'} className="!h-3 !w-3" shape={capShape[tone]} />
+      <span>
+        <span className={`block font-mono text-sm font-medium ${on ? 'text-ink' : 'text-sec'}`}>{name}</span>
+        <span className="block text-xs text-mute">{desc}</span>
+      </span>
+    </button>
+  )
+  const removeBtn = 'ml-auto px-1 text-base leading-none text-mute transition-colors hover:text-danger'
+
   return (
-    <Modal title="New instance" onClose={onClose}>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-3">
-          <Field label="TTL (minutes)">
-            <input type="number" min={1} className={inputCls} value={ttlMin} onChange={(e) => { setJsonDirty(false); setTtlMin(Number(e.target.value)) }} />
-          </Field>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={fsOn} onChange={(e) => { setJsonDirty(false); setFsOn(e.target.checked) }} />
-            fs capability
-          </label>
-          {fsOn && (
-            <Field label="fs quota (bytes)">
-              <input className={inputCls} value={fsQuota} onChange={(e) => { setJsonDirty(false); setFsQuota(e.target.value) }} />
+    <Modal title="New instance" onClose={onClose} wide footer={
+      <>
+        {err && <p className="text-xs text-danger">{err}</p>}
+        <div className="ml-auto flex gap-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" disabled={create.isPending} onClick={submit}>
+            Create instance
+          </Button>
+        </div>
+      </>
+    }>
+      <div className="grid gap-8 lg:grid-cols-[1fr_360px]">
+        <div className="space-y-7">
+          <div className="grid grid-cols-[110px_1fr] gap-3">
+            <Field label="TTL (minutes)">
+              <input type="number" min={1} className={inputCls} value={ttlMin} onChange={(e) => { setJsonDirty(false); setTtlMin(Number(e.target.value)) }} />
             </Field>
-          )}
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={netOn} onChange={(e) => { setJsonDirty(false); setNetOn(e.target.checked) }} />
-            net capability
-          </label>
-          {netOn && (
-            <>
-              <Field label="allow_hosts (one per line; *.suffix or host:port; empty = any public host)">
-                <textarea className={inputCls + ' font-mono text-xs'} rows={3} value={netHosts} onChange={(e) => { setJsonDirty(false); setNetHosts(e.target.value) }} />
-              </Field>
-              <Field label="methods">
-                <input className={inputCls} value={netMethods} onChange={(e) => { setJsonDirty(false); setNetMethods(e.target.value) }} />
-              </Field>
-            </>
-          )}
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={extOn} onChange={(e) => { setJsonDirty(false); setExtOn(e.target.checked) }} />
-            ext capability
-          </label>
-          {extOn && (
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-medium text-gray-600 dark:text-gray-400">extensions</span>
-                <button type="button" className="text-xs text-blue-600 dark:text-blue-400"
-                  onClick={() => { setJsonDirty(false); setExtRows([...extRows, { source: '', custom: false, sum: '', alias: '', config: {} }]) }}>+ add</button>
-              </div>
-              {extCat && !extCat.remote_enabled && !extCat.local_enabled && (
-                <p className="mb-1 text-xs text-gray-500">server has no ext sources enabled (--ext-local-roots / --ext-allow-sources)</p>
-              )}
-              {extRows.map((r, i) => (
-                <ExtRowEditor key={i} row={r} catalog={extCat?.extensions ?? []}
-                  specNames={secretRows.map((s) => s.name).filter(Boolean)}
-                  vaultNames={vaultNames}
-                  netOn={netOn} fsOn={fsOn}
-                  onChange={(nr) => { setJsonDirty(false); const rs = [...extRows]; rs[i] = nr; setExtRows(rs) }}
-                  onEnsureSecret={upsertSecretRow}
-                  onRemove={() => { setJsonDirty(false); setExtRows(extRows.filter((_, j) => j !== i)) }} />
-              ))}
-            </div>
-          )}
-          <Field label="labels (k=v, comma separated)">
-            <input className={inputCls} value={labelsText} onChange={(e) => { setJsonDirty(false); setLabelsText(e.target.value) }} placeholder="team=agents, env=dev" />
-          </Field>
+            <Field label="Labels (k=v, comma separated)">
+              <input className={inputCls} value={labelsText} onChange={(e) => { setJsonDirty(false); setLabelsText(e.target.value) }} placeholder="team=agents, env=dev" />
+            </Field>
+          </div>
+
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-medium text-gray-600 dark:text-gray-400">env</span>
-              <button type="button" className="text-xs text-blue-600 dark:text-blue-400"
-                onClick={() => { setJsonDirty(false); setEnvRows([...envRows, { k: '', v: '' }]) }}>+ add</button>
+            <SectionTitle>Capabilities</SectionTitle>
+            <div className="grid grid-cols-3 gap-px border border-line bg-line">
+              {capTile('fs', 'virtual filesystem', 'blue', fsOn, setFsOn)}
+              {capTile('net', 'outbound HTTP', 'red', netOn, setNetOn)}
+              {capTile('ext', 'Starlark extensions', 'yellow', extOn, setExtOn)}
             </div>
+            <div className="mt-4 space-y-4">
+              {fsOn && (
+                <div className="space-y-3 border-l-2 border-accent pl-4">
+                  <Field label="fs quota (bytes)">
+                    <input className={inputCls + ' font-mono'} value={fsQuota} onChange={(e) => { setJsonDirty(false); setFsQuota(e.target.value) }} />
+                  </Field>
+                </div>
+              )}
+              {netOn && (
+                <div className="space-y-3 border-l-2 border-danger pl-4">
+                  <Field label="allow_hosts (one per line; *.suffix or host:port; empty = any public host)">
+                    <textarea className={inputCls + ' font-mono text-xs'} rows={3} value={netHosts} onChange={(e) => { setJsonDirty(false); setNetHosts(e.target.value) }} />
+                  </Field>
+                  <Field label="methods">
+                    <input className={inputCls + ' font-mono'} value={netMethods} onChange={(e) => { setJsonDirty(false); setNetMethods(e.target.value) }} />
+                  </Field>
+                </div>
+              )}
+              {extOn && (
+                <div className="space-y-2 border-l-2 border-warn pl-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-sec">extensions</span>
+                    <button type="button" className="text-btn"
+                      onClick={() => { setJsonDirty(false); setExtRows([...extRows, { source: '', custom: false, sum: '', alias: '', config: {} }]) }}>+ Add</button>
+                  </div>
+                  {extCat && !extCat.remote_enabled && !extCat.local_enabled && (
+                    <p className="text-xs text-mute">server has no ext sources enabled (--ext-local-roots / --ext-allow-sources)</p>
+                  )}
+                  {extRows.map((r, i) => (
+                    <ExtRowEditor key={i} row={r} catalog={extCat?.extensions ?? []}
+                      specNames={secretRows.map((s) => s.name).filter(Boolean)}
+                      vaultNames={vaultNames}
+                      netOn={netOn} fsOn={fsOn}
+                      onChange={(nr) => { setJsonDirty(false); const rs = [...extRows]; rs[i] = nr; setExtRows(rs) }}
+                      onEnsureSecret={upsertSecretRow}
+                      onRemove={() => { setJsonDirty(false); setExtRows(extRows.filter((_, j) => j !== i)) }} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <SectionTitle aside={<button type="button" className="text-btn" onClick={() => { setJsonDirty(false); setEnvRows([...envRows, { k: '', v: '' }]) }}>+ Add</button>}>
+              Env
+            </SectionTitle>
+            {envRows.length === 0 && <p className="text-xs text-mute">no env vars</p>}
             {envRows.map((r, i) => (
-              <div key={i} className="flex gap-1 mb-1">
-                <input className={inputCls + ' !w-28 font-mono text-xs'} placeholder="NAME" value={r.k}
+              <div key={i} className="mb-1.5 flex items-center gap-1.5">
+                <input className={inputCls + ' !w-36 font-mono text-xs'} placeholder="NAME" value={r.k}
                   onChange={(e) => { setJsonDirty(false); const rs = [...envRows]; rs[i] = { ...r, k: e.target.value }; setEnvRows(rs) }} />
                 <input className={inputCls + ' font-mono text-xs'} placeholder="value" value={r.v}
                   onChange={(e) => { setJsonDirty(false); const rs = [...envRows]; rs[i] = { ...r, v: e.target.value }; setEnvRows(rs) }} />
-                <button className="text-xs text-gray-400" onClick={() => { setJsonDirty(false); setEnvRows(envRows.filter((_, j) => j !== i)) }}>×</button>
+                <button className={removeBtn} aria-label="Remove" onClick={() => { setJsonDirty(false); setEnvRows(envRows.filter((_, j) => j !== i)) }}>×</button>
               </div>
             ))}
           </div>
+
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-medium text-gray-600 dark:text-gray-400">secrets</span>
-              <button type="button" className="text-xs text-blue-600 dark:text-blue-400"
-                onClick={() => { setJsonDirty(false); setSecretRows([...secretRows, { name: '', kind: 'vault', value: '', domains: '' }]) }}>+ add</button>
-            </div>
+            <SectionTitle aside={<button type="button" className="text-btn" onClick={() => { setJsonDirty(false); setSecretRows([...secretRows, { name: '', kind: 'vault', value: '', domains: '' }]) }}>+ Add</button>}>
+              Secrets
+            </SectionTitle>
+            {secretRows.length === 0 && <p className="text-xs text-mute">no secrets</p>}
             {secretRows.map((r, i) => {
               const set = (patch: Partial<SecretRow>) => {
                 setJsonDirty(false)
@@ -468,13 +496,13 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
                 setSecretRows(rs)
               }
               return (
-                <div key={i} className="mb-2 rounded border border-gray-200 dark:border-gray-800 p-2 space-y-1">
-                  <div className="flex gap-1 items-center">
-                    <select className={inputCls + ' !w-20 text-xs'} value={r.kind} onChange={(e) => set({ kind: e.target.value as SecretSource })}>
+                <div key={i} className="panel mb-2 space-y-1.5 p-2.5">
+                  <div className="flex items-center gap-1.5">
+                    <select className={inputCls + ' !w-24 text-xs'} value={r.kind} onChange={(e) => set({ kind: e.target.value as SecretSource })}>
                       <option value="vault">vault</option>
                       <option value="inline">inline</option>
                     </select>
-                    {r.auto && <span className="text-xs text-gray-400">via ext</span>}
+                    {r.auto && <span className="eyebrow whitespace-nowrap">via ext</span>}
                     {r.kind === 'vault' ? (
                       <select className={inputCls + ' font-mono text-xs'} value={r.name} onChange={(e) => set({ name: e.target.value })}>
                         <option value="">pick…</option>
@@ -483,7 +511,7 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
                     ) : (
                       <input className={inputCls + ' font-mono text-xs'} placeholder="NAME" value={r.name} onChange={(e) => set({ name: e.target.value })} />
                     )}
-                    <button className="ml-auto text-xs text-gray-400" onClick={() => { setJsonDirty(false); setSecretRows(secretRows.filter((_, j) => j !== i)) }}>×</button>
+                    <button className={removeBtn} aria-label="Remove" onClick={() => { setJsonDirty(false); setSecretRows(secretRows.filter((_, j) => j !== i)) }}>×</button>
                   </div>
                   {r.kind === 'inline' && (
                     <input type="password" className={inputCls + ' font-mono text-xs'} placeholder="value (never persisted)" value={r.value} onChange={(e) => set({ value: e.target.value })} autoComplete="new-password" />
@@ -495,22 +523,18 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
             })}
           </div>
         </div>
-        <div>
-          <Field label="spec (advanced JSON — editable)">
-            <textarea
-              className={inputCls + ' font-mono text-xs h-[340px]'}
-              value={jsonShown}
-              onChange={(e) => { setJsonText(e.target.value); setJsonDirty(true) }}
-            />
-          </Field>
+
+        <div className="flex flex-col">
+          <SectionTitle aside={jsonDirty ? <span className="text-warn-text">edited by hand</span> : <span className="text-mute">generated from form</span>}>
+            Spec JSON
+          </SectionTitle>
+          <textarea
+            className={inputCls + ' min-h-[420px] flex-1 resize-none bg-code font-mono text-xs leading-relaxed'}
+            spellCheck={false}
+            value={jsonShown}
+            onChange={(e) => { setJsonText(e.target.value); setJsonDirty(true) }}
+          />
         </div>
-      </div>
-      {err && <p className="mt-2 text-xs text-red-600">{err}</p>}
-      <div className="mt-4 flex justify-end gap-2">
-        <Button onClick={onClose}>Cancel</Button>
-        <Button variant="primary" disabled={create.isPending} onClick={submit}>
-          Create
-        </Button>
       </div>
     </Modal>
   )
@@ -531,53 +555,56 @@ export default function Instances() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-3">
-        <h1 className="text-base font-semibold">Instances</h1>
-        <Button variant="primary" onClick={() => setShowNew(true)}>New instance</Button>
-      </div>
-      {isLoading && <p className="text-sm text-gray-500">loading…</p>}
-      <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-800">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-100 dark:bg-gray-900 text-left text-xs text-gray-600 dark:text-gray-400">
+      <PageHeader index="01" section="Runtime" title="Instances"
+        actions={<Button variant="primary" onClick={() => setShowNew(true)}>New instance</Button>}>
+        Each instance is a Starlark session with its own globals, VFS and policy snapshot. Only the capabilities granted in its spec exist.
+      </PageHeader>
+      {isLoading && <Loading />}
+      <div className="tbl-wrap">
+        <table className="tbl">
+          <thead>
             <tr>
-              <th className="px-3 py-2">ID</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Capabilities</th>
-              <th className="px-3 py-2">Labels</th>
-              <th className="px-3 py-2">Created</th>
-              <th className="px-3 py-2">Expires</th>
-              <th className="px-3 py-2" />
+              <th>ID</th>
+              <th>Status</th>
+              <th>Capabilities</th>
+              <th>Labels</th>
+              <th>Created</th>
+              <th>Expires</th>
+              <th />
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+          <tbody>
             {(data?.instances ?? []).map((i) => (
-              <tr key={i.id} className="hover:bg-gray-50 dark:hover:bg-gray-900/60">
-                <td className="px-3 py-2 font-mono text-xs">
-                  <Link to={`/instances/${i.id}`} className="text-blue-600 dark:text-blue-400 hover:underline">{i.id}</Link>
+              <tr key={i.id} className="row-hover">
+                <td className="font-mono text-xs">
+                  <Link to={`/instances/${i.id}`} className="link font-medium">{i.id}</Link>
                 </td>
-                <td className="px-3 py-2"><StatusBadge status={i.status} /></td>
-                <td className="px-3 py-2 text-xs">
-                  {Object.entries(i.spec?.capabilities ?? {}).map(([k, v]) =>
-                    k === 'ext' ? `ext(${Object.keys(v ?? {}).join(', ')})` : k
-                  ).join(', ') || '—'}
+                <td><StatusBadge status={i.status} /></td>
+                <td>
+                  <span className="flex flex-wrap gap-1">
+                    {Object.entries(i.spec?.capabilities ?? {}).map(([k, v]) => (
+                      <Tag key={k}>{k === 'ext' ? `ext(${Object.keys(v ?? {}).join(', ')})` : k}</Tag>
+                    ))}
+                    {Object.keys(i.spec?.capabilities ?? {}).length === 0 && <span className="text-mute">—</span>}
+                  </span>
                 </td>
-                <td className="px-3 py-2 text-xs">
-                  {Object.entries(i.labels ?? {}).map(([k, v]) => (
-                    <Badge key={k} tone="gray">{k}={v}</Badge>
-                  ))}
+                <td>
+                  <span className="flex flex-wrap gap-1">
+                    {Object.entries(i.labels ?? {}).map(([k, v]) => (
+                      <Tag key={k}>{k}={v}</Tag>
+                    ))}
+                  </span>
                 </td>
-                <td className="px-3 py-2 text-xs">{fmtTime(i.created_at)}</td>
-                <td className="px-3 py-2 text-xs">{i.status === 'running' ? fmtCountdown(i.expires_at) : '—'}</td>
-                <td className="px-3 py-2 text-right">
+                <td className="whitespace-nowrap text-xs text-sec">{fmtTime(i.created_at)}</td>
+                <td className="font-mono text-xs">{i.status === 'running' ? fmtCountdown(i.expires_at) : <span className="text-mute">—</span>}</td>
+                <td className="text-right">
                   {i.status === 'running' && (
-                    <Button variant="danger" className="!px-2 !py-1 text-xs" onClick={() => del.mutate(i.id)}>Delete</Button>
+                    <Button variant="danger" size="sm" onClick={() => del.mutate(i.id)}>Delete</Button>
                   )}
                 </td>
               </tr>
             ))}
-            {data && data.instances.length === 0 && (
-              <tr><td colSpan={7} className="px-3 py-6 text-center text-sm text-gray-500">no instances</td></tr>
-            )}
+            {data && data.instances.length === 0 && <EmptyRow cols={7}>no instances</EmptyRow>}
           </tbody>
         </table>
       </div>

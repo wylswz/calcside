@@ -7,7 +7,8 @@ import { api, AuditEvent, ExecResult, Execution, FileEntry, Instance, InstanceIn
 import type { SecretSource } from '../api'
 
 interface SpecSecret { ref?: string; source?: SecretSource; allowed_domains?: string[] }
-import { Badge, Button, StatusBadge, fmtBytes, fmtCountdown, fmtTime } from '../components/ui'
+import { Badge, Button, EmptyRow, Loading, Notice, SectionTitle, StatusBadge, fmtBytes, fmtCountdown, fmtTime } from '../components/ui'
+import { cmTheme } from '../components/codemirror'
 import { AuditTable, ExecCode } from '../components/AuditTable'
 
 const DEFAULT_CODE = `# Starlark. Capabilities appear as globals when granted.
@@ -33,30 +34,36 @@ function FileBrowser({ id }: { id: string }) {
   }
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2 text-xs">
-        <button className="text-blue-600 dark:text-blue-400" onClick={() => { setDir('/work'); setFile(null) }}>/work</button>
+      <div className="flex items-center gap-1.5 font-mono text-xs">
+        <button className="link" onClick={() => { setDir('/work'); setFile(null) }}>/work</button>
         {dir !== '/work' && (
           <>
-            <span className="text-gray-400">/</span>
-            <span className="font-mono">{dir.replace('/work/', '')}</span>
+            <span className="text-mute">/</span>
+            <span className="text-ink">{dir.replace('/work/', '')}</span>
           </>
         )}
-        <button className="ml-auto text-gray-500" onClick={() => refetch()}>refresh</button>
+        <button className="text-btn ml-auto font-sans" onClick={() => refetch()}>refresh</button>
       </div>
-      <ul className="rounded border border-gray-200 dark:border-gray-800 divide-y divide-gray-200 dark:divide-gray-800 text-xs font-mono max-h-48 overflow-y-auto">
+      <ul className="max-h-56 overflow-y-auto border-y border-line font-mono text-xs">
         {(data?.entries ?? []).map((e) => (
-          <li key={e.path}>
-            <button className="w-full text-left px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-800" onClick={() => open(e)}>
-              {e.is_dir ? '▸ ' : '  '}{e.name}{e.is_dir ? '/' : ` (${e.size}B)`}
+          <li key={e.path} className="border-b border-line last:border-b-0">
+            <button
+              className={`flex w-full items-center gap-2 px-2 py-1.5 text-left transition-colors hover:bg-surface ${file?.path === e.path ? 'bg-surface text-accent' : 'text-ink'}`}
+              onClick={() => open(e)}
+            >
+              <span className={`h-1.5 w-1.5 shrink-0 ${e.is_dir ? 'bg-accent' : 'border border-mute'}`} />
+              <span className="truncate">{e.name}{e.is_dir ? '/' : ''}</span>
+              {!e.is_dir && <span className="ml-auto text-mute">{fmtBytes(e.size)}</span>}
             </button>
           </li>
         ))}
-        {data && data.entries.length === 0 && <li className="px-2 py-1 text-gray-500">empty</li>}
+        {data && data.entries.length === 0 && <li className="px-2 py-2 text-mute">empty</li>}
       </ul>
       {file && (
-        <pre className="rounded border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 p-2 text-xs max-h-64 overflow-auto whitespace-pre-wrap">
-          {file.path}{'\n'}{file.content}
-        </pre>
+        <div>
+          <div className="eyebrow mb-1 truncate normal-case tracking-normal">{file.path}</div>
+          <pre className="pre max-h-64">{file.content}</pre>
+        </div>
       )}
     </div>
   )
@@ -78,7 +85,7 @@ function MemorySparkline({ samples, max }: { samples: number[]; max: number }) {
   const top = Math.max(max, ...samples) || 1
   const pts = samples.map((v, i) => `${(i / (HISTORY_LEN - 1)) * 100},${30 - (v / top) * 28}`).join(' ')
   return (
-    <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="w-full h-10 text-blue-500">
+    <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="h-10 w-full text-accent">
       <polyline points={pts} fill="none" stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
     </svg>
   )
@@ -87,37 +94,36 @@ function MemorySparkline({ samples, max }: { samples: number[]; max: number }) {
 function ResourcesCard({ resources, history }: { resources?: ResourceUsages; history: number[] }) {
   if (!resources) {
     return (
-      <p className="rounded border border-gray-200 dark:border-gray-800 p-3 text-xs text-gray-500">
-        resource usage unavailable — this instance has no cgroup of its own (inproc isolation, or process isolation
-        without <span className="font-mono">--instance-memory-max</span>)
-      </p>
+      <Notice>
+        <span className="text-xs text-sec">
+          resource usage unavailable — this instance has no cgroup of its own (inproc isolation, or process isolation
+          without <span className="font-mono">--instance-memory-max</span>)
+        </span>
+      </Notice>
     )
   }
   const { memory_usage: usage, memory_peak: peak, memory_max: max } = resources
   const pct = max > 0 ? Math.min(100, (usage / max) * 100) : 0
   const peakPct = max > 0 ? Math.min(100, (peak / max) * 100) : 0
-  const bar = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-yellow-500' : 'bg-green-500'
+  const bar = pct >= 90 ? 'bg-danger' : pct >= 70 ? 'bg-warn' : 'bg-accent'
   const stat = (label: string, value: string) => (
     <div>
-      <div className="text-gray-500">{label}</div>
-      <div className="font-mono text-sm">{value}</div>
+      <div className="eyebrow">{label}</div>
+      <div className="mt-1 font-mono text-sm text-ink">{value}</div>
     </div>
   )
   return (
-    <div className="rounded border border-gray-200 dark:border-gray-800 p-3 space-y-2 text-xs">
-      <div className="flex items-baseline">
-        <span className="font-semibold text-gray-600 dark:text-gray-400">Memory</span>
-        {max > 0 && <span className="ml-auto font-mono">{pct.toFixed(1)}%</span>}
-      </div>
+    <div className="space-y-3 text-xs">
+      <SectionTitle aside={max > 0 && <span className="font-mono text-sm text-ink">{pct.toFixed(1)}%</span>}>Memory</SectionTitle>
       {max > 0 && (
-        <div className="relative h-2 rounded bg-gray-200 dark:bg-gray-800 overflow-hidden">
-          <div className={`h-full ${bar}`} style={{ width: `${pct}%` }} />
+        <div className="relative h-3 bg-surface">
+          <div className={`h-full transition-[width] ${bar}`} style={{ width: `${pct}%` }} />
           {peak > 0 && (
-            <div className="absolute top-0 h-full w-0.5 bg-gray-700 dark:bg-gray-300" style={{ left: `calc(${peakPct}% - 1px)` }} title={`peak ${fmtBytes(peak)}`} />
+            <div className="absolute -top-1 h-5 w-0.5 bg-ink" style={{ left: `calc(${peakPct}% - 1px)` }} title={`peak ${fmtBytes(peak)}`} />
           )}
         </div>
       )}
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-3 gap-px border border-line bg-line [&>div]:bg-paper [&>div]:px-3 [&>div]:py-2">
         {stat('current', fmtBytes(usage))}
         {stat('peak', peak > 0 ? fmtBytes(peak) : '—')}
         {stat('limit', max > 0 ? fmtBytes(max) : 'unlimited')}
@@ -149,49 +155,43 @@ function InspectTab({ id, running, busy }: { id: string; running: boolean; busy:
     .filter((n) => !q || n.toLowerCase().includes(q))
     .sort()
   return (
-    <div className="space-y-3">
+    <div className="space-y-6">
       <div className="flex items-center gap-3 text-xs">
-        <span className="text-gray-500">live snapshot of this instance</span>
-        {dataUpdatedAt > 0 && <span className="text-gray-400">updated {new Date(dataUpdatedAt).toLocaleTimeString()}</span>}
-        {busy && auto && <span className="text-gray-400">paused while code runs</span>}
-        <label className="ml-auto flex items-center gap-1 text-gray-500">
+        <span className="text-sec">live snapshot of this instance</span>
+        {dataUpdatedAt > 0 && <span className="text-mute">updated {new Date(dataUpdatedAt).toLocaleTimeString()}</span>}
+        {busy && auto && <span className="text-warn-text">paused while code runs</span>}
+        <label className="ml-auto flex items-center gap-1.5 text-sec">
           <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} disabled={!running} />
           auto-refresh
         </label>
-        <button className="text-gray-500" onClick={() => refetch()} disabled={!running}>
+        <button className="text-btn" onClick={() => refetch()} disabled={!running}>
           {isFetching ? 'refreshing…' : 'refresh'}
         </button>
       </div>
-      {!running && <p className="text-xs text-gray-500">instance is not running — nothing to inspect</p>}
-      {error && <p className="text-xs text-red-600">{(error as Error).message}</p>}
+      {!running && <p className="text-xs text-mute">instance is not running — nothing to inspect</p>}
+      {error && <Notice tone="red">{(error as Error).message}</Notice>}
       {data && (
         <>
           <ResourcesCard resources={data.resources} history={history} />
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-xs">
-              <span className="font-semibold text-gray-600 dark:text-gray-400">Variables</span>
-              <span className="text-gray-400">{Object.keys(data.variables).length} globals · reprs, secrets scrubbed</span>
-              <input
-                className="ml-auto rounded border border-gray-300 dark:border-gray-700 bg-transparent px-2 py-0.5 font-mono w-40"
-                placeholder="filter"
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-              />
-            </div>
-            <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-800">
-              <table className="w-full text-xs">
-                <tbody className="divide-y divide-gray-200 dark:divide-gray-800 font-mono">
+          <div>
+            <SectionTitle aside={
+              <>
+                <span className="text-mute">{Object.keys(data.variables).length} globals · reprs, secrets scrubbed</span>
+                <input className="input !w-40 !py-1 font-mono !text-xs" placeholder="filter" value={filter} onChange={(e) => setFilter(e.target.value)} />
+              </>
+            }>Variables</SectionTitle>
+            <div className="overflow-x-auto">
+              <table className="tbl tbl-compact">
+                <tbody className="font-mono">
                   {names.map((name) => (
-                    <tr key={name}>
-                      <td className="px-2 py-1 align-top whitespace-nowrap text-gray-600 dark:text-gray-400">{name}</td>
-                      <td className="px-2 py-1">
-                        <div className="max-h-32 overflow-auto whitespace-pre-wrap break-all">{data.variables[name]}</div>
+                    <tr key={name} className="row-hover">
+                      <td className="w-px whitespace-nowrap align-top font-medium text-accent">{name}</td>
+                      <td>
+                        <div className="max-h-32 overflow-auto whitespace-pre-wrap break-all text-ink">{data.variables[name]}</div>
                       </td>
                     </tr>
                   ))}
-                  {names.length === 0 && (
-                    <tr><td className="px-2 py-2 text-gray-500">{q ? 'no matching variables' : 'no variables yet — run some code first'}</td></tr>
-                  )}
+                  {names.length === 0 && <EmptyRow cols={2}>{q ? 'no matching variables' : 'no variables yet — run some code first'}</EmptyRow>}
                 </tbody>
               </table>
             </div>
@@ -227,23 +227,15 @@ function PromptTab({ id, running }: { id: string; running: boolean }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 text-xs">
-        <label className="text-gray-500">tool prefix</label>
-        <input
-          className="rounded border border-gray-300 dark:border-gray-700 bg-transparent px-2 py-1 font-mono w-40"
-          value={prefix}
-          onChange={(e) => setPrefix(e.target.value)}
-        />
-        <Button onClick={copy} disabled={!data} className="!px-2 !py-1 text-xs ml-auto">
+        <label className="text-sec">tool prefix</label>
+        <input className="input !w-40 !py-1 font-mono !text-xs" value={prefix} onChange={(e) => setPrefix(e.target.value)} />
+        <Button onClick={copy} disabled={!data} size="sm" className="ml-auto">
           {copied ? 'Copied' : 'Copy'}
         </Button>
       </div>
-      {!running && <p className="text-xs text-gray-500">instance is not running — no prompt available</p>}
-      {error && <p className="text-xs text-red-600">{(error as Error).message}</p>}
-      {data && (
-        <pre className="rounded border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 p-3 text-xs font-mono max-h-[32rem] overflow-auto whitespace-pre-wrap">
-          {data.prompt}
-        </pre>
-      )}
+      {!running && <p className="text-xs text-mute">instance is not running — no prompt available</p>}
+      {error && <Notice tone="red">{(error as Error).message}</Notice>}
+      {data && <pre className="pre max-h-[32rem] p-4">{data.prompt}</pre>}
     </div>
   )
 }
@@ -300,137 +292,154 @@ export default function InstanceDetail() {
     qc.invalidateQueries({ queryKey: ['instance', id] })
   }
 
-  if (!inst) return <p className="text-sm text-gray-500">loading…</p>
+  if (!inst) return <Loading />
+
+  const tabs = [
+    { k: 'execs', label: 'Executions' },
+    { k: 'audit', label: 'Audit' },
+    { k: 'inspect', label: 'Inspect' },
+    { k: 'prompt', label: 'Agent prompt' },
+  ] as const
+  const ext = Object.entries(inst.spec?.capabilities?.ext ?? {}) as [string, { source?: string; sum?: string }][]
+  const env = Object.entries(inst.spec?.env ?? {}) as [string, string][]
+  const secrets = Object.entries(inst.spec?.secrets ?? {}) as [string, SpecSecret][]
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <Link to="/" className="text-xs text-gray-500 hover:underline">← instances</Link>
-        <span className="font-mono text-sm">{inst.id}</span>
-        <StatusBadge status={inst.status} />
-        {inst.status === 'running' && (
-          <>
-            <span className="text-xs text-gray-500">expires in {fmtCountdown(inst.expires_at)}</span>
-            <Button onClick={keepalive} className="!px-2 !py-1 text-xs">Keepalive</Button>
-          </>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 space-y-3">
-          <div className="rounded border border-gray-300 dark:border-gray-700 overflow-hidden">
-            <CodeMirror
-              value={code}
-              height="280px"
-              extensions={[python()]}
-              onChange={setCode}
-              theme={window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'}
-            />
+    <div>
+      <div className="mb-8 flex flex-wrap items-end gap-x-8 gap-y-4">
+        <div className="min-w-0 flex-1">
+          <div className="eyebrow">
+            <Link to="/" className="transition-colors hover:text-accent">← <span className="text-accent">01</span> · Instances</Link>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="primary" disabled={running || inst.status !== 'running'} onClick={run}>
-              {running ? 'Running…' : 'Run (⌘/Ctrl+Enter)'}
-            </Button>
-            {result && (
-              <span className="text-xs text-gray-500">
-                {result.duration_ms}ms · {result.steps} steps
-                {result.error && <> · <Badge tone="red">{result.error.type}</Badge></>}
-              </span>
+          <h1 className="mt-3 truncate font-mono text-[28px] font-medium leading-tight tracking-tight text-ink">{inst.id}</h1>
+          <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-sec">
+            <StatusBadge status={inst.status} />
+            {inst.status === 'running' && <span>expires in <span className="font-mono text-ink">{fmtCountdown(inst.expires_at)}</span></span>}
+            <span>created {fmtTime(inst.created_at)}</span>
+            {Object.keys(inst.spec?.capabilities ?? {}).length > 0 && (
+              <span className="font-mono">{Object.keys(inst.spec.capabilities ?? {}).join(' · ')}</span>
             )}
           </div>
-          {result && (
-            <div className="space-y-2">
-              <pre className="rounded border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 p-3 text-xs font-mono max-h-64 overflow-auto whitespace-pre-wrap">
-                {result.output || '(no output)'}
-              </pre>
-              {result.error && (
-                <pre className="rounded border border-red-300 dark:border-red-900 bg-red-50 dark:bg-red-950/40 p-3 text-xs font-mono max-h-64 overflow-auto whitespace-pre-wrap text-red-700 dark:text-red-300">
-                  error[{result.error.type}]: {result.error.message}
-                  {result.error.backtrace ? '\n' + result.error.backtrace : ''}
-                </pre>
-              )}
-            </div>
-          )}
+        </div>
+        {inst.status === 'running' && <Button onClick={keepalive}>Keepalive</Button>}
+      </div>
 
-          <div className="flex gap-2 border-b border-gray-200 dark:border-gray-800 text-sm">
-            <button className={`px-3 py-1.5 ${tab === 'execs' ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`} onClick={() => setTab('execs')}>Executions</button>
-            <button className={`px-3 py-1.5 ${tab === 'audit' ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`} onClick={() => setTab('audit')}>Audit</button>
-            <button className={`px-3 py-1.5 ${tab === 'inspect' ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`} onClick={() => setTab('inspect')}>Inspect</button>
-            <button className={`px-3 py-1.5 ${tab === 'prompt' ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`} onClick={() => setTab('prompt')}>Agent prompt</button>
-          </div>
-          {tab === 'execs' && (
-            <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-800">
-              <table className="w-full text-xs">
-                <thead className="bg-gray-100 dark:bg-gray-900 text-left text-gray-600 dark:text-gray-400">
-                  <tr><th className="px-2 py-1.5">Exec</th><th className="px-2 py-1.5">Status</th><th className="px-2 py-1.5">Snippet</th><th className="px-2 py-1.5">ms</th><th className="px-2 py-1.5">Steps</th><th className="px-2 py-1.5">Time</th></tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200 dark:divide-gray-800 font-mono">
-                  {(execs?.executions ?? []).map((x) => (
-                    <Fragment key={x.id}>
-                      <tr
-                        className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900"
-                        onClick={() => setOpenExec(openExec === x.id ? null : x.id)}
-                      >
-                        <td className="px-2 py-1">{openExec === x.id ? '▾ ' : '▸ '}{x.id}</td>
-                        <td className="px-2 py-1">{x.status === 'ok' ? <Badge tone="green">ok</Badge> : <Badge tone="red">{x.error_type || 'error'}</Badge>}</td>
-                        <td className="px-2 py-1 max-w-[240px] truncate" title={x.code_snippet}>{x.code_snippet}</td>
-                        <td className="px-2 py-1">{x.duration_ms}</td>
-                        <td className="px-2 py-1">{x.steps}</td>
-                        <td className="px-2 py-1">{fmtTime(x.created_at)}</td>
-                      </tr>
-                      {openExec === x.id && (
-                        <tr>
-                          <td colSpan={6} className="px-3 py-3 bg-gray-50/60 dark:bg-gray-900/40">
-                            <ExecCode execId={x.id} />
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
+      <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0 space-y-8">
+          <div className="border border-ink">
+            <div className="flex items-center gap-3 border-b border-ink px-3 py-2">
+              <span className="eyebrow">Starlark</span>
+              <span className="text-[11px] text-mute">⌘/Ctrl + Enter</span>
+              <Button variant="primary" size="sm" className="ml-auto min-w-20" disabled={running || inst.status !== 'running'} onClick={run}>
+                {running ? 'Running…' : 'Run ▸'}
+              </Button>
             </div>
-          )}
-          {tab === 'audit' && <AuditTab id={id} />}
-          {tab === 'inspect' && <InspectTab key={id} id={id} running={inst.status === 'running'} busy={running} />}
-          {tab === 'prompt' && <PromptTab id={id} running={inst.status === 'running'} />}
+            <CodeMirror value={code} height="300px" extensions={[python()]} onChange={setCode} theme={cmTheme} />
+            {result && (
+              <div className="border-t border-ink">
+                <div className="flex items-center gap-4 border-b border-line bg-surface px-3 py-1.5 text-xs">
+                  <span className="eyebrow">Output</span>
+                  <span className="font-mono text-sec">{result.duration_ms}ms · {result.steps} steps</span>
+                  {result.error ? <Badge tone="red">{result.error.type}</Badge> : <Badge tone="blue">ok</Badge>}
+                </div>
+                <pre className="max-h-64 overflow-auto whitespace-pre-wrap p-3 font-mono text-xs leading-relaxed text-ink">
+                  {result.output || <span className="text-mute">(no output)</span>}
+                </pre>
+                {result.error && (
+                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap border-t border-danger/40 border-l-4 border-l-danger bg-danger/5 p-3 font-mono text-xs leading-relaxed text-danger">
+                    error[{result.error.type}]: {result.error.message}
+                    {result.error.backtrace ? '\n' + result.error.backtrace : ''}
+                  </pre>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <div className="mb-4 flex gap-6 border-b border-line">
+              {tabs.map((t) => (
+                <button key={t.k} onClick={() => setTab(t.k)}
+                  className={`-mb-px border-b-[3px] pb-2 text-sm transition-colors ${tab === t.k ? 'border-accent font-medium text-ink' : 'border-transparent text-sec hover:text-ink'}`}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            {tab === 'execs' && (
+              <div className="tbl-wrap">
+                <table className="tbl tbl-compact">
+                  <thead>
+                    <tr><th>Exec</th><th>Status</th><th>Snippet</th><th>ms</th><th>Steps</th><th>Time</th></tr>
+                  </thead>
+                  <tbody className="font-mono">
+                    {(execs?.executions ?? []).map((x) => (
+                      <Fragment key={x.id}>
+                        <tr className={`row-click ${openExec === x.id ? 'row-open' : ''}`} onClick={() => setOpenExec(openExec === x.id ? null : x.id)}>
+                          <td className="whitespace-nowrap"><span className="mr-1.5 inline-block w-2 text-accent">{openExec === x.id ? '▾' : '▸'}</span>{x.id}</td>
+                          <td>{x.status === 'ok' ? <Badge tone="blue">ok</Badge> : <Badge tone="red">{x.error_type || 'error'}</Badge>}</td>
+                          <td className="max-w-[240px] truncate text-sec" title={x.code_snippet}>{x.code_snippet}</td>
+                          <td>{x.duration_ms}</td>
+                          <td>{x.steps}</td>
+                          <td className="whitespace-nowrap font-sans text-sec">{fmtTime(x.created_at)}</td>
+                        </tr>
+                        {openExec === x.id && (
+                          <tr className="bg-surface">
+                            <td colSpan={6} className="!px-4 !py-4 font-sans">
+                              <ExecCode execId={x.id} />
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    ))}
+                    {execs && execs.executions.length === 0 && <EmptyRow cols={6}>no executions yet</EmptyRow>}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {tab === 'audit' && <AuditTab id={id} />}
+            {tab === 'inspect' && <InspectTab key={id} id={id} running={inst.status === 'running'} busy={running} />}
+            {tab === 'prompt' && <PromptTab id={id} running={inst.status === 'running'} />}
+          </div>
         </div>
 
-        <div className="space-y-4">
+        <aside className="space-y-8">
           <div>
-            <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">Files</h3>
+            <SectionTitle>Files</SectionTitle>
             <FileBrowser id={id} />
           </div>
-          {Object.keys(inst.spec?.capabilities?.ext ?? {}).length > 0 && (
+          {ext.length > 0 && (
             <div>
-              <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">Extensions</h3>
-              <div className="rounded border border-gray-200 dark:border-gray-800 p-2 text-xs font-mono space-y-1">
-                {(Object.entries(inst.spec.capabilities?.ext ?? {}) as [string, { source?: string; sum?: string }][]).map(([alias, e]) => (
+              <SectionTitle>Extensions</SectionTitle>
+              <dl className="space-y-2 font-mono text-xs">
+                {ext.map(([alias, e]) => (
                   <div key={alias}>
-                    <span className="text-gray-500">{alias}</span> → {e.source}
-                    {e.sum && <span className="text-gray-400"> ({e.sum})</span>}
+                    <dt className="font-medium text-accent">{alias}</dt>
+                    <dd className="break-all text-ink">{e.source}</dd>
+                    {e.sum && <dd className="break-all text-mute">{e.sum}</dd>}
                   </div>
                 ))}
-              </div>
+              </dl>
             </div>
           )}
-          {(Object.keys(inst.spec?.env ?? {}).length > 0 || Object.keys(inst.spec?.secrets ?? {}).length > 0) && (
+          {(env.length > 0 || secrets.length > 0) && (
             <div>
-              <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">Env & Secrets</h3>
-              <div className="rounded border border-gray-200 dark:border-gray-800 p-2 text-xs font-mono space-y-1">
-                {Object.entries(inst.spec.env ?? {}).map(([k, v]) => (
-                  <div key={k}><span className="text-gray-500">{k}</span>={v as string}</div>
-                ))}
-                {(Object.entries(inst.spec.secrets ?? {}) as [string, SpecSecret][]).map(([k, v]) => (
-                  <div key={k}>
-                    <span className="text-gray-500">{k}</span>
-                    <span className="text-gray-400"> {v.source === 'vault' ? `→vault:${v.ref}` : '(inline)'} {(v.allowed_domains ?? []).join(', ') || 'any'}</span>
+              <SectionTitle>Env &amp; Secrets</SectionTitle>
+              <dl className="space-y-1.5 font-mono text-xs">
+                {env.map(([k, v]) => (
+                  <div key={k} className="flex gap-2">
+                    <dt className="text-sec">{k}</dt>
+                    <dd className="break-all text-ink">{v}</dd>
                   </div>
                 ))}
-              </div>
+                {secrets.map(([k, v]) => (
+                  <div key={k} className="flex flex-wrap gap-x-2">
+                    <dt className="font-medium text-ink">{k}</dt>
+                    <dd className="text-mute">{v.source === 'vault' ? `→vault:${v.ref}` : '(inline)'} {(v.allowed_domains ?? []).join(', ') || 'any'}</dd>
+                  </div>
+                ))}
+              </dl>
             </div>
           )}
-        </div>
+        </aside>
       </div>
     </div>
   )

@@ -1,23 +1,53 @@
 import React from 'react'
 import type { Decision, InstanceStatus } from '../api'
 
-type Tone = 'green' | 'red' | 'gray' | 'yellow' | 'blue'
+type Tone = 'blue' | 'red' | 'yellow' | 'gray'
+type Shape = 'circle' | 'square' | 'triangle'
+
+const toneShape: Record<Tone, Shape> = { blue: 'circle', red: 'square', yellow: 'triangle', gray: 'square' }
+const toneFill: Record<Tone, string> = { blue: 'fill-accent', red: 'fill-danger', yellow: 'fill-warn', gray: 'fill-none stroke-mute' }
+
+// Mark is the Bauhaus primitive used as a status glyph: circle, square or
+// triangle in one of the three signal colors.
+export function Mark({ tone, shape = toneShape[tone], className = '' }: { tone: Tone; shape?: Shape; className?: string }) {
+  const cls = toneFill[tone]
+  return (
+    <svg viewBox="0 0 10 10" className={`h-2 w-2 shrink-0 ${className}`} aria-hidden>
+      {shape === 'circle' && <circle cx="5" cy="5" r="5" className={cls} />}
+      {shape === 'square' && <rect x="0.75" y="0.75" width="8.5" height="8.5" strokeWidth="1.5" className={cls} />}
+      {shape === 'triangle' && <polygon points="5,0 10,10 0,10" className={cls} />}
+    </svg>
+  )
+}
+
+export function Logo({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 34 10" className={`h-2.5 w-auto ${className}`} aria-hidden>
+      <circle cx="5" cy="5" r="5" className="fill-accent" />
+      <rect x="12" y="0" width="10" height="10" className="fill-danger" />
+      <polygon points="29,0 34,10 24,10" className="fill-warn" />
+    </svg>
+  )
+}
 
 export function Badge({ tone, children }: { tone: Tone; children: React.ReactNode }) {
-  const cls = {
-    green: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
-    red: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
-    gray: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
-    yellow: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300',
-    blue: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
-  }[tone]
-  return <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${cls}`}>{children}</span>
+  const text = { blue: 'text-ink', red: 'text-danger', yellow: 'text-warn-text', gray: 'text-mute' }[tone]
+  return (
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium ${text}`}>
+      <Mark tone={tone} />
+      {children}
+    </span>
+  )
+}
+
+export function Tag({ children }: { children: React.ReactNode }) {
+  return <span className="inline-block border border-line px-1.5 py-px font-mono text-[11px] text-sec">{children}</span>
 }
 
 const statusTones: Record<InstanceStatus, Tone> = {
-  running: 'green',
+  running: 'blue',
   expired: 'yellow',
-  lost: 'yellow',
+  lost: 'red',
   deleted: 'gray',
 }
 
@@ -25,48 +55,118 @@ export function StatusBadge({ status }: { status: InstanceStatus }) {
   return <Badge tone={statusTones[status]}>{status}</Badge>
 }
 
-const decisionTones: Record<Decision, Tone> = { allow: 'green', deny: 'red' }
+const decisionTones: Record<Decision, Tone> = { allow: 'blue', deny: 'red' }
 
 export function DecisionBadge({ decision }: { decision: Decision }) {
   return <Badge tone={decisionTones[decision]}>{decision}</Badge>
 }
 
-export function Button(props: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'danger' }) {
-  const { variant, className, ...rest } = props
-  const base = 'rounded px-3 py-1.5 text-sm font-medium disabled:opacity-50 '
+export function Button(
+  props: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'danger'; size?: 'sm' },
+) {
+  const { variant, size, className, ...rest } = props
+  const base =
+    'inline-flex items-center justify-center gap-2 whitespace-nowrap border font-medium transition-colors disabled:pointer-events-none disabled:opacity-40 '
+  const sz = size === 'sm' ? 'h-7 px-2.5 text-xs ' : 'h-8 px-3.5 text-sm '
   const v =
     variant === 'primary'
-      ? 'bg-blue-600 text-white hover:bg-blue-700'
+      ? 'border-accent bg-accent text-white hover:border-ink hover:bg-ink hover:text-paper'
       : variant === 'danger'
-        ? 'bg-red-600 text-white hover:bg-red-700'
-        : 'border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800'
-  return <button className={base + v + (className ? ' ' + className : '')} {...rest} />
+        ? 'border-danger/60 text-danger hover:border-danger hover:bg-danger hover:text-white'
+        : 'border-ink/80 text-ink hover:bg-ink hover:text-paper'
+  return <button className={base + sz + v + (className ? ' ' + className : '')} {...rest} />
 }
 
 export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{label}</span>
+      <span className="mb-1.5 block text-xs font-medium text-sec">{label}</span>
       {children}
     </label>
   )
 }
 
-export const inputCls =
-  'w-full rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1.5 text-sm'
+export const inputCls = 'input'
 
-export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+// PageHeader mirrors the deck's slide header: a numbered eyebrow, a
+// strong title, an optional lede, and actions aligned to the baseline.
+export function PageHeader({ index, section, title, children, actions }: {
+  index: string
+  section: string
+  title: React.ReactNode
+  children?: React.ReactNode
+  actions?: React.ReactNode
+}) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+    <div className="mb-8 flex flex-wrap items-end gap-x-8 gap-y-4">
+      <div className="min-w-0 flex-1">
+        <div className="eyebrow"><span className="text-accent">{index}</span> · {section}</div>
+        <h1 className="mt-3 text-[32px] font-semibold leading-[1.1] tracking-tight text-ink">{title}</h1>
+        {children && <p className="mt-3 max-w-3xl text-[15px] leading-relaxed text-sec">{children}</p>}
+      </div>
+      {actions && <div className="flex items-center gap-2">{actions}</div>}
+    </div>
+  )
+}
+
+// SectionTitle is a small heading sitting on a heavy rule.
+export function SectionTitle({ children, aside, className = '' }: { children: React.ReactNode; aside?: React.ReactNode; className?: string }) {
+  return (
+    <div className={`mb-3 flex items-center gap-3 border-b-2 border-ink pb-2 ${className}`}>
+      <h3 className="text-[13px] font-semibold tracking-tight text-ink">{children}</h3>
+      {aside && <div className="ml-auto flex items-center gap-3 text-xs">{aside}</div>}
+    </div>
+  )
+}
+
+export function Notice({ tone = 'gray', children }: { tone?: Tone; children: React.ReactNode }) {
+  const bar = { blue: 'border-accent', red: 'border-danger', yellow: 'border-warn', gray: 'border-line-strong' }[tone]
+  const text = tone === 'red' ? 'text-danger' : 'text-body'
+  return <div className={`border-l-4 bg-surface px-4 py-3 text-sm ${bar} ${text}`}>{children}</div>
+}
+
+export function EmptyRow({ cols, children }: { cols: number; children: React.ReactNode }) {
+  return (
+    <tr>
+      <td colSpan={cols} className="!py-10 text-center text-sm text-mute">
+        <span className="inline-flex items-center gap-2"><Mark tone="gray" />{children}</span>
+      </td>
+    </tr>
+  )
+}
+
+export function Loading({ label = 'loading' }: { label?: string }) {
+  return (
+    <div className="flex items-center gap-3 text-sm text-mute">
+      <span className="flex gap-1">
+        <Mark tone="blue" className="animate-pulse" />
+        <Mark tone="red" className="animate-pulse [animation-delay:150ms]" />
+        <Mark tone="yellow" className="animate-pulse [animation-delay:300ms]" />
+      </span>
+      {label}
+    </div>
+  )
+}
+
+export function Modal({ title, onClose, children, footer, wide }: {
+  title: string
+  onClose: () => void
+  children: React.ReactNode
+  footer?: React.ReactNode
+  wide?: boolean
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div
-        className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4 shadow-xl"
+        className={`flex max-h-[90vh] w-full flex-col border border-ink bg-paper shadow-[8px_8px_0_0_rgb(var(--accent))] ${wide ? 'max-w-5xl' : 'max-w-xl'}`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold">{title}</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 text-lg leading-none">&times;</button>
+        <div className="flex items-center justify-between border-b border-line px-6 py-4">
+          <h2 className="text-lg font-semibold tracking-tight text-ink">{title}</h2>
+          <button onClick={onClose} aria-label="Close" className="-mr-2 flex h-8 w-8 items-center justify-center text-xl leading-none text-mute transition-colors hover:bg-ink hover:text-paper">&times;</button>
         </div>
-        {children}
+        <div className="overflow-y-auto px-6 py-5">{children}</div>
+        {footer && <div className="flex items-center gap-2 border-t border-line px-6 py-4">{footer}</div>}
       </div>
     </div>
   )

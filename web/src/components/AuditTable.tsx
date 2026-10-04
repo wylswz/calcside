@@ -4,15 +4,12 @@ import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
 import { api, AuditEvent } from '../api'
 import type { Execution } from '../api'
-import { DecisionBadge } from './ui'
+import { DecisionBadge, EmptyRow, Loading, Notice } from './ui'
+import { cmTheme } from './codemirror'
 
 interface ExecutionDetail {
   execution: Execution
   code: string
-}
-
-function dark(): boolean {
-  return window.matchMedia('(prefers-color-scheme: dark)').matches
 }
 
 function prettyArgs(args: string): string {
@@ -40,29 +37,30 @@ export function ExecCode({ execId }: { execId: string }) {
   }
   return (
     <div>
-      <div className="flex items-center gap-2 mb-1">
-        <span className="font-medium">exec {execId || '—'}</span>
+      <div className="mb-2 flex items-center gap-3 text-xs">
+        <span className="eyebrow">exec</span>
+        <span className="font-mono text-ink">{execId || '—'}</span>
         {data?.code && (
-          <button className="text-blue-600 dark:text-blue-400" onClick={copy}>
+          <button className="text-btn" onClick={copy}>
             {copied ? 'copied' : 'copy'}
           </button>
         )}
       </div>
-      {execId === '' && <p className="text-gray-500">no execution linked to this event</p>}
-      {isLoading && <p className="text-gray-500">loading…</p>}
-      {error && <p className="text-red-600">{(error as Error).message}</p>}
+      {execId === '' && <p className="text-xs text-mute">no execution linked to this event</p>}
+      {isLoading && <Loading />}
+      {error && <Notice tone="red">{(error as Error).message}</Notice>}
       {data && data.code === '' && (
-        <p className="text-gray-500">code was not recorded for this execution (pre-dates code retention)</p>
+        <p className="text-xs text-mute">code was not recorded for this execution (pre-dates code retention)</p>
       )}
       {data && data.code !== '' && (
-        <div className="rounded border border-gray-300 dark:border-gray-700 overflow-hidden">
+        <div className="border border-line">
           <CodeMirror
             value={data.code}
             readOnly
             editable={false}
             maxHeight="24rem"
             extensions={[python()]}
-            theme={dark() ? 'dark' : 'light'}
+            theme={cmTheme}
             basicSetup={{ highlightActiveLine: false, highlightActiveLineGutter: false, foldGutter: false }}
           />
         </div>
@@ -73,33 +71,32 @@ export function ExecCode({ execId }: { execId: string }) {
 
 function EventDetail({ e }: { e: AuditEvent }) {
   return (
-    <div className="space-y-3 font-mono text-xs">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-1">
-        <div><span className="text-gray-500">id:</span> {e.id}</div>
-        <div><span className="text-gray-500">user:</span> {e.user_id}</div>
-        <div><span className="text-gray-500">instance:</span> {e.instance_id}</div>
-        <div><span className="text-gray-500">exec:</span> {e.exec_id || '—'}</div>
-        <div><span className="text-gray-500">phase:</span> {e.phase || '—'}</div>
-        <div><span className="text-gray-500">duration:</span> {e.duration_ms}ms</div>
-      </div>
+    <div className="space-y-4 text-xs">
+      <dl className="grid grid-cols-2 gap-px border border-line bg-line md:grid-cols-3 [&>div]:bg-paper [&>div]:px-3 [&>div]:py-2">
+        {([['id', e.id], ['user', e.user_id], ['instance', e.instance_id], ['exec', e.exec_id || '—'], ['phase', e.phase || '—'], ['duration', `${e.duration_ms}ms`]] as const).map(([k, v]) => (
+          <div key={k} className="min-w-0">
+            <dt className="eyebrow">{k}</dt>
+            <dd className="mt-0.5 truncate font-mono text-ink" title={v}>{v}</dd>
+          </div>
+        ))}
+      </dl>
       {e.reason && (
         <div>
-          <div className="text-gray-500 mb-0.5">reason</div>
-          <pre className="rounded bg-gray-50 dark:bg-gray-900 p-2 whitespace-pre-wrap">{e.reason}</pre>
+          <div className="eyebrow mb-1">reason</div>
+          <pre className="pre">{e.reason}</pre>
         </div>
       )}
       {e.error && (
         <div>
-          <div className="text-gray-500 mb-0.5">error</div>
-          <pre className="rounded bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 p-2 whitespace-pre-wrap">{e.error}</pre>
+          <div className="eyebrow mb-1">error</div>
+          <pre className="pre border-l-4 border-danger !bg-danger/5 text-danger">{e.error}</pre>
         </div>
       )}
       <div>
-        <div className="text-gray-500 mb-0.5">args</div>
-        <pre className="rounded bg-gray-50 dark:bg-gray-900 p-2 whitespace-pre-wrap break-all max-h-64 overflow-auto">{prettyArgs(e.args)}</pre>
+        <div className="eyebrow mb-1">args</div>
+        <pre className="pre max-h-64 break-all">{prettyArgs(e.args)}</pre>
       </div>
       <div>
-        <div className="text-gray-500 mb-0.5">executed code</div>
         <ExecCode execId={e.exec_id} />
       </div>
     </div>
@@ -112,50 +109,45 @@ export function AuditTable({ events, showScope }: { events: AuditEvent[]; showSc
   const [open, setOpen] = useState<string | null>(null)
   const cols = showScope ? 9 : 8
   return (
-    <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-800">
-      <table className="w-full text-xs">
-        <thead className="bg-gray-100 dark:bg-gray-900 text-left text-gray-600 dark:text-gray-400">
+    <div className="tbl-wrap">
+      <table className="tbl tbl-compact">
+        <thead>
           <tr>
-            <th className="px-2 py-1.5">Time</th>
-            {showScope && <th className="px-2 py-1.5">Instance</th>}
-            <th className="px-2 py-1.5">Exec</th>
-            <th className="px-2 py-1.5">Cap</th>
-            <th className="px-2 py-1.5">Op</th>
-            <th className="px-2 py-1.5">Args</th>
-            <th className="px-2 py-1.5">Decision</th>
-            <th className="px-2 py-1.5">Reason</th>
-            <th className="px-2 py-1.5">ms</th>
+            <th>Time</th>
+            {showScope && <th>Instance</th>}
+            <th>Exec</th>
+            <th>Cap</th>
+            <th>Op</th>
+            <th>Args</th>
+            <th>Decision</th>
+            <th>Reason</th>
+            <th className="!text-right">ms</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-200 dark:divide-gray-800 font-mono">
+        <tbody className="font-mono">
           {events.map((e) => (
             <Fragment key={e.id}>
-              <tr
-                className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900"
-                onClick={() => setOpen(open === e.id ? null : e.id)}
-              >
-                <td className="px-2 py-1 whitespace-nowrap">{open === e.id ? '▾ ' : '▸ '}{new Date(e.ts).toLocaleString()}</td>
-                {showScope && <td className="px-2 py-1">{e.instance_id}</td>}
-                <td className="px-2 py-1">{e.exec_id}</td>
-                <td className="px-2 py-1">{e.capability}</td>
-                <td className="px-2 py-1">{e.op}</td>
-                <td className="px-2 py-1 max-w-[200px] truncate">{e.args}</td>
-                <td className="px-2 py-1"><DecisionBadge decision={e.decision} /></td>
-                <td className="px-2 py-1 max-w-[180px] truncate">{e.reason}</td>
-                <td className="px-2 py-1">{e.duration_ms}</td>
+              <tr className={`row-click ${open === e.id ? 'row-open' : ''}`} onClick={() => setOpen(open === e.id ? null : e.id)}>
+                <td className="whitespace-nowrap font-sans text-sec"><span className="mr-1.5 inline-block w-2 text-accent">{open === e.id ? '▾' : '▸'}</span>{new Date(e.ts).toLocaleString()}</td>
+                {showScope && <td className="max-w-[150px] truncate" title={e.instance_id}>{e.instance_id}</td>}
+                <td className="max-w-[150px] truncate" title={e.exec_id}>{e.exec_id}</td>
+                <td className="font-medium text-ink">{e.capability}</td>
+                <td className="text-ink">{e.op}</td>
+                <td className="max-w-[180px] truncate text-sec">{e.args}</td>
+                <td><DecisionBadge decision={e.decision} /></td>
+                <td className={`max-w-[160px] truncate ${e.decision === 'deny' ? 'text-danger' : 'text-sec'}`}>{e.reason}</td>
+                <td className="text-right text-sec">{e.duration_ms}</td>
               </tr>
               {open === e.id && (
-                <tr>
-                  <td colSpan={cols} className="px-3 py-3 bg-gray-50/60 dark:bg-gray-900/40">
+                <tr className="bg-surface">
+                  <td colSpan={cols} className="!px-4 !py-4 font-sans">
                     <EventDetail e={e} />
                   </td>
                 </tr>
               )}
             </Fragment>
           ))}
-          {events.length === 0 && (
-            <tr><td colSpan={cols} className="px-2 py-3 text-center text-gray-500">no events</td></tr>
-          )}
+          {events.length === 0 && <EmptyRow cols={cols}>no events</EmptyRow>}
         </tbody>
       </table>
     </div>

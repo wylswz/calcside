@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, APIKey } from '../api'
-import { Button, Field, Modal, fmtTime, inputCls } from '../components/ui'
+import { Badge, Button, EmptyRow, Field, Modal, Notice, PageHeader, fmtTime, inputCls } from '../components/ui'
 
 export default function Keys() {
   const qc = useQueryClient()
@@ -35,31 +35,29 @@ export default function Keys() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-3">
-        <h1 className="text-base font-semibold">API Keys</h1>
-        <Button variant="primary" onClick={() => { setShowNew(true); setSecret(''); setName('') }}>New key</Button>
-      </div>
-      <div className="overflow-x-auto rounded border border-gray-200 dark:border-gray-800">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-100 dark:bg-gray-900 text-left text-xs text-gray-600 dark:text-gray-400">
-            <tr><th className="px-3 py-2">Name</th><th className="px-3 py-2">Prefix</th><th className="px-3 py-2">Created</th><th className="px-3 py-2">Expires</th><th className="px-3 py-2">Status</th><th className="px-3 py-2" /></tr>
+      <PageHeader index="03" section="Access" title="API Keys"
+        actions={<Button variant="primary" onClick={() => { setShowNew(true); setSecret(''); setName('') }}>New key</Button>}>
+        Bearer tokens (<code className="font-mono text-ink">cs_…</code>) for the SDK, csctl and agents. The secret is shown once at creation.
+      </PageHeader>
+      <div className="tbl-wrap">
+        <table className="tbl">
+          <thead>
+            <tr><th>Name</th><th>Prefix</th><th>Created</th><th>Expires</th><th>Status</th><th /></tr>
           </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+          <tbody>
             {(data?.keys ?? []).map((k) => (
-              <tr key={k.id}>
-                <td className="px-3 py-2">{k.name}</td>
-                <td className="px-3 py-2 font-mono text-xs">{k.prefix}…</td>
-                <td className="px-3 py-2 text-xs">{fmtTime(k.created_at)}</td>
-                <td className="px-3 py-2 text-xs">{k.expires_at ? fmtTime(k.expires_at) : 'never'}</td>
-                <td className="px-3 py-2 text-xs">{k.revoked_at ? 'revoked' : 'active'}</td>
-                <td className="px-3 py-2 text-right">
-                  {!k.revoked_at && <Button variant="danger" className="!px-2 !py-1 text-xs" onClick={() => revoke.mutate(k.id)}>Revoke</Button>}
+              <tr key={k.id} className={`row-hover ${k.revoked_at ? 'text-mute' : ''}`}>
+                <td className={k.revoked_at ? 'line-through' : 'font-medium text-ink'}>{k.name}</td>
+                <td className="font-mono text-xs">{k.prefix}…</td>
+                <td className="whitespace-nowrap text-xs text-sec">{fmtTime(k.created_at)}</td>
+                <td className="whitespace-nowrap text-xs text-sec">{k.expires_at ? fmtTime(k.expires_at) : 'never'}</td>
+                <td>{k.revoked_at ? <Badge tone="gray">revoked</Badge> : <Badge tone="blue">active</Badge>}</td>
+                <td className="text-right">
+                  {!k.revoked_at && <Button variant="danger" size="sm" onClick={() => revoke.mutate(k.id)}>Revoke</Button>}
                 </td>
               </tr>
             ))}
-            {data && data.keys.length === 0 && (
-              <tr><td colSpan={6} className="px-3 py-6 text-center text-sm text-gray-500">no keys</td></tr>
-            )}
+            {data && data.keys.length === 0 && <EmptyRow cols={6}>no keys</EmptyRow>}
           </tbody>
         </table>
       </div>
@@ -67,21 +65,21 @@ export default function Keys() {
       {showNew && (
         <Modal title="New API key" onClose={() => setShowNew(false)}>
           {!secret ? (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <Field label="Name"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} /></Field>
               <Field label="Expires in (days; 0 = never)"><input type="number" className={inputCls} value={days} onChange={(e) => setDays(Number(e.target.value))} /></Field>
-              <div className="flex justify-end gap-2">
+              <div className="flex justify-end gap-2 pt-2">
                 <Button onClick={() => setShowNew(false)}>Cancel</Button>
                 <Button variant="primary" disabled={!name || create.isPending} onClick={() => create.mutate()}>Create</Button>
               </div>
             </div>
           ) : (
-            <div className="space-y-3">
-              <p className="text-xs text-red-600 dark:text-red-400 font-medium">
-                Copy this secret now — it will never be shown again.
-              </p>
+            <div className="space-y-4">
+              <Notice tone="yellow">
+                <span className="font-medium text-ink">Copy this secret now — it will never be shown again.</span>
+              </Notice>
               <div className="flex gap-2">
-                <code className="flex-1 rounded bg-gray-100 dark:bg-gray-800 px-2 py-2 text-xs font-mono break-all">{secret}</code>
+                <code className="flex-1 break-all border border-ink bg-code px-3 py-2 font-mono text-xs text-ink">{secret}</code>
                 <Button onClick={copy}>{copied ? 'Copied' : 'Copy'}</Button>
               </div>
               <div className="flex justify-end">
