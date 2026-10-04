@@ -2,7 +2,8 @@
 // dialector (pure Go, via modernc) is the only registered driver today;
 // adding postgres is a matter of a new dialector case in open.
 //
-// Schema is created via AutoMigrate on open. The implementation uses
+// Schema is managed by versioned Atlas migrations (migrations/sqlite),
+// applied on open; see migrate.go. The implementation uses
 // dedicated row structs so the domain types in internal/store stay free
 // of ORM tags. Errors are mapped: gorm.ErrRecordNotFound → ErrNotFound,
 // unique violations → ErrConflict.
@@ -39,7 +40,7 @@ type sqlDB struct {
 	g *gorm.DB
 }
 
-func open(_ context.Context, driver types.StoreDriver, dsn string) (store.Store, error) {
+func open(ctx context.Context, driver types.StoreDriver, dsn string) (store.Store, error) {
 	var dialector gorm.Dialector
 	switch driver {
 	case types.DriverSQLite:
@@ -62,18 +63,10 @@ func open(_ context.Context, driver types.StoreDriver, dsn string) (store.Store,
 	if err != nil {
 		return nil, fmt.Errorf("gormstore: %w", err)
 	}
-	// policies.enabled predates per-instance policy selection. Drop it
-	// before AutoMigrate: SQLite drops columns by rebuilding the table,
-	// which would discard indexes AutoMigrate just created.
-	if g.Migrator().HasColumn(&policyRow{}, "enabled") {
-		if err := g.Migrator().DropColumn(&policyRow{}, "enabled"); err != nil {
-			return nil, fmt.Errorf("gormstore migrate: %w", err)
+	if err := migrateSchema(ctx, g); err != nil {
+		if db, derr := g.DB(); derr == nil {
+			_ = db.Close()
 		}
-	}
-	if err := g.AutoMigrate(
-		&userRow{}, &keyRow{}, &sessionRow{}, &instanceRow{},
-		&execRow{}, &auditRow{}, &policyRow{}, &secretRow{},
-	); err != nil {
 		return nil, fmt.Errorf("gormstore migrate: %w", err)
 	}
 	return &sqlDB{g: g}, nil

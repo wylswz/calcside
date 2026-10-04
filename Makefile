@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 BINARIES := bin/calcside bin/csctl bin/calcside-worker
 
-.PHONY: build test test-cgroup test-cgroup-host lint web dev serve-dev tidy gen gen-check sdk-test sdk-lint docker-env
+.PHONY: build test test-cgroup test-cgroup-host lint web dev serve-dev tidy gen gen-check migrate-diff migrate-hash sdk-test sdk-lint docker-env
 
 # First-run compose setup: generate docker/.env with a random shared
 # key, or copy docker/.env.example to fill in yourself.
@@ -68,6 +68,16 @@ gen:
 
 gen-check: gen
 	git diff --exit-code -- internal/api/gen internal/api/intgen internal/client/gen internal/runtime/remote/gen internal/runtime/remote/apiclient web/src/api/schema.ts
+
+# Store schema migrations (Atlas, see atlas.hcl). The GORM row models are
+# the source of truth; migrate-diff writes a new versioned file from model
+# changes. Requires the atlas CLI.
+migrate-diff:
+	@test -n "$(name)" || (echo "usage: make migrate-diff name=<desc>" >&2; exit 1)
+	atlas migrate diff --env sqlite $(name)
+
+migrate-hash:
+	atlas migrate hash --env sqlite
 
 # DEV ONLY — fixed throwaway key so `make dev` enables the secrets vault.
 CALCSIDE_SECRET_KEY ?= MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
