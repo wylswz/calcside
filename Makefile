@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 BINARIES := bin/calcside bin/csctl bin/calcside-worker
 
-.PHONY: build test test-cgroup test-cgroup-host lint web dev serve-dev tidy gen gen-check migrate-diff migrate-hash sdk-test sdk-lint docker-env
+.PHONY: build test test-cgroup test-cgroup-host lint web dev serve-dev tidy gen gen-check migrate-new migrate-hash migrate-validate migrate-apply migrate-status test-postgres sdk-test sdk-lint docker-env
 
 # First-run compose setup: generate docker/.env with a random shared
 # key, or copy docker/.env.example to fill in yourself.
@@ -69,15 +69,49 @@ gen:
 gen-check: gen
 	git diff --exit-code -- internal/api/gen internal/api/intgen internal/client/gen internal/runtime/remote/gen internal/runtime/remote/apiclient web/src/api/schema.ts
 
-# Store schema migrations (Atlas, see atlas.hcl). The GORM row models are
-# the source of truth; migrate-diff writes a new versioned file from model
-# changes. Requires the atlas CLI.
-migrate-diff:
-	@test -n "$(name)" || (echo "usage: make migrate-diff name=<desc>" >&2; exit 1)
-	atlas migrate diff --env sqlite $(name)
+# Store schema migrations (Atlas, see atlas.hcl): hand-written SQL, one
+# dir per dialect, same version in each. Requires the atlas CLI.
+MIGRATIONS := internal/store/gormstore/migrations
+MIGRATION_DIALECTS := sqlite postgres
+
+MIGRATION_ENV ?= sqlite
+export name
+
+migrate-new:
+	@set -eu; [[ "$${name}" =~ ^[a-zA-Z0-9_]+$$ ]] || { echo "usage: make migrate-new name=<letters_digits_underscores>" >&2; exit 1; }; \
+	v=$$(date -u +%Y%m%d%H%M%S); \
+	for d in $(MIGRATION_DIALECTS); do test ! -e "$(MIGRATIONS)/$$d/$${v}_$${name}.sql"; done; \
+	for d in $(MIGRATION_DIALECTS); do \
+	  f="$(MIGRATIONS)/$$d/$${v}_$${name}.sql"; (set -C; : > "$$f"); echo "created $$f"; \
+	done
+	$(MAKE) migrate-hash
 
 migrate-hash:
-	atlas migrate hash --env sqlite
+	@for d in $(MIGRATION_DIALECTS); do atlas migrate hash --dir file://$(MIGRATIONS)/$$d || exit 1; done
+
+migrate-validate:
+	@for d in $(MIGRATION_DIALECTS); do atlas migrate validate --env $$d || exit 1; echo "$$d: ok"; done
+
+migrate-apply:
+	@test -n "$$ATLAS_DB_URL" || { echo "set ATLAS_DB_URL first" >&2; exit 1; }
+	atlas migrate apply --env $(MIGRATION_ENV)
+
+migrate-status:
+	@test -n "$$ATLAS_DB_URL" || { echo "set ATLAS_DB_URL first" >&2; exit 1; }
+	atlas migrate status --env $(MIGRATION_ENV)
+
+# gormstore tests (storetest conformance + migrations) against a
+# throwaway PostgreSQL in Docker; plain `go test` skips postgres.
+TEST_PG_PORT ?= 55432
+test-postgres:
+	@set -eu; \
+	cid=$$(docker run -d --rm -p 127.0.0.1:$(TEST_PG_PORT):5432 -e POSTGRES_PASSWORD=postgres postgres:17-alpine); \
+	trap 'docker stop "$$cid" >/dev/null' EXIT; \
+	ready=0; for i in $$(seq 1 60); do \
+	  if docker exec "$$cid" pg_isready -U postgres -h 127.0.0.1 >/dev/null 2>&1; then ready=1; break; fi; sleep 1; \
+	done; test $$ready -eq 1; \
+	CALCSIDE_TEST_POSTGRES_DSN="postgres://postgres:postgres@127.0.0.1:$(TEST_PG_PORT)/postgres?sslmode=disable" \
+	  go test -race -count=1 ./internal/store/...
 
 # DEV ONLY — fixed throwaway key so `make dev` enables the secrets vault.
 CALCSIDE_SECRET_KEY ?= MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
@@ -97,6 +131,7 @@ export VITE_API_TARGET ?= http://127.0.0.1:$(DEV_API_PORT)
 # compile errors); the API starts once the worker is healthy and Vite
 # once the API is, so nothing proxy-serves ECONNREFUSED.
 dev:
+	@ATLAS_DB_URL="sqlite://$(abspath $(DEV_DSN))" atlas migrate apply --env sqlite
 	@go build -o bin/calcside-dev ./cmd/calcside
 	@go build -o bin/calcside-worker-dev ./cmd/calcside-worker
 	@trap 'kill 0' INT TERM EXIT; \
@@ -144,6 +179,7 @@ dev:
 
 # Backend only, serving the embedded console (run `make web` first).
 serve-dev:
+	@ATLAS_DB_URL="sqlite://$(abspath $(DEV_DSN))" atlas migrate apply --env sqlite
 	go run ./cmd/calcside serve --dev --addr 127.0.0.1:$(DEV_API_PORT) \
 	  --policy-dir policies/examples --secret-key $(CALCSIDE_SECRET_KEY) \
 	  --dsn $(DEV_DSN) --ext-local-roots $(DEV_EXT_ROOTS) \

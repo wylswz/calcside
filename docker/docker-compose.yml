@@ -1,4 +1,16 @@
 services:
+  migrate:
+    image: arigaio/atlas:1.2.2@sha256:dce85fd3f83c9c28f343c73236c8917f802d526f1fe921e150b720077a83c5ae
+    user: "10001:10001"
+    working_dir: /workspace
+    command: ["migrate", "apply", "--env", "${CALCSIDE_STORE:-sqlite}"]
+    environment:
+      ATLAS_DB_URL: ${ATLAS_DB_URL:-sqlite:///data/calcside.db}
+    volumes:
+      - ../atlas.hcl:/workspace/atlas.hcl:ro
+      - ../internal/store/gormstore/migrations:/workspace/internal/store/gormstore/migrations:ro
+      - ./data:/data
+
   calcside:
     build:
       context: ..
@@ -14,13 +26,16 @@ services:
         required: false
     environment:
       CALCSIDE_ADDR: ":8080"
-      CALCSIDE_DSN: /data/calcside.db
+      CALCSIDE_STORE: ${CALCSIDE_STORE:-sqlite}
+      CALCSIDE_DSN: ${CALCSIDE_DSN:-/data/calcside.db}
       CALCSIDE_BASE_URL: ${CALCSIDE_BASE_URL:-http://localhost:8080}
       # Remote execution tier: worker list nodeID=host:port plus the
       # shared HMAC key both sides must carry.
       CALCSIDE_WORKERS: ${CALCSIDE_WORKERS:-worker-1=worker:8090}
       CALCSIDE_WORKER_SHARED_KEY: ${CALCSIDE_WORKER_SHARED_KEY:?run `make docker-env` first, or set CALCSIDE_WORKER_SHARED_KEY}
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       worker:
         condition: service_healthy
     volumes:

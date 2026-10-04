@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -26,6 +25,7 @@ import (
 	"calcside/internal/service/vault"
 	"calcside/internal/store"
 	_ "calcside/internal/store/gormstore"
+	"calcside/internal/store/storetest"
 	"calcside/internal/types"
 )
 
@@ -33,7 +33,7 @@ import (
 // anonymous principal is implicit.
 func newDevEnv(t *testing.T, cipher *secrets.Cipher) *env {
 	t.Helper()
-	st, err := store.Open(context.Background(), "sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, err := store.Open(context.Background(), "sqlite", storetest.SQLite(t))
 	if err != nil {
 		t.Fatal(err)
 	}

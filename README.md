@@ -32,7 +32,7 @@ flowchart LR
 
     pol["Policy — OPA/Rego<br/>server policies + per-instance picks<br/>snapshot at create · fail closed"] -->|"before / after hooks"| gate
     gate -->|"decision + metadata"| audit[("Audit log")]
-    mgr --> store[("Store — SQLite")]
+    mgr --> store[("Store — SQLite / PostgreSQL")]
 
     vault[("Secret vault — per user<br/>AES-256-GCM at rest<br/>write-only API")] -->|"decrypt refs at create"| sset["Instance secret set<br/>{{secrets.NAME}} placeholders"]
     sset -->|"inject at send time · domain allowlist<br/>scrub from results, errors, audit"| base
@@ -77,6 +77,8 @@ Policy input:
 
 ## Quick start
 
+Install Atlas CLI 1.2.2 for local development and database tests. `make dev` and `make serve-dev` apply migrations before starting the API.
+
 ```bash
 make build                 # web console + bin/calcside + bin/csctl
 make dev                   # backend (--dev, anonymous) on :8787 + Vite console on :5173 — no login
@@ -95,12 +97,47 @@ Instance spec (`POST /api/v1/instances`):
  "limits": {"exec_timeout_ms": 30000, "max_steps": 10000000, "max_output_bytes": 1048576}}
 ```
 
+## Database migrations
+
+SQLite is the default; PostgreSQL is selected with `--store postgres` and a PostgreSQL DSN. The server only connects to the database: **run migrations before starting it**. Atlas CLI manages migration history, checksums, locks, and transactions; the application binary does not need Atlas installed.
+
+```bash
+export ATLAS_DB_URL="sqlite://$(pwd)/calcside.db"
+make migrate-apply
+make migrate-status
+bin/calcside serve --dsn calcside.db
+```
+
+For PostgreSQL, set `ATLAS_DB_URL` to the database URL with `search_path=public`, then run `make migrate-apply MIGRATION_ENV=postgres`. Start the server with `--store postgres` and the corresponding `--dsn` (or `CALCSIDE_STORE` / `CALCSIDE_DSN`). Supply real credentials through your deployment's secret configuration, not committed files.
+
+To add a migration:
+
+```bash
+make migrate-new name=add_user_avatar
+# Hand-write the SQLite and PostgreSQL SQL in the two new files.
+make migrate-hash
+make migrate-validate
+make test-postgres
+```
+
+The files live in `internal/store/gormstore/migrations/{sqlite,postgres}` and share a version and name. Keep GORM row structs in sync, but do not generate SQL from them. Never modify an applied migration; add a new one instead. `migrate-validate` checks both directories' checksums. Go database tests apply the migrations to fresh SQLite databases; `make test-postgres` applies them and runs the same store conformance suite on disposable PostgreSQL databases (Docker required).
+
+For an existing **unversioned SQLite database**, back it up and confirm its schema already matches `20261004092922_baseline.sql` before marking the baseline:
+
+```bash
+atlas migrate apply --env sqlite --baseline 20261004092922
+```
+
+This uses `ATLAS_DB_URL`, records the baseline without executing its CREATE statements, and applies later migrations. It does **not** upgrade an older schema; in particular, a database still carrying `policies.enabled` needs a separately reviewed upgrade first. Do not pass `--baseline` for an empty database.
+
 ## Run with Docker
 
 ```bash
 make docker-env                    # first run: generates docker/.env with a random shared key
 docker compose -f docker/docker-compose.yml up --build
 ```
+
+Compose first runs the pinned Atlas image as a one-shot `migrate` service and starts the API only after it succeeds. The migration service and API share `docker/data`; existing unversioned databases need the explicit baseline step above. For PostgreSQL, set `CALCSIDE_STORE=postgres`, `CALCSIDE_DSN`, and `ATLAS_DB_URL` to the same database/schema.
 
 Compose starts the API (`:8080`) plus one execution worker; the API forwards instance execution to it over an HMAC-authenticated internal protocol. Drop local extensions into `docker/data/ext/` (bind-mounted) — workers resolve them through the API. See `docker/.env.example` for the remaining env knobs.
 

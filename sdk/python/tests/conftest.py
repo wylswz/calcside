@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import socket
 import subprocess
 import time
@@ -28,6 +29,12 @@ def server(tmp_path_factory):
     subprocess.run(
         ["go", "build", "-o", str(binary), "./cmd/calcside"],
         cwd=REPO_ROOT,
+        check=True,
+    )
+    subprocess.run(
+        ["atlas", "migrate", "apply", "--env", "sqlite"],
+        cwd=REPO_ROOT,
+        env={**os.environ, "ATLAS_DB_URL": f"sqlite://{tmp / 't.db'}"},
         check=True,
     )
     port = _free_port()

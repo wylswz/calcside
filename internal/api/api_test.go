@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +28,7 @@ import (
 	"calcside/internal/service/vault"
 	"calcside/internal/store"
 	_ "calcside/internal/store/gormstore"
+	"calcside/internal/store/storetest"
 )
 
 type env struct {
@@ -65,7 +65,7 @@ func newEnv(t *testing.T) *env { return newEnvWith(t, nil) }
 // vault and net capability (private + http, for httptest) are enabled.
 func newEnvWith(t *testing.T, cipher *secrets.Cipher) *env {
 	t.Helper()
-	st, err := store.Open(context.Background(), "sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, err := store.Open(context.Background(), "sqlite", storetest.SQLite(t))
 	if err != nil {
 		t.Fatal(err)
 	}

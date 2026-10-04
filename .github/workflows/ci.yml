@@ -24,6 +24,12 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
+      - name: Install Atlas 1.2.2
+        run: |
+          curl -fsSL --retry 3 https://release.ariga.io/atlas/atlas-linux-amd64-v1.2.2 -o "$RUNNER_TEMP/atlas"
+          echo "db9ddcfeca89cb1183e362aab9c266bbb8ddc4faf17a4739b79db5f87fd0c2db  $RUNNER_TEMP/atlas" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/atlas"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - run: go build ./...
       - run: go vet ./...
       - name: gofmt
@@ -52,6 +58,25 @@ jobs:
       - name: In a privileged container (cgroup namespace root)
         run: make test-cgroup
 
+  integration-postgres:
+    name: Integration (store on PostgreSQL)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Install Atlas 1.2.2
+        run: |
+          curl -fsSL --retry 3 https://release.ariga.io/atlas/atlas-linux-amd64-v1.2.2 -o "$RUNNER_TEMP/atlas"
+          echo "db9ddcfeca89cb1183e362aab9c266bbb8ddc4faf17a4739b79db5f87fd0c2db  $RUNNER_TEMP/atlas" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/atlas"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - run: make test-postgres
+
   integration-sdk:
     name: Integration (Python SDK against a dev server)
     runs-on: ubuntu-24.04
@@ -67,4 +92,10 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: sdk/python/uv.lock
+      - name: Install Atlas 1.2.2
+        run: |
+          curl -fsSL --retry 3 https://release.ariga.io/atlas/atlas-linux-amd64-v1.2.2 -o "$RUNNER_TEMP/atlas"
+          echo "db9ddcfeca89cb1183e362aab9c266bbb8ddc4faf17a4739b79db5f87fd0c2db  $RUNNER_TEMP/atlas" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/atlas"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - run: make sdk-test

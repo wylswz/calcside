@@ -307,9 +307,12 @@ func (c *APIErrorCode) UnmarshalText(b []byte) error {
 // StoreDriver names a registered store backend.
 type StoreDriver string
 
-const DriverSQLite StoreDriver = "sqlite"
+const (
+	DriverSQLite   StoreDriver = "sqlite"
+	DriverPostgres StoreDriver = "postgres"
+)
 
-func AllStoreDrivers() []StoreDriver { return []StoreDriver{DriverSQLite} }
+func AllStoreDrivers() []StoreDriver { return []StoreDriver{DriverSQLite, DriverPostgres} }
 
 func (d StoreDriver) Valid() bool { return valid(d, AllStoreDrivers()) }
 

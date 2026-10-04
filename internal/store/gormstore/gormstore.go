@@ -1,11 +1,10 @@
-// Package gormstore implements store.Store with GORM. The sqlite
-// dialector (pure Go, via modernc) is the only registered driver today;
-// adding postgres is a matter of a new dialector case in open.
+// Package gormstore implements store.Store with GORM for SQLite (pure
+// Go, via modernc) and PostgreSQL (pgx).
 //
-// Schema is managed by versioned Atlas migrations (migrations/sqlite),
-// applied on open; see migrate.go. The implementation uses
-// dedicated row structs so the domain types in internal/store stay free
-// of ORM tags. Errors are mapped: gorm.ErrRecordNotFound → ErrNotFound,
+// Schema is managed by hand-written, versioned Atlas migrations
+// (migrations/<dialect>), applied separately by the Atlas CLI. The
+// implementation uses dedicated row structs so the domain types in
+// internal/store stay free of ORM tags. Errors are mapped: gorm.ErrRecordNotFound → ErrNotFound,
 // unique violations → ErrConflict.
 package gormstore
 
@@ -25,22 +24,24 @@ import (
 	"calcside/internal/types"
 
 	gormsqlite "github.com/glebarez/sqlite"
+	gormpostgres "gorm.io/driver/postgres"
 )
 
 func init() {
-	store.RegisterDriver(types.DriverSQLite, func(ctx context.Context, dsn string) (store.Store, error) {
-		return open(ctx, types.DriverSQLite, dsn)
-	})
+	for _, d := range []types.StoreDriver{types.DriverSQLite, types.DriverPostgres} {
+		store.RegisterDriver(d, func(ctx context.Context, dsn string) (store.Store, error) {
+			return open(ctx, d, dsn)
+		})
+	}
 }
 
-// sqlDB wraps *gorm.DB and implements store.Store. Named sqlDB to keep
-// the diff with the previous driver obvious — it is not tied to SQLite
-// beyond the dialector chosen in open.
+// sqlDB wraps *gorm.DB and implements store.Store; it is dialect
+// neutral beyond the dialector chosen in open.
 type sqlDB struct {
 	g *gorm.DB
 }
 
-func open(ctx context.Context, driver types.StoreDriver, dsn string) (store.Store, error) {
+func open(_ context.Context, driver types.StoreDriver, dsn string) (store.Store, error) {
 	var dialector gorm.Dialector
 	switch driver {
 	case types.DriverSQLite:
@@ -53,6 +54,8 @@ func open(ctx context.Context, driver types.StoreDriver, dsn string) (store.Stor
 		}
 		conn += "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
 		dialector = gormsqlite.Open(conn)
+	case types.DriverPostgres:
+		dialector = gormpostgres.Open(dsn)
 	default:
 		return nil, fmt.Errorf("gormstore: unsupported driver %q", driver)
 	}
@@ -62,12 +65,6 @@ func open(ctx context.Context, driver types.StoreDriver, dsn string) (store.Stor
 	})
 	if err != nil {
 		return nil, fmt.Errorf("gormstore: %w", err)
-	}
-	if err := migrateSchema(ctx, g); err != nil {
-		if db, derr := g.DB(); derr == nil {
-			_ = db.Close()
-		}
-		return nil, fmt.Errorf("gormstore migrate: %w", err)
 	}
 	return &sqlDB{g: g}, nil
 }

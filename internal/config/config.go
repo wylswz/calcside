@@ -119,8 +119,8 @@ func Parse(args []string) (Config, error) {
 	var c Config
 	fs := flag.NewFlagSet("calcside serve", flag.ContinueOnError)
 	fs.StringVar(&c.Addr, "addr", envOr("ADDR", ":8080"), "listen address")
-	fs.TextVar(&c.Store, "store", types.StoreDriver(envOr("STORE", string(types.DriverSQLite))), "store driver")
-	fs.StringVar(&c.DSN, "dsn", envOr("DSN", "calcside.db"), "store DSN")
+	fs.TextVar(&c.Store, "store", types.StoreDriver(envOr("STORE", string(types.DriverSQLite))), "store driver: sqlite or postgres")
+	fs.StringVar(&c.DSN, "dsn", envOr("DSN", "calcside.db"), "store DSN: sqlite file path, or postgres URL / key=value conn string")
 	fs.StringVar(&c.PolicyDir, "policy-dir", envOr("POLICY_DIR", ""), "global rego policy dir")
 	fs.StringVar(&c.BaseURL, "base-url", envOr("BASE_URL", "http://localhost:8080"), "external base URL")
 	fs.StringVar(&c.GoogleClientID, "google-client-id", envOr("GOOGLE_CLIENT_ID", ""), "google oauth client id")

@@ -21,13 +21,14 @@ import (
 	"calcside/internal/service/vault"
 	"calcside/internal/store"
 	_ "calcside/internal/store/gormstore"
+	"calcside/internal/store/storetest"
 )
 
 // TestListExtensions checks the catalog endpoint: unauth → 401, authed →
 // the examples/capabilities tavily entry.
 func TestListExtensions(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.Open(ctx, "sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, err := store.Open(ctx, "sqlite", storetest.SQLite(t))
 	if err != nil {
 		t.Fatal(err)
 	}
