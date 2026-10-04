@@ -254,7 +254,7 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
   const [labelsText, setLabelsText] = useState('')
   const [envRows, setEnvRows] = useState<EnvRow[]>([])
   const [secretRows, setSecretRows] = useState<SecretRow[]>([])
-  const [policyNames, setPolicyNames] = useState<string[]>([])
+  const [policyNames, setPolicyNames] = useState<string[] | null>(null)
   const [err, setErr] = useState('')
   const [jsonText, setJsonText] = useState('')
   const [jsonDirty, setJsonDirty] = useState(false)
@@ -263,7 +263,7 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
     queryFn: () => api.get<{ secrets: Secret[] }>('/api/v1/secrets'),
     retry: false,
   })
-  const { data: library } = useQuery({
+  const { data: library, error: policyError } = useQuery({
     queryKey: ['policies'],
     queryFn: () => api.get<{ policies: Policy[] }>('/api/v1/policies'),
   })
@@ -273,6 +273,7 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
     enabled: extOn,
     retry: false,
   })
+  const selectedPolicies = useMemo(() => policyNames ?? library?.policies.filter((p) => p.default).map((p) => p.name), [policyNames, library])
   const vaultNames = useMemo(() => (vault?.secrets ?? []).map((s) => s.name), [vault])
 
   // upsertSecretRow adds or updates an auto-managed secret row (created
@@ -355,7 +356,7 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
       }
     }
     if (Object.keys(secs).length) draft.secrets = secs
-    if (policyNames.length) draft.policies = policyNames
+    if (selectedPolicies !== undefined) draft.policies = selectedPolicies
     return draft
   }
 
@@ -363,7 +364,7 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
     if (jsonDirty) return jsonText
     return JSON.stringify(specFromForm(), null, 2)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jsonDirty, ttlMin, fsOn, fsQuota, netOn, netHosts, netMethods, extOn, extRows, extCat, labelsText, envRows, secretRows, policyNames, vault])
+  }, [jsonDirty, ttlMin, fsOn, fsQuota, netOn, netHosts, netMethods, extOn, extRows, extCat, labelsText, envRows, secretRows, selectedPolicies, vault])
 
   const create = useMutation({
     mutationFn: (spec: any) => api.post<{ instance: Instance }>('/api/v1/instances', spec),
@@ -442,7 +443,7 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
               )}
               {netOn && (
                 <div className="space-y-3 border-l-2 border-danger pl-4">
-                  <Field label="allow_hosts (one per line; *.suffix or host:port; empty = any public host)">
+                  <Field label="allow_hosts (one per line; *.suffix or host:port; empty = any host, subject to selected policies)">
                     <textarea className={inputCls + ' font-mono text-xs'} rows={3} value={netHosts} onChange={(e) => { setJsonDirty(false); setNetHosts(e.target.value) }} />
                   </Field>
                   <Field label="methods">
@@ -534,17 +535,22 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
             <SectionTitle aside={<Link to="/policies" className="text-btn">Manage</Link>}>
               Policies
             </SectionTitle>
-            <p className="mb-2 text-xs text-mute">Library policies to attach. Rego is snapshotted at creation; server policies always apply.</p>
-            {library && library.policies.length === 0 && <p className="text-xs text-mute">no policies in your library</p>}
+            <p className="mb-2 text-xs text-mute">Select built-in and Rego policies for this instance. Default policies are preselected; uncheck to opt out. Server policies always apply.</p>
+            {!library && <p className="text-xs text-mute">{policyError ? 'Could not load policies; server defaults will apply unless you set policies in the JSON spec.' : 'Loading policies…'}</p>}
+            {library && library.policies.length === 0 && <p className="text-xs text-mute">no policies available</p>}
             <div className="flex flex-wrap gap-x-4 gap-y-1.5">
               {(library?.policies ?? []).map((p) => (
                 <label key={p.id} className="flex items-center gap-2 font-mono text-xs text-ink">
-                  <input type="checkbox" checked={policyNames.includes(p.name)}
+                  <input type="checkbox" checked={selectedPolicies?.includes(p.name) ?? p.default}
                     onChange={(e) => {
                       setJsonDirty(false)
-                      setPolicyNames(e.target.checked ? [...policyNames, p.name] : policyNames.filter((n) => n !== p.name))
+                      setPolicyNames(e.target.checked ? [...(selectedPolicies ?? []), p.name] : (selectedPolicies ?? []).filter((n) => n !== p.name))
                     }} />
-                  {p.name}
+                  <span>
+                    {p.name} <Tag>{p.kind === 'builtin' ? 'Built-in' : 'Rego'}</Tag>
+                    {p.default && <span className="ml-2 font-sans text-mute">default</span>}
+                    {p.description && <span className="mt-1 block font-sans text-mute">{p.description}</span>}
+                  </span>
                 </label>
               ))}
             </div>

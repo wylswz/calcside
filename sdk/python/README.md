@@ -28,6 +28,18 @@ c.delete_instance(inst["id"])
 Dev-mode servers accept no credentials; the client always sends the
 `X-Requested-With: calcside` CSRF header.
 
+Instance policies use the same spec for `Client`, `AsyncClient`, and the middleware:
+
+```python
+spec = {
+    "capabilities": {"net": {"allow_hosts": ["internal.example.com"]}},
+    "policies": [],
+}
+inst = c.create_instance(spec)
+```
+
+An omitted (or `None`) `policies` field selects `builtin.block_private_network` by default. An explicit list replaces defaults; `[]` opts out of the built-in private/reserved-IP restriction. To use a library policy while keeping network protection, pass `"policies": ["builtin.block_private_network", "my_policy"]`. Server policies and host/secret allowlists still apply.
+
 ## LangChain middleware
 
 ```python

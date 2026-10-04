@@ -403,7 +403,7 @@ paths:
       tags: [policies]
       responses:
         '200':
-          description: the user's policies
+          description: Built-in policies and the user's Rego policies
           content:
             application/json:
               schema:
@@ -480,6 +480,7 @@ paths:
                 $ref: '#/components/schemas/PolicyResponse'
         '400': { $ref: '#/components/responses/Error' }
         '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
     delete:
@@ -494,6 +495,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/OkResponse'
         '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
   /api/v1/secrets:
     get:
@@ -866,9 +868,13 @@ components:
         policies:
           type: array
           description: >-
-            Names of the owner's library policies to attach (at most 32).
-            Their rego is snapshotted at creation; server policies
+            Policy names to attach (at most 32), including built-in policies.
+            Omitted or null selects builtin.block_private_network by default.
+            An explicit list replaces the defaults; [] selects none.
+            Library Rego is snapshotted at creation; server policies
             (--policy-dir) always apply in addition.
+          nullable: true
+          uniqueItems: true
           maxItems: 32
           items: { $ref: '#/components/schemas/PolicyName' }
     Instance:
@@ -1025,19 +1031,23 @@ components:
     Policy:
       type: object
       description: >-
-        A library policy. It applies only to instances whose spec.policies
-        names it; the rego is snapshotted at instance creation.
-      required: [id, user_id, name, rego, created_at, updated_at]
+        A selectable policy. Built-in policies are read-only, have no Rego
+        source or owner, and use their name as ID. Rego policies belong to
+        the user and are snapshotted at instance creation.
+      required: [id, name, kind, default]
       properties:
         id: { type: string }
         user_id: { type: string }
         name: { $ref: '#/components/schemas/PolicyName' }
+        kind: { type: string, enum: [builtin, rego] }
+        default: { type: boolean, description: Selected when InstanceSpec.policies is omitted or null. }
+        description: { type: string }
         rego: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     PolicyName:
       type: string
-      description: Unique per user; referenced by InstanceSpec.policies.
+      description: Unique per user; the builtin. prefix is reserved for read-only built-in policies.
       pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'
     PolicyRequest:
       type: object

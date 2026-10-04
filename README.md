@@ -30,7 +30,8 @@ flowchart LR
 
     mgr --> inst
 
-    pol["Policy — OPA/Rego<br/>server policies + per-instance picks<br/>snapshot at create · fail closed"] -->|"before / after hooks"| gate
+    pol["Policies<br/>server Rego + per-instance picks<br/>Rego or built-in · fail closed"] -->|"Rego before / after hooks"| gate
+    pol -->|"built-in runtime checks"| base
     gate -->|"decision + metadata"| audit[("Audit log")]
     mgr --> store[("Store — SQLite / PostgreSQL")]
 
@@ -48,7 +49,7 @@ Every capability call — including the base-capability calls an extension makes
 - **Instance**: a long-lived Starlark interpreter with its own in-memory VFS and persistent globals. It uses a sliding idle TTL; an exec or keepalive renews it. Lifecycle: create / exec / delete / expire.
 - **Capability**: the globals an instance is granted. A capability that isn't granted simply doesn't exist in the script.
   - `fs`: in-memory VFS rooted at `/work`, with a quota, a file limit, and a read-only option. Path escapes are rejected.
-  - `net`: HTTP with a host allowlist (exact, `*.suffix`, or `host:port`). Self-resolved DNS, IP pinning, blocking of internal addresses, and redirect re-checks. Private addresses are rejected by default (`--net-allow-private`).
+  - `net`: HTTP with a host allowlist (exact, `*.suffix`, or `host:port`). Self-resolved DNS, IP pinning, and redirect re-checks. The default-selected built-in policy `builtin.block_private_network` rejects private, loopback, link-local, and reserved addresses; deselect it for an instance to allow internal services. Host allowlists and secret-domain restrictions still apply.
   - `io`: `print` / `io.println`, with bounded output.
   - `ext`: **extended capabilities** — Starlark modules that compose base capabilities into higher-level ops (e.g. a `search` op built on `net`). Declared by a `capability.yaml` manifest (name, version, dependencies, ops, config); every nested op still routes through the Gate. Sources are opt-in on the server: local directories (`--ext-local-roots`) or remote git refs (`--ext-allow-sources`, cached under `--ext-cache-dir`); remote sources must be pinned `@version` with an `h1:` integrity sum, and require the git CLI at fetch time. See [docs/extensions.md](docs/extensions.md) for how to write and distribute one; `examples/capabilities/tavily` is a complete example.
   - `json` and `math` are pure modules and are always available.
@@ -58,13 +59,16 @@ Every capability call — including the base-capability calls an extension makes
   - **Vault refs** (`{"ref": "NAME", "allowed_domains": [narrowed]}`) resolve at creation from the user's vault. Vault secrets are encrypted at rest with `--secret-key` (AES-256-GCM, base64 32-byte key) and write-only via the session-only `/api/v1/secrets` endpoints. An instance ref may only *narrow* the vault allowlist.
   - Response redaction is best-effort defense in depth — it catches raw, base64, URL- and JSON-escaped reflections, not arbitrary server-side transforms — so `allowed_domains` must only list hosts trusted with the secret.
 - **Hook**: every op of every capability goes through the instance's Gate: `before hooks -> op -> after hooks -> audit`. Once an exec ends, the Gate is disarmed; once the instance is deleted, it is revoked. Any capability reference that leaks out of an exec then fails with `out_of_scope`.
-- **Policy**: OPA/Rego, `package calcside.hooks`, `deny contains msg if {...}`. Policies are bound per instance.
+- **Policy**: a per-instance selection of built-in runtime checks and user-defined Rego policies, presented together in the console and `/api/v1/policies`.
   - **Server policies** come from `--policy-dir` and are attached to every instance; a spec cannot opt out of them.
+  - **Built-in policies** are read-only and do not need Rego. `builtin.block_private_network` checks IP literals and all DNS results before dialing, including new connections after redirects, then pins connections to checked IPs. Its selection is per instance. `--net-allow-cidrs` still exempts configured ranges (e.g. development fake-IP proxies); the former `--net-allow-private` flag is replaced by instance policy selection.
+  - **Defaults**: omitting `spec.policies` (or setting it to `null`) selects `builtin.block_private_network`. An explicit list is the complete selection: `[]` selects no optional policies; `["custom"]` selects only that Rego policy. To retain the network check alongside a library policy, include both names. The console preselects default policies and sends `[]` when all are unchecked.
+  - Policy descriptors expose `kind` (`builtin` or `rego`), `default`, and an optional description. The `builtin.` name prefix is reserved; built-ins cannot be edited, renamed, or deleted.
   - **Library policies** are defined once per user (`/api/v1/policies` or the console) under a unique name (`[A-Za-z0-9][A-Za-z0-9_.-]{0,63}`), and an instance selects the ones it wants with `spec.policies: ["name", ...]` (up to 32). An unknown name rejects the create (`bad_spec`). A policy not listed in the spec doesn't apply to that instance.
-  - Library policies are compiled and evaluated separately from server policies, under a restricted builtin set (no `http.send`, `opa.runtime`, `net.lookup_ip_addr`, `print`, or `trace`).
+  - Library policies use `package calcside.hooks` and `deny contains msg if {...}`. They are compiled and evaluated separately from server policies, under a restricted builtin set (no `http.send`, `opa.runtime`, `net.lookup_ip_addr`, `print`, or `trace`).
   - The selected rego is snapshotted when the instance is created, so editing or deleting a library policy only affects instances created afterwards. Evaluation errors or timeouts count as deny (fail closed).
 
-Policy input:
+Rego policy input:
 
 ```json
 {"phase": "before|after", "user": {"id", "email"}, "instance": {"id", "labels"},
@@ -105,9 +109,11 @@ Instance spec (`POST /api/v1/instances`):
 ```json
 {"ttl_seconds": 900, "labels": {"team": "x"},
  "capabilities": {"fs": {"quota_bytes": 67108864}, "net": {"allow_hosts": ["api.github.com"]}, "io": {}},
- "policies": ["deny_net_hosts"],
+ "policies": ["builtin.block_private_network", "deny_net_hosts"],
  "limits": {"exec_timeout_ms": 30000, "max_steps": 10000000, "max_output_bytes": 1048576}}
 ```
+
+For an instance that needs internal HTTP access, pass `"policies": []` (or an explicit list without `builtin.block_private_network`). This does not bypass the instance's host allowlist, secret domain restrictions, or mandatory server policies. No network capability means no network access regardless of policy selection.
 
 ## Database migrations
 

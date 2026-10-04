@@ -49,7 +49,6 @@ def server(tmp_path_factory):
             str(tmp / "t.db"),
             "--secret-key",
             SECRET_KEY,
-            "--net-allow-private",
             "--secrets-allow-http",
         ],
         cwd=REPO_ROOT,

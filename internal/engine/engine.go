@@ -101,6 +101,7 @@ type SessionCreation struct {
 	// Capabilities maps capability name to its validated, typed config.
 	// io is granted even when absent.
 	Capabilities   map[string]any
+	Policies       []string
 	Env            map[string]string
 	MaxSteps       uint64
 	MaxOutputBytes int64
@@ -197,7 +198,7 @@ func NewSession(d SessionDeps, c SessionCreation) (*Session, error) {
 		if !ok {
 			return fail(fmt.Errorf("unknown capability %s", name))
 		}
-		val, closer, err := f.New(caps[name], capability.InstanceEnv{Gate: gate, Secrets: d.Secrets, Bindings: bindings, MaxSteps: c.MaxSteps})
+		val, closer, err := f.New(caps[name], capability.InstanceEnv{Gate: gate, Secrets: d.Secrets, Bindings: bindings, MaxSteps: c.MaxSteps, Policies: c.Policies})
 		if err != nil {
 			return fail(fmt.Errorf("capability %s: %s", name, err))
 		}

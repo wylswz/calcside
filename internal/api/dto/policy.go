@@ -3,27 +3,34 @@ package dto
 import (
 	"time"
 
-	"calcside/internal/store"
+	policysvc "calcside/internal/service/policy"
 )
 
-// Policy mirrors the wire shape of a store.Policy.
+// Policy describes either a built-in or a user Rego policy.
 type Policy struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	Name      string    `json:"name"`
-	Rego      string    `json:"rego"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Kind        string     `json:"kind"`
+	Default     bool       `json:"default"`
+	Description string     `json:"description,omitempty"`
+	ID          string     `json:"id"`
+	UserID      string     `json:"user_id,omitempty"`
+	Name        string     `json:"name"`
+	Rego        string     `json:"rego,omitempty"`
+	CreatedAt   *time.Time `json:"created_at,omitempty"`
+	UpdatedAt   *time.Time `json:"updated_at,omitempty"`
 }
 
-func NewPolicy(p *store.Policy) Policy {
-	return Policy{
+func NewPolicy(p *policysvc.Policy) Policy {
+	out := Policy{
 		ID: p.ID, UserID: p.UserID, Name: p.Name, Rego: p.Rego,
-		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+		Kind: p.Kind, Default: p.Default, Description: p.Description,
 	}
+	if p.Kind == "rego" {
+		out.CreatedAt, out.UpdatedAt = &p.CreatedAt, &p.UpdatedAt
+	}
+	return out
 }
 
-func NewPolicies(lst []*store.Policy) []Policy {
+func NewPolicies(lst []*policysvc.Policy) []Policy {
 	out := make([]Policy, len(lst))
 	for i, p := range lst {
 		out[i] = NewPolicy(p)

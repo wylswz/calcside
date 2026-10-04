@@ -270,6 +270,24 @@ func (e Phase) Valid() bool {
 	}
 }
 
+// Defines values for PolicyKind.
+const (
+	Builtin PolicyKind = "builtin"
+	Rego    PolicyKind = "rego"
+)
+
+// Valid indicates whether the value is a known member of the PolicyKind enum.
+func (e PolicyKind) Valid() bool {
+	switch e {
+	case Builtin:
+		return true
+	case Rego:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SecretSource.
 const (
 	Inline SecretSource = "inline"
@@ -571,7 +589,7 @@ type InstanceSpec struct {
 	Labels       *map[string]string      `json:"labels,omitempty"`
 	Limits       *Limits                 `json:"limits,omitempty"`
 
-	// Policies Names of the owner's library policies to attach (at most 32). Their rego is snapshotted at creation; server policies (--policy-dir) always apply in addition.
+	// Policies Policy names to attach (at most 32), including built-in policies. Omitted or null selects builtin.block_private_network by default. An explicit list replaces the defaults; [] selects none. Library Rego is snapshotted at creation; server policies (--policy-dir) always apply in addition.
 	Policies   *[]PolicyName          `json:"policies,omitempty"`
 	Secrets    *map[string]SecretSpec `json:"secrets,omitempty"`
 	TtlSeconds *int64                 `json:"ttl_seconds,omitempty"`
@@ -626,37 +644,45 @@ type PoliciesResponse struct {
 	Policies *[]Policy `json:"policies,omitempty"`
 }
 
-// Policy A library policy. It applies only to instances whose spec.policies names it; the rego is snapshotted at instance creation.
+// Policy A selectable policy. Built-in policies are read-only, have no Rego source or owner, and use their name as ID. Rego policies belong to the user and are snapshotted at instance creation.
 type Policy struct {
-	CreatedAt time.Time `json:"created_at"`
-	Id        string    `json:"id"`
+	CreatedAt *time.Time `json:"created_at,omitempty"`
 
-	// Name Unique per user; referenced by InstanceSpec.policies.
+	// Default Selected when InstanceSpec.policies is omitted or null.
+	Default     bool       `json:"default"`
+	Description *string    `json:"description,omitempty"`
+	Id          string     `json:"id"`
+	Kind        PolicyKind `json:"kind"`
+
+	// Name Unique per user; the builtin. prefix is reserved for read-only built-in policies.
 	Name      PolicyName `json:"name"`
-	Rego      string     `json:"rego"`
-	UpdatedAt time.Time  `json:"updated_at"`
-	UserId    string     `json:"user_id"`
+	Rego      *string    `json:"rego,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	UserId    *string    `json:"user_id,omitempty"`
 }
 
-// PolicyName Unique per user; referenced by InstanceSpec.policies.
+// PolicyKind defines model for Policy.Kind.
+type PolicyKind string
+
+// PolicyName Unique per user; the builtin. prefix is reserved for read-only built-in policies.
 type PolicyName = string
 
 // PolicyRequest defines model for PolicyRequest.
 type PolicyRequest struct {
-	// Name Unique per user; referenced by InstanceSpec.policies.
+	// Name Unique per user; the builtin. prefix is reserved for read-only built-in policies.
 	Name PolicyName `json:"name"`
 	Rego string     `json:"rego"`
 }
 
 // PolicyResponse defines model for PolicyResponse.
 type PolicyResponse struct {
-	// Policy A library policy. It applies only to instances whose spec.policies names it; the rego is snapshotted at instance creation.
+	// Policy A selectable policy. Built-in policies are read-only, have no Rego source or owner, and use their name as ID. Rego policies belong to the user and are snapshotted at instance creation.
 	Policy *Policy `json:"policy,omitempty"`
 }
 
 // PolicyUpdateRequest defines model for PolicyUpdateRequest.
 type PolicyUpdateRequest struct {
-	// Name Unique per user; referenced by InstanceSpec.policies.
+	// Name Unique per user; the builtin. prefix is reserved for read-only built-in policies.
 	Name *PolicyName `json:"name,omitempty"`
 	Rego *string     `json:"rego,omitempty"`
 }
@@ -2990,6 +3016,20 @@ func (response DeletePolicy401JSONResponse) VisitDeletePolicyResponse(w http.Res
 	return err
 }
 
+type DeletePolicy403JSONResponse ErrorEnvelope
+
+func (response DeletePolicy403JSONResponse) VisitDeletePolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type DeletePolicy404JSONResponse ErrorEnvelope
 
 func (response DeletePolicy404JSONResponse) VisitDeletePolicyResponse(w http.ResponseWriter) error {
@@ -3101,6 +3141,20 @@ func (response UpdatePolicy401JSONResponse) VisitUpdatePolicyResponse(w http.Res
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePolicy403JSONResponse ErrorEnvelope
+
+func (response UpdatePolicy403JSONResponse) VisitUpdatePolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
 }

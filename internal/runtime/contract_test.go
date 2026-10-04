@@ -189,3 +189,38 @@ func TestNormalizeRejects(t *testing.T) {
 		}
 	}
 }
+
+func TestPolicyDefaultsSurviveSerialization(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want int
+	}{
+		{`{}`, 1},
+		{`{"policies":null}`, 1},
+		{`{"policies":[]}`, 0},
+		{`{"policies":["custom"]}`, 1},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			var spec Spec
+			if err := json.Unmarshal([]byte(tc.raw), &spec); err != nil {
+				t.Fatal(err)
+			}
+			if err := spec.Normalize(Bounds{}, nil); err != nil {
+				t.Fatal(err)
+			}
+			if spec.Policies == nil || len(spec.Policies) != tc.want {
+				t.Fatalf("policies: %v", spec.Policies)
+			}
+			var roundtrip Spec
+			if err := json.Unmarshal(spec.Sanitized(nil), &roundtrip); err != nil {
+				t.Fatal(err)
+			}
+			if err := roundtrip.Normalize(Bounds{}, nil); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(spec.Policies, roundtrip.Policies) {
+				t.Fatalf("policies changed across boundary: %v -> %v", spec.Policies, roundtrip.Policies)
+			}
+		})
+	}
+}

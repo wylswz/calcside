@@ -43,7 +43,6 @@ type Config struct {
 	MaxSteps             uint64
 	MaxOutputBytes       int64
 	ExecMemoryLimit      uint64
-	NetAllowPrivate      bool
 	NetAllowCIDRs        []*net.IPNet
 	MaxNetResponseBytes  int64
 	SecretKey            string
@@ -144,7 +143,6 @@ func Parse(args []string) (Config, error) {
 	fs.Uint64Var(&c.MaxSteps, "max-steps", uint64(envInt("MAX_STEPS", 100000000)), "max starlark execution steps per exec")
 	fs.Int64Var(&c.MaxOutputBytes, "max-output-bytes", int64(envInt("MAX_OUTPUT_BYTES", 4<<20)), "max captured output bytes per exec")
 	fs.Uint64Var(&c.ExecMemoryLimit, "exec-memory-limit", uint64(envInt("EXEC_MEMORY_LIMIT", 2<<30)), "heap watchdog limit in bytes (0 disables)")
-	fs.BoolVar(&c.NetAllowPrivate, "net-allow-private", envBool("NET_ALLOW_PRIVATE", false), "allow private/reserved IPs in net allowlists")
 	var netCIDRs string
 	fs.StringVar(&netCIDRs, "net-allow-cidrs", envOr("NET_ALLOW_CIDRS", ""), "comma-separated CIDRs exempt from net's private/reserved-address blocking, e.g. 198.18.0.0/15 for fake-ip proxies")
 	fs.Int64Var(&c.MaxNetResponseBytes, "max-net-response-bytes", int64(envInt("MAX_NET_RESPONSE_BYTES", 32<<20)), "clamp for net.max_response_bytes")
@@ -245,7 +243,6 @@ type WorkerConfig struct {
 	MaxSteps             uint64
 	MaxOutputBytes       int64
 	ExecMemoryLimit      uint64
-	NetAllowPrivate      bool
 	NetAllowCIDRs        []*net.IPNet
 	MaxNetResponseBytes  int64
 	SecretsAllowHTTP     bool
@@ -279,7 +276,6 @@ func ParseWorker(args []string) (WorkerConfig, error) {
 	fs.Uint64Var(&c.MaxSteps, "max-steps", uint64(envInt("MAX_STEPS", 100000000)), "max starlark execution steps per exec")
 	fs.Int64Var(&c.MaxOutputBytes, "max-output-bytes", int64(envInt("MAX_OUTPUT_BYTES", 4<<20)), "max captured output bytes per exec")
 	fs.Uint64Var(&c.ExecMemoryLimit, "exec-memory-limit", uint64(envInt("EXEC_MEMORY_LIMIT", 2<<30)), "heap watchdog limit in bytes (0 disables)")
-	fs.BoolVar(&c.NetAllowPrivate, "net-allow-private", envBool("NET_ALLOW_PRIVATE", false), "allow private/reserved IPs in net allowlists")
 	var netCIDRs string
 	fs.StringVar(&netCIDRs, "net-allow-cidrs", envOr("NET_ALLOW_CIDRS", ""), "comma-separated CIDRs exempt from net's private/reserved-address blocking")
 	fs.Int64Var(&c.MaxNetResponseBytes, "max-net-response-bytes", int64(envInt("MAX_NET_RESPONSE_BYTES", 32<<20)), "clamp for net.max_response_bytes")
@@ -329,7 +325,6 @@ func (c WorkerConfig) ExecLimits() capability.ServerLimits {
 		MaxSteps:            c.MaxSteps,
 		MaxFSQuotaBytes:     256 << 20,
 		MaxOutputBytes:      c.MaxOutputBytes,
-		NetAllowPrivate:     c.NetAllowPrivate,
 		NetAllowCIDRs:       c.NetAllowCIDRs,
 		MaxNetResponseBytes: c.MaxNetResponseBytes,
 		SecretsAllowHTTP:    c.SecretsAllowHTTP,
@@ -346,7 +341,6 @@ func (c Config) ExecLimits() capability.ServerLimits {
 		MaxSteps:            c.MaxSteps,
 		MaxFSQuotaBytes:     256 << 20,
 		MaxOutputBytes:      c.MaxOutputBytes,
-		NetAllowPrivate:     c.NetAllowPrivate,
 		NetAllowCIDRs:       c.NetAllowCIDRs,
 		MaxNetResponseBytes: c.MaxNetResponseBytes,
 		SecretsAllowHTTP:    c.SecretsAllowHTTP,

@@ -352,6 +352,7 @@ def test_secret_placeholder_and_redaction(server):
             base_url=server,
             spec={
                 "capabilities": {"net": {"allow_hosts": [f"127.0.0.1:{port}"]}},
+                "policies": [],
                 "secrets": {
                     "T": {"value": "s3cr3t", "allowed_domains": [f"127.0.0.1:{port}"]}
                 },

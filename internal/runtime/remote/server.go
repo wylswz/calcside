@@ -76,6 +76,13 @@ type strict struct {
 
 var _ gen.StrictServerInterface = strict{}
 
+func requestContext(ctx context.Context) context.Context {
+	if c, ok := ctx.(*gin.Context); ok {
+		return c.Request.Context()
+	}
+	return ctx
+}
+
 func envelope(err error) gen.ErrorEnvelope {
 	var e gen.ErrorEnvelope
 	e.Error.Kind = gen.ErrorEnvelopeErrorKind(kindOf(err))
@@ -84,7 +91,7 @@ func envelope(err error) gen.ErrorEnvelope {
 }
 
 func (s strict) RuntimeCreate(ctx context.Context, req gen.RuntimeCreateRequestObject) (gen.RuntimeCreateResponseObject, error) {
-	resp, err := s.rt.Create(ctx, req.Body)
+	resp, err := s.rt.Create(requestContext(ctx), req.Body)
 	if err != nil {
 		return gen.RuntimeCreatedefaultJSONResponse{Body: envelope(err), StatusCode: statusOf(err)}, nil
 	}
@@ -92,7 +99,7 @@ func (s strict) RuntimeCreate(ctx context.Context, req gen.RuntimeCreateRequestO
 }
 
 func (s strict) RuntimeExec(ctx context.Context, req gen.RuntimeExecRequestObject) (gen.RuntimeExecResponseObject, error) {
-	resp, err := s.rt.Exec(ctx, req.Body)
+	resp, err := s.rt.Exec(requestContext(ctx), req.Body)
 	if err != nil {
 		return gen.RuntimeExecdefaultJSONResponse{Body: envelope(err), StatusCode: statusOf(err)}, nil
 	}
@@ -100,7 +107,7 @@ func (s strict) RuntimeExec(ctx context.Context, req gen.RuntimeExecRequestObjec
 }
 
 func (s strict) RuntimeKeepalive(ctx context.Context, req gen.RuntimeKeepaliveRequestObject) (gen.RuntimeKeepaliveResponseObject, error) {
-	resp, err := s.rt.Keepalive(ctx, req.Body)
+	resp, err := s.rt.Keepalive(requestContext(ctx), req.Body)
 	if err != nil {
 		return gen.RuntimeKeepalivedefaultJSONResponse{Body: envelope(err), StatusCode: statusOf(err)}, nil
 	}
@@ -108,7 +115,7 @@ func (s strict) RuntimeKeepalive(ctx context.Context, req gen.RuntimeKeepaliveRe
 }
 
 func (s strict) RuntimeDelete(ctx context.Context, req gen.RuntimeDeleteRequestObject) (gen.RuntimeDeleteResponseObject, error) {
-	resp, err := s.rt.Delete(ctx, req.Body)
+	resp, err := s.rt.Delete(requestContext(ctx), req.Body)
 	if err != nil {
 		return gen.RuntimeDeletedefaultJSONResponse{Body: envelope(err), StatusCode: statusOf(err)}, nil
 	}
@@ -116,7 +123,7 @@ func (s strict) RuntimeDelete(ctx context.Context, req gen.RuntimeDeleteRequestO
 }
 
 func (s strict) RuntimeBrowse(ctx context.Context, req gen.RuntimeBrowseRequestObject) (gen.RuntimeBrowseResponseObject, error) {
-	resp, err := s.rt.Browse(ctx, req.Body)
+	resp, err := s.rt.Browse(requestContext(ctx), req.Body)
 	if err != nil {
 		return gen.RuntimeBrowsedefaultJSONResponse{Body: envelope(err), StatusCode: statusOf(err)}, nil
 	}
@@ -124,7 +131,7 @@ func (s strict) RuntimeBrowse(ctx context.Context, req gen.RuntimeBrowseRequestO
 }
 
 func (s strict) RuntimePrompt(ctx context.Context, req gen.RuntimePromptRequestObject) (gen.RuntimePromptResponseObject, error) {
-	resp, err := s.rt.Prompt(ctx, req.Body)
+	resp, err := s.rt.Prompt(requestContext(ctx), req.Body)
 	if err != nil {
 		return gen.RuntimePromptdefaultJSONResponse{Body: envelope(err), StatusCode: statusOf(err)}, nil
 	}
@@ -132,7 +139,7 @@ func (s strict) RuntimePrompt(ctx context.Context, req gen.RuntimePromptRequestO
 }
 
 func (s strict) RuntimeInspect(ctx context.Context, req gen.RuntimeInspectRequestObject) (gen.RuntimeInspectResponseObject, error) {
-	resp, err := s.rt.Inspect(ctx, req.Body)
+	resp, err := s.rt.Inspect(requestContext(ctx), req.Body)
 	if err != nil {
 		return gen.RuntimeInspectdefaultJSONResponse{Body: envelope(err), StatusCode: statusOf(err)}, nil
 	}

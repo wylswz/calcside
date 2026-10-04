@@ -19,10 +19,10 @@ type Spec struct {
 	Limits       Limits                     `json:"limits"`
 	Env          map[string]string          `json:"env"`
 	Secrets      map[string]SecretSpec      `json:"secrets"`
-	// Policies names the owner's library policies attached to this
-	// instance. The API tier snapshots their rego at create time; server
+	// Policies names the built-in and library policies attached to this
+	// instance. Nil selects defaults; an empty list selects none. Server
 	// policies (--policy-dir) always apply and are never listed here.
-	Policies []string `json:"policies,omitempty"`
+	Policies []string `json:"policies"`
 }
 
 // SecretSpec is one entry of spec.secrets: either a vault ref (name of a
@@ -142,6 +142,7 @@ func (s *Spec) Normalize(b Bounds, validate CapValidator) error {
 			return Errf(ErrBadSpec, "secrets: name %q also used by env", name)
 		}
 	}
+	s.Policies = EffectivePolicies(s.Policies)
 	if len(s.Policies) > maxPolicies {
 		return Errf(ErrBadSpec, "policies: more than %d entries", maxPolicies)
 	}

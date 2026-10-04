@@ -45,7 +45,6 @@ func extNode(t *testing.T, localRoots []string) *node {
 		CacheDir:   t.TempDir(),
 	}))
 	limits := defaultLimits()
-	limits.NetAllowPrivate = true
 	limits.SecretsAllowHTTP = true
 	return newNode(t, Options{Registry: reg, Limits: limits}, nil)
 }
@@ -69,7 +68,7 @@ func TestExtEndToEnd(t *testing.T) {
 	extDir := examplesDir(t)
 	n := extNode(t, []string{extDir})
 
-	spec := fmt.Sprintf(`{"capabilities":{
+	spec := fmt.Sprintf(`{"policies":[],"capabilities":{
 		"net": {"allow_hosts": [%q]},
 		"ext": {"tavily": {"source": %q, "config": {"base_url": %q}}}
 	}, "secrets": {"TAVILY_API_KEY": {"value": "s3cr3t-key", "allowed_domains": [%q]}}}`,
@@ -171,7 +170,7 @@ func TestExtSecretOverride(t *testing.T) {
 
 	extDir := examplesDir(t)
 	n := extNode(t, []string{extDir})
-	spec := fmt.Sprintf(`{"capabilities":{
+	spec := fmt.Sprintf(`{"policies":[],"capabilities":{
 		"net": {"allow_hosts": [%q]},
 		"ext": {"tavily": {"source": %q, "config": {"base_url": %q, "api_key": "{{secrets.MY_TAVILY}}"}}}
 	}, "secrets": {"MY_TAVILY": {"value": "other-key-9", "allowed_domains": [%q]}}}`,
@@ -201,7 +200,7 @@ func TestExtSecretOverride(t *testing.T) {
 func TestExtMissingSecretRef(t *testing.T) {
 	extDir := examplesDir(t)
 	n := extNode(t, []string{extDir})
-	spec := fmt.Sprintf(`{"capabilities":{
+	spec := fmt.Sprintf(`{"policies":[],"capabilities":{
 		"net": {"allow_hosts": ["x.example"]},
 		"ext": {"tavily": {"source": %q}}}}`,
 		filepath.Join(extDir, "tavily"))
@@ -214,7 +213,7 @@ func TestExtMissingSecretRef(t *testing.T) {
 func TestExtMissingBaseDep(t *testing.T) {
 	extDir := examplesDir(t)
 	n := extNode(t, []string{extDir})
-	spec := fmt.Sprintf(`{"capabilities":{"ext":{"tavily":{"source":%q}}}}`,
+	spec := fmt.Sprintf(`{"policies":[],"capabilities":{"ext":{"tavily":{"source":%q}}}}`,
 		filepath.Join(extDir, "tavily"))
 	_, err := n.create(spec)
 	if err == nil || !strings.Contains(err.Error(), `requires capability "net"`) {
@@ -225,7 +224,7 @@ func TestExtMissingBaseDep(t *testing.T) {
 func TestExtNetAllowlistEnforced(t *testing.T) {
 	extDir := examplesDir(t)
 	n := extNode(t, []string{extDir})
-	spec := fmt.Sprintf(`{"capabilities":{
+	spec := fmt.Sprintf(`{"policies":[],"capabilities":{
 		"net": {"allow_hosts": ["nowhere.example"]},
 		"ext": {"tavily": {"source": %q, "config": {"base_url": "http://127.0.0.1:1"}}}},
 		"secrets": {"TAVILY_API_KEY": {"value": "x", "allowed_domains": ["127.0.0.1:1"]}}}`,
@@ -266,7 +265,7 @@ func TestExtInitOutOfScope(t *testing.T) {
 		"main.star":       "net.get(url=\"http://x.example\")\ndef go():\n    return 1\n",
 	})
 	n := extNode(t, []string{root})
-	spec := fmt.Sprintf(`{"capabilities":{"net":{"allow_hosts":["x.example"]},"ext":{"bad":{"source":%q}}}}`, dir)
+	spec := fmt.Sprintf(`{"policies":[],"capabilities":{"net":{"allow_hosts":["x.example"]},"ext":{"bad":{"source":%q}}}}`, dir)
 	_, err := n.create(spec)
 	if err == nil || !strings.Contains(err.Error(), "outside its scope") {
 		t.Fatalf("want out-of-scope error, got %v", err)
@@ -275,7 +274,7 @@ func TestExtInitOutOfScope(t *testing.T) {
 
 func TestExtRemoteDisabled(t *testing.T) {
 	n := extNode(t, nil)
-	_, err := n.create(`{"capabilities":{"ext":{"x":{"source":"github.com/a/b@v1","sum":"h1:z"}}}}`)
+	_, err := n.create(`{"policies":[],"capabilities":{"ext":{"x":{"source":"github.com/a/b@v1","sum":"h1:z"}}}}`)
 	if err == nil {
 		t.Fatal("remote source without allow-sources should fail")
 	}

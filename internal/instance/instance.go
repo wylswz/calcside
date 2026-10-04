@@ -241,6 +241,7 @@ func (m *Manager) Create(ctx context.Context, req *runtime.CreateRequest) (*runt
 		Labels:         req.Labels,
 		Capabilities:   typed,
 		Env:            spec.Env,
+		Policies:       spec.Policies,
 		MaxSteps:       spec.Limits.MaxSteps,
 		MaxOutputBytes: spec.Limits.MaxOutputBytes,
 	})

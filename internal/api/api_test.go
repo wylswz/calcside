@@ -19,6 +19,7 @@ import (
 	capnet "calcside/internal/capability/net"
 	"calcside/internal/engine"
 	"calcside/internal/instance"
+	"calcside/internal/runtime"
 	"calcside/internal/secrets"
 	auditsvc "calcside/internal/service/audit"
 	"calcside/internal/service/catalog"
@@ -64,6 +65,10 @@ func newEnv(t *testing.T) *env { return newEnvWith(t, nil) }
 // newEnvWith builds the test server; with cipher non-nil the secrets
 // vault and net capability (private + http, for httptest) are enabled.
 func newEnvWith(t *testing.T, cipher *secrets.Cipher) *env {
+	return newEnvWithPolicies(t, cipher, nil)
+}
+
+func newEnvWithPolicies(t *testing.T, cipher *secrets.Cipher, global map[string]string) *env {
 	t.Helper()
 	st, err := store.Open(context.Background(), "sqlite", storetest.SQLite(t))
 	if err != nil {
@@ -88,7 +93,6 @@ func newEnvWith(t *testing.T, cipher *secrets.Cipher) *env {
 	}
 	if cipher != nil {
 		reg.Register(capnet.Factory())
-		limits.NetAllowPrivate = true
 		limits.SecretsAllowHTTP = true
 	}
 	mgr := instance.New(instance.Options{
@@ -99,7 +103,7 @@ func newEnvWith(t *testing.T, cipher *secrets.Cipher) *env {
 	vaultSvc := vault.New(st, cipher)
 	e.sbx = sandbox.New(sandbox.Options{
 		Store: st, Runtime: mgr, Secrets: vaultSvc, Audit: rec,
-		Registry: reg, Limits: limits, MaxInstancesPerUser: 10,
+		Registry: reg, Limits: limits, MaxInstancesPerUser: 10, GlobalPolicies: global,
 	})
 	svc := auth.NewService(st, false)
 	h := Handler(Deps{
@@ -601,7 +605,7 @@ func TestEnvSecretsEndToEnd(t *testing.T) {
 		t.Fatalf("create vault secret: %v", m)
 	}
 
-	spec := `{"env":{"REGION":"us-east-1"},
+	spec := `{"policies":[],"env":{"REGION":"us-east-1"},
 		"capabilities":{"net":{"allow_hosts":["` + eh + `"]},"fs":{}},
 		"secrets":{"T":{"ref":"T","allowed_domains":["` + eh + `"]}}}`
 	code, m, _ := e.req("POST", "/api/v1/instances", spec, bearer, nil)
@@ -675,5 +679,137 @@ func TestEnvSecretsEndToEnd(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no net audit event with template URL; events: %v", m["events"])
+	}
+}
+
+func TestBuiltinPolicyCatalog(t *testing.T) {
+	e := newEnv(t)
+	cookies := login(e, "builtin@x.com")
+	csrf := map[string]string{"X-Requested-With": "calcside"}
+	code, m, _ := e.req("GET", "/api/v1/policies", "", nil, cookies)
+	if code != 200 {
+		t.Fatalf("list: %d %v", code, m)
+	}
+	pols := m["policies"].([]any)
+	if len(pols) != 1 {
+		t.Fatalf("built-in catalog: %v", pols)
+	}
+	p := pols[0].(map[string]any)
+	if p["id"] != runtime.BlockPrivateNetworkPolicy || p["kind"] != "builtin" || p["default"] != true || p["rego"] != nil || p["description"] == "" {
+		t.Fatalf("built-in descriptor: %v", p)
+	}
+	path := "/api/v1/policies/" + runtime.BlockPrivateNetworkPolicy
+	code, m, _ = e.req("GET", path, "", nil, cookies)
+	if code != 200 || m["policy"].(map[string]any)["name"] != runtime.BlockPrivateNetworkPolicy {
+		t.Fatalf("get: %d %v", code, m)
+	}
+	for _, method := range []string{"PUT", "DELETE"} {
+		code, m, _ = e.req(method, path, `{}`, csrf, cookies)
+		if code != 403 {
+			t.Fatalf("read-only %s: %d %v", method, code, m)
+		}
+	}
+	for _, name := range []string{runtime.BlockPrivateNetworkPolicy, "builtin.future"} {
+		code, m, _ = e.req("POST", "/api/v1/policies", `{"name":`+jsonStr(name)+`,"rego":"package calcside.hooks"}`, csrf, cookies)
+		if code != 400 {
+			t.Fatalf("reserved name %s: %d %v", name, code, m)
+		}
+	}
+	code, m, _ = e.req("POST", "/api/v1/policies", `{"name":"custom","rego":"package calcside.hooks"}`, csrf, cookies)
+	if code != 201 {
+		t.Fatalf("create: %d %v", code, m)
+	}
+	id := m["policy"].(map[string]any)["id"].(string)
+	code, m, _ = e.req("PUT", "/api/v1/policies/"+id, `{"name":`+jsonStr(runtime.BlockPrivateNetworkPolicy)+`}`, csrf, cookies)
+	if code != 400 {
+		t.Fatalf("reserved rename: %d %v", code, m)
+	}
+	code, m, _ = e.req("POST", "/api/v1/instances", `{"policies":["builtin.unknown"]}`, csrf, cookies)
+	if code != 400 {
+		t.Fatalf("unknown built-in: %d %v", code, m)
+	}
+}
+
+func TestBuiltinNetworkPolicySelection(t *testing.T) {
+	e := newEnvWith(t, apiCipher(t))
+	cookies := login(e, "network@x.com")
+	csrf := map[string]string{"X-Requested-With": "calcside"}
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") }))
+	defer target.Close()
+	localhost := strings.Replace(target.URL, "127.0.0.1", "localhost", 1)
+	code, m, _ := e.req("POST", "/api/v1/policies", `{"name":"custom","rego":"package calcside.hooks"}`, csrf, cookies)
+	if code != 201 {
+		t.Fatalf("policy: %d %v", code, m)
+	}
+	for _, tc := range []struct {
+		name, field string
+		blocked     bool
+	}{
+		{"default", "", true},
+		{"selected", `,"policies":["builtin.block_private_network"]`, true},
+		{"none", `,"policies":[]`, false},
+		{"custom-only", `,"policies":["custom"]`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, m, _ := e.req("POST", "/api/v1/instances", `{"capabilities":{"net":{}}`+tc.field+`}`, csrf, cookies)
+			if code != 201 {
+				t.Fatalf("create: %d %v", code, m)
+			}
+			in := m["instance"].(map[string]any)
+			id := in["id"].(string)
+			selected, ok := in["spec"].(map[string]any)["policies"].([]any)
+			if !ok || (tc.blocked && (len(selected) != 1 || selected[0] != runtime.BlockPrivateNetworkPolicy)) || (tc.name == "none" && len(selected) != 0) {
+				t.Fatalf("stored selection: %v", in)
+			}
+			for _, url := range []string{target.URL, localhost} {
+				code, m, _ = e.req("POST", "/api/v1/instances/"+id+"/exec", `{"code":`+jsonStr(fmt.Sprintf(`print(net.get(%q)["body"])`, url))+`}`, csrf, cookies)
+				if code != 200 {
+					t.Fatalf("exec: %d %v", code, m)
+				}
+				if tc.blocked {
+					err, ok := m["error"].(map[string]any)
+					if !ok || err["type"] != "policy_denied" || !strings.Contains(err["message"].(string), runtime.BlockPrivateNetworkPolicy) {
+						t.Fatalf("expected policy denial: %v", m)
+					}
+				} else if m["error"] != nil || m["output"] != "ok\n" {
+					t.Fatalf("unselected: %v", m)
+				}
+			}
+		})
+	}
+	e.rec.Close()
+	e.rec = nil
+	code, m, _ = e.req("GET", "/api/v1/audit", "", nil, cookies)
+	if code != 200 {
+		t.Fatalf("audit: %d %v", code, m)
+	}
+	denied := 0
+	for _, item := range m["events"].([]any) {
+		event := item.(map[string]any)
+		if event["decision"] == "deny" {
+			denied++
+			if event["phase"] != "before" || !strings.Contains(event["reason"].(string), runtime.BlockPrivateNetworkPolicy) {
+				t.Fatalf("audit denial: %v", event)
+			}
+		}
+	}
+	if denied != 4 {
+		t.Fatalf("want 4 network policy audit denials, got %d", denied)
+	}
+}
+
+func TestEmptySelectionKeepsServerPolicies(t *testing.T) {
+	e := newEnvWithPolicies(t, nil, map[string]string{"server.rego": `package calcside.hooks
+deny contains "server guardrail" if { input.capability == "io" }`})
+	cookies := login(e, "server@x.com")
+	csrf := map[string]string{"X-Requested-With": "calcside"}
+	code, m, _ := e.req("POST", "/api/v1/instances", `{"policies":[]}`, csrf, cookies)
+	if code != 201 {
+		t.Fatalf("create: %d %v", code, m)
+	}
+	id := m["instance"].(map[string]any)["id"].(string)
+	code, m, _ = e.req("POST", "/api/v1/instances/"+id+"/exec", `{"code":"print(1)"}`, csrf, cookies)
+	if code != 200 || m["error"] == nil || !strings.Contains(fmt.Sprint(m["error"]), "server guardrail") {
+		t.Fatalf("server policy bypassed: %d %v", code, m)
 	}
 }

@@ -53,7 +53,7 @@ type Result struct {
 	Err  error
 }
 
-// DeniedError is produced when a hook denies a call.
+// DeniedError is produced when a hook or runtime policy denies a call.
 type DeniedError struct {
 	Hook   string
 	Phase  types.Phase // "before" | "after"
@@ -226,6 +226,10 @@ func (g *Gate) Invoke(ctx context.Context, capability types.CapabilityName, op t
 	rec.Err = opErr
 	if opErr != nil {
 		rec.Reason = opErr.Error()
+		var denied *DeniedError
+		if errors.As(opErr, &denied) {
+			rec.Decision, rec.Phase = types.DecisionDeny, denied.Phase
+		}
 	}
 	return val, opErr
 }
@@ -282,6 +286,7 @@ type Factory interface {
 // treated as empty), and the already-built bindings of other capabilities
 // (for ext, which composes them).
 type InstanceEnv struct {
+	Policies []string // selected policies controlling runtime address checks
 	Gate     *Gate
 	Secrets  *secrets.Set
 	Bindings map[types.CapabilityName]starlark.Value
@@ -298,7 +303,6 @@ type ServerLimits struct {
 	MaxExecTimeout      time.Duration
 	MaxSteps            uint64
 	MaxOutputBytes      int64
-	NetAllowPrivate     bool         // allow private/reserved IPs in net allowlists
 	NetAllowCIDRs       []*net.IPNet // CIDRs exempt from private/reserved blocking
 	MaxNetResponseBytes int64        // clamp for net.max_response_bytes
 	SecretsAllowHTTP    bool         // allow secret injection into plain http:// URLs

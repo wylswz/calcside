@@ -136,3 +136,27 @@ def test_client_paths_in_openapi(server):
     for method, path in used:
         assert path in paths, f"missing path {path}"
         assert method in paths[path], f"missing {method.upper()} {path}"
+
+
+@pytest.mark.parametrize("selection", [None, [], ["builtin.block_private_network"]])
+def test_network_policy_selection(server, selection):
+    with Client(base_url=server) as c:
+        spec = {"capabilities": {"net": {}}}
+        if selection is not None:
+            spec["policies"] = selection
+        inst = c.create_instance(spec)
+        try:
+            expected = (
+                ["builtin.block_private_network"] if selection is None else selection
+            )
+            assert inst["spec"]["policies"] == expected
+            r = c.exec(inst["id"], f'print(net.get("{server}/healthz")["status"])')
+            if expected:
+                assert r.error is not None
+                assert r.error.type == "policy_denied"
+                assert "builtin.block_private_network" in r.error.message
+            else:
+                assert r.error is None
+                assert r.output == "200\n"
+        finally:
+            c.delete_instance(inst["id"])

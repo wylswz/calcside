@@ -25,6 +25,9 @@
             "max_output_bytes": 1048576,
             "max_steps": 1000000
           },
+          "policies": [
+            "builtin.block_private_network"
+          ],
           "secrets": null,
           "ttl_seconds": 900
         },

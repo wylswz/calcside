@@ -29,7 +29,7 @@ func tlsClient(t *testing.T, ts *httptest.Server, cfg Config, set *secrets.Set, 
 		pool.AddCert(ts.Certificate())
 	}
 	f := factory{}
-	v, err := f.Validate(mustJSON(t, cfg), capability.ServerLimits{NetAllowPrivate: true, SecretsAllowHTTP: allowHTTP})
+	v, err := f.Validate(mustJSON(t, cfg), capability.ServerLimits{SecretsAllowHTTP: allowHTTP})
 	if err != nil {
 		t.Fatal(err)
 	}

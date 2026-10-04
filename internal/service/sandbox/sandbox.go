@@ -171,7 +171,7 @@ func (s *Service) List(ctx context.Context, a service.Actor, status types.Instan
 }
 
 // selectedPolicies snapshots the owner's library policies named by the
-// spec, keyed by name. An unknown name is a spec error: silently
+// spec, keyed by name; built-ins run natively. Unknown names fail: silently
 // creating an instance without a policy it asked for would fail open.
 // Compilation happens on the node; only sources cross the boundary.
 func (s *Service) selectedPolicies(ctx context.Context, userID string, names []string) (map[string]string, error) {
@@ -188,6 +188,9 @@ func (s *Service) selectedPolicies(ctx context.Context, userID string, names []s
 	}
 	out := make(map[string]string, len(names))
 	for _, n := range names {
+		if runtime.IsBuiltinPolicy(n) {
+			continue
+		}
 		src, ok := byName[n]
 		if !ok {
 			return nil, service.Errf(types.ErrCodeBadSpec, "policies: unknown policy %q", n)

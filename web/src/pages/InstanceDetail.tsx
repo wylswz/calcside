@@ -7,7 +7,7 @@ import { api, AuditEvent, ExecResult, Execution, FileEntry, Instance, InstanceIn
 import type { SecretSource } from '../api'
 
 interface SpecSecret { ref?: string; source?: SecretSource; allowed_domains?: string[] }
-import { Badge, Button, EmptyRow, Loading, Notice, SectionTitle, StatusBadge, fmtBytes, fmtCountdown, fmtTime } from '../components/ui'
+import { Badge, Button, EmptyRow, Loading, Notice, SectionTitle, StatusBadge, Tag, fmtBytes, fmtCountdown, fmtTime } from '../components/ui'
 import { cmTheme } from '../components/codemirror'
 import { AuditTable, ExecCode } from '../components/AuditTable'
 
@@ -437,10 +437,10 @@ export default function InstanceDetail() {
               ? <p className="text-xs text-mute">server policies only</p>
               : (
                 <ul className="space-y-1 font-mono text-xs text-ink">
-                  {policies.map((n) => <li key={n}>{n}</li>)}
+                  {policies.map((n) => <li key={n}>{n} <Tag>{n.startsWith('builtin.') ? 'Built-in' : 'Rego'}</Tag></li>)}
                 </ul>
               )}
-            <p className="mt-2 text-xs text-mute">snapshotted at creation; library edits don't apply here</p>
+            <p className="mt-2 text-xs text-mute">selection fixed at creation; Rego sources snapshotted; server policies also apply</p>
           </div>
           {(env.length > 0 || secrets.length > 0) && (
             <div>

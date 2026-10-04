@@ -1,8 +1,8 @@
 // Package net implements the "net" capability: HTTP requests gated by a
 // host allowlist (empty = any host), with DNS resolution done in-process
 // and connections pinned to vetted IPs to resist SSRF and DNS-rebinding
-// (private/reserved addresses stay blocked unless the server opts in via
-// --net-allow-private). It also substitutes {{secrets.NAME}} placeholders
+// (private/reserved addresses are blocked by the selected built-in
+// policy). It also substitutes {{secrets.NAME}} placeholders
 // at send time; plaintext secret values never reach the script, audit, or
 // policy input.
 package net
@@ -12,12 +12,14 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	gonet "net"
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -26,6 +28,7 @@ import (
 
 	"calcside/internal/capability"
 	"calcside/internal/hostmatch"
+	"calcside/internal/runtime"
 	"calcside/internal/secrets"
 	"calcside/internal/types"
 )
@@ -57,6 +60,7 @@ type client struct {
 	allowCIDRs   []*gonet.IPNet
 	secrets      *secrets.Set
 	hc           *http.Client
+	resolve      func(context.Context, string) ([]gonet.IPAddr, error)
 }
 
 // blocked reports whether ip must not be dialed: addresses inside an
@@ -66,15 +70,7 @@ func (c *client) blocked(ip gonet.IP) bool {
 	if ip == nil {
 		return true
 	}
-	if v4 := ip.To4(); v4 != nil {
-		ip = v4
-	}
-	for _, n := range c.allowCIDRs {
-		if n.Contains(ip) {
-			return false
-		}
-	}
-	return isBlockedIP(ip)
+	return !c.allowPrivate && !inCIDRs(c.allowCIDRs, ip) && isBlockedIP(ip)
 }
 
 // injectedKey carries the names of secrets injected into a request so the
@@ -120,7 +116,7 @@ func (c *client) authorize(method, rawURL string) (host, effPort string, err err
 		return "", "", fmt.Errorf("net: method %s not in methods %v", m, c.cfg.Methods)
 	}
 	// Empty allow_hosts = unrestricted at the host-name layer; the dialer
-	// still blocks private/reserved addresses unless --net-allow-private.
+	// still enforces the instance's selected network policy.
 	if len(c.rules) == 0 {
 		return host, effPort, nil
 	}
@@ -153,7 +149,7 @@ var blockedCIDRs = func() []*gonet.IPNet {
 }()
 
 // isBlockedIP reports whether ip is in a range that must never be dialed
-// unless the server opts in (SSRF/rebinding protection).
+// when the built-in network policy is selected (SSRF/rebinding protection).
 func isBlockedIP(ip gonet.IP) bool {
 	if ip == nil {
 		return true
@@ -178,6 +174,10 @@ func isBlockedIP(ip gonet.IP) bool {
 // domain-name hosts, and dials the vetted IP directly.
 func (c *client) transport() *http.Transport {
 	dialer := &gonet.Dialer{Timeout: c.timeout()}
+	resolve := c.resolve
+	if resolve == nil {
+		resolve = gonet.DefaultResolver.LookupIPAddr
+	}
 	return &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (gonet.Conn, error) {
 			hostPort, port, err := gonet.SplitHostPort(addr)
@@ -185,23 +185,23 @@ func (c *client) transport() *http.Transport {
 				return nil, fmt.Errorf("net: bad dial address %q: %w", addr, err)
 			}
 			if ip := gonet.ParseIP(hostPort); ip != nil {
-				// IP-literal hosts must be explicitly opted in via allowlist
-				// AND the server must permit private/reserved addresses.
-				if !c.allowPrivate && c.blocked(ip) {
-					return nil, fmt.Errorf("net: dialing disallowed IP %s", ip)
+				// IP-literal hosts obey the same selected network policy
+				// as addresses obtained by resolving a domain name.
+				if err := c.checkAddresses(hostPort, []gonet.IPAddr{{IP: ip}}); err != nil {
+					return nil, err
 				}
 				return dialer.DialContext(ctx, network, addr)
 			}
-			ips, err := gonet.DefaultResolver.LookupIPAddr(ctx, hostPort)
+			ips, err := resolve(ctx, hostPort)
 			if err != nil {
 				return nil, fmt.Errorf("net: resolving %q: %w", hostPort, err)
+			}
+			if err := c.checkAddresses(hostPort, ips); err != nil {
+				return nil, err
 			}
 			var lastErr error
 			dialed := false
 			for _, ia := range ips {
-				if c.blocked(ia.IP) {
-					return nil, fmt.Errorf("net: host %q resolves to disallowed address %s", hostPort, ia.IP)
-				}
 				conn, derr := dialer.DialContext(ctx, network, gonet.JoinHostPort(ia.IP.String(), port))
 				if derr == nil {
 					return conn, nil
@@ -215,6 +215,18 @@ func (c *client) transport() *http.Transport {
 		},
 		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: c.cfg.RootCAs},
 	}
+}
+
+func (c *client) checkAddresses(host string, ips []gonet.IPAddr) error {
+	for _, ia := range ips {
+		if c.blocked(ia.IP) {
+			return &capability.DeniedError{
+				Hook: "policy", Phase: types.PhaseBefore,
+				Reason: fmt.Sprintf("policy %s: net: host %q has disallowed address %s", runtime.BlockPrivateNetworkPolicy, host, ia.IP),
+			}
+		}
+	}
+	return nil
 }
 
 func (c *client) timeout() time.Duration {
@@ -413,6 +425,10 @@ func (c *client) do(ctx context.Context, method, rawURL, body string, headers ma
 	if err != nil {
 		// Every error path is scrubbed: transport errors embed the
 		// expanded URL (which may contain an injected secret).
+		var denied *capability.DeniedError
+		if errors.As(err, &denied) {
+			return nil, &capability.DeniedError{Hook: denied.Hook, Phase: denied.Phase, Reason: c.redact(denied.Reason)}
+		}
 		return nil, fmt.Errorf("%s", c.redact(err.Error()))
 	}
 	return resp, nil
@@ -492,7 +508,7 @@ func (factory) Ops() []capability.OpInfo {
 
 func (factory) ConfigFields() []capability.FieldDoc {
 	return []capability.FieldDoc{
-		{Name: "allow_hosts", Type: types.FieldStringList, Doc: "exact host, *.suffix wildcard, or host:port; empty = any public host (private/reserved IPs still blocked unless --net-allow-private)", Default: []string{}},
+		{Name: "allow_hosts", Type: types.FieldStringList, Doc: "exact host, *.suffix wildcard, or host:port; empty = any host, subject to selected policies (builtin.block_private_network blocks private/reserved IPs by default)", Default: []string{}},
 		{Name: "methods", Type: types.FieldStringList, Doc: "permitted HTTP methods", Default: []string{"GET", "POST"}},
 		{Name: "max_response_bytes", Type: types.FieldInt, Doc: "response body cap", Default: defaultMaxResponse},
 		{Name: "timeout_ms", Type: types.FieldInt, Doc: "request timeout", Default: defaultTimeoutMs},
@@ -507,16 +523,10 @@ func (factory) Validate(raw json.RawMessage, limits capability.ServerLimits) (an
 		}
 	}
 	for _, h := range cfg.AllowHosts {
-		r, err := hostmatch.Parse(h)
-		if err != nil {
+		// Host patterns are validated here; address policy checks happen
+		// at dial time, for both IP literals and resolved domain names.
+		if _, err := hostmatch.Parse(h); err != nil {
 			return nil, err
-		}
-		// IP-literal entries are only meaningful when private addresses are
-		// allowed (tests, internal services); reject blocked literals.
-		if r.IsIP && !limits.NetAllowPrivate {
-			if ip := gonet.ParseIP(r.Host); ip != nil && isBlockedIP(ip) && !inCIDRs(limits.NetAllowCIDRs, ip) {
-				return nil, fmt.Errorf("net config: IP-literal allow_hosts entry %q in a blocked range (set --net-allow-private to permit)", h)
-			}
 		}
 	}
 	if len(cfg.Methods) == 0 {
@@ -534,7 +544,7 @@ func (factory) Validate(raw json.RawMessage, limits capability.ServerLimits) (an
 	if limits.MaxExecTimeout > 0 && cfg.TimeoutMs > limits.MaxExecTimeout.Milliseconds() {
 		cfg.TimeoutMs = limits.MaxExecTimeout.Milliseconds()
 	}
-	return validated{Config: cfg, allowPrivate: limits.NetAllowPrivate, allowHTTP: limits.SecretsAllowHTTP, allowCIDRs: limits.NetAllowCIDRs}, nil
+	return validated{Config: cfg, allowHTTP: limits.SecretsAllowHTTP, allowCIDRs: limits.NetAllowCIDRs}, nil
 }
 
 // inCIDRs reports whether ip falls inside any of the given networks
@@ -554,9 +564,8 @@ func inCIDRs(ns []*gonet.IPNet, ip gonet.IP) bool {
 // validated carries the parsed config plus server policy the binding needs.
 type validated struct {
 	Config
-	allowPrivate bool
-	allowHTTP    bool
-	allowCIDRs   []*gonet.IPNet
+	allowHTTP  bool
+	allowCIDRs []*gonet.IPNet
 }
 
 func (f factory) Prompt(cfgAny any) string {
@@ -569,7 +578,7 @@ func (f factory) Prompt(cfgAny any) string {
 	if len(cfg.AllowHosts) > 0 {
 		fmt.Fprintf(&b, "- Allowed hosts: %s\n", strings.Join(cfg.AllowHosts, ", "))
 	} else {
-		b.WriteString("- Allowed hosts: any public host\n")
+		b.WriteString("- Allowed hosts: any host, subject to selected policies\n")
 	}
 	if len(cfg.Methods) > 0 {
 		methods := make([]string, len(cfg.Methods))
@@ -591,7 +600,7 @@ func (factory) New(cfgAny any, env capability.InstanceEnv) (starlark.Value, io.C
 	if !ok {
 		return nil, nil, fmt.Errorf("net: config must come from Validate")
 	}
-	c := &client{cfg: v.Config, allowPrivate: v.allowPrivate, allowHTTP: v.allowHTTP, allowCIDRs: v.allowCIDRs, secrets: env.Secrets}
+	c := &client{cfg: v.Config, allowPrivate: !slices.Contains(runtime.EffectivePolicies(env.Policies), runtime.BlockPrivateNetworkPolicy), allowHTTP: v.allowHTTP, allowCIDRs: v.allowCIDRs, secrets: env.Secrets}
 	rules, err := hostmatch.ParseAll(v.AllowHosts)
 	if err != nil {
 		return nil, nil, err

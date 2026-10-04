@@ -135,7 +135,7 @@ func TestCompletionSchemasMatchGatedOperations(t *testing.T) {
 	}))
 	defer ts.Close()
 	reg := capability.NewRegistry()
-	limits := capability.ServerLimits{MaxFSQuotaBytes: 256 << 20, NetAllowPrivate: true}
+	limits := capability.ServerLimits{MaxFSQuotaBytes: 256 << 20}
 	caps := map[string]any{}
 	hook := &completionSchemaHook{docs: map[string]capability.OpInfo{}, seen: map[string]bool{}}
 	for _, f := range []capability.Factory{capfs.Factory(), capio.Factory(), capnet.Factory()} {
@@ -150,7 +150,7 @@ func TestCompletionSchemasMatchGatedOperations(t *testing.T) {
 		}
 	}
 	hook.docs["io.print"] = hook.docs["io.println"]
-	s, err := NewSession(SessionDeps{Registry: reg, Limits: limits, Hooks: []capability.Hook{hook}}, SessionCreation{Capabilities: caps, MaxOutputBytes: 1024})
+	s, err := NewSession(SessionDeps{Registry: reg, Limits: limits, Hooks: []capability.Hook{hook}}, SessionCreation{Capabilities: caps, MaxOutputBytes: 1024, Policies: []string{}})
 	if err != nil {
 		t.Fatal(err)
 	}

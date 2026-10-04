@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -216,5 +218,34 @@ func TestBadSpecKillsChild(t *testing.T) {
 	}
 	if s.Count() != 0 {
 		t.Fatal("failed create left a process routed")
+	}
+}
+
+func TestNetworkPolicyThroughChild(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") }))
+	defer target.Close()
+	s := newSupervisor(t, nil)
+	for _, tc := range []struct {
+		id, spec string
+		blocked  bool
+	}{
+		{"default", `{"capabilities":{"net":{}}}`, true},
+		{"none", `{"capabilities":{"net":{}},"policies":[]}`, false},
+	} {
+		_, err := s.Create(context.Background(), &runtime.CreateRequest{InstanceID: tc.id, Owner: owner, Spec: []byte(tc.spec), ExpiresAt: time.Now().Add(time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := run(t, s, tc.id, "network", fmt.Sprintf(`print(net.get(%q)["body"])`, target.URL))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tc.blocked {
+			if resp.Result.Error == nil || !strings.Contains(resp.Result.Error.Message, runtime.BlockPrivateNetworkPolicy) {
+				t.Fatalf("expected child policy denial: %+v", resp)
+			}
+		} else if resp.Result.Error != nil || resp.Result.Output != "ok\n" {
+			t.Fatalf("explicit empty list lost through child: %+v", resp)
+		}
 	}
 }

@@ -204,3 +204,35 @@ func TestRemoteAuth(t *testing.T) {
 		t.Fatalf("unconfigured worker: got %d", resp.StatusCode)
 	}
 }
+
+type contextRuntime struct {
+	runtime.Runtime
+	ctx context.Context
+}
+
+func (r *contextRuntime) Create(ctx context.Context, _ *runtime.CreateRequest) (*runtime.CreateResponse, error) {
+	r.ctx = ctx
+	return &runtime.CreateResponse{}, nil
+}
+
+func TestRuntimeReceivesRequestContext(t *testing.T) {
+	rt := &contextRuntime{}
+	h := remote.NewHandler(rt, testKey)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequest("POST", "/runtime/v1/create", strings.NewReader(`{}`)).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	remote.SignRequest(testKey, "api-test", req, []byte(`{}`), time.Now())
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("request failed: %d %s", w.Code, w.Body.String())
+	}
+	if rt.ctx != ctx {
+		t.Fatalf("runtime received pooled context %T instead of request context", rt.ctx)
+	}
+	cancel()
+	if !errors.Is(rt.ctx.Err(), context.Canceled) {
+		t.Fatal("request cancellation not propagated")
+	}
+}

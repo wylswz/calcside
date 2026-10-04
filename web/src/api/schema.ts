@@ -632,8 +632,8 @@ export interface components {
                 [key: string]: unknown;
             };
             limits?: components["schemas"]["Limits"];
-            /** @description Names of the owner's library policies to attach (at most 32). Their rego is snapshotted at creation; server policies (--policy-dir) always apply in addition. */
-            policies?: components["schemas"]["PolicyName"][];
+            /** @description Policy names to attach (at most 32), including built-in policies. Omitted or null selects builtin.block_private_network by default. An explicit list replaces the defaults; [] selects none. Library Rego is snapshotted at creation; server policies (--policy-dir) always apply in addition. */
+            policies?: components["schemas"]["PolicyName"][] | null;
         };
         Instance: {
             id: string;
@@ -775,18 +775,23 @@ export interface components {
         AuditResponse: {
             events?: components["schemas"]["AuditEvent"][];
         };
-        /** @description A library policy. It applies only to instances whose spec.policies names it; the rego is snapshotted at instance creation. */
+        /** @description A selectable policy. Built-in policies are read-only, have no Rego source or owner, and use their name as ID. Rego policies belong to the user and are snapshotted at instance creation. */
         Policy: {
             id: string;
-            user_id: string;
+            user_id?: string;
             name: components["schemas"]["PolicyName"];
-            rego: string;
+            /** @enum {string} */
+            kind: "builtin" | "rego";
+            /** @description Selected when InstanceSpec.policies is omitted or null. */
+            default: boolean;
+            description?: string;
+            rego?: string;
             /** Format: date-time */
-            created_at: string;
+            created_at?: string;
             /** Format: date-time */
-            updated_at: string;
+            updated_at?: string;
         };
-        /** @description Unique per user; referenced by InstanceSpec.policies. */
+        /** @description Unique per user; the builtin. prefix is reserved for read-only built-in policies. */
         PolicyName: string;
         PolicyRequest: {
             name: components["schemas"]["PolicyName"];
@@ -1406,7 +1411,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description the user's policies */
+            /** @description Built-in policies and the user's Rego policies */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1521,6 +1526,7 @@ export interface operations {
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
         };
@@ -1546,6 +1552,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
             404: components["responses"]["Error"];
         };
     };
@@ -1738,3 +1745,4 @@ export const secretSourceValues: ReadonlyArray<FlattenedDeepRequired<components>
 export const aPIErrorCodeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["APIErrorCode"]> = ["auth_failed", "bad_capability", "bad_policy", "bad_request", "bad_secret", "bad_spec", "conflict", "csrf", "forbidden", "fs_error", "internal", "method_not_allowed", "no_fs", "not_found", "not_running", "secrets_disabled", "too_large", "too_many", "unauthorized"];
 export const fieldTypeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["FieldType"]> = ["int", "bool", "string", "string_list", "string_map"];
 export const authKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AuthKind"]> = ["session", "api_key", "anonymous"];
+export const policyKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Policy"]["kind"]> = ["builtin", "rego"];

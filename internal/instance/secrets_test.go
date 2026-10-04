@@ -25,7 +25,6 @@ func netNode(t *testing.T) *node {
 	reg.Register(capio.Factory())
 	reg.Register(capnet.Factory())
 	limits := defaultLimits()
-	limits.NetAllowPrivate = true
 	limits.SecretsAllowHTTP = true
 	return newNode(t, Options{Registry: reg, Limits: limits}, nil)
 }
@@ -61,7 +60,7 @@ func TestSecretInjectionRespectsAllowlist(t *testing.T) {
 
 	n := netNode(t)
 	id := n.mustCreate(fmt.Sprintf(
-		`{"capabilities":{"net":{"allow_hosts":[%q,%q]}},
+		`{"policies":[],"capabilities":{"net":{"allow_hosts":[%q,%q]}},
 		"secrets":{"T":{"value":"vault-secret-1","allowed_domains":[%q]}}}`, host, host2, host))
 
 	res := n.mustExec(id, fmt.Sprintf(
@@ -93,7 +92,7 @@ func TestUnrestrictedSecret(t *testing.T) {
 
 	n := netNode(t)
 	id := n.mustCreate(fmt.Sprintf(
-		`{"capabilities":{"net":{"allow_hosts":[%q]}},"secrets":{"T":{"value":"wide-open"}}}`, host))
+		`{"policies":[],"capabilities":{"net":{"allow_hosts":[%q]}},"secrets":{"T":{"value":"wide-open"}}}`, host))
 	n.mustExec(id, fmt.Sprintf(`net.get(url=%q, headers={"X-Token":"{{secrets.T}}"})`, srv.URL))
 	if echoTok != "wide-open" {
 		t.Fatalf("header: %q", echoTok)

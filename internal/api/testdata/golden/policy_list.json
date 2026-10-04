@@ -3,11 +3,20 @@
     "policies": [
       {
         "created_at": "\u003cts\u003e",
+        "default": false,
         "id": "\u003cid:pol\u003e",
+        "kind": "rego",
         "name": "p",
         "rego": "package calcside.hooks\ndeny contains \"x\" if { input.op == \"read\" }",
         "updated_at": "\u003cts\u003e",
         "user_id": "\u003cid:usr\u003e"
+      },
+      {
+        "default": true,
+        "description": "Block private, loopback, link-local and reserved IP addresses, including DNS results and redirect targets. Server CIDR exemptions still apply.",
+        "id": "builtin.block_private_network",
+        "kind": "builtin",
+        "name": "builtin.block_private_network"
       }
     ]
   },

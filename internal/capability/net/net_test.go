@@ -3,21 +3,24 @@ package net
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	gonet "net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"calcside/internal/capability"
 	"calcside/internal/hostmatch"
+	"calcside/internal/runtime"
 	"calcside/internal/types"
 )
 
 func newClient(t *testing.T, cfg Config) *client {
 	f := factory{}
-	v, err := f.Validate(mustJSON(t, cfg), capability.ServerLimits{NetAllowPrivate: true})
+	v, err := f.Validate(mustJSON(t, cfg), capability.ServerLimits{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +85,7 @@ func TestLocalhostResolvingToLoopbackBlocked(t *testing.T) {
 	// "localhost" is a domain name resolving to 127.0.0.1 — must be refused
 	// by the pinning dialer even though allowlisted.
 	c := newClient(t, Config{AllowHosts: []string{"localhost:80"}})
+	c.allowPrivate = false
 	_, err := c.do(context.Background(), "GET", "http://localhost/", "", nil, "")
 	if err == nil {
 		t.Fatal("expected SSRF block for localhost")
@@ -168,7 +172,7 @@ func TestEmptyAllowlistAllowsAny(t *testing.T) {
 
 func TestEmptyAllowlistStillBlocksPrivateIPs(t *testing.T) {
 	// Empty allow_hosts opens the host check but the SSRF dialer still
-	// refuses private/reserved addresses without --net-allow-private.
+	// refuses private/reserved addresses when the built-in policy is selected.
 	c := &client{cfg: Config{Methods: []types.HTTPMethod{types.MethodGet}}, allowPrivate: false}
 	c.hc = c.newHTTPClient()
 	for _, u := range []string{"http://127.0.0.1:8080/", "http://localhost/"} {
@@ -241,29 +245,36 @@ func TestAllowCIDRs(t *testing.T) {
 		}
 	}
 
-	// The IP-literal allow_hosts Validate check also honors the CIDR.
+	// The IP-literal allow_hosts Validate check defers address policy to dialing.
 	f := factory{}
 	b, _ := json.Marshal(Config{AllowHosts: []string{"127.0.0.1:" + port}})
 	if _, err := f.Validate(b, capability.ServerLimits{NetAllowCIDRs: cidrs}); err != nil {
 		t.Fatalf("literal in allowed CIDR should validate: %v", err)
 	}
-	if _, err := f.Validate(b, capability.ServerLimits{}); err == nil {
-		t.Fatal("literal outside allowed CIDRs should still be rejected")
+	if _, err := f.Validate(b, capability.ServerLimits{}); err != nil {
+		t.Fatalf("address policy should run at dial time: %v", err)
 	}
 }
 
-func TestIPLiteralBlockedWhenPrivateNotAllowed(t *testing.T) {
+func TestIPLiteralPolicyRunsAtDialTime(t *testing.T) {
 	f := factory{}
 	for _, host := range []string{"127.0.0.1:8080", "169.254.169.254", "10.0.0.1", "[::1]"} {
 		_, err := f.Validate(mustJSON(t, Config{AllowHosts: []string{host}}), capability.ServerLimits{})
-		if err == nil {
-			t.Errorf("expected rejection of %q without NetAllowPrivate", host)
+		if err != nil {
+			t.Fatalf("validate %q: %v", host, err)
+		}
+		c := &client{cfg: Config{Methods: []types.HTTPMethod{types.MethodGet}}}
+		c.hc = c.newHTTPClient()
+		_, err = c.do(context.Background(), "GET", "http://"+host, "", nil, "")
+		var denied *capability.DeniedError
+		if !errors.As(err, &denied) {
+			t.Fatalf("expected policy denial for %q, got %v", host, err)
 		}
 	}
 	// and accepted when allowed
-	_, err := f.Validate(mustJSON(t, Config{AllowHosts: []string{"127.0.0.1:8080"}}), capability.ServerLimits{NetAllowPrivate: true})
+	_, err := f.Validate(mustJSON(t, Config{AllowHosts: []string{"127.0.0.1:8080"}}), capability.ServerLimits{})
 	if err != nil {
-		t.Fatalf("127.0.0.1 should be allowed with NetAllowPrivate: %v", err)
+		t.Fatalf("127.0.0.1 should validate regardless of selected policies: %v", err)
 	}
 }
 
@@ -293,5 +304,99 @@ func TestPrompt(t *testing.T) {
 		if !strings.Contains(p, want) {
 			t.Fatalf("missing %q in:\n%s", want, p)
 		}
+	}
+}
+
+func TestUnselectedNetworkPolicyAllowsDNSLoopback(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") }))
+	defer ts.Close()
+	_, port := hostPort(ts)
+	c := newClient(t, Config{})
+	defer c.hc.CloseIdleConnections()
+	r, err := c.do(context.Background(), "GET", "http://localhost:"+port, "", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Body != "ok" {
+		t.Fatalf("body: %q", r.Body)
+	}
+}
+
+func TestNetworkPolicyChecksAllDNSResults(t *testing.T) {
+	for _, ips := range [][]gonet.IPAddr{
+		{{IP: gonet.ParseIP("8.8.8.8")}, {IP: gonet.ParseIP("127.0.0.1")}},
+		{{IP: gonet.ParseIP("::1")}, {IP: gonet.ParseIP("8.8.8.8")}},
+		{{IP: gonet.ParseIP("::ffff:10.0.0.1")}},
+	} {
+		c := &client{}
+		var denied *capability.DeniedError
+		if err := c.checkAddresses("test.example", ips); !errors.As(err, &denied) || !strings.Contains(denied.Reason, runtime.BlockPrivateNetworkPolicy) {
+			t.Fatalf("DNS results %v: %v", ips, err)
+		}
+		c.allowPrivate = true
+		if err := c.checkAddresses("test.example", ips); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := (&client{}).checkAddresses("public.example", []gonet.IPAddr{{IP: gonet.ParseIP("8.8.8.8")}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNetworkPolicyChecksRedirectAddresses(t *testing.T) {
+	var hits int
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits++; fmt.Fprint(w, "ok") }))
+	defer target.Close()
+	_, port := hostPort(target)
+	_, exempt, _ := gonet.ParseCIDR("127.0.0.1/32")
+	for _, destination := range []string{"http://127.0.0.2:" + port, "http://redirect.invalid:" + port} {
+		start := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, destination, http.StatusFound) }))
+		c := newClient(t, Config{})
+		c.allowPrivate, c.allowCIDRs = false, []*gonet.IPNet{exempt}
+		c.resolve = func(context.Context, string) ([]gonet.IPAddr, error) {
+			return []gonet.IPAddr{{IP: gonet.ParseIP("127.0.0.2")}}, nil
+		}
+		c.hc = c.newHTTPClient()
+		_, err := c.do(context.Background(), "GET", start.URL, "", nil, "")
+		var denied *capability.DeniedError
+		if !errors.As(err, &denied) {
+			t.Fatalf("redirect %s: want policy denial, got %v", destination, err)
+		}
+		c.hc.CloseIdleConnections()
+		start.Close()
+	}
+	if hits != 0 {
+		t.Fatalf("blocked redirect reached target %d times", hits)
+	}
+}
+
+func TestNetworkPolicyRechecksDNSAndPinsConnections(t *testing.T) {
+	var hits, lookups atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Connection", "close")
+		fmt.Fprint(w, "ok")
+	}))
+	defer target.Close()
+	_, port := hostPort(target)
+	_, exempt, _ := gonet.ParseCIDR("127.0.0.1/32")
+	c := &client{cfg: Config{Methods: []types.HTTPMethod{types.MethodGet}}, allowCIDRs: []*gonet.IPNet{exempt}}
+	c.resolve = func(context.Context, string) ([]gonet.IPAddr, error) {
+		ip := "127.0.0.1"
+		if lookups.Add(1) > 1 {
+			ip = "10.0.0.1"
+		}
+		return []gonet.IPAddr{{IP: gonet.ParseIP(ip)}}, nil
+	}
+	c.hc = c.newHTTPClient()
+	defer c.hc.CloseIdleConnections()
+	url := "http://rebind.invalid:" + port
+	if _, err := c.do(context.Background(), "GET", url, "", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	_, err := c.do(context.Background(), "GET", url, "", nil, "")
+	var denied *capability.DeniedError
+	if !errors.As(err, &denied) || hits.Load() != 1 || lookups.Load() != 2 {
+		t.Fatalf("rebinding: hits=%d lookups=%d err=%v", hits.Load(), lookups.Load(), err)
 	}
 }

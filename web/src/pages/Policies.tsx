@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { api, Policy } from '../api'
-import { Button, EmptyRow, Field, Modal, PageHeader, fmtTime, inputCls } from '../components/ui'
+import { Button, EmptyRow, Field, Modal, PageHeader, fmtTime, inputCls, Tag } from '../components/ui'
 import { cmTheme } from '../components/codemirror'
 import { useRegoEditor } from '../components/editor'
 
@@ -20,7 +20,7 @@ Example — deny fs reads under /work/secrets:
       msg := sprintf("path %q is forbidden", [input.args.path])
   }`
 
-const nameRe = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/
+const nameRe = /^(?!builtin\.)[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/
 
 function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () => void }) {
   const qc = useQueryClient()
@@ -67,7 +67,7 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
           <Field label="Name (referenced by spec.policies)">
             <input className={inputCls + ' font-mono'} value={name} onChange={(e) => setName(e.target.value)} placeholder="deny_net_hosts" />
           </Field>
-          {name && !nameRe.test(name) && <p className="text-xs text-danger">letters, digits, _ . - (max 64), starting with a letter or digit</p>}
+          {name && !nameRe.test(name) && <p className="text-xs text-danger">letters, digits, _ . - (max 64), starting with a letter or digit; builtin. is reserved</p>}
           <div className="border border-ink">
             <div className="flex items-center gap-3 border-b border-ink px-3 py-1.5">
               <span className="eyebrow">Rego</span>
@@ -128,25 +128,32 @@ export default function Policies() {
     <div>
       <PageHeader index="02" section="Governance" title="Policies"
         actions={<Button variant="primary" onClick={() => setShowNew(true)}>New policy</Button>}>
-        Your policy library: Rego hooks evaluated before and after every capability call; any deny vetoes the op. A policy applies only to instances that select it at creation (spec.policies), and is snapshotted then — edits affect instances created afterwards. Server policies (--policy-dir) always apply.
+        Built-in and Rego policies share one selection list at instance creation (spec.policies). Built-in policies run native runtime checks and are read-only; default policies are preselected, not mandatory. Rego policies are snapshotted at creation. Server policies (--policy-dir) always apply.
       </PageHeader>
       <div className="tbl-wrap">
         <table className="tbl">
           <thead>
-            <tr><th>Name</th><th>Updated</th><th /></tr>
+            <tr><th>Name</th><th>Type</th><th>Updated</th><th /></tr>
           </thead>
           <tbody>
             {(data?.policies ?? []).map((p) => (
               <tr key={p.id} className="row-hover">
-                <td className="font-mono font-medium text-ink">{p.name}</td>
-                <td className="whitespace-nowrap text-xs text-sec">{fmtTime(p.updated_at)}</td>
+                <td>
+                  <span className="font-mono font-medium text-ink">{p.name}</span>
+                  {p.default && <span className="ml-2"><Tag>Default</Tag></span>}
+                  {p.description && <p className="mt-1 max-w-xl text-xs text-mute">{p.description}</p>}
+                </td>
+                <td><Tag>{p.kind === 'builtin' ? 'Built-in' : 'Rego'}</Tag></td>
+                <td className="whitespace-nowrap text-xs text-sec">{p.updated_at ? fmtTime(p.updated_at) : '—'}</td>
                 <td className="space-x-2 whitespace-nowrap text-right">
-                  <Button size="sm" onClick={() => setEditing(p)}>Edit</Button>
-                  <Button variant="danger" size="sm" onClick={() => del.mutate(p.id)}>Delete</Button>
+                  {p.kind === 'builtin' ? <span className="text-xs text-mute">Read-only</span> : <>
+                    <Button size="sm" onClick={() => setEditing(p)}>Edit</Button>
+                    <Button variant="danger" size="sm" onClick={() => del.mutate(p.id)}>Delete</Button>
+                  </>}
                 </td>
               </tr>
             ))}
-            {data && data.policies.length === 0 && <EmptyRow cols={3}>no policies</EmptyRow>}
+            {data && data.policies.length === 0 && <EmptyRow cols={4}>no policies</EmptyRow>}
           </tbody>
         </table>
       </div>
