@@ -188,3 +188,22 @@ func TestInspect(t *testing.T) {
 		t.Fatalf("expected ErrNotOwner, got %v", err)
 	}
 }
+
+func TestInspectRedactsBeforeTruncating(t *testing.T) {
+	now := time.Now()
+	n := newNode(t, Options{Limits: defaultLimits()}, &now)
+	id := n.mustCreate(`{"capabilities":{},"secrets":{"TOK":{"value":"s3cr3t"}}}`)
+	n.mustExec(id, `x = "a" * 8190 + "s3cr3t"
+y = "s3cr3t" + "a" * (1 << 20)`)
+	resp, err := n.m.Inspect(context.Background(), &runtime.InspectRequest{InstanceID: id, Owner: n.owner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := truncate(`"`+strings.Repeat("a", 8190)+`[REDACTED:TOK]"`, maxInspectValueBytes)
+	if resp.Variables["x"] != want {
+		t.Fatal("inspection truncated a value before redacting its secret")
+	}
+	if resp.Variables["y"] != "<value omitted: inspection limit>" {
+		t.Fatal("oversized value should be omitted without exposing a secret prefix")
+	}
+}

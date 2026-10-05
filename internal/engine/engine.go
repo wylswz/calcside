@@ -23,6 +23,7 @@ import (
 	"go.starlark.net/lib/math"
 	"go.starlark.net/resolve"
 	"go.starlark.net/starlark"
+	"go.starlark.net/starlarkstruct"
 	"go.starlark.net/syntax"
 
 	"calcside/internal/capability"
@@ -74,11 +75,87 @@ func (s *Session) Inspect(ctx context.Context) *InspectResult {
 	defer s.ExecMu.Unlock()
 	vars := map[string]string{}
 	for varName, g := range s.Globals {
-		vars[varName] = g.String()
+		if inspectBudget(g, maxInspectWork, 64) < 0 {
+			vars[varName] = "<value omitted: inspection limit>"
+		} else {
+			vars[varName] = g.String()
+		}
 	}
 	return &InspectResult{
 		Variables: vars,
 	}
+}
+
+const maxInspectWork = 64 << 10
+
+var (
+	maxInspectInt = starlark.MakeInt(1).Lsh(maxInspectWork)
+	minInspectInt = starlark.MakeInt(-1).Lsh(maxInspectWork)
+)
+
+func inspectBudget(v starlark.Value, budget, depth int) int {
+	budget -= 32
+	if budget < 0 || depth == 0 {
+		return -1
+	}
+	text := ""
+	switch v := v.(type) {
+	case starlark.String:
+		text = string(v)
+	case starlark.Bytes:
+		text = string(v)
+	case starlark.Int:
+		if _, ok := v.Int64(); !ok {
+			hi, _ := v.Cmp(maxInspectInt, 0)
+			lo, _ := v.Cmp(minInspectInt, 0)
+			if hi >= 0 || lo <= 0 {
+				return -1
+			}
+			budget -= v.BigInt().BitLen()
+		}
+	case starlark.NoneType, starlark.Bool, starlark.Float, secretsStruct:
+	case *starlark.Function:
+		text = v.Name()
+	case *starlark.Builtin:
+		text = v.Name()
+		if recv := v.Receiver(); recv != nil {
+			budget -= len(recv.Type())
+		}
+	case *starlarkstruct.Module:
+		text = v.Name
+	case *starlarkstruct.Struct:
+		budget = inspectBudget(v.Constructor(), budget, depth-1)
+		for name, value := range v.Entries() {
+			budget = inspectBudget(value, budget-len(name), depth-1)
+			if budget < 0 {
+				return -1
+			}
+		}
+	case *starlark.Dict:
+		for key, value := range v.Entries() {
+			budget = inspectBudget(key, budget, depth-1)
+			budget = inspectBudget(value, budget, depth-1)
+			if budget < 0 {
+				return -1
+			}
+		}
+	case *starlark.List, starlark.Tuple, *starlark.Set:
+		iter := v.(starlark.Iterable).Iterate()
+		defer iter.Done()
+		var elem starlark.Value
+		for iter.Next(&elem) {
+			budget = inspectBudget(elem, budget, depth-1)
+			if budget < 0 {
+				return -1
+			}
+		}
+	default:
+		return -1
+	}
+	if budget < 0 || len(text) > budget/4 {
+		return -1
+	}
+	return budget - 4*len(text)
 }
 
 // Close revokes the gate and releases capability resources.

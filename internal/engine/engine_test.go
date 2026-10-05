@@ -8,6 +8,7 @@ import (
 
 	starjson "go.starlark.net/lib/json"
 	"go.starlark.net/starlark"
+	"go.starlark.net/starlarkstruct"
 
 	"calcside/internal/capability"
 	capfs "calcside/internal/capability/fs"
@@ -242,5 +243,106 @@ func TestNewSessionUnknownCapability(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "unknown capability nope") {
 		t.Fatalf("want unknown capability error, got %v", err)
+	}
+}
+
+func TestInspectLargeValues(t *testing.T) {
+	large := starlark.String(strings.Repeat("a", 1<<20))
+	dict := starlark.NewDict(1)
+	if err := dict.SetKey(starlark.String("x"), large); err != nil {
+		t.Fatal(err)
+	}
+	set := starlark.NewSet(1)
+	if err := set.Insert(large); err != nil {
+		t.Fatal(err)
+	}
+	keyDict := starlark.NewDict(1)
+	if err := keyDict.SetKey(large, starlark.None); err != nil {
+		t.Fatal(err)
+	}
+	wide := starlark.NewList(nil)
+	for range 8192 {
+		if err := wide.Append(starlark.None); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cycle := starlark.NewList(nil)
+	if err := cycle.Append(cycle); err != nil {
+		t.Fatal(err)
+	}
+	var deep starlark.Value = starlark.None
+	for range 100 {
+		deep = starlark.Tuple{deep}
+	}
+	var shared starlark.Value = starlark.None
+	for range 16 {
+		shared = starlark.Tuple{shared, shared}
+	}
+	for name, value := range map[string]starlark.Value{
+		"string":             large,
+		"bytes":              starlark.Bytes(large),
+		"list":               starlark.NewList([]starlark.Value{large}),
+		"tuple":              starlark.Tuple{large},
+		"dict":               dict,
+		"set":                set,
+		"struct":             starlarkstruct.FromStringDict(starlark.String("struct"), starlark.StringDict{"x": large}),
+		"struct constructor": starlarkstruct.FromStringDict(large, nil),
+		"struct field name":  starlarkstruct.FromStringDict(starlark.String("struct"), starlark.StringDict{string(large): starlark.None}),
+		"module":             &starlarkstruct.Module{Name: string(large)},
+		"dict key":           keyDict,
+		"int":                starlark.MakeInt(1).Lsh(maxInspectWork + 1),
+		"negative int":       starlark.MakeInt(-1).Lsh(maxInspectWork + 1),
+		"wide":               wide,
+		"deep":               deep,
+		"shared":             shared,
+		"cycle":              cycle,
+		"opaque":             opaqueCompletionValue{starlark.String("private")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := &Session{Globals: starlark.StringDict{"x": value}}
+			got := s.Inspect(context.Background()).Variables["x"]
+			if got != "<value omitted: inspection limit>" {
+				t.Fatalf("large value was not omitted: rendered %d bytes", len(got))
+			}
+		})
+	}
+}
+
+func TestInspectSmallValues(t *testing.T) {
+	s, buf := newSession(t, nil, 1<<20)
+	res := New(1).Exec(context.Background(), s, "inspect", `
+x = "hello\nworld"
+y = [1, True, None, (2,), {"k": 3.5}]
+z = 1 << 100
+f = len
+m = json
+b = b"hello"
+method = ("x" * (1 << 20)).upper
+def fn(x):
+  return x
+`, 0, 1<<20, buf.String)
+	if res.Error != nil {
+		t.Fatal(res.Error)
+	}
+	s.Globals["struct"] = starlarkstruct.FromStringDict(starlark.String("struct"), starlark.StringDict{"x": starlark.String("small")})
+	s.Globals["set"] = starlark.NewSet(0)
+	s.Globals["escaped"] = starlark.String(strings.Repeat("\x00", (maxInspectWork-32)/4))
+	got := s.Inspect(context.Background()).Variables
+	for name, value := range s.Globals {
+		if got[name] != value.String() {
+			t.Errorf("%s = %q, want %q", name, got[name], value.String())
+		}
+	}
+}
+
+func TestInspectAllocations(t *testing.T) {
+	s := &Session{Globals: starlark.StringDict{"x": starlark.String(strings.Repeat("a", 1<<20))}}
+	result := testing.Benchmark(func(b *testing.B) {
+		for b.Loop() {
+			s.Inspect(context.Background())
+		}
+	})
+	if got := result.AllocedBytesPerOp(); got > 64<<10 {
+		t.Fatalf("inspect allocated %d bytes for an omitted value, want at most 64 KiB", got)
 	}
 }
