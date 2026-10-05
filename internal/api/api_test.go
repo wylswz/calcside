@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"calcside/internal/artifact"
 	"calcside/internal/audit"
 	"calcside/internal/auth"
 	"calcside/internal/capability"
@@ -69,6 +70,10 @@ func newEnvWith(t *testing.T, cipher *secrets.Cipher) *env {
 }
 
 func newEnvWithPolicies(t *testing.T, cipher *secrets.Cipher, global map[string]string) *env {
+	return newArtifactEnv(t, cipher, global, artifact.Config{})
+}
+
+func newArtifactEnv(t *testing.T, cipher *secrets.Cipher, global map[string]string, cfg artifact.Config) *env {
 	t.Helper()
 	st, err := store.Open(context.Background(), "sqlite", storetest.SQLite(t))
 	if err != nil {
@@ -100,17 +105,23 @@ func newEnvWithPolicies(t *testing.T, cipher *secrets.Cipher, global map[string]
 		EvalTimeout: time.Second, ReapInterval: time.Hour,
 	})
 	e.mgr = mgr
+	t.Cleanup(mgr.StopReaper)
 	vaultSvc := vault.New(st, cipher)
 	e.sbx = sandbox.New(sandbox.Options{
 		Store: st, Runtime: mgr, Secrets: vaultSvc, Audit: rec,
 		Registry: reg, Limits: limits, MaxInstancesPerUser: 10, GlobalPolicies: global,
 	})
+	previews, err := NewArtifactPreviews(cfg, e.sbx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(previews.Close)
 	svc := auth.NewService(st, false)
 	h := Handler(Deps{
 		IAM: iam.New(st, nil), Vault: vaultSvc,
 		Policy: policysvc.New(st), Audit: auditsvc.New(st),
 		Catalog: catalog.New(reg), Sandbox: e.sbx,
-		Auth: svc,
+		Auth: svc, Previews: previews,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)

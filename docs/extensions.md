@@ -6,6 +6,18 @@ Extensions run *inside* the instance's Gate: every op call is a gated `ext` op, 
 
 ## Layout
 
+Community extensions live under `contrib/`; Tavily is bundled in `contrib/tavily`.
+Development uses this root by default. Container images include it at
+`/opt/calcside/contrib`, alongside operator-managed `/data/ext`; Compose mounts
+`contrib` read-only on the API, while workers resolve local trees through the API.
+
+An optional `icon: icon.png` manifest field refers to a regular PNG within the
+extension tree (32 KiB, at most 256 by 256 pixels). External URLs and traversal
+are rejected. Catalog icons are decoded/re-encoded and served by authenticated
+content-addressed endpoints; missing or invalid image bytes use the UI fallback.
+The bundled Tavily icon is a project-authored monogram. Existing custom manifests
+without icons remain valid; saved specs using the old example path need updating.
+
 ```
 myext/
 ├── capability.yaml    # manifest (required)
@@ -142,7 +154,7 @@ From the repository root, run `make build` once for the embedded console. Save t
 
 ```bash
 # serve with local sources enabled
-make serve-dev DEV_EXT_ROOTS="$(pwd)/examples/capabilities"
+make serve-dev DEV_EXT_ROOTS="$(pwd)/contrib"
 
 # check discovery
 curl -fsS http://127.0.0.1:8787/api/v1/extensions | jq .

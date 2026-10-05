@@ -290,3 +290,17 @@ func respOf[Resp any](ok *Resp, def *gen.Error, hresp *http.Response) (*Resp, er
 	}
 	return nil, fmt.Errorf("remote: worker returned %s", hresp.Status)
 }
+
+func (c *Client) Export(ctx context.Context, req *runtime.ExportRequest) (*runtime.ExportResponse, error) {
+	return retryOnStaleRoute(c, ctx, req.InstanceID, func() (*runtime.ExportResponse, error) {
+		rt, err := c.routed(ctx, req.InstanceID)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := c.forNode(rt.addr).RuntimeExportWithResponse(ctx, *req)
+		if err != nil {
+			return nil, err
+		}
+		return respOf(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
+	})
+}

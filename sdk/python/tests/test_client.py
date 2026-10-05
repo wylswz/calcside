@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 import yaml
@@ -160,3 +162,56 @@ def test_network_policy_selection(server, selection):
                 assert r.output == "200\n"
         finally:
             c.delete_instance(inst["id"])
+
+
+def test_artifacts(server):
+    with Client(base_url=server) as c:
+        instance = c.create_instance({"capabilities": {"fs": {}}})
+        iid = instance["id"]
+        try:
+            result = c.exec(
+                iid, 'fs.write("reports/结果.csv", "id,value\\r\\nA,001\\r\\n")'
+            )
+            assert result.error is None
+            preview = c.preview_artifact(iid, "reports/结果.csv")
+            assert preview["kind"] == "csv"
+            assert preview["csv_rows"][1] == ["A", "001"]
+            download = c.download_file(iid, "reports/结果.csv")
+            assert download.filename == "结果.csv"
+            assert download.content == b"id,value\r\nA,001\r\n"
+            assert download.file_count == 1
+            assert download.redacted is False
+            archive = c.export_files(iid, ["reports"])
+            with ZipFile(BytesIO(archive.content)) as zipped:
+                assert zipped.read("reports/结果.csv") == download.content
+            with pytest.raises(CalcsideError):
+                c.export_files(iid, ["reports", "missing.txt"])
+        finally:
+            c.delete_instance(iid)
+        with pytest.raises(CalcsideError):
+            c.download_file(iid, "reports/结果.csv")
+
+
+def test_async_artifacts(server):
+    import asyncio
+
+    from calcside import AsyncClient
+
+    async def scenario():
+        async with AsyncClient(base_url=server) as c:
+            instance = await c.create_instance({"capabilities": {"fs": {}}})
+            iid = instance["id"]
+            try:
+                result = await c.exec(iid, 'fs.write("report.txt", "hello")')
+                assert result.error is None
+                assert (await c.preview_artifact(iid, "report.txt"))[
+                    "source"
+                ] == "hello"
+                assert (await c.download_file(iid, "report.txt")).content == b"hello"
+                archive = await c.export_files(iid, ["report.txt"])
+                with ZipFile(BytesIO(archive.content)) as zipped:
+                    assert zipped.read("report.txt") == b"hello"
+            finally:
+                await c.delete_instance(iid)
+
+    asyncio.run(scenario())

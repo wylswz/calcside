@@ -69,8 +69,10 @@ type inst struct {
 	secrets *secrets.Set
 	sink    *auditSink
 
-	mu        sync.Mutex // guards expiresAt and execLog
-	expiresAt time.Time
+	requestMu  sync.Mutex
+	artifactMu sync.Mutex
+	mu         sync.Mutex // guards expiresAt and execLog
+	expiresAt  time.Time
 	// epoch is the fencing token of the binding this instance was
 	// created under; a request carrying any other epoch is rejected.
 	epoch int64
@@ -229,6 +231,7 @@ func (m *Manager) Create(ctx context.Context, req *runtime.CreateRequest) (*runt
 
 	sink := &auditSink{}
 	sess, err := engine.NewSession(engine.SessionDeps{
+		Context:  ctx,
 		Registry: m.reg,
 		Limits:   m.limits,
 		Hooks:    []capability.Hook{hook},
@@ -343,6 +346,13 @@ func (m *Manager) Exec(ctx context.Context, req *runtime.ExecRequest) (*runtime.
 }
 
 func (m *Manager) exec(ctx context.Context, req *runtime.ExecRequest, in *inst) (*runtime.ExecResponse, error) {
+	if err := in.lockRequest(ctx); err != nil {
+		return nil, err
+	}
+	defer in.requestMu.Unlock()
+	if _, err := m.live(req.InstanceID, req.Owner, req.Epoch); err != nil {
+		return nil, err
+	}
 	timeout := time.Duration(in.spec.Limits.ExecTimeoutMs) * time.Millisecond
 	if req.TimeoutMs > 0 {
 		d := time.Duration(req.TimeoutMs) * time.Millisecond
@@ -512,6 +522,9 @@ func (m *Manager) Delete(ctx context.Context, req *runtime.DeleteRequest) (*runt
 }
 
 func (m *Manager) end(ctx context.Context, in *inst) {
+	in.sess.Gate.Revoke()
+	in.artifactMu.Lock()
+	defer in.artifactMu.Unlock()
 	in.sess.Close()
 	if in.secrets != nil {
 		in.secrets.Wipe()
@@ -548,4 +561,25 @@ func (m *Manager) Count() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.insts)
+}
+
+func (in *inst) lockRequest(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if in.requestMu.TryLock() {
+		return nil
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if in.requestMu.TryLock() {
+				return nil
+			}
+		}
+	}
 }

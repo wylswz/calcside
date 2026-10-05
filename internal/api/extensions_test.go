@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"image/png"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +28,7 @@ import (
 )
 
 // TestListExtensions checks the catalog endpoint: unauth → 401, authed →
-// the examples/capabilities tavily entry.
+// the contrib tavily entry.
 func TestListExtensions(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.Open(ctx, "sqlite", storetest.SQLite(t))
@@ -36,7 +39,7 @@ func TestListExtensions(t *testing.T) {
 	reg := capability.NewRegistry()
 	reg.Register(capio.Factory())
 	reg.Register(capext.Factory(capext.Options{
-		LocalRoots: []string{filepath.Join("..", "..", "examples", "capabilities")},
+		LocalRoots: []string{filepath.Join("..", "..", "contrib")},
 		CacheDir:   t.TempDir(),
 	}))
 	limits := capability.ServerLimits{
@@ -66,7 +69,8 @@ func TestListExtensions(t *testing.T) {
 	if code != 401 {
 		t.Fatalf("unauth: %d %v", code, m)
 	}
-	code, m, _ = e.req("GET", "/api/v1/extensions", "", nil, login(e, "a@x.com"))
+	cookies := login(e, "a@x.com")
+	code, m, _ = e.req("GET", "/api/v1/extensions", "", nil, cookies)
 	if code != 200 {
 		t.Fatalf("list: %d %v", code, m)
 	}
@@ -80,6 +84,31 @@ func TestListExtensions(t *testing.T) {
 	ex := exts[0].(map[string]any)
 	if ex["name"] != "tavily" || ex["version"] != "0.1.0" {
 		t.Fatalf("entry: %v", ex)
+	}
+	icon, _ := ex["icon_url"].(string)
+	if !strings.HasPrefix(icon, "/api/v1/extensions/icons/") {
+		t.Fatalf("missing packaged icon URL: %v", ex)
+	}
+	if code, _, _ := e.req("GET", icon, "", nil, nil); code != 401 {
+		t.Fatalf("unauth icon: %d", code)
+	}
+	req, err := http.NewRequest("GET", srv.URL+icon, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "image/png" || resp.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("icon response: %d %v", resp.StatusCode, resp.Header)
+	}
+	if _, err := png.Decode(resp.Body); err != nil {
+		t.Fatal(err)
 	}
 	if deps, _ := ex["dependencies"].([]any); len(deps) != 1 || deps[0] != "net" {
 		t.Fatalf("deps: %v", ex["dependencies"])

@@ -36,7 +36,7 @@ func TestMain(m *testing.M) {
 func testConfig(t *testing.T) config.Config {
 	t.Helper()
 	return config.Config{
-		Addr: "127.0.0.1:0", AddrExplicit: true, Dev: true,
+		Addr: "127.0.0.1:0", AddrExplicit: true, Dev: true, ConsoleOrigin: "http://localhost:8080",
 		Store: types.DriverSQLite, DSN: storetest.SQLite(t), NodeID: "api-test",
 		DefaultTTL: time.Minute, MaxTTL: time.Hour, MaxExecTimeout: time.Minute,
 		MaxConcurrentExecs: 2, ReaperInterval: time.Hour, PolicyEvalTimeout: time.Second,
@@ -479,4 +479,29 @@ func TestProfilePasswordChange(t *testing.T) {
 	login(cfg.AdminPassword, 401)
 	fresh := login("changed-password", 200)
 	send("GET", "/api/v1/me", "", fresh, nil, 200)
+}
+
+func TestArtifactsUseConsoleOrigin(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.ConsoleOrigin = "https://console.example.com"
+	cfg.ArtifactPreviewBaseURL = "https://reports.example.net"
+	app, cleanup, err := initializeApp(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	h := app.Server.Handler
+	created := request(t, h, "POST", "/api/v1/instances", `{"capabilities":{"fs":{}}}`, http.StatusCreated)
+	id := created["instance"].(map[string]any)["id"].(string)
+	request(t, h, "POST", "/api/v1/instances/"+id+"/exec", `{"code":"fs.write(\"report.html\", \"<h1>Report</h1>\")"}`, http.StatusOK)
+	preview := request(t, h, "POST", "/api/v1/instances/"+id+"/artifacts/preview", `{"path":"report.html","mode":"static"}`, http.StatusOK)
+	r := httptest.NewRequest("GET", preview["preview_url"].(string), nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK || !strings.HasSuffix(r.URL.Hostname(), ".reports.example.net") {
+		t.Fatalf("isolated preview unavailable: %d", w.Code)
+	}
+	if !strings.Contains(w.Header().Get("Content-Security-Policy"), "frame-ancestors "+cfg.ConsoleOrigin) {
+		t.Fatal("preview CSP did not use the console origin")
+	}
 }

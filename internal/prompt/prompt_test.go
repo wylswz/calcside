@@ -82,3 +82,15 @@ func TestRenderToolPrefixApplied(t *testing.T) {
 		t.Fatal("default prefix leaked")
 	}
 }
+
+func TestUtilityPrompt(t *testing.T) {
+	out, err := Render(Input{InstanceID: "utilities"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"url.parse", "csv.parse_dicts", "base64.encode", "hashlib.sha256", "regex.search", "datetime.parse_date"} {
+		if !strings.Contains(out, name) {
+			t.Errorf("missing utility %s", name)
+		}
+	}
+}

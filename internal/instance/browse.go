@@ -26,6 +26,10 @@ func (m *Manager) Browse(ctx context.Context, req *runtime.BrowseRequest) (*runt
 	if err != nil {
 		return nil, err
 	}
+	if err := in.lockRequest(ctx); err != nil {
+		return nil, err
+	}
+	defer in.requestMu.Unlock()
 	var stat capfs.Entry
 	var listing []capfs.Entry
 	var content string

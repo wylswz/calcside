@@ -5,6 +5,15 @@
 - **Area:** Starlark environment, extension loader, completion metadata, agent prompt
 - **Related:** [EP-0003](0003-community-extensions.md), [EP-0005](0005-instance-file-uploads.md), [EP-0006](0006-pluggable-instance-vfs.md)
 
+## Implementation status
+
+The initial six modules (`url`, `csv`, `base64`, `hashlib`, `regex`, `datetime`)
+are implemented as bounded pure utilities, shared by scripts, extensions, prompt
+and completion metadata. The registry in `internal/stdlib` and repository README
+describe the shipped names, signatures and limits; design alternatives below are
+not additional implemented APIs. No I/O, host clock or new capability grants are
+introduced.
+
 ## Summary
 
 Provide a documented, deterministic standard library for common agent data

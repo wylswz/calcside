@@ -22,7 +22,7 @@ from langchain.agents import create_agent
 os.environ.setdefault("CALCSIDE_SERVER", "http://127.0.0.1:8787")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-TAVILY_SOURCE = REPO_ROOT / "examples" / "capabilities" / "tavily"
+TAVILY_SOURCE = REPO_ROOT / "contrib" / "tavily"
 TAVILY_HOSTS = ["api.tavily.com"]
 
 

@@ -87,6 +87,14 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		cleanup()
 		return nil, nil, err
 	}
+	artifactPreviews, cleanup5, err := provideArtifacts(cfg, sandboxService)
+	if err != nil {
+		cleanup4()
+		cleanup3()
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
 	deps := api.Deps{
 		IAM:       service,
 		Vault:     vaultService,
@@ -98,9 +106,11 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		Basic:     basicLogin,
 		Web:       fs,
 		Anonymous: user,
+		Previews:  artifactPreviews,
 	}
 	googleFlow, err := provideGoogle(ctx, cfg)
 	if err != nil {
+		cleanup5()
 		cleanup4()
 		cleanup3()
 		cleanup2()
@@ -113,6 +123,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		Sandbox: sandboxService,
 	}
 	return mainApplication, func() {
+		cleanup5()
 		cleanup4()
 		cleanup3()
 		cleanup2()

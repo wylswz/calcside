@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"calcside/internal/capability"
+	capfs "calcside/internal/capability/fs"
 	capio "calcside/internal/capability/io"
 	"calcside/internal/engine"
 	"calcside/internal/instance"
@@ -28,6 +29,7 @@ func newWorker(t *testing.T, key []byte) (addr string) {
 	t.Helper()
 	reg := capability.NewRegistry()
 	reg.Register(capio.Factory())
+	reg.Register(capfs.Factory())
 	mgr := instance.New(instance.Options{
 		Engine:   engine.New(8),
 		Registry: reg,
@@ -234,5 +236,42 @@ func TestRuntimeReceivesRequestContext(t *testing.T) {
 	cancel()
 	if !errors.Is(rt.ctx.Err(), context.Canceled) {
 		t.Fatal("request cancellation not propagated")
+	}
+}
+
+func TestRemoteArtifactExport(t *testing.T) {
+	addr := newWorker(t, testKey)
+	bindings := map[string]*placement.Binding{}
+	client := newClient(addr, bindings)
+	ctx := context.Background()
+	req := createReq("ins_artifact")
+	req.Spec = []byte(`{"capabilities":{"fs":{}}}`)
+	req.Policies = runtime.PolicyBundle{Global: map[string]string{"deny.rego": `package calcside.hooks
+deny contains "blocked" if { input.phase == "after"; input.op == "read"; input.args.path == "/work/denied.txt" }`}}
+	created, err := client.Create(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindings[req.InstanceID] = &placement.Binding{InstanceID: req.InstanceID, NodeID: created.NodeID, Epoch: created.Epoch}
+	result, err := client.Exec(ctx, &runtime.ExecRequest{InstanceID: req.InstanceID, Owner: req.Owner, Epoch: created.Epoch, ExecID: "write", Code: `fs.write("ok.csv", "a,b\r\n1,2\r\n"); fs.write("denied.txt", "private")`})
+	if err != nil || result.Result.Error != nil {
+		t.Fatal("write failed")
+	}
+	out, err := client.Export(ctx, &runtime.ExportRequest{InstanceID: req.InstanceID, Owner: req.Owner, Epoch: created.Epoch, Paths: []string{"ok.csv"}})
+	if err != nil || out.Error != nil || len(out.Files) != 1 || string(out.Files[0].Content) != "a,b\r\n1,2\r\n" {
+		t.Fatalf("round trip failed: %v", err)
+	}
+	out, err = client.Export(ctx, &runtime.ExportRequest{InstanceID: req.InstanceID, Owner: req.Owner, Epoch: created.Epoch, Paths: []string{"ok.csv", "denied.txt"}, Recursive: true})
+	if err != nil || out.Error == nil || len(out.Files) != 0 || len(out.Audit.Events) == 0 {
+		t.Fatal("failure or audit lost over HTTP")
+	}
+	denied := false
+	for _, event := range out.Audit.Events {
+		if event.Decision == "deny" && event.Phase == "after" {
+			denied = true
+		}
+	}
+	if !denied {
+		t.Fatal("after-denial was lost over HTTP")
 	}
 }

@@ -21,15 +21,15 @@ import (
 	"calcside/internal/types"
 )
 
-// examplesDir resolves the repo's examples/capabilities dir.
-func examplesDir(t *testing.T) string {
+// contribDir resolves the repo's contrib dir.
+func contribDir(t *testing.T) string {
 	t.Helper()
-	d, err := filepath.Abs(filepath.Join("..", "..", "examples", "capabilities"))
+	d, err := filepath.Abs(filepath.Join("..", "..", "contrib"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(d, "tavily", "capability.yaml")); err != nil {
-		t.Fatalf("examples dir: %v", err)
+		t.Fatalf("contrib dir: %v", err)
 	}
 	return d
 }
@@ -65,7 +65,7 @@ func TestExtEndToEnd(t *testing.T) {
 	defer srv.Close()
 	host := strings.TrimPrefix(srv.URL, "http://")
 
-	extDir := examplesDir(t)
+	extDir := contribDir(t)
 	n := extNode(t, []string{extDir})
 
 	spec := fmt.Sprintf(`{"policies":[],"capabilities":{
@@ -168,7 +168,7 @@ func TestExtSecretOverride(t *testing.T) {
 	defer srv.Close()
 	host := strings.TrimPrefix(srv.URL, "http://")
 
-	extDir := examplesDir(t)
+	extDir := contribDir(t)
 	n := extNode(t, []string{extDir})
 	spec := fmt.Sprintf(`{"policies":[],"capabilities":{
 		"net": {"allow_hosts": [%q]},
@@ -198,7 +198,7 @@ func TestExtSecretOverride(t *testing.T) {
 }
 
 func TestExtMissingSecretRef(t *testing.T) {
-	extDir := examplesDir(t)
+	extDir := contribDir(t)
 	n := extNode(t, []string{extDir})
 	spec := fmt.Sprintf(`{"policies":[],"capabilities":{
 		"net": {"allow_hosts": ["x.example"]},
@@ -211,7 +211,7 @@ func TestExtMissingSecretRef(t *testing.T) {
 }
 
 func TestExtMissingBaseDep(t *testing.T) {
-	extDir := examplesDir(t)
+	extDir := contribDir(t)
 	n := extNode(t, []string{extDir})
 	spec := fmt.Sprintf(`{"policies":[],"capabilities":{"ext":{"tavily":{"source":%q}}}}`,
 		filepath.Join(extDir, "tavily"))
@@ -222,7 +222,7 @@ func TestExtMissingBaseDep(t *testing.T) {
 }
 
 func TestExtNetAllowlistEnforced(t *testing.T) {
-	extDir := examplesDir(t)
+	extDir := contribDir(t)
 	n := extNode(t, []string{extDir})
 	spec := fmt.Sprintf(`{"policies":[],"capabilities":{
 		"net": {"allow_hosts": ["nowhere.example"]},

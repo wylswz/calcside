@@ -27,6 +27,9 @@ func parseManifest(data []byte) (*CapabilityManifest, error) {
 }
 
 func validateManifest(m *CapabilityManifest) error {
+	if m.Icon != "" && !validIconPath(m.Icon) {
+		return fmt.Errorf("ext: invalid icon path")
+	}
 	for _, d := range m.Dependencies {
 		// Extensions may only depend on base capabilities (net/fs/io) —
 		// never on other extensions.

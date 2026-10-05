@@ -15,12 +15,15 @@ const instance: InstanceContext = {
     { name: 'env', kind: 'variable' },
     { name: 'answer', kind: 'variable', detail: 'int' },
     { name: 'len', kind: 'function' },
+    { name: 'csv', kind: 'namespace' },
+    { name: 'csv.parse', kind: 'function', params: ['text', 'delimiter'], doc: 'Parse bounded CSV' },
     { name: 'ext.search.query', kind: 'function', params: ['q'] },
   ],
   env_keys: ['REGION', 'API_HOST'],
   truncated: false,
 }
 const metadata: EditorMetadata = {
+  utilities: [],
   rego: [
     { name: 'input', kind: 'namespace' },
     { name: 'input.args', kind: 'property' },
@@ -131,4 +134,9 @@ test('aborted completions do not request directories', async () => {
   Object.defineProperty(context, 'aborted', { get: () => true })
   assert.equal(await source(context), null)
   assert.equal(calls, 0)
+})
+
+test('utility completion uses runtime symbols and options', async () => {
+  assert.deepEqual((await complete(star, 'csv.'))?.options.map((o) => o.label), ['parse'])
+  assert.ok((await complete(star, 'csv.parse("a", '))?.options.some((o) => o.label === 'delimiter='))
 })

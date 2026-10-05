@@ -163,3 +163,11 @@ func envelopeFor(kind, msg string) gen.ErrorEnvelope {
 	e.Error.Message = msg
 	return e
 }
+
+func (s strict) RuntimeExport(ctx context.Context, req gen.RuntimeExportRequestObject) (gen.RuntimeExportResponseObject, error) {
+	resp, err := s.rt.Export(requestContext(ctx), req.Body)
+	if err != nil {
+		return gen.RuntimeExportdefaultJSONResponse{Body: envelope(err), StatusCode: statusOf(err)}, nil
+	}
+	return gen.RuntimeExport200JSONResponse(*resp), nil
+}

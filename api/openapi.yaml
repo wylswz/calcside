@@ -127,6 +127,23 @@ paths:
               schema:
                 $ref: '#/components/schemas/ExtensionCatalog'
         '401': { $ref: '#/components/responses/Error' }
+  /api/v1/extensions/icons/{icon_id}:
+    get:
+      operationId: extensionIcon
+      tags: [meta]
+      parameters:
+        - name: icon_id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        '200':
+          description: Validated packaged PNG icon
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
   /api/v1/keys:
     get:
       operationId: listKeys
@@ -302,6 +319,94 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
+  /api/v1/artifacts/config:
+    get:
+      operationId: artifactConfig
+      tags: [meta]
+      responses:
+        '200':
+          description: Artifact limits and enabled HTML preview modes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArtifactConfig' }
+        '401': { $ref: '#/components/responses/Error' }
+  /api/v1/instances/{id}/artifacts/preview:
+    post:
+      operationId: previewArtifact
+      tags: [instances]
+      description: Read and redact one bounded text file; optionally issue a short-lived isolated HTML snapshot URL.
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path: { type: string, minLength: 1, maxLength: 1024 }
+                mode: { type: string, enum: [source, static, interactive], default: source }
+      responses:
+        '200':
+          description: Bounded redacted source, CSV table, or isolated HTML snapshot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArtifactPreview' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /api/v1/instances/{id}/artifacts/export:
+    post:
+      operationId: exportArtifacts
+      tags: [instances]
+      description: >-
+        All-or-nothing export of authorized redacted UTF-8 files. ZIP accepts files
+        and directories and preserves paths relative to /work. No binary export,
+        persistence, partial archives, or implicit spreadsheet formula rewriting.
+        Successful preparation does not guarantee delivery to the client.
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paths, format]
+              properties:
+                paths:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: { type: string, minLength: 1, maxLength: 1024 }
+                format: { type: string, enum: [file, zip] }
+      responses:
+        '200':
+          description: Complete attachment prepared before response headers are written
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+            X-Calcside-Redacted:
+              schema: { type: boolean }
+            X-Calcside-File-Count:
+              schema: { type: integer }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+            application/zip:
+              schema: { type: string, format: binary }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
   /api/v1/instances/{id}/prompt:
     get:
       operationId: instancePrompt
@@ -789,8 +894,11 @@ components:
         truncated: { type: boolean }
     EditorMetadata:
       type: object
-      required: [rego, capabilities]
+      required: [rego, capabilities, utilities]
       properties:
+        utilities:
+          type: array
+          items: { $ref: '#/components/schemas/CompletionSymbol' }
         rego:
           type: array
           items: { $ref: '#/components/schemas/CompletionSymbol' }
@@ -842,6 +950,38 @@ components:
         type: { type: string, description: 'a FieldType value or "secret"' }
         doc: { type: string }
         default: { }
+    ArtifactConfig:
+      type: object
+      required: [html_enabled, interactive_enabled, max_file_bytes, max_total_bytes, max_files, preview_ttl_seconds]
+      properties:
+        html_enabled: { type: boolean }
+        interactive_enabled: { type: boolean }
+        max_file_bytes: { type: integer }
+        max_total_bytes: { type: integer }
+        max_files: { type: integer }
+        preview_ttl_seconds: { type: integer }
+    ArtifactPreview:
+      type: object
+      required: [path, kind, source, source_truncated, redacted, size]
+      properties:
+        path: { type: string }
+        kind: { type: string, enum: [text, csv, json, html] }
+        source: { type: string }
+        source_truncated: { type: boolean }
+        redacted: { type: boolean }
+        size: { type: integer }
+        csv_rows:
+          type: array
+          items:
+            type: array
+            items: { type: string }
+        csv_total_rows: { type: integer }
+        csv_truncated: { type: boolean }
+        preview_error: { type: string }
+        preview_url: { type: string, description: Short-lived bearer URL; do not log or share it }
+        expires_at: { type: string, format: date-time }
+        interactive: { type: boolean }
+        sanitized: { type: boolean }
     ExtensionInfo:
       type: object
       required: [source, name, dependencies, ops, config]
@@ -850,6 +990,7 @@ components:
         name: { type: string }
         version: { type: string }
         description: { type: string }
+        icon_url: { type: string, description: Authenticated same-origin packaged PNG endpoint }
         dependencies:
           type: array
           items: { $ref: '#/components/schemas/CapabilityName' }

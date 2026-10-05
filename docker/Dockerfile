@@ -32,6 +32,7 @@ RUN apk add --no-cache ca-certificates tzdata git su-exec && \
 
 COPY --from=build /out/calcside /usr/local/bin/calcside
 COPY --from=build /out/calcside-worker /usr/local/bin/calcside-worker
+COPY contrib/ /opt/calcside/contrib/
 COPY --chmod=0755 docker/worker-entrypoint.sh /usr/local/bin/worker-entrypoint
 
 # Everything mutable lives under /data: sqlite db, global rego policies,
@@ -47,9 +48,9 @@ EXPOSE 8080
 ENV CALCSIDE_ADDR=":8080" \
     CALCSIDE_DSN="/data/calcside.db" \
     CALCSIDE_POLICY_DIR="/data/policies" \
-    CALCSIDE_EXT_LOCAL_ROOTS="/data/ext" \
+    CALCSIDE_EXT_LOCAL_ROOTS="/opt/calcside/contrib,/data/ext" \
     CALCSIDE_EXT_CACHE_DIR="/data/ext-cache" \
-    CALCSIDE_BASE_URL="http://localhost:8080"
+    CALCSIDE_CONSOLE_ORIGIN="http://localhost:8080"
 
 ENTRYPOINT ["calcside"]
 CMD ["serve"]

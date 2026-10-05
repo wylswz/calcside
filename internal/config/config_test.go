@@ -117,3 +117,63 @@ func TestAdminPasswordNotInHelp(t *testing.T) {
 		t.Fatal("Administrator password is exposed by --help")
 	}
 }
+
+func TestPublicOriginFlags(t *testing.T) {
+	_, err := Parse([]string{"--console-origin=https://console.example.com", "--artifact-preview-base-url=https://reports.example.net"})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRemovedPublicOriginFlags(t *testing.T) {
+	for _, name := range []string{"base-url", "artifact-console-origin"} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Parse([]string{"--" + name + "=https://console.example.com"}); err == nil {
+				t.Fatal("obsolete origin flag is still accepted")
+			}
+		})
+	}
+}
+
+func TestPublicOriginConfiguration(t *testing.T) {
+	for _, key := range []string{"CALCSIDE_CONSOLE_ORIGIN", "CALCSIDE_ARTIFACT_PREVIEW_BASE_URL", "CALCSIDE_BASE_URL", "CALCSIDE_ARTIFACT_CONSOLE_ORIGIN"} {
+		t.Setenv(key, "")
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg, err := Parse(nil)
+	if err != nil || cfg.ConsoleOrigin != "http://localhost:8080" || cfg.ArtifactPreviewBaseURL != "" {
+		t.Fatalf("unexpected public origin defaults: %v", err)
+	}
+	t.Setenv("CALCSIDE_CONSOLE_ORIGIN", "https://console.example.com")
+	t.Setenv("CALCSIDE_ARTIFACT_PREVIEW_BASE_URL", "https://reports.example.net")
+	cfg, err = Parse(nil)
+	if err != nil || cfg.ConsoleOrigin != "https://console.example.com" || cfg.ArtifactPreviewBaseURL != "https://reports.example.net" {
+		t.Fatalf("public origin environment not applied: %v", err)
+	}
+	cfg, err = Parse([]string{"--console-origin=https://OTHER.example.com:8443/", "--artifact-preview-base-url=https://other.example.net"})
+	if err != nil || cfg.ConsoleOrigin != "https://other.example.com:8443" || cfg.ArtifactPreviewBaseURL != "https://other.example.net" {
+		t.Fatalf("public origin flags not applied: %v", err)
+	}
+}
+
+func TestRemovedPublicOriginEnvironment(t *testing.T) {
+	for _, name := range []string{"CALCSIDE_BASE_URL", "CALCSIDE_ARTIFACT_CONSOLE_ORIGIN"} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(name, "https://obsolete.example.com")
+			_, err := Parse([]string{"--console-origin=https://console.example.com"})
+			if err == nil || !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), "CALCSIDE_CONSOLE_ORIGIN") {
+				t.Fatalf("expected explicit migration error: %v", err)
+			}
+		})
+	}
+}
+
+func TestConsoleOriginValidation(t *testing.T) {
+	for _, origin := range []string{"", "console.example.com", "ftp://console.example.com", "https://user:password@console.example.com", "https://console.example.com/path", "https://console.example.com?", "https://console.example.com?q=1", "https://console.example.com#fragment", "https://console.example.com:99999"} {
+		if _, err := Parse([]string{"--console-origin=" + origin}); err == nil {
+			t.Errorf("accepted invalid console origin %q", origin)
+		}
+	}
+}

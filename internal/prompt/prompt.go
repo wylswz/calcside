@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"text/template"
+
+	"calcside/internal/stdlib"
 )
 
 //go:embed prompt.md.tmpl
@@ -85,6 +87,7 @@ func Render(in Input) (string, error) {
 	}
 
 	data := map[string]any{
+		"Utilities":      stdlib.Symbols(),
 		"InstanceID":     in.InstanceID,
 		"Prefix":         in.Prefix,
 		"Persistent":     in.Persistent,

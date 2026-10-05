@@ -75,15 +75,16 @@ func Resolve(p string) (string, error) {
 }
 
 var (
-	ErrNotExist   = errors.New("fs: file does not exist")
-	ErrExist      = errors.New("fs: path already exists")
-	ErrNotDir     = errors.New("fs: not a directory")
-	ErrIsDir      = errors.New("fs: is a directory")
-	ErrNotEmpty   = errors.New("fs: directory not empty")
-	ErrReadOnly   = errors.New("fs: filesystem is read-only")
-	ErrQuota      = errors.New("fs: quota exceeded")
-	ErrMaxFiles   = errors.New("fs: file count limit exceeded")
-	ErrRootDelete = errors.New("fs: cannot delete root")
+	ErrListingLimit = errors.New("fs: listing limit exceeded")
+	ErrNotExist     = errors.New("fs: file does not exist")
+	ErrExist        = errors.New("fs: path already exists")
+	ErrNotDir       = errors.New("fs: not a directory")
+	ErrIsDir        = errors.New("fs: is a directory")
+	ErrNotEmpty     = errors.New("fs: directory not empty")
+	ErrReadOnly     = errors.New("fs: filesystem is read-only")
+	ErrQuota        = errors.New("fs: quota exceeded")
+	ErrMaxFiles     = errors.New("fs: file count limit exceeded")
+	ErrRootDelete   = errors.New("fs: cannot delete root")
 )
 
 func (v *VFS) mkdirAllLocked(p string) error {
@@ -219,7 +220,9 @@ func (v *VFS) Exists(p string) (bool, error) {
 	return ok, nil
 }
 
-func (v *VFS) List(p string) ([]Entry, error) {
+func (v *VFS) List(p string) ([]Entry, error) { return v.list(p, 0) }
+
+func (v *VFS) list(p string, limit int) ([]Entry, error) {
 	full, err := Resolve(p)
 	if err != nil {
 		return nil, err
@@ -239,6 +242,9 @@ func (v *VFS) List(p string) ([]Entry, error) {
 			continue
 		}
 		if path.Dir(pth) == full {
+			if limit > 0 && len(out) >= limit {
+				return nil, ErrListingLimit
+			}
 			e, _ := v.statLocked(pth)
 			out = append(out, e)
 		}
@@ -552,7 +558,9 @@ func statCall(v *VFS, p string, res *Entry) (call, error) {
 	}, nil
 }
 
-func listCall(v *VFS, dir string, res *[]Entry) (call, error) {
+func listCall(v *VFS, dir string, res *[]Entry) (call, error) { return listCallBounded(v, dir, res, 0) }
+
+func listCallBounded(v *VFS, dir string, res *[]Entry, limit int) (call, error) {
 	full, err := Resolve(dir)
 	if err != nil {
 		return call{}, err
@@ -560,7 +568,7 @@ func listCall(v *VFS, dir string, res *[]Entry) (call, error) {
 	return call{
 		args: map[string]any{"path": full},
 		body: func(ctx context.Context) (starlark.Value, map[string]any, error) {
-			entries, err := v.List(dir)
+			entries, err := v.list(dir, limit)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -745,4 +753,19 @@ func dictOf(m map[string]starlark.Value) *starlark.Dict {
 		_ = d.SetKey(starlark.String(k), v)
 	}
 	return d
+}
+
+func (a *Accessor) ListBounded(ctx context.Context, dir string, limit int) ([]Entry, error) {
+	if limit < 1 {
+		return nil, ErrListingLimit
+	}
+	var entries []Entry
+	c, err := listCallBounded(a.v, dir, &entries, limit)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.invoke(ctx, OpList, c); err != nil {
+		return nil, err
+	}
+	return entries, nil
 }

@@ -5,6 +5,25 @@
 - **Area:** File API, runtime export contract, fs accessors, console, Python SDK
 - **Related:** [G07 gap register](../business-scenarios-and-gaps.md), [EP-0002](0002-standard-library-utilities.md), [EP-0005](0005-instance-file-uploads.md), [EP-0006](0006-pluggable-instance-vfs.md)
 
+## Implementation status
+
+The first implementation is available. See the repository README's **Artifacts:
+preview and download** section for the actual routes, limits, supported profile,
+and deployment settings; the candidate contracts below remain design background.
+It uses the memory VFS, a typed atomic export operation across all runtime hops,
+bounded redaction, CSV/text preview, authenticated file/ZIP attachments, and
+short-lived random-subdomain HTML snapshots. Static HTML includes a restricted
+simple-SVG subset; images, SVG references/filters and general site assets are not
+supported in static mode. Browser markup budgets are not hard JavaScript resource
+quotas. Interactive mode requires both operator and user opt-in and is not a
+strict no-egress sandbox.
+
+Current routes use `/artifacts/preview` and `/artifacts/export`, with limits exposed
+by `/api/v1/artifacts/config`. Limits are fixed ceilings in this increment rather
+than per-deployment tunables. The preview cache is per API process; multi-replica
+routing must use distinct per-replica preview bases. Durable storage, uploads,
+shared preview storage and unrestricted binary export remain separate work.
+
 ## Summary
 
 Complete the output workflow: **write files -> inspect a CSV table or HTML report

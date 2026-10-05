@@ -1,6 +1,7 @@
 name: tavily
 version: 0.1.0
-description: Tavily web search
+description: Search the web and return structured sources for research.
+icon: icon.png
 dependencies: [net]
 ops:
   - name: search

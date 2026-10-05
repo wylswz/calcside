@@ -3,71 +3,20 @@ import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { useStarlarkEditor } from '../components/editor'
-import { api, AuditEvent, ExecResult, Execution, FileEntry, Instance, InstanceInspect, ResourceUsages } from '../api'
+import { api, AuditEvent, ExecResult, Execution, Instance, InstanceInspect, ResourceUsages } from '../api'
 import type { SecretSource } from '../api'
 
 interface SpecSecret { ref?: string; source?: SecretSource; allowed_domains?: string[] }
 import { Badge, Button, EmptyRow, Loading, Notice, SectionTitle, StatusBadge, Tag, fmtBytes, fmtCountdown, fmtTime } from '../components/ui'
 import { cmTheme } from '../components/codemirror'
 import { AuditTable, ExecCode } from '../components/AuditTable'
+import { ArtifactBrowser } from '../components/Artifacts'
 
 const DEFAULT_CODE = `# Starlark. Capabilities appear as globals when granted.
-# fs.read/write/list, net.get/post, print/json/math are always available.
+# Utilities: json, math, url, csv, base64, hashlib, regex, datetime.
 print("hello from calcside")
 `
 
-function FileBrowser({ id }: { id: string }) {
-  const [dir, setDir] = useState('/work')
-  const [file, setFile] = useState<{ path: string; content: string } | null>(null)
-  const { data, refetch } = useQuery({
-    queryKey: ['files', id, dir],
-    queryFn: () => api.get<{ entries: FileEntry[] }>(`/api/v1/instances/${id}/files?path=${encodeURIComponent(dir)}`),
-  })
-  const open = async (e: FileEntry) => {
-    if (e.is_dir) {
-      setFile(null)
-      setDir(e.path)
-    } else {
-      const r = await api.get<{ path: string; content: string }>(`/api/v1/instances/${id}/files?path=${encodeURIComponent(e.path)}`)
-      setFile({ path: r.path, content: r.content })
-    }
-  }
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-1.5 font-mono text-xs">
-        <button className="link" onClick={() => { setDir('/work'); setFile(null) }}>/work</button>
-        {dir !== '/work' && (
-          <>
-            <span className="text-mute">/</span>
-            <span className="text-ink">{dir.replace('/work/', '')}</span>
-          </>
-        )}
-        <button className="text-btn ml-auto font-sans" onClick={() => refetch()}>refresh</button>
-      </div>
-      <ul className="max-h-56 overflow-y-auto border-y border-line font-mono text-xs">
-        {(data?.entries ?? []).map((e) => (
-          <li key={e.path} className="border-b border-line last:border-b-0">
-            <button
-              className={`flex w-full items-center gap-2 px-2 py-1.5 text-left transition-colors hover:bg-surface ${file?.path === e.path ? 'bg-surface text-accent' : 'text-ink'}`}
-              onClick={() => open(e)}
-            >
-              <span className={`h-1.5 w-1.5 shrink-0 ${e.is_dir ? 'bg-accent' : 'border border-mute'}`} />
-              <span className="truncate">{e.name}{e.is_dir ? '/' : ''}</span>
-              {!e.is_dir && <span className="ml-auto text-mute">{fmtBytes(e.size)}</span>}
-            </button>
-          </li>
-        ))}
-        {data && data.entries.length === 0 && <li className="px-2 py-2 text-mute">empty</li>}
-      </ul>
-      {file && (
-        <div>
-          <div className="eyebrow mb-1 truncate normal-case tracking-normal">{file.path}</div>
-          <pre className="pre max-h-64">{file.content}</pre>
-        </div>
-      )}
-    </div>
-  )
-}
 
 function AuditTab({ id }: { id: string }) {
   const { data } = useQuery({
@@ -415,7 +364,7 @@ export default function InstanceDetail() {
         <aside className="space-y-8">
           <div>
             <SectionTitle>Files</SectionTitle>
-            <FileBrowser id={id} />
+            <ArtifactBrowser key={id} id={id} running={inst.status === 'running'} busy={running} />
           </div>
           {ext.length > 0 && (
             <div>

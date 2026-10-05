@@ -123,3 +123,15 @@
     @apply bg-surface;
   }
 }
+
+@layer components {
+  .artifact-action {
+    @apply inline-flex h-8 w-8 shrink-0 items-center justify-center border border-transparent text-sec transition-colors hover:border-line-strong hover:bg-paper hover:text-accent disabled:pointer-events-none disabled:opacity-30 aria-disabled:pointer-events-none aria-disabled:opacity-30;
+  }
+  .artifact-tab {
+    @apply inline-flex h-12 shrink-0 items-center gap-2 border-b-[3px] border-transparent px-3 text-xs font-medium text-sec transition-colors hover:text-ink disabled:opacity-40;
+  }
+  .artifact-tab[aria-pressed="true"] {
+    @apply border-accent text-accent;
+  }
+}

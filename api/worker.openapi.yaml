@@ -135,6 +135,28 @@ paths:
                 $ref: '#/components/schemas/BrowseResponse'
         default:
           $ref: '#/components/responses/Error'
+  /runtime/v1/export:
+    post:
+      operationId: runtimeExport
+      summary: Atomically collect authorized redacted text artifacts.
+      description: >-
+        Read-only; may be retried on a stale route. Once an instance is reached,
+        operation failures are carried in the 200 response alongside the audit
+        batch. A failed collection never returns partial files. File content uses
+        base64 transport encoding to bound JSON expansion.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExportRequest' }
+      responses:
+        '200':
+          description: Complete bounded snapshot or failure, with audit in both cases
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExportResponse' }
+        default:
+          $ref: '#/components/responses/Error'
   /runtime/v1/prompt:
     post:
       operationId: runtimePrompt
@@ -290,6 +312,14 @@ components:
     BrowseResponse:
       type: object
       x-go-type: rt.BrowseResponse
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    ExportRequest:
+      type: object
+      x-go-type: rt.ExportRequest
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    ExportResponse:
+      type: object
+      x-go-type: rt.ExportResponse
       x-go-type-import: {name: rt, path: calcside/internal/runtime}
     PromptRequest:
       type: object

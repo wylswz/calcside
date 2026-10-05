@@ -42,6 +42,141 @@ Instance spec (`POST /api/v1/instances`):
 
 For an instance that needs internal HTTP access, pass `"policies": []` (or an explicit list without `builtin.block_private_network`). This does not bypass the instance's host allowlist, secret domain restrictions, or mandatory server policies. No network capability means no network access regardless of policy selection.
 
+## Built-in utilities
+
+Every instance and extension has `json`, `math`, `url`, `csv`, `base64`, `hashlib`,
+`regex`, and `datetime`. These are bounded pure functions, not capability grants:
+no implicit I/O, secrets, current clock, randomness, or host timezone. The server
+prompt and editor completion describe their signatures and limits.
+
+```python
+rows = csv.parse_dicts("id,amount_minor\nA,1200\nB,300\n")
+selected = [r for r in rows if int(r["amount_minor"]) > 1000]
+fs.write("output/selected.csv", csv.format_dicts(selected, columns=["id", "amount_minor"]))
+print(url.query_encode({"tag": ["agent", "sandbox"], "q": "CSV analysis"}))
+```
+
+CSV cells remain strings; use integer minor units for money. Dates use Unix
+milliseconds and explicit UTC/offset inputs. Base64 decoding returns bytes;
+text utilities require explicit decoding. Regex uses RE2 (not Python regex),
+UTF-8 byte offsets, and literal replacement strings. Module names are reserved
+predeclared bindings; rename existing script variables that used these names.
+
+Limits include 8 MiB general input/output, 10,000 CSV records / 100,000 cells,
+256 CSV columns / 256 KiB fields, 64 KiB URLs / 1,024 query pairs, and 1 MiB regex
+text / 8 KiB patterns / 10,000 matches, with a separate pattern-complexity bound.
+
+## Artifacts: preview and download
+
+Write outputs with `fs.write`, then use the instance's Files list. Each file has
+preview and download icons; preview opens a dedicated page in a new tab without
+interrupting the editor. The viewer provides Preview/Source, refresh, download,
+CSV table headers and HTML desktop/mobile widths. JavaScript requires explicit
+confirmation; switching to Source stops it. Select files/directories in the list
+for ZIP export. No disk backend or publication step is required; files remain in
+the memory VFS.
+
+All exports pass through per-file Gate checks and known-secret redaction. ZIP
+capture is serialized against execution, preserves `/work`-relative paths and
+empty directories, and fails entirely on denied, missing, unsupported, colliding,
+or oversized entries. Downloads preserve bytes unless redaction is required;
+spreadsheet formulas are not silently rewritten. Use `spreadsheet_safe=True`
+when generating CSV for that purpose. Downloaded HTML runs outside the viewer's
+controls when opened locally.
+
+| Limit | Current value |
+|---|---|
+| Supported files | NUL-free UTF-8 text: CSV/TSV, HTML, JSON, Markdown, CSS/JS, XML, YAML, SQL, text/log, or extensionless text |
+| File / total source and redacted bytes | 1 MiB / 4 MiB |
+| Files / expanded entries / ZIP response | 100 / 256 / 8 MiB |
+| Paths | 1,024 bytes, 255 bytes per component, at most 32 levels below `/work`; portable names with NFC/case-fold collision checks |
+| Source preview | 64 KiB, visibly marked when truncated |
+| CSV table preview | 200 rows, 32 columns, 512 bytes per cell, 256 KiB displayed text; full bounded input is parsed |
+| HTML markup | 8,192 tokens, nesting 64, 64 attributes per tag, 16,384 attributes total, 64 KiB per tag |
+| Capture / concurrent artifact requests | 10 seconds / 4 operations |
+| HTML snapshot access | 120 seconds, never beyond instance expiry |
+| Preview cache per API process | 128 snapshots / 32 MiB / 16 snapshots per user; a new preview replaces the previous one for that instance |
+
+A preview is a snapshot; later downloads read current VFS state. New reads and
+preview loads fail after deletion, expiry, or execution-node loss. Previewing does
+not renew the instance. Already delivered bytes cannot be revoked. Neither the
+VFS nor the preview cache provides durable artifact retention.
+
+### Configure isolated HTML previews
+
+Rendered HTML is disabled until a separate preview origin is configured; there
+is no same-origin fallback. Static mode uses a restricted HTML/CSS/simple-SVG
+allowlist, with scripts, links, forms, embedded frames, images, and unsupported
+markup removed. Interactive mode is a separate explicit action and is disabled
+by default at deployment level.
+
+For example, with a console at `https://console.example.com` and a separately
+owned preview domain:
+
+```dotenv
+CALCSIDE_CONSOLE_ORIGIN=https://console.example.com
+CALCSIDE_ARTIFACT_PREVIEW_BASE_URL=https://reports.example.net
+CALCSIDE_ARTIFACT_ALLOW_SCRIPTS=false
+```
+
+There are exactly two public address settings: `CALCSIDE_CONSOLE_ORIGIN`
+(`--console-origin`, default `http://localhost:8080`) and
+`CALCSIDE_ARTIFACT_PREVIEW_BASE_URL` (`--artifact-preview-base-url`, empty disables
+rendered HTML). The console origin is the single source for the UI origin,
+Google OAuth callback URL, and preview CSP `frame-ancestors`. Both accept a scheme,
+host and optional port, not page paths. Preview-enabled production deployments
+must use HTTPS and different registrable domains, not just different ports or
+sibling subdomains. `--artifact-allow-scripts` remains a separate opt-in switch,
+not an additional address.
+
+`CALCSIDE_BASE_URL` / `--base-url` and `CALCSIDE_ARTIFACT_CONSOLE_ORIGIN` /
+`--artifact-console-origin` have been removed without aliases or fallback logic.
+Migrate their console address to `CALCSIDE_CONSOLE_ORIGIN`; a nonempty obsolete
+environment variable causes startup to fail with a migration message.
+
+Provision wildcard DNS and a wildcard certificate for `*.reports.example.net`.
+Route those hosts to the API listener **without rewriting the Host header**.
+The outer host router serves only a ticketed snapshot at `/`; it never forwards
+preview hosts to API, login, worker-callback, or console routes. No credentials
+from the console are put in the report. Keep cookies host-only, do not configure
+credentialed CORS for previews, and remove query strings from preview ingress/CDN
+access logs: the short-lived `ticket` query value is a bearer credential. The
+application does not log these preview requests. Relative assets and CDN libraries
+are not served; reports must be self-contained. The console host serves the UI,
+API and `/auth` routes together; there is no separately configurable API origin.
+
+Both the iframe and the HTTP response enforce sandboxing without
+`allow-same-origin`. CSP blocks fetch/XHR, external scripts/styles, frames, workers,
+forms and base changes; permissions policy disables sensitive device/storage APIs.
+**This is not a network firewall:** interactive JavaScript may navigate its own
+frame, and browser execution is outside Starlark CPU/memory limits. Keep interactive
+mode disabled for strict no-egress requirements. When enabled, the UI still
+requires the user to click **Run interactive preview**.
+
+Preview caches are local to one API process. A single API can use remote workers
+and subprocess isolation normally. With multiple API replicas, assign each replica
+its own preview base domain/routing (and wildcard certificate) so issued hosts reach
+the process holding the snapshot; sharing one preview base behind an arbitrary
+load balancer will produce unavailable previews. A shared/persistent cache is not
+implemented.
+
+For local development only, `--dev` permits HTTP on reserved `.localhost` domains,
+for example `--artifact-preview-base-url=http://preview.localhost:8787` with
+`--console-origin=http://localhost:5173`. The browser must resolve random
+`*.preview.localhost` names to loopback. Do not use this exception for production.
+
+Public APIs are `GET /api/v1/artifacts/config`,
+`POST /api/v1/instances/{id}/artifacts/preview` (`path`, `mode`), and
+`POST /api/v1/instances/{id}/artifacts/export` (`paths`, `format: file|zip`). The
+Python SDK exposes `preview_artifact`, `download_file`, and `export_files` on both
+sync and async clients.
+
+Browser regressions use a fresh temporary database/server and never modify a
+running deployment. Run `PLAYWRIGHT_CHANNEL=chrome pnpm -C web test:browser` with
+local Chrome, or install Playwright Chromium and run `pnpm -C web test:browser`.
+Do not run Go builds concurrently with `pnpm -C web build`: Vite clears `web/dist`
+while Go embeds that directory.
+
 ## Database migrations
 
 SQLite is the default; PostgreSQL is selected with `--store postgres` and a PostgreSQL DSN. The server only connects to the database: **run migrations before starting it**. Atlas CLI manages migration history, checksums, locks, and transactions; the application binary does not need Atlas installed.

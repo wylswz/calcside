@@ -86,3 +86,11 @@ func (d *Direct) Inspect(ctx context.Context, req *runtime.InspectRequest) (*run
 	}
 	return respOf(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
 }
+
+func (d *Direct) Export(ctx context.Context, req *runtime.ExportRequest) (*runtime.ExportResponse, error) {
+	resp, err := d.cl.RuntimeExportWithResponse(ctx, *req)
+	if err != nil {
+		return nil, err
+	}
+	return respOf(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
+}

@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Route, Routes, Link, NavLink, Navigate, useNavigate } from 'react-router-dom'
+import { Route, Routes, Link, NavLink, Navigate, useNavigate, useMatch } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api, loadAuthConfig, User, AuthConfig, AuthKind } from './api'
 import Login from './pages/Login'
 import Instances from './pages/Instances'
 import InstanceDetail from './pages/InstanceDetail'
+import ArtifactPreviewPage from './pages/ArtifactPreview'
 import Keys from './pages/Keys'
 import Policies from './pages/Policies'
 import Audit from './pages/Audit'
@@ -39,6 +40,7 @@ export default function App() {
   const [backendRetrying, setBackendRetrying] = useState(false)
   const { data, isLoading, isError, error } = useMe(setBackendRetrying)
   const navigate = useNavigate()
+  const previewRoute = useMatch('/instances/:id/preview')
   const user = data?.user
   const cfg: AuthConfig | undefined = data?.cfg
   const dev = cfg?.dev_mode === true
@@ -71,6 +73,8 @@ export default function App() {
       </Routes>
     )
   }
+
+  if (previewRoute) return <Routes><Route path="/instances/:id/preview" element={<ArtifactPreviewPage dev={dev} />} /></Routes>
 
   const logout = async () => {
     await api.post('/auth/logout')

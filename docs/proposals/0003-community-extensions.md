@@ -5,6 +5,14 @@
 - **Area:** `contrib`, extension manifests/loader/catalog, packaging, API, CI
 - **Related:** [EP-0002](0002-standard-library-utilities.md), [EP-0004](0004-extension-discovery-ui.md)
 
+## Implementation status
+
+The foundation is implemented: Tavily lives in `contrib/tavily`, its local PNG
+icon is validated/re-encoded and served through an authenticated API, the console
+shows extension icons/descriptions, and development/Docker references use contrib.
+Catalog indexing/search, richer community metadata and a complete discovery UI
+remain separate work; this does not implement the entire distribution proposal.
+
 ## Summary
 
 Make extensions a maintained product surface rather than example assets. Add a
@@ -19,7 +27,7 @@ This proposal describes a future move; it does not move files by itself.
 
 ## Motivation and current state
 
-- The only checked-in provider extension lives in `examples/capabilities/tavily`.
+- Before implementation, the only checked-in provider extension lived in `examples/capabilities/tavily`; it is now `contrib/tavily`.
 - `Makefile`, the LangChain example, extension docs, and a Compose comment refer
   to that path. Local copies under `docker/data` and `docker/worker-cache` are not
   tracked source and must not be migrated or deleted automatically.

@@ -66,6 +66,10 @@ func TestMessagesRoundTrip(t *testing.T) {
 			Entries: []FileEntry{{Name: "a.txt", Path: "/work/a.txt", Size: 3, Mtime: 1}},
 			Audit:   AuditBatch{Events: []AuditEvent{{Ts: ts, Op: "list", Decision: types.DecisionAllow}}},
 		},
+		&ExportRequest{InstanceID: "ins_1", Owner: Owner{UserID: "usr_1"}, Epoch: 3, Paths: []string{"/work/report.csv"}, Recursive: true},
+		&ExportRequest{InstanceID: "ins_1", Owner: Owner{UserID: "usr_1"}, Epoch: 3, CheckOnly: true},
+		&ExportResponse{Files: []ArtifactFile{{Path: "/work/report.csv", Content: []byte("id,value\r\nA,001\r\n"), Redacted: true}}, Audit: AuditBatch{Events: []AuditEvent{{Ts: ts, Op: "read", Decision: types.DecisionAllow}}}},
+		&ExportResponse{Error: &ArtifactError{Code: types.ErrCodeForbidden, Message: "denied"}, Audit: AuditBatch{Events: []AuditEvent{{Ts: ts, Op: "read", Decision: types.DecisionDeny}}}},
 		&PromptResponse{
 			Fragments:     []PromptFragment{{Capability: types.CapFS, Text: "fs docs"}},
 			Env:           map[string]string{"REGION": "us-east-1"},

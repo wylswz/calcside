@@ -147,10 +147,10 @@ func TestLoadEscape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.init(nil, nil, 0); err == nil || !strings.Contains(err.Error(), "escapes") {
+	if _, err := m.init(context.Background(), nil, nil, 0); err == nil || !strings.Contains(err.Error(), "escapes") {
 		t.Fatalf("want escape error, got %v", err)
 	}
-	if _, err := m.init(nil, nil, 0); err == nil {
+	if _, err := m.init(context.Background(), nil, nil, 0); err == nil {
 		t.Fatal("expected load error")
 	}
 	// Absolute path load also rejected.
@@ -162,7 +162,7 @@ func TestLoadEscape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m2.init(nil, nil, 0); err == nil || !strings.Contains(err.Error(), "absolute") {
+	if _, err := m2.init(context.Background(), nil, nil, 0); err == nil || !strings.Contains(err.Error(), "absolute") {
 		t.Fatalf("want absolute error, got %v", err)
 	}
 }
@@ -181,7 +181,7 @@ config:
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := m.init(nil, map[string]any{"n": int64(5)}, 0)
+	g, err := m.init(context.Background(), nil, map[string]any{"n": int64(5)}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,5 +192,38 @@ config:
 	}
 	if v.(starlark.Int) != starlark.MakeInt(6) {
 		t.Fatalf("got %v", v)
+	}
+}
+
+func TestExtensionUtilities(t *testing.T) {
+	dir := writeExt(t, map[string]string{
+		"capability.yaml": "name: utility\nops: [{name: run}]\n",
+		"main.star": `query = url.query_encode({"q": "a b"})
+rows = csv.parse_dicts("id,value\nA,001\n")
+def run():
+    return [query, rows, base64.encode("hello"), hashlib.sha256("abc"), regex.find_all("[0-9]+", "a12"), datetime.parse_date("1970-01-01")]
+`,
+	})
+	m, err := loadLocal(t, dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	globals, err := m.init(context.Background(), nil, nil, 100000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := starlark.Call(&starlark.Thread{}, globals["run"], nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"q=a+b", "001", "aGVsbG8=", "ba7816bf", "12"} {
+		if !strings.Contains(result.String(), want) {
+			t.Fatalf("missing %s", want)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := m.init(ctx, nil, nil, 100000); err == nil {
+		t.Fatal("ignored initialization cancellation")
 	}
 }

@@ -40,6 +40,63 @@ inst = c.create_instance(spec)
 
 An omitted (or `None`) `policies` field selects `builtin.block_private_network` by default. An explicit list replaces defaults; `[]` opts out of the built-in private/reserved-IP restriction. To use a library policy while keeping network protection, pass `"policies": ["builtin.block_private_network", "my_policy"]`. Server policies and host/secret allowlists still apply.
 
+## Data utilities
+
+All utility modules are available through `exec` without extra capability grants;
+file operations still require `fs`:
+
+```python
+inst = c.create_instance({"capabilities": {"fs": {}}})
+result = c.exec(
+    inst["id"],
+    """
+rows = csv.parse_dicts("id,amount_minor\\nA,1200\\nB,300\\n")
+fs.write("output/selected.csv", csv.format_dicts(
+    [r for r in rows if int(r["amount_minor"]) > 1000],
+    columns=["id", "amount_minor"],
+))
+print(json.encode({"path": "/work/output/selected.csv", "rows": len(rows)}))
+""",
+)
+```
+
+URL, CSV, Base64, SHA-256, RE2 regex, and UTC date conversion share the same
+bounded implementation in scripts and extensions. `datetime` timestamps are
+Unix milliseconds; `base64.decode` returns bytes. Inspect the server prompt
+for parameter defaults and bounds rather than assuming Python library APIs.
+
+## Artifact preview and downloads
+
+Both `Client` and `AsyncClient` provide `preview_artifact(instance_id, path,
+mode="source")`, `download_file(instance_id, path)`, and
+`export_files(instance_id, paths)` (ZIP). Downloads return `ArtifactDownload`
+with `content: bytes`, `filename`, `redacted`, and `file_count`; saving to local
+storage is an explicit caller action.
+
+```python
+from pathlib import Path
+
+preview = client.preview_artifact(instance_id, "/work/output/differences.csv")
+print(preview.get("csv_rows", []))
+download = client.download_file(instance_id, "/work/output/differences.csv")
+Path("differences.csv").write_bytes(download.content)
+archive = client.export_files(instance_id, ["/work/output"])
+Path("output.zip").write_bytes(archive.content)
+```
+
+Preview tables/source may be visibly truncated; successful downloads are complete
+within server limits and are never just the preview prefix. Redaction may alter
+text, CSV structure, or HTML. ZIP paths are relative to `/work`; a denied or
+unsupported member fails the entire request. HTTP transfer errors propagate rather
+than returning a partial successful download. Files must be downloaded while the
+instance is live; the SDK does not automatically keep it alive or retain artifacts.
+
+HTML modes `static` and `interactive` require the deployment's isolated preview
+domain. Interactive mode also requires operator opt-in. Treat `preview_url` as a
+short-lived bearer credential: do not log it or attach API credentials when opening
+it. Browser scripts are outside Starlark resource limits, and CSP is not a complete
+network firewall. See the repository README for deployment and security boundaries.
+
 ## LangChain middleware
 
 ```python

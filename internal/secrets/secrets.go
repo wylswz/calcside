@@ -6,11 +6,13 @@
 package secrets
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -262,4 +264,29 @@ func (s *Set) Expand(str string) (string, []string, error) {
 	}
 	sort.Strings(names)
 	return out, names, nil
+}
+
+func (s *Set) RedactBounded(ctx context.Context, str string, limit int) (string, error) {
+	if len(str) > limit {
+		return "", errors.New("redacted output exceeds byte limit")
+	}
+	if s == nil || str == "" {
+		return str, ctx.Err()
+	}
+	names := s.Names()
+	sort.SliceStable(names, func(i, j int) bool { return len(s.m[names[i]].value) > len(s.m[names[j]].value) })
+	for _, name := range names {
+		for _, v := range variants(s.m[name].value) {
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
+			replacement := "[REDACTED:" + name + "]"
+			delta := len(replacement) - len(v)
+			if delta > 0 && strings.Count(str, v) > (limit-len(str))/delta {
+				return "", errors.New("redacted output exceeds byte limit")
+			}
+			str = strings.ReplaceAll(str, v, replacement)
+		}
+	}
+	return str, ctx.Err()
 }

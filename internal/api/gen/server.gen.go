@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -78,6 +79,30 @@ func (e APIErrorCode) Valid() bool {
 	case TooMany:
 		return true
 	case Unauthorized:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ArtifactPreviewKind.
+const (
+	Csv  ArtifactPreviewKind = "csv"
+	Html ArtifactPreviewKind = "html"
+	Json ArtifactPreviewKind = "json"
+	Text ArtifactPreviewKind = "text"
+)
+
+// Valid indicates whether the value is a known member of the ArtifactPreviewKind enum.
+func (e ArtifactPreviewKind) Valid() bool {
+	switch e {
+	case Csv:
+		return true
+	case Html:
+		return true
+	case Json:
+		return true
+	case Text:
 		return true
 	default:
 		return false
@@ -306,6 +331,45 @@ func (e SecretSource) Valid() bool {
 	}
 }
 
+// Defines values for ExportArtifactsJSONBodyFormat.
+const (
+	File ExportArtifactsJSONBodyFormat = "file"
+	Zip  ExportArtifactsJSONBodyFormat = "zip"
+)
+
+// Valid indicates whether the value is a known member of the ExportArtifactsJSONBodyFormat enum.
+func (e ExportArtifactsJSONBodyFormat) Valid() bool {
+	switch e {
+	case File:
+		return true
+	case Zip:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PreviewArtifactJSONBodyMode.
+const (
+	Interactive PreviewArtifactJSONBodyMode = "interactive"
+	Source      PreviewArtifactJSONBodyMode = "source"
+	Static      PreviewArtifactJSONBodyMode = "static"
+)
+
+// Valid indicates whether the value is a known member of the PreviewArtifactJSONBodyMode enum.
+func (e PreviewArtifactJSONBodyMode) Valid() bool {
+	switch e {
+	case Interactive:
+		return true
+	case Source:
+		return true
+	case Static:
+		return true
+	default:
+		return false
+	}
+}
+
 // APIErrorCode defines model for APIErrorCode.
 type APIErrorCode string
 
@@ -320,6 +384,39 @@ type APIKey struct {
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 	UserId     string     `json:"user_id"`
 }
+
+// ArtifactConfig defines model for ArtifactConfig.
+type ArtifactConfig struct {
+	HtmlEnabled        bool `json:"html_enabled"`
+	InteractiveEnabled bool `json:"interactive_enabled"`
+	MaxFileBytes       int  `json:"max_file_bytes"`
+	MaxFiles           int  `json:"max_files"`
+	MaxTotalBytes      int  `json:"max_total_bytes"`
+	PreviewTtlSeconds  int  `json:"preview_ttl_seconds"`
+}
+
+// ArtifactPreview defines model for ArtifactPreview.
+type ArtifactPreview struct {
+	CsvRows      *[][]string         `json:"csv_rows,omitempty"`
+	CsvTotalRows *int                `json:"csv_total_rows,omitempty"`
+	CsvTruncated *bool               `json:"csv_truncated,omitempty"`
+	ExpiresAt    *time.Time          `json:"expires_at,omitempty"`
+	Interactive  *bool               `json:"interactive,omitempty"`
+	Kind         ArtifactPreviewKind `json:"kind"`
+	Path         string              `json:"path"`
+	PreviewError *string             `json:"preview_error,omitempty"`
+
+	// PreviewUrl Short-lived bearer URL; do not log or share it
+	PreviewUrl      *string `json:"preview_url,omitempty"`
+	Redacted        bool    `json:"redacted"`
+	Sanitized       *bool   `json:"sanitized,omitempty"`
+	Size            int     `json:"size"`
+	Source          string  `json:"source"`
+	SourceTruncated bool    `json:"source_truncated"`
+}
+
+// ArtifactPreviewKind defines model for ArtifactPreview.Kind.
+type ArtifactPreviewKind string
 
 // AuditEvent defines model for AuditEvent.
 type AuditEvent struct {
@@ -424,6 +521,7 @@ type Decision string
 type EditorMetadata struct {
 	Capabilities []CapabilityDoc    `json:"capabilities"`
 	Rego         []CompletionSymbol `json:"rego"`
+	Utilities    []CompletionSymbol `json:"utilities"`
 }
 
 // ErrorEnvelope defines model for ErrorEnvelope.
@@ -511,10 +609,13 @@ type ExtensionInfo struct {
 	Config       []ExtConfigField `json:"config"`
 	Dependencies []CapabilityName `json:"dependencies"`
 	Description  *string          `json:"description,omitempty"`
-	Name         string           `json:"name"`
-	Ops          []OpDoc          `json:"ops"`
-	Source       string           `json:"source"`
-	Version      *string          `json:"version,omitempty"`
+
+	// IconUrl Authenticated same-origin packaged PNG endpoint
+	IconUrl *string `json:"icon_url,omitempty"`
+	Name    string  `json:"name"`
+	Ops     []OpDoc `json:"ops"`
+	Source  string  `json:"source"`
+	Version *string `json:"version,omitempty"`
 }
 
 // FieldDoc defines model for FieldDoc.
@@ -795,6 +896,24 @@ type ListInstancesParams struct {
 	Status *InstanceStatus `form:"status,omitempty" json:"status,omitempty"`
 }
 
+// ExportArtifactsJSONBody defines parameters for ExportArtifacts.
+type ExportArtifactsJSONBody struct {
+	Format ExportArtifactsJSONBodyFormat `json:"format"`
+	Paths  []string                      `json:"paths"`
+}
+
+// ExportArtifactsJSONBodyFormat defines parameters for ExportArtifacts.
+type ExportArtifactsJSONBodyFormat string
+
+// PreviewArtifactJSONBody defines parameters for PreviewArtifact.
+type PreviewArtifactJSONBody struct {
+	Mode *PreviewArtifactJSONBodyMode `json:"mode,omitempty"`
+	Path string                       `json:"path"`
+}
+
+// PreviewArtifactJSONBodyMode defines parameters for PreviewArtifact.
+type PreviewArtifactJSONBodyMode string
+
 // ListExecutionsParams defines parameters for ListExecutions.
 type ListExecutionsParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
@@ -825,6 +944,12 @@ type ChangePasswordJSONBody struct {
 // CreateInstanceJSONRequestBody defines body for CreateInstance for application/json ContentType.
 type CreateInstanceJSONRequestBody = InstanceSpec
 
+// ExportArtifactsJSONRequestBody defines body for ExportArtifacts for application/json ContentType.
+type ExportArtifactsJSONRequestBody ExportArtifactsJSONBody
+
+// PreviewArtifactJSONRequestBody defines body for PreviewArtifact for application/json ContentType.
+type PreviewArtifactJSONRequestBody PreviewArtifactJSONBody
+
 // ExecJSONRequestBody defines body for Exec for application/json ContentType.
 type ExecJSONRequestBody = ExecRequest
 
@@ -852,6 +977,9 @@ type UpdateSecretJSONRequestBody = UpdateSecretRequest
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 
+	// (GET /api/v1/artifacts/config)
+	ArtifactConfig(c *gin.Context)
+
 	// (GET /api/v1/audit)
 	ListAudit(c *gin.Context, params ListAuditParams)
 
@@ -870,6 +998,9 @@ type ServerInterface interface {
 	// (GET /api/v1/extensions)
 	ListExtensions(c *gin.Context)
 
+	// (GET /api/v1/extensions/icons/{icon_id})
+	ExtensionIcon(c *gin.Context, iconId string)
+
 	// (GET /api/v1/instances)
 	ListInstances(c *gin.Context, params ListInstancesParams)
 
@@ -881,6 +1012,12 @@ type ServerInterface interface {
 
 	// (GET /api/v1/instances/{id})
 	GetInstance(c *gin.Context, id IdPath)
+
+	// (POST /api/v1/instances/{id}/artifacts/export)
+	ExportArtifacts(c *gin.Context, id IdPath)
+
+	// (POST /api/v1/instances/{id}/artifacts/preview)
+	PreviewArtifact(c *gin.Context, id IdPath)
 
 	// (GET /api/v1/instances/{id}/completions)
 	InstanceCompletions(c *gin.Context, id IdPath)
@@ -960,6 +1097,19 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(c *gin.Context)
+
+// ArtifactConfig operation middleware
+func (siw *ServerInterfaceWrapper) ArtifactConfig(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ArtifactConfig(c)
+}
 
 // ListAudit operation middleware
 func (siw *ServerInterfaceWrapper) ListAudit(c *gin.Context) {
@@ -1089,6 +1239,31 @@ func (siw *ServerInterfaceWrapper) ListExtensions(c *gin.Context) {
 	siw.Handler.ListExtensions(c)
 }
 
+// ExtensionIcon operation middleware
+func (siw *ServerInterfaceWrapper) ExtensionIcon(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "icon_id" -------------
+	var iconId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "icon_id", c.Param("icon_id"), &iconId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter icon_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ExtensionIcon(c, iconId)
+}
+
 // ListInstances operation middleware
 func (siw *ServerInterfaceWrapper) ListInstances(c *gin.Context) {
 
@@ -1177,6 +1352,56 @@ func (siw *ServerInterfaceWrapper) GetInstance(c *gin.Context) {
 	}
 
 	siw.Handler.GetInstance(c, id)
+}
+
+// ExportArtifacts operation middleware
+func (siw *ServerInterfaceWrapper) ExportArtifacts(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ExportArtifacts(c, id)
+}
+
+// PreviewArtifact operation middleware
+func (siw *ServerInterfaceWrapper) PreviewArtifact(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PreviewArtifact(c, id)
 }
 
 // InstanceCompletions operation middleware
@@ -1709,6 +1934,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/capabilities", wrapper.Capabilities)
 	router.GET(options.BaseURL+"/api/v1/editor/metadata", wrapper.EditorMetadata)
 	router.GET(options.BaseURL+"/api/v1/extensions", wrapper.ListExtensions)
+	router.GET(options.BaseURL+"/api/v1/extensions/icons/:icon_id", wrapper.ExtensionIcon)
 	router.GET(options.BaseURL+"/api/v1/keys", wrapper.ListKeys)
 	router.POST(options.BaseURL+"/api/v1/keys", wrapper.CreateKey)
 	router.DELETE(options.BaseURL+"/api/v1/keys/:id", wrapper.DeleteKey)
@@ -1719,6 +1945,9 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/api/v1/instances/:id/keepalive", wrapper.Keepalive)
 	router.POST(options.BaseURL+"/api/v1/instances/:id/exec", wrapper.Exec)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/files", wrapper.Files)
+	router.GET(options.BaseURL+"/api/v1/artifacts/config", wrapper.ArtifactConfig)
+	router.POST(options.BaseURL+"/api/v1/instances/:id/artifacts/preview", wrapper.PreviewArtifact)
+	router.POST(options.BaseURL+"/api/v1/instances/:id/artifacts/export", wrapper.ExportArtifacts)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/prompt", wrapper.InstancePrompt)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/completions", wrapper.InstanceCompletions)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/inspect", wrapper.InstanceInspect)
@@ -1738,6 +1967,41 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 }
 
 type ErrorJSONResponse ErrorEnvelope
+
+type ArtifactConfigRequestObject struct {
+}
+
+type ArtifactConfigResponseObject interface {
+	VisitArtifactConfigResponse(w http.ResponseWriter) error
+}
+
+type ArtifactConfig200JSONResponse ArtifactConfig
+
+func (response ArtifactConfig200JSONResponse) VisitArtifactConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ArtifactConfig401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ArtifactConfig401JSONResponse) VisitArtifactConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
 
 type ListAuditRequestObject struct {
 	Params ListAuditParams
@@ -1947,6 +2211,62 @@ func (response ListExtensions401JSONResponse) VisitListExtensionsResponse(w http
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExtensionIconRequestObject struct {
+	IconId string `json:"icon_id"`
+}
+
+type ExtensionIconResponseObject interface {
+	VisitExtensionIconResponse(w http.ResponseWriter) error
+}
+
+type ExtensionIcon200ImagepngResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response ExtensionIcon200ImagepngResponse) VisitExtensionIconResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "image/png")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type ExtensionIcon401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ExtensionIcon401JSONResponse) VisitExtensionIconResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExtensionIcon404JSONResponse ErrorEnvelope
+
+func (response ExtensionIcon404JSONResponse) VisitExtensionIconResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -2161,6 +2481,300 @@ func (response GetInstance404JSONResponse) VisitGetInstanceResponse(w http.Respo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportArtifactsRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *ExportArtifactsJSONRequestBody
+}
+
+type ExportArtifactsResponseObject interface {
+	VisitExportArtifactsResponse(w http.ResponseWriter) error
+}
+
+type ExportArtifacts200ResponseHeaders struct {
+	ContentDisposition *string
+	XCalcsideFileCount *int
+	XCalcsideRedacted  *bool
+}
+
+type ExportArtifacts200ApplicationoctetStreamResponse struct {
+	Body          io.Reader
+	Headers       ExportArtifacts200ResponseHeaders
+	ContentLength int64
+}
+
+func (response ExportArtifacts200ApplicationoctetStreamResponse) VisitExportArtifactsResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	if response.Headers.ContentDisposition != nil {
+		w.Header().Set("Content-Disposition", fmt.Sprint(*response.Headers.ContentDisposition))
+	}
+	if response.Headers.XCalcsideFileCount != nil {
+		w.Header().Set("X-Calcside-File-Count", fmt.Sprint(*response.Headers.XCalcsideFileCount))
+	}
+	if response.Headers.XCalcsideRedacted != nil {
+		w.Header().Set("X-Calcside-Redacted", fmt.Sprint(*response.Headers.XCalcsideRedacted))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type ExportArtifacts200ApplicationzipResponse struct {
+	Body          io.Reader
+	Headers       ExportArtifacts200ResponseHeaders
+	ContentLength int64
+}
+
+func (response ExportArtifacts200ApplicationzipResponse) VisitExportArtifactsResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "application/zip")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	if response.Headers.ContentDisposition != nil {
+		w.Header().Set("Content-Disposition", fmt.Sprint(*response.Headers.ContentDisposition))
+	}
+	if response.Headers.XCalcsideFileCount != nil {
+		w.Header().Set("X-Calcside-File-Count", fmt.Sprint(*response.Headers.XCalcsideFileCount))
+	}
+	if response.Headers.XCalcsideRedacted != nil {
+		w.Header().Set("X-Calcside-Redacted", fmt.Sprint(*response.Headers.XCalcsideRedacted))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type ExportArtifacts400JSONResponse struct{ ErrorJSONResponse }
+
+func (response ExportArtifacts400JSONResponse) VisitExportArtifactsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportArtifacts401JSONResponse ErrorEnvelope
+
+func (response ExportArtifacts401JSONResponse) VisitExportArtifactsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportArtifacts403JSONResponse ErrorEnvelope
+
+func (response ExportArtifacts403JSONResponse) VisitExportArtifactsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportArtifacts404JSONResponse ErrorEnvelope
+
+func (response ExportArtifacts404JSONResponse) VisitExportArtifactsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportArtifacts409JSONResponse ErrorEnvelope
+
+func (response ExportArtifacts409JSONResponse) VisitExportArtifactsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportArtifacts413JSONResponse ErrorEnvelope
+
+func (response ExportArtifacts413JSONResponse) VisitExportArtifactsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportArtifacts429JSONResponse ErrorEnvelope
+
+func (response ExportArtifacts429JSONResponse) VisitExportArtifactsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewArtifactRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *PreviewArtifactJSONRequestBody
+}
+
+type PreviewArtifactResponseObject interface {
+	VisitPreviewArtifactResponse(w http.ResponseWriter) error
+}
+
+type PreviewArtifact200JSONResponse ArtifactPreview
+
+func (response PreviewArtifact200JSONResponse) VisitPreviewArtifactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewArtifact400JSONResponse struct{ ErrorJSONResponse }
+
+func (response PreviewArtifact400JSONResponse) VisitPreviewArtifactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewArtifact401JSONResponse ErrorEnvelope
+
+func (response PreviewArtifact401JSONResponse) VisitPreviewArtifactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewArtifact403JSONResponse ErrorEnvelope
+
+func (response PreviewArtifact403JSONResponse) VisitPreviewArtifactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewArtifact404JSONResponse ErrorEnvelope
+
+func (response PreviewArtifact404JSONResponse) VisitPreviewArtifactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewArtifact409JSONResponse ErrorEnvelope
+
+func (response PreviewArtifact409JSONResponse) VisitPreviewArtifactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewArtifact413JSONResponse ErrorEnvelope
+
+func (response PreviewArtifact413JSONResponse) VisitPreviewArtifactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewArtifact429JSONResponse ErrorEnvelope
+
+func (response PreviewArtifact429JSONResponse) VisitPreviewArtifactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -3679,6 +4293,9 @@ func (response Healthz200JSONResponse) VisitHealthzResponse(w http.ResponseWrite
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 
+	// (GET /api/v1/artifacts/config)
+	ArtifactConfig(ctx context.Context, request ArtifactConfigRequestObject) (ArtifactConfigResponseObject, error)
+
 	// (GET /api/v1/audit)
 	ListAudit(ctx context.Context, request ListAuditRequestObject) (ListAuditResponseObject, error)
 
@@ -3697,6 +4314,9 @@ type StrictServerInterface interface {
 	// (GET /api/v1/extensions)
 	ListExtensions(ctx context.Context, request ListExtensionsRequestObject) (ListExtensionsResponseObject, error)
 
+	// (GET /api/v1/extensions/icons/{icon_id})
+	ExtensionIcon(ctx context.Context, request ExtensionIconRequestObject) (ExtensionIconResponseObject, error)
+
 	// (GET /api/v1/instances)
 	ListInstances(ctx context.Context, request ListInstancesRequestObject) (ListInstancesResponseObject, error)
 
@@ -3708,6 +4328,12 @@ type StrictServerInterface interface {
 
 	// (GET /api/v1/instances/{id})
 	GetInstance(ctx context.Context, request GetInstanceRequestObject) (GetInstanceResponseObject, error)
+
+	// (POST /api/v1/instances/{id}/artifacts/export)
+	ExportArtifacts(ctx context.Context, request ExportArtifactsRequestObject) (ExportArtifactsResponseObject, error)
+
+	// (POST /api/v1/instances/{id}/artifacts/preview)
+	PreviewArtifact(ctx context.Context, request PreviewArtifactRequestObject) (PreviewArtifactResponseObject, error)
 
 	// (GET /api/v1/instances/{id}/completions)
 	InstanceCompletions(ctx context.Context, request InstanceCompletionsRequestObject) (InstanceCompletionsResponseObject, error)
@@ -3834,6 +4460,30 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictGinServerOptions
+}
+
+// ArtifactConfig operation middleware
+func (sh *strictHandler) ArtifactConfig(ctx *gin.Context) {
+	var request ArtifactConfigRequestObject
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ArtifactConfig(ctx, request.(ArtifactConfigRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ArtifactConfig")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ArtifactConfigResponseObject); ok {
+		if err := validResponse.VisitArtifactConfigResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // ListAudit operation middleware
@@ -3984,6 +4634,32 @@ func (sh *strictHandler) ListExtensions(ctx *gin.Context) {
 	}
 }
 
+// ExtensionIcon operation middleware
+func (sh *strictHandler) ExtensionIcon(ctx *gin.Context, iconId string) {
+	var request ExtensionIconRequestObject
+
+	request.IconId = iconId
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ExtensionIcon(ctx, request.(ExtensionIconRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ExtensionIcon")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ExtensionIconResponseObject); ok {
+		if err := validResponse.VisitExtensionIconResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListInstances operation middleware
 func (sh *strictHandler) ListInstances(ctx *gin.Context, params ListInstancesParams) {
 	var request ListInstancesRequestObject
@@ -4086,6 +4762,72 @@ func (sh *strictHandler) GetInstance(ctx *gin.Context, id IdPath) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(GetInstanceResponseObject); ok {
 		if err := validResponse.VisitGetInstanceResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ExportArtifacts operation middleware
+func (sh *strictHandler) ExportArtifacts(ctx *gin.Context, id IdPath) {
+	var request ExportArtifactsRequestObject
+
+	request.Id = id
+
+	var body ExportArtifactsJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ExportArtifacts(ctx, request.(ExportArtifactsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ExportArtifacts")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ExportArtifactsResponseObject); ok {
+		if err := validResponse.VisitExportArtifactsResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PreviewArtifact operation middleware
+func (sh *strictHandler) PreviewArtifact(ctx *gin.Context, id IdPath) {
+	var request PreviewArtifactRequestObject
+
+	request.Id = id
+
+	var body PreviewArtifactJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.PreviewArtifact(ctx, request.(PreviewArtifactRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PreviewArtifact")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(PreviewArtifactResponseObject); ok {
+		if err := validResponse.VisitPreviewArtifactResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

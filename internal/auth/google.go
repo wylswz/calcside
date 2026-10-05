@@ -17,7 +17,7 @@ import (
 type GoogleConfig struct {
 	ClientID       string
 	ClientSecret   string
-	BaseURL        string // external base URL for the redirect_uri
+	ConsoleOrigin  string // external base URL for the redirect_uri
 	AllowedDomains []string
 	Issuer         string // default https://accounts.google.com
 	provider       *oidc.Provider
@@ -58,7 +58,7 @@ func (g *GoogleFlow) oauth2cfg() *oauth2.Config {
 		ClientID:     g.cfg.ClientID,
 		ClientSecret: g.cfg.ClientSecret,
 		Endpoint:     g.cfg.provider.Endpoint(),
-		RedirectURL:  strings.TrimSuffix(g.cfg.BaseURL, "/") + "/auth/google/callback",
+		RedirectURL:  strings.TrimSuffix(g.cfg.ConsoleOrigin, "/") + "/auth/google/callback",
 		Scopes:       []string{oidc.ScopeOpenID, "email", "profile"},
 	}
 }

@@ -19,8 +19,6 @@ import (
 	"sync"
 	"time"
 
-	starjson "go.starlark.net/lib/json"
-	"go.starlark.net/lib/math"
 	"go.starlark.net/resolve"
 	"go.starlark.net/starlark"
 	"go.starlark.net/starlarkstruct"
@@ -29,6 +27,7 @@ import (
 	"calcside/internal/capability"
 	capio "calcside/internal/capability/io"
 	"calcside/internal/secrets"
+	"calcside/internal/stdlib"
 	"calcside/internal/types"
 )
 
@@ -187,6 +186,7 @@ type SessionCreation struct {
 // SessionDeps are the live collaborators a session is wired to — the
 // part of session creation that is not data.
 type SessionDeps struct {
+	Context  context.Context
 	Registry *capability.Registry
 	Limits   capability.ServerLimits
 	Hooks    []capability.Hook
@@ -199,6 +199,9 @@ type SessionDeps struct {
 // globals for one instance. On error every capability built so far is
 // closed.
 func NewSession(d SessionDeps, c SessionCreation) (*Session, error) {
+	if d.Context == nil {
+		d.Context = context.Background()
+	}
 	labels := c.Labels
 	if labels == nil {
 		labels = map[string]string{}
@@ -217,12 +220,9 @@ func NewSession(d SessionDeps, c SessionCreation) (*Session, error) {
 		_ = envDict.SetKey(starlark.String(k), starlark.String(v))
 	}
 	envDict.Freeze()
-	predeclared := starlark.StringDict{
-		"json":    starjson.Module,
-		"math":    math.Module,
-		"env":     envDict,
-		"secrets": secretsStruct{set: d.Secrets},
-	}
+	predeclared := stdlib.Modules()
+	predeclared["env"] = envDict
+	predeclared["secrets"] = secretsStruct{set: d.Secrets}
 
 	// io is always granted, even when not listed in the spec.
 	caps := maps.Clone(c.Capabilities)
@@ -275,7 +275,7 @@ func NewSession(d SessionDeps, c SessionCreation) (*Session, error) {
 		if !ok {
 			return fail(fmt.Errorf("unknown capability %s", name))
 		}
-		val, closer, err := f.New(caps[name], capability.InstanceEnv{Gate: gate, Secrets: d.Secrets, Bindings: bindings, MaxSteps: c.MaxSteps, Policies: c.Policies})
+		val, closer, err := f.New(caps[name], capability.InstanceEnv{Context: d.Context, Gate: gate, Secrets: d.Secrets, Bindings: bindings, MaxSteps: c.MaxSteps, Policies: c.Policies})
 		if err != nil {
 			return fail(fmt.Errorf("capability %s: %s", name, err))
 		}

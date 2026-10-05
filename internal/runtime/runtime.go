@@ -82,6 +82,7 @@ type Runtime interface {
 	Keepalive(ctx context.Context, req *KeepaliveRequest) (*KeepaliveResponse, error)
 	Delete(ctx context.Context, req *DeleteRequest) (*DeleteResponse, error)
 	Browse(ctx context.Context, req *BrowseRequest) (*BrowseResponse, error)
+	Export(ctx context.Context, req *ExportRequest) (*ExportResponse, error)
 	Prompt(ctx context.Context, req *PromptRequest) (*PromptResponse, error)
 	Inspect(ctx context.Context, req *InspectRequest) (*InspectResponse, error)
 }

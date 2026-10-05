@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"calcside/internal/api"
+	"calcside/internal/artifact"
 	"calcside/internal/audit"
 	"calcside/internal/auth"
 	"calcside/internal/capability"
@@ -195,7 +196,7 @@ func provideGoogle(ctx context.Context, cfg config.Config) (*auth.GoogleFlow, er
 	flow, err := auth.InitGoogle(ctx, auth.GoogleConfig{
 		ClientID:       cfg.GoogleClientID,
 		ClientSecret:   cfg.GoogleClientSecret,
-		BaseURL:        cfg.BaseURL,
+		ConsoleOrigin:  cfg.ConsoleOrigin,
 		AllowedDomains: cfg.GoogleAllowedDomains,
 	})
 	if err != nil {
@@ -236,5 +237,16 @@ func provideServer(cfg config.Config, deps api.Deps, flow *auth.GoogleFlow) *htt
 		slog.Info("google login disabled (no --google-client-id)")
 	}
 
+	if deps.Previews != nil {
+		mux = deps.Previews.Wrap(mux)
+	}
 	return &http.Server{Addr: serverAddr(cfg), Handler: mux}
+}
+
+func provideArtifacts(cfg config.Config, sbx *sandbox.Service) (*api.ArtifactPreviews, func(), error) {
+	previews, err := api.NewArtifactPreviews(artifact.Config{BaseURL: cfg.ArtifactPreviewBaseURL, ConsoleOrigin: cfg.ConsoleOrigin, AllowScripts: cfg.ArtifactAllowScripts, AllowLocalHTTP: cfg.Dev}, sbx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return previews, previews.Close, nil
 }

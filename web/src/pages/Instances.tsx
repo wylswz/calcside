@@ -79,6 +79,10 @@ function ExtRowEditor({ row, catalog, specNames, vaultNames, netOn, fsOn, onChan
   return (
     <div className="panel space-y-1.5 p-2.5">
       <div className="flex items-center gap-1.5">
+        <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded bg-surface font-mono text-accent" aria-hidden="true">
+          {(entry?.name || row.alias || '?').slice(0, 1).toUpperCase()}
+          {entry?.icon_url?.startsWith('/api/v1/extensions/icons/') && <img key={entry.icon_url} src={entry.icon_url} alt="" className="absolute inset-0 h-8 w-8 rounded" onError={(e) => { e.currentTarget.style.display = 'none' }} />}
+        </span>
         <select className={inputCls + ' font-mono text-xs'} value={row.custom ? '__custom__' : row.source}
           onChange={(e) => {
             if (e.target.value === '__custom__') {
@@ -109,6 +113,7 @@ function ExtRowEditor({ row, catalog, specNames, vaultNames, netOn, fsOn, onChan
             onChange={(e) => set({ sum: e.target.value })} />
         </>
       )}
+      {entry?.description && <p className="text-xs text-sec">{entry.description}</p>}
       {entry && (entry.ops ?? []).length > 0 && (
         <p className="font-mono text-xs text-sec">
           {(entry.ops ?? []).map((o) => `ext.${row.alias || '?'}.${o.name}(${(o.params ?? []).join(', ')})`).join('  ')}

@@ -19,6 +19,7 @@ import (
 
 	"calcside/internal/api/dto"
 	"calcside/internal/api/gen"
+	"calcside/internal/artifact"
 	"calcside/internal/auth"
 	auditsvc "calcside/internal/service/audit"
 	"calcside/internal/service/catalog"
@@ -34,12 +35,13 @@ const maxBodyBytes = 1 << 20
 
 // Deps wires the API.
 type Deps struct {
-	IAM     *iam.Service
-	Vault   *vault.Service
-	Policy  *policysvc.Service
-	Audit   *auditsvc.Service
-	Catalog *catalog.Service
-	Sandbox *sandbox.Service
+	IAM      *iam.Service
+	Vault    *vault.Service
+	Policy   *policysvc.Service
+	Audit    *auditsvc.Service
+	Catalog  *catalog.Service
+	Sandbox  *sandbox.Service
+	Previews *ArtifactPreviews
 
 	Auth          *auth.Service
 	Basic         *auth.BasicLogin
@@ -155,6 +157,9 @@ func Handler(d Deps) http.Handler {
 	} else {
 		gin.SetMode(gin.ReleaseMode)
 	}
+	if d.Previews == nil {
+		d.Previews, _ = NewArtifactPreviews(artifact.Config{}, d.Sandbox)
+	}
 	r := gin.New()
 	r.HandleMethodNotAllowed = true
 	r.Use(gin.Recovery(), requestLogger())
@@ -177,7 +182,7 @@ func Handler(d Deps) http.Handler {
 	})
 
 	api := r.Group("/")
-	api.Use(d.authMiddleware(), bodyLimit())
+	api.Use(d.authMiddleware(), bodyLimit(), d.Previews.limit())
 	gen.RegisterHandlers(api, strict)
 
 	// auth-raw: session cookie endpoints stay hand-written.
@@ -189,7 +194,7 @@ func Handler(d Deps) http.Handler {
 	}
 
 	r.NoRoute(d.noRoute())
-	return r
+	return d.Previews.Wrap(r)
 }
 
 // resolveOnly attaches a principal when credentials exist but never

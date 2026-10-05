@@ -17,6 +17,8 @@ type Info struct {
 	Name         string                 `json:"name"`
 	Version      string                 `json:"version"`
 	Description  string                 `json:"description"`
+	IconURL      string                 `json:"icon_url,omitempty"`
+	Icon         []byte                 `json:"-"`
 	Dependencies []types.CapabilityName `json:"dependencies"`
 	Ops          []OpSpec               `json:"ops"`
 	Config       []ConfigField          `json:"config"`
@@ -80,6 +82,7 @@ func (f factory) Available() Catalog {
 				Name:         m.Manifest.Name,
 				Version:      m.Manifest.Version,
 				Description:  m.Manifest.Description,
+				Icon:         packagedIcon(m),
 				Dependencies: m.Manifest.Dependencies,
 				Ops:          m.Manifest.Ops,
 				Config:       m.Manifest.Config,

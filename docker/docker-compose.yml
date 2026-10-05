@@ -28,7 +28,7 @@ services:
       CALCSIDE_ADDR: ":8080"
       CALCSIDE_STORE: ${CALCSIDE_STORE:-sqlite}
       CALCSIDE_DSN: ${CALCSIDE_DSN:-/data/calcside.db}
-      CALCSIDE_BASE_URL: ${CALCSIDE_BASE_URL:-http://localhost:8080}
+      CALCSIDE_CONSOLE_ORIGIN: ${CALCSIDE_CONSOLE_ORIGIN:-http://localhost:8080}
       # Remote execution tier: worker list nodeID=host:port plus the
       # shared HMAC key both sides must carry.
       CALCSIDE_WORKERS: ${CALCSIDE_WORKERS:-worker-1=worker:8090}
@@ -44,8 +44,9 @@ services:
       #   data/policies  global .rego files (CALCSIDE_POLICY_DIR)
       #   data/ext       local ext capability dirs (CALCSIDE_EXT_LOCAL_ROOTS)
       #   data/ext-cache remote ext fetch cache
-      # e.g.: cp -r examples/capabilities/tavily docker/data/ext/
+      # e.g.: cp -r contrib/tavily docker/data/ext/
       - ./data:/data
+      - ../contrib:/opt/calcside/contrib:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
       interval: 30s

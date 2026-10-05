@@ -286,6 +286,7 @@ type Factory interface {
 // treated as empty), and the already-built bindings of other capabilities
 // (for ext, which composes them).
 type InstanceEnv struct {
+	Context  context.Context
 	Policies []string // selected policies controlling runtime address checks
 	Gate     *Gate
 	Secrets  *secrets.Set

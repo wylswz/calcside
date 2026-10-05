@@ -7,15 +7,22 @@ import (
 	"calcside/internal/capability/ext"
 	"calcside/internal/completion"
 	"calcside/internal/policy"
+	"calcside/internal/stdlib"
 	"calcside/internal/types"
+	"crypto/sha256"
+	"fmt"
+	"sync"
 )
 
 type Service struct {
-	reg *capability.Registry
+	reg       *capability.Registry
+	mu        sync.Mutex
+	icons     map[string][]byte
+	iconOrder []string
 }
 
 func New(reg *capability.Registry) *Service {
-	return &Service{reg: reg}
+	return &Service{reg: reg, icons: map[string][]byte{}}
 }
 
 // CapabilityDoc describes one registered capability factory. This is the
@@ -57,6 +64,12 @@ func (s *Service) Extensions() ExtensionsView {
 		if av, ok := f.(interface{ Available() ext.Catalog }); ok {
 			c := av.Available()
 			out.Extensions = c.Extensions
+			for i := range out.Extensions {
+				if icon := out.Extensions[i].Icon; len(icon) > 0 {
+					out.Extensions[i].IconURL = s.rememberIcon(icon)
+					out.Extensions[i].Icon = nil
+				}
+			}
 			out.RemoteEnabled = c.RemoteEnabled
 			out.LocalEnabled = c.LocalEnabled
 		}
@@ -65,6 +78,7 @@ func (s *Service) Extensions() ExtensionsView {
 }
 
 type EditorMetadata struct {
+	Utilities    []completion.Symbol `json:"utilities"`
 	Rego         []completion.Symbol `json:"rego"`
 	Capabilities []CapabilityDoc     `json:"capabilities"`
 }
@@ -82,5 +96,26 @@ func (s *Service) Editor() EditorMetadata {
 			}
 		}
 	}
-	return EditorMetadata{Rego: policy.EditorSymbols(), Capabilities: caps}
+	return EditorMetadata{Rego: policy.EditorSymbols(), Capabilities: caps, Utilities: stdlib.Symbols()}
+}
+
+func (s *Service) rememberIcon(data []byte) string {
+	id := fmt.Sprintf("%x", sha256.Sum256(data))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.icons[id]; !ok {
+		if len(s.iconOrder) >= 512 {
+			delete(s.icons, s.iconOrder[0])
+			s.iconOrder = s.iconOrder[1:]
+		}
+		s.icons[id] = data
+		s.iconOrder = append(s.iconOrder, id)
+	}
+	return "/api/v1/extensions/icons/" + id
+}
+
+func (s *Service) Icon(id string) []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.icons[id]
 }

@@ -30,6 +30,24 @@ export function Logo({ className = '' }: { className?: string }) {
   )
 }
 
+export function Icon({ name, className = '' }: { name: 'preview' | 'download' | 'refresh' | 'back' | 'folder' | 'file' | 'code' | 'play' | 'stop' | 'desktop' | 'mobile' | 'chevron'; className?: string }) {
+  const paths = {
+    preview: <><path d="M2 10s3-6 8-6 8 6 8 6-3 6-8 6-8-6-8-6Z" /><circle cx="10" cy="10" r="2.5" /></>,
+    download: <><path d="M10 2v10m-4-4 4 4 4-4M3 13v4h14v-4" /></>,
+    refresh: <><path d="M17 8a7 7 0 1 0-1 7M17 3v5h-5" /></>,
+    back: <path d="m9 4-6 6 6 6M3 10h14" />,
+    folder: <path d="M2 5h6l2 2h8v10H2Z" />,
+    file: <><path d="M4 2h8l4 4v12H4Z M12 2v5h4M7 11h6M7 14h4" /></>,
+    code: <path d="m6 5-4 5 4 5m8-10 4 5-4 5M11 3 9 17" />,
+    play: <path d="m6 3 11 7-11 7Z" />,
+    stop: <path d="M5 5h10v10H5Z" />,
+    desktop: <><path d="M2 3h16v11H2ZM10 14v4M6 18h8" /></>,
+    mobile: <><rect x="5" y="2" width="10" height="16" /><path d="M9 15h2" /></>,
+    chevron: <path d="m7 4 6 6-6 6" />,
+  }
+  return <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" className={`h-4 w-4 shrink-0 ${className}`} aria-hidden="true">{paths[name]}</svg>
+}
+
 export function Badge({ tone, children }: { tone: Tone; children: React.ReactNode }) {
   const text = { blue: 'text-ink', red: 'text-danger', yellow: 'text-warn-text', gray: 'text-mute' }[tone]
   return (

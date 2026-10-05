@@ -298,7 +298,7 @@ func (f factory) New(cfgAny any, env capability.InstanceEnv) (starlark.Value, io
 	extMembers := starlark.StringDict{}
 	for _, alias := range aliases {
 		ac := v[alias]
-		globals, err := ac.mod.init(env.Bindings, ac.config, env.MaxSteps)
+		globals, err := ac.mod.init(env.Context, env.Bindings, ac.config, env.MaxSteps)
 		if err != nil {
 			return nil, nil, err
 		}

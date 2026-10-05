@@ -249,3 +249,24 @@ func TestNetworkPolicyThroughChild(t *testing.T) {
 		}
 	}
 }
+
+func TestArtifactExportThroughChild(t *testing.T) {
+	s := newSupervisor(t, nil)
+	ctx := context.Background()
+	_, err := s.Create(ctx, &runtime.CreateRequest{InstanceID: "ins_artifact", Owner: owner, Spec: []byte(`{"capabilities":{"fs":{}}}`), ExpiresAt: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := run(t, s, "ins_artifact", "write", `fs.write("report.csv", "id,value\nA,001\n")`)
+	if err != nil || result.Result.Error != nil {
+		t.Fatal("write failed")
+	}
+	out, err := s.Export(ctx, &runtime.ExportRequest{InstanceID: "ins_artifact", Owner: owner, Paths: []string{"report.csv"}})
+	if err != nil || out.Error != nil || len(out.Files) != 1 || string(out.Files[0].Content) != "id,value\nA,001\n" || len(out.Audit.Events) == 0 {
+		t.Fatalf("child export: %v", err)
+	}
+	out, err = s.Export(ctx, &runtime.ExportRequest{InstanceID: "ins_artifact", Owner: owner, Paths: []string{"report.csv", "missing.txt"}, Recursive: true})
+	if err != nil || out.Error == nil || len(out.Files) != 0 || len(out.Audit.Events) == 0 {
+		t.Fatal("partial child export or missing failure audit")
+	}
+}

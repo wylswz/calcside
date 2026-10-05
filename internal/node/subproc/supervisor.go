@@ -526,3 +526,7 @@ func (s *Supervisor) Inspect(ctx context.Context, req *runtime.InspectRequest) (
 		return resp, nil
 	})
 }
+
+func (s *Supervisor) Export(ctx context.Context, req *runtime.ExportRequest) (*runtime.ExportResponse, error) {
+	return call(s, req.InstanceID, func(p *proc) (*runtime.ExportResponse, error) { return p.rt.Export(ctx, req) })
+}

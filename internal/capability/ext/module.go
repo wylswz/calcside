@@ -6,13 +6,15 @@
 package ext
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
+	"time"
 
-	starjson "go.starlark.net/lib/json"
-	"go.starlark.net/lib/math"
 	"go.starlark.net/starlark"
 
+	"calcside/internal/capability"
+	"calcside/internal/stdlib"
 	"calcside/internal/types"
 )
 
@@ -29,11 +31,13 @@ type boundModule struct {
 // with only the declared base capability bindings, a frozen `config`
 // dict, and json/math predeclared. The gate is not armed during init, so
 // any capability call at import time fails with ErrOutOfScope.
-func (m *Module) init(bindings map[types.CapabilityName]starlark.Value, cfg map[string]any, maxSteps uint64) (starlark.StringDict, error) {
-	pre := starlark.StringDict{
-		"json": starjson.Module,
-		"math": math.Module,
+func (m *Module) init(ctx context.Context, bindings map[types.CapabilityName]starlark.Value, cfg map[string]any, maxSteps uint64) (starlark.StringDict, error) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	pre := stdlib.Modules()
 	cfgDict, err := configDict(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("ext %s: config: %w", m.ID, err)
@@ -48,6 +52,9 @@ func (m *Module) init(bindings map[types.CapabilityName]starlark.Value, cfg map[
 	}
 	b := &boundModule{mod: m, pre: pre, cache: map[string]starlark.StringDict{}}
 	thread := &starlark.Thread{Name: "ext " + string(m.ID), Load: b.load}
+	thread.SetLocal(capability.ContextKey, ctx)
+	stop := context.AfterFunc(ctx, func() { thread.Cancel("extension initialization canceled") })
+	defer stop()
 	if maxSteps > 0 {
 		thread.SetMaxExecutionSteps(maxSteps)
 	}

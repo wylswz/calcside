@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"context"
 	"encoding/base64"
 	"net/url"
 	"strings"
@@ -142,5 +143,26 @@ func TestWipe(t *testing.T) {
 	s.Wipe()
 	if len(s.Names()) != 0 || string(stored) != "\x00\x00\x00\x00" || s.Lookup("W") != nil {
 		t.Fatal("wipe failed")
+	}
+}
+
+func TestRedactBounded(t *testing.T) {
+	set := NewSet()
+	set.Add("TOKEN", []byte("s3cr3t"), nil)
+	for _, text := range []string{"prefix s3cr3t suffix", "czNjcjN0", "not a secret"} {
+		got, err := set.RedactBounded(context.Background(), text, 128)
+		if err != nil || got != set.Redact(text) {
+			t.Fatalf("redaction mismatch: %v", err)
+		}
+	}
+	set = NewSet()
+	set.Add("TOKEN", []byte("X"), nil)
+	if _, err := set.RedactBounded(context.Background(), strings.Repeat("X", 100000), 100000); err == nil {
+		t.Fatal("allowed redaction expansion")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := set.RedactBounded(ctx, "X", 100); err == nil {
+		t.Fatal("ignored cancellation")
 	}
 }

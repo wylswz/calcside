@@ -10,7 +10,7 @@ you type. Depends on the local SDK checkout via a uv path source
 
 ```bash
 # from the repo root: start a dev-mode server on :8787
-# (enables the secrets vault and --ext-local-roots examples/capabilities)
+# (enables the secrets vault and --ext-local-roots contrib)
 make serve-dev
 
 # create a vault secret named TAVILY_API_KEY in the web console
@@ -36,7 +36,7 @@ the run finishes (a continuing thread resumes the same instance).
 
 `CalcsideMiddleware` creates a sandbox instance per run with `fs`, `net`
 (allow_hosts `api.tavily.com`), and the `tavily` extension loaded from
-`examples/capabilities/tavily`. The instance spec references vault secret
+`contrib/tavily`. The instance spec references vault secret
 `TAVILY_API_KEY`; the extension's `api_key` config is the
 `{{secrets.TAVILY_API_KEY}}` placeholder, so the key is injected by the
 `net` capability at send time — the script and the model only ever see the

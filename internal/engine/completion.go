@@ -12,6 +12,7 @@ import (
 
 	"calcside/internal/capability"
 	"calcside/internal/completion"
+	"calcside/internal/stdlib"
 )
 
 const maxCompletionSymbols = 2048
@@ -35,6 +36,10 @@ func (s *Session) Completions(ctx context.Context, reg *capability.Registry) (*c
 	maps.Copy(bindings, s.Globals)
 	maps.Copy(bindings, s.Predeclared)
 	docs := map[string]capability.OpInfo{}
+	utilities := map[string]completion.Symbol{}
+	for _, symbol := range stdlib.Symbols() {
+		utilities[symbol.Name] = symbol
+	}
 	for _, name := range reg.Names() {
 		cfg, granted := s.Capabilities[string(name)]
 		if !granted {
@@ -66,6 +71,9 @@ func (s *Session) Completions(ctx context.Context, reg *capability.Registry) (*c
 				symbol.Params = functionParams(fn)
 				symbol.Detail = "(" + strings.Join(symbol.Params, ", ") + ")"
 			}
+		}
+		if utility, ok := utilities[name]; ok {
+			symbol = utility
 		}
 		if op, ok := docs[name]; ok {
 			symbol.Params = op.Params

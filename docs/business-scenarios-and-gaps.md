@@ -248,19 +248,25 @@ editor completion fields alone does not implement enforcement.
 ### G07: current priority is artifact preview and export
 
 The immediate product gap is **generate -> preview -> download/package**. A CSV
-or HTML file in VFS is not a complete deliverable when the console only shows
-source text and offers no download action.
+or HTML file in VFS was not a complete deliverable when the console only showed
+source text and offered no download action.
 
-[EP-0007](proposals/0007-artifact-preview-and-download.md) proposes CSV table
-preview, isolated static/interactive HTML modes, single-file attachments, and
-ZIP export of selected files/directories. Every file read keeps Gate and secret
+The first [EP-0007](proposals/0007-artifact-preview-and-download.md) increment now
+provides CSV/TSV table previews, isolated static/interactive HTML modes, single-file
+attachments, and ZIP export of selected files/directories in the UI/API/Python SDK. Every file read keeps Gate and secret
 redaction enforcement; an archive is not a way to bypass per-file policy.
 
 This can ship independently of upload, a new business connector, or a storage
 backend change: existing scripts can already write files. Keep memory VFS and
 instance-scoped lifetime, and distinguish static HTML from opt-in JavaScript
 charts with separate-origin requirements. Do not claim post-expiry availability
-or unrestricted binary download. The gap is still open until implemented.
+or unrestricted binary download. This first delivery gap is now implemented for
+bounded UTF-8 text while the instance is live. HTML deployment requires a separate
+registrable domain and random snapshot subdomains. JavaScript is off by default;
+CSP/sandbox isolate console authority but are not a strict no-egress firewall.
+Durable retention, binary exports and shared multi-replica preview storage remain
+open. The six utility modules and Tavily contrib migration are also implemented in this
+increment; the earlier scenario analysis describes the pre-implementation baseline.
 
 ## Relationship to the current proposals
 

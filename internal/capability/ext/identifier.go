@@ -80,6 +80,7 @@ type CapabilityManifest struct {
 	Name         string                 `yaml:"name"`
 	Version      string                 `yaml:"version"`
 	Description  string                 `yaml:"description"`
+	Icon         string                 `yaml:"icon"`
 	Dependencies []types.CapabilityName `yaml:"dependencies"`
 	Ops          []OpSpec               `yaml:"ops"`
 	Config       []ConfigField          `yaml:"config"`

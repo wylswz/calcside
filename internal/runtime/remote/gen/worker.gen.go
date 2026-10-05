@@ -98,6 +98,12 @@ type ExecRequest = rt.ExecRequest
 // ExecResponse defines model for ExecResponse.
 type ExecResponse = rt.ExecResponse
 
+// ExportRequest defines model for ExportRequest.
+type ExportRequest = rt.ExportRequest
+
+// ExportResponse defines model for ExportResponse.
+type ExportResponse = rt.ExportResponse
+
 // ExtTree defines model for ExtTree.
 type ExtTree struct {
 	// Files Slash-relative path to file contents.
@@ -139,6 +145,9 @@ type RuntimeDeleteJSONRequestBody = DeleteRequest
 
 // RuntimeExecJSONRequestBody defines body for RuntimeExec for application/json ContentType.
 type RuntimeExecJSONRequestBody = ExecRequest
+
+// RuntimeExportJSONRequestBody defines body for RuntimeExport for application/json ContentType.
+type RuntimeExportJSONRequestBody = ExportRequest
 
 // RuntimeInspectJSONRequestBody defines body for RuntimeInspect for application/json ContentType.
 type RuntimeInspectJSONRequestBody = InspectRequest
@@ -290,6 +299,24 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /runtime/v1/exec (the `RuntimeExec` operationId).
 	RuntimeExec(ctx context.Context, body RuntimeExecJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RuntimeExportWithBody Atomically collect authorized redacted text artifacts.
+	//
+	// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /runtime/v1/export (the `RuntimeExport` operationId).
+	RuntimeExportWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RuntimeExport Atomically collect authorized redacted text artifacts.
+	//
+	// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /runtime/v1/export (the `RuntimeExport` operationId).
+	RuntimeExport(ctx context.Context, body RuntimeExportJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RuntimeInspectWithBody Snapshot a live instance's globals or completion metadata.
 	//
@@ -484,6 +511,44 @@ func (c *Client) RuntimeExecWithBody(ctx context.Context, contentType string, bo
 // Corresponds with POST /runtime/v1/exec (the `RuntimeExec` operationId).
 func (c *Client) RuntimeExec(ctx context.Context, body RuntimeExecJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRuntimeExecRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RuntimeExportWithBody Atomically collect authorized redacted text artifacts.
+//
+// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /runtime/v1/export (the `RuntimeExport` operationId).
+func (c *Client) RuntimeExportWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRuntimeExportRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RuntimeExport Atomically collect authorized redacted text artifacts.
+//
+// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /runtime/v1/export (the `RuntimeExport` operationId).
+func (c *Client) RuntimeExport(ctx context.Context, body RuntimeExportJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRuntimeExportRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -768,6 +833,46 @@ func NewRuntimeExecRequestWithBody(server string, contentType string, body io.Re
 	return req, nil
 }
 
+// NewRuntimeExportRequest calls the generic RuntimeExport builder with application/json body
+func NewRuntimeExportRequest(server string, body RuntimeExportJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRuntimeExportRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewRuntimeExportRequestWithBody constructs an http.Request for the RuntimeExport method, with any body, and a specified content type
+func NewRuntimeExportRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/runtime/v1/export")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewRuntimeInspectRequest calls the generic RuntimeInspect builder with application/json body
 func NewRuntimeInspectRequest(server string, body RuntimeInspectJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -999,6 +1104,24 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /runtime/v1/exec (the `RuntimeExec` operationId).
 	RuntimeExecWithResponse(ctx context.Context, body RuntimeExecJSONRequestBody, reqEditors ...RequestEditorFn) (*RuntimeExecResponse, error)
+
+	// RuntimeExportWithBodyWithResponse Atomically collect authorized redacted text artifacts.
+	//
+	// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /runtime/v1/export (the `RuntimeExport` operationId).
+	RuntimeExportWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RuntimeExportResponse, error)
+
+	// RuntimeExportWithResponse Atomically collect authorized redacted text artifacts.
+	//
+	// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /runtime/v1/export (the `RuntimeExport` operationId).
+	RuntimeExportWithResponse(ctx context.Context, body RuntimeExportJSONRequestBody, reqEditors ...RequestEditorFn) (*RuntimeExportResponse, error)
 
 	// RuntimeInspectWithBodyWithResponse Snapshot a live instance's globals or completion metadata.
 	//
@@ -1241,6 +1364,54 @@ func (r RuntimeExecResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r RuntimeExecResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RuntimeExportResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ExportResponse
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RuntimeExportResponse) GetJSON200() *ExportResponse {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RuntimeExportResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RuntimeExportResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RuntimeExportResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RuntimeExportResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RuntimeExportResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -1507,6 +1678,36 @@ func (c *ClientWithResponses) RuntimeExecWithResponse(ctx context.Context, body 
 	return ParseRuntimeExecResponse(rsp)
 }
 
+// RuntimeExportWithBodyWithResponse Atomically collect authorized redacted text artifacts.
+//
+// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /runtime/v1/export (the `RuntimeExport` operationId).
+func (c *ClientWithResponses) RuntimeExportWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RuntimeExportResponse, error) {
+	rsp, err := c.RuntimeExportWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRuntimeExportResponse(rsp)
+}
+
+// RuntimeExportWithResponse Atomically collect authorized redacted text artifacts.
+//
+// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /runtime/v1/export (the `RuntimeExport` operationId).
+func (c *ClientWithResponses) RuntimeExportWithResponse(ctx context.Context, body RuntimeExportJSONRequestBody, reqEditors ...RequestEditorFn) (*RuntimeExportResponse, error) {
+	rsp, err := c.RuntimeExport(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRuntimeExportResponse(rsp)
+}
+
 // RuntimeInspectWithBodyWithResponse Snapshot a live instance's globals or completion metadata.
 //
 // Read-only; may be retried.
@@ -1729,6 +1930,39 @@ func ParseRuntimeExecResponse(rsp *http.Response) (*RuntimeExecResponse, error) 
 	return response, nil
 }
 
+// ParseRuntimeExportResponse parses an HTTP response from a RuntimeExportWithResponse call
+func ParseRuntimeExportResponse(rsp *http.Response) (*RuntimeExportResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RuntimeExportResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ExportResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseRuntimeInspectResponse parses an HTTP response from a RuntimeInspectWithResponse call
 func ParseRuntimeInspectResponse(rsp *http.Response) (*RuntimeInspectResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -1842,6 +2076,9 @@ type ServerInterface interface {
 	// RuntimeExec Run Starlark on a live instance.
 	// (POST /runtime/v1/exec)
 	RuntimeExec(c *gin.Context)
+	// RuntimeExport Atomically collect authorized redacted text artifacts.
+	// (POST /runtime/v1/export)
+	RuntimeExport(c *gin.Context)
 	// RuntimeInspect Snapshot a live instance's globals or completion metadata.
 	// (POST /runtime/v1/inspect)
 	RuntimeInspect(c *gin.Context)
@@ -1912,6 +2149,19 @@ func (siw *ServerInterfaceWrapper) RuntimeExec(c *gin.Context) {
 	}
 
 	siw.Handler.RuntimeExec(c)
+}
+
+// RuntimeExport operation middleware
+func (siw *ServerInterfaceWrapper) RuntimeExport(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RuntimeExport(c)
 }
 
 // RuntimeInspect operation middleware
@@ -1985,6 +2235,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/runtime/v1/keepalive", wrapper.RuntimeKeepalive)
 	router.POST(options.BaseURL+"/runtime/v1/delete", wrapper.RuntimeDelete)
 	router.POST(options.BaseURL+"/runtime/v1/browse", wrapper.RuntimeBrowse)
+	router.POST(options.BaseURL+"/runtime/v1/export", wrapper.RuntimeExport)
 	router.POST(options.BaseURL+"/runtime/v1/prompt", wrapper.RuntimePrompt)
 	router.POST(options.BaseURL+"/runtime/v1/inspect", wrapper.RuntimeInspect)
 }
@@ -2147,6 +2398,45 @@ func (response RuntimeExecdefaultJSONResponse) VisitRuntimeExecResponse(w http.R
 	return err
 }
 
+type RuntimeExportRequestObject struct {
+	Body *RuntimeExportJSONRequestBody
+}
+
+type RuntimeExportResponseObject interface {
+	VisitRuntimeExportResponse(w http.ResponseWriter) error
+}
+
+type RuntimeExport200JSONResponse ExportResponse
+
+func (response RuntimeExport200JSONResponse) VisitRuntimeExportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RuntimeExportdefaultJSONResponse struct {
+	Body       ErrorEnvelope
+	StatusCode int
+}
+
+func (response RuntimeExportdefaultJSONResponse) VisitRuntimeExportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RuntimeInspectRequestObject struct {
 	Body *RuntimeInspectJSONRequestBody
 }
@@ -2278,6 +2568,9 @@ type StrictServerInterface interface {
 	// RuntimeExec Run Starlark on a live instance.
 	// (POST /runtime/v1/exec)
 	RuntimeExec(ctx context.Context, request RuntimeExecRequestObject) (RuntimeExecResponseObject, error)
+	// RuntimeExport Atomically collect authorized redacted text artifacts.
+	// (POST /runtime/v1/export)
+	RuntimeExport(ctx context.Context, request RuntimeExportRequestObject) (RuntimeExportResponseObject, error)
 	// RuntimeInspect Snapshot a live instance's globals or completion metadata.
 	// (POST /runtime/v1/inspect)
 	RuntimeInspect(ctx context.Context, request RuntimeInspectRequestObject) (RuntimeInspectResponseObject, error)
@@ -2463,6 +2756,37 @@ func (sh *strictHandler) RuntimeExec(ctx *gin.Context) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(RuntimeExecResponseObject); ok {
 		if err := validResponse.VisitRuntimeExecResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RuntimeExport operation middleware
+func (sh *strictHandler) RuntimeExport(ctx *gin.Context) {
+	var request RuntimeExportRequestObject
+
+	var body RuntimeExportJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.RuntimeExport(ctx, request.(RuntimeExportRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RuntimeExport")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(RuntimeExportResponseObject); ok {
+		if err := validResponse.VisitRuntimeExportResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

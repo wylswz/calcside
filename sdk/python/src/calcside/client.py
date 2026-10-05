@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any
+from email.message import Message
+from typing import Any, Literal
 
 import httpx
 from typing_extensions import Self
@@ -48,6 +49,25 @@ class ExecResult:
     duration_ms: int
     steps: int
     raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ArtifactDownload:
+    content: bytes
+    filename: str
+    redacted: bool
+    file_count: int
+
+
+def _artifact_download(resp: httpx.Response) -> ArtifactDownload:
+    header = Message()
+    header["Content-Disposition"] = resp.headers.get("Content-Disposition", "")
+    return ArtifactDownload(
+        content=resp.content,
+        filename=header.get_filename() or "artifact",
+        redacted=resp.headers.get("X-Calcside-Redacted") == "true",
+        file_count=int(resp.headers.get("X-Calcside-File-Count", "0")),
+    )
 
 
 def _exec_result(data: dict[str, Any]) -> ExecResult:
@@ -162,6 +182,36 @@ class Client:
         return self._req(
             "GET", f"/api/v1/instances/{instance_id}/files", params={"path": path}
         ).json()
+
+    def preview_artifact(
+        self,
+        instance_id: str,
+        path: str,
+        mode: Literal["source", "static", "interactive"] = "source",
+    ) -> dict[str, Any]:
+        return self._req(
+            "POST",
+            f"/api/v1/instances/{instance_id}/artifacts/preview",
+            json={"path": path, "mode": mode},
+        ).json()
+
+    def download_file(self, instance_id: str, path: str) -> ArtifactDownload:
+        return _artifact_download(
+            self._req(
+                "POST",
+                f"/api/v1/instances/{instance_id}/artifacts/export",
+                json={"paths": [path], "format": "file"},
+            )
+        )
+
+    def export_files(self, instance_id: str, paths: list[str]) -> ArtifactDownload:
+        return _artifact_download(
+            self._req(
+                "POST",
+                f"/api/v1/instances/{instance_id}/artifacts/export",
+                json={"paths": paths, "format": "zip"},
+            )
+        )
 
     def prompt(
         self, instance_id: str, tool_prefix: str | None = None
@@ -286,6 +336,40 @@ class AsyncClient:
                 "GET", f"/api/v1/instances/{instance_id}/files", params={"path": path}
             )
         ).json()
+
+    async def preview_artifact(
+        self,
+        instance_id: str,
+        path: str,
+        mode: Literal["source", "static", "interactive"] = "source",
+    ) -> dict[str, Any]:
+        return (
+            await self._req(
+                "POST",
+                f"/api/v1/instances/{instance_id}/artifacts/preview",
+                json={"path": path, "mode": mode},
+            )
+        ).json()
+
+    async def download_file(self, instance_id: str, path: str) -> ArtifactDownload:
+        return _artifact_download(
+            await self._req(
+                "POST",
+                f"/api/v1/instances/{instance_id}/artifacts/export",
+                json={"paths": [path], "format": "file"},
+            )
+        )
+
+    async def export_files(
+        self, instance_id: str, paths: list[str]
+    ) -> ArtifactDownload:
+        return _artifact_download(
+            await self._req(
+                "POST",
+                f"/api/v1/instances/{instance_id}/artifacts/export",
+                json={"paths": paths, "format": "zip"},
+            )
+        )
 
     async def prompt(
         self, instance_id: str, tool_prefix: str | None = None

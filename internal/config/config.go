@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,45 +19,47 @@ import (
 
 // Config is the server configuration.
 type Config struct {
-	Addr                 string
-	AddrExplicit         bool // --addr flag or CALCSIDE_ADDR set
-	Dev                  bool
-	DevAllowRemote       bool
-	Store                types.StoreDriver
-	DSN                  string
-	PolicyDir            string
-	BaseURL              string
-	AdminUsername        string
-	AdminPassword        string
-	GoogleClientID       string
-	GoogleClientSecret   string
-	GoogleAllowedDomains []string
-	CookieSecure         bool
-	NodeID               string
-	Workers              string
-	WorkerKey            string
-	MaxInstancesPerUser  int
-	MaxInstancesPerNode  int
-	DefaultTTL           time.Duration
-	MaxTTL               time.Duration
-	MaxExecTimeout       time.Duration
-	MaxConcurrentExecs   int
-	ReaperInterval       time.Duration
-	PolicyEvalTimeout    time.Duration
-	MaxSteps             uint64
-	MaxOutputBytes       int64
-	ExecMemoryLimit      uint64
-	NetAllowCIDRs        []*net.IPNet
-	MaxNetResponseBytes  int64
-	SecretKey            string
-	SecretsAllowHTTP     bool
-	ExtAllowSources      []string
-	ExtLocalRoots        []string
-	ExtCacheDir          string
-	ExtFetchTimeout      time.Duration
-	InstanceIsolation    string
-	InstanceMemoryMax    int64
-	InstanceCgroupParent string
+	Addr                   string
+	AddrExplicit           bool // --addr flag or CALCSIDE_ADDR set
+	Dev                    bool
+	DevAllowRemote         bool
+	Store                  types.StoreDriver
+	DSN                    string
+	PolicyDir              string
+	ConsoleOrigin          string
+	ArtifactPreviewBaseURL string
+	ArtifactAllowScripts   bool
+	AdminUsername          string
+	AdminPassword          string
+	GoogleClientID         string
+	GoogleClientSecret     string
+	GoogleAllowedDomains   []string
+	CookieSecure           bool
+	NodeID                 string
+	Workers                string
+	WorkerKey              string
+	MaxInstancesPerUser    int
+	MaxInstancesPerNode    int
+	DefaultTTL             time.Duration
+	MaxTTL                 time.Duration
+	MaxExecTimeout         time.Duration
+	MaxConcurrentExecs     int
+	ReaperInterval         time.Duration
+	PolicyEvalTimeout      time.Duration
+	MaxSteps               uint64
+	MaxOutputBytes         int64
+	ExecMemoryLimit        uint64
+	NetAllowCIDRs          []*net.IPNet
+	MaxNetResponseBytes    int64
+	SecretKey              string
+	SecretsAllowHTTP       bool
+	ExtAllowSources        []string
+	ExtLocalRoots          []string
+	ExtCacheDir            string
+	ExtFetchTimeout        time.Duration
+	InstanceIsolation      string
+	InstanceMemoryMax      int64
+	InstanceCgroupParent   string
 }
 
 func envOr(key, def string) string {
@@ -124,7 +127,9 @@ func Parse(args []string) (Config, error) {
 	fs.TextVar(&c.Store, "store", types.StoreDriver(envOr("STORE", string(types.DriverSQLite))), "store driver: sqlite or postgres")
 	fs.StringVar(&c.DSN, "dsn", envOr("DSN", "calcside.db"), "store DSN: sqlite file path, or postgres URL / key=value conn string")
 	fs.StringVar(&c.PolicyDir, "policy-dir", envOr("POLICY_DIR", ""), "global rego policy dir")
-	fs.StringVar(&c.BaseURL, "base-url", envOr("BASE_URL", "http://localhost:8080"), "external base URL")
+	fs.StringVar(&c.ConsoleOrigin, "console-origin", envOr("CONSOLE_ORIGIN", "http://localhost:8080"), "public console origin for UI, OAuth callbacks, and artifact framing")
+	fs.StringVar(&c.ArtifactPreviewBaseURL, "artifact-preview-base-url", envOr("ARTIFACT_PREVIEW_BASE_URL", ""), "isolated preview origin on a separate registrable domain (empty disables rendered HTML)")
+	fs.BoolVar(&c.ArtifactAllowScripts, "artifact-allow-scripts", envBool("ARTIFACT_ALLOW_SCRIPTS", false), "allow explicit interactive HTML previews on the isolated origin")
 	fs.StringVar(&c.AdminUsername, "admin-username", envOr("ADMIN_USERNAME", ""), "bootstrap administrator username or email (independent from Google accounts)")
 	fs.StringVar(&c.AdminPassword, "admin-password", "", "initial administrator password, 8-72 bytes (prefer CALCSIDE_ADMIN_PASSWORD)")
 	c.AdminPassword = envOr("ADMIN_PASSWORD", "")
@@ -165,6 +170,23 @@ func Parse(args []string) (Config, error) {
 	if err := fs.Parse(args); err != nil {
 		return c, err
 	}
+	for _, key := range []string{"CALCSIDE_BASE_URL", "CALCSIDE_ARTIFACT_CONSOLE_ORIGIN"} {
+		if os.Getenv(key) != "" {
+			return c, fmt.Errorf("%s has been removed; use CALCSIDE_CONSOLE_ORIGIN", key)
+		}
+	}
+	origin, err := url.Parse(c.ConsoleOrigin)
+	if err != nil || origin.Hostname() == "" || origin.Scheme != "http" && origin.Scheme != "https" || origin.User != nil || origin.Path != "" && origin.Path != "/" || origin.RawQuery != "" || origin.ForceQuery || strings.Contains(c.ConsoleOrigin, "#") || strings.HasSuffix(origin.Host, ":") {
+		return c, fmt.Errorf("--console-origin must be an HTTP(S) origin without credentials, path, query, or fragment")
+	}
+	if port := origin.Port(); port != "" {
+		if value, err := strconv.ParseUint(port, 10, 16); err != nil || value == 0 {
+			return c, fmt.Errorf("--console-origin has an invalid port")
+		}
+	}
+	origin.Host = strings.ToLower(origin.Host)
+	origin.Path, origin.RawPath = "", ""
+	c.ConsoleOrigin = origin.String()
 	if err := checkIsolation(c.InstanceIsolation); err != nil {
 		return c, err
 	}

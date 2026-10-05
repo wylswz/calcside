@@ -129,7 +129,7 @@ DEV_WORKER_ID ?= dev-w1
 # DEV ONLY — fixed throwaway key for the API↔worker shared secret.
 DEV_WORKER_KEY ?= dev-worker-key-not-secret
 DEV_DSN ?= calcside-dev.db
-DEV_EXT_ROOTS ?= $(CURDIR)/examples/capabilities
+DEV_EXT_ROOTS ?= $(CURDIR)/contrib
 DEV_NET_ALLOW_CIDRS ?= 198.18.0.0/15
 export VITE_API_TARGET ?= http://127.0.0.1:$(DEV_API_PORT)
 
@@ -161,6 +161,7 @@ dev:
 	  echo "make dev: worker did not answer /healthz within 60s" >&2; exit 1; \
 	fi; \
 	( bin/calcside-dev serve --dev --addr 127.0.0.1:$(DEV_API_PORT) \
+	    --console-origin="$${CALCSIDE_CONSOLE_ORIGIN:-http://localhost:5173}" \
 	    --policy-dir policies/examples --secret-key $(CALCSIDE_SECRET_KEY) \
 	    --dsn $(DEV_DSN) --ext-local-roots $(DEV_EXT_ROOTS) \
 	    --net-allow-cidrs=$(DEV_NET_ALLOW_CIDRS) \
@@ -188,6 +189,7 @@ dev:
 serve-dev:
 	@ATLAS_DB_URL="sqlite://$(abspath $(DEV_DSN))" atlas migrate apply --env sqlite
 	go run ./cmd/calcside serve --dev --addr 127.0.0.1:$(DEV_API_PORT) \
+	  --console-origin="$${CALCSIDE_CONSOLE_ORIGIN:-http://localhost:$(DEV_API_PORT)}" \
 	  --policy-dir policies/examples --secret-key $(CALCSIDE_SECRET_KEY) \
 	  --dsn $(DEV_DSN) --ext-local-roots $(DEV_EXT_ROOTS) \
 	  --net-allow-cidrs=$(DEV_NET_ALLOW_CIDRS)
@@ -203,4 +205,5 @@ sdk-test:
 
 sdk-lint:
 	cd sdk/python && UV_PROJECT_ENVIRONMENT=$(CURDIR)/sdk/python/.venv \
-	  uv run ruff check . && uv run ruff format --check .
+	  uv run ruff check . && UV_PROJECT_ENVIRONMENT=$(CURDIR)/sdk/python/.venv \
+	  uv run ruff format --check .

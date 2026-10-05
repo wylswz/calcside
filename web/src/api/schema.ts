@@ -120,6 +120,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/extensions/icons/{icon_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["extensionIcon"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/keys": {
         parameters: {
             query?: never;
@@ -229,6 +245,56 @@ export interface paths {
         get: operations["files"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/artifacts/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["artifactConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instances/{id}/artifacts/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Read and redact one bounded text file; optionally issue a short-lived isolated HTML snapshot URL. */
+        post: operations["previewArtifact"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instances/{id}/artifacts/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description All-or-nothing export of authorized redacted UTF-8 files. ZIP accepts files and directories and preserves paths relative to /work. No binary export, persistence, partial archives, or implicit spreadsheet formula rewriting. Successful preparation does not guarantee delivery to the client. */
+        post: operations["exportArtifacts"];
         delete?: never;
         options?: never;
         head?: never;
@@ -571,6 +637,7 @@ export interface components {
             truncated: boolean;
         };
         EditorMetadata: {
+            utilities: components["schemas"]["CompletionSymbol"][];
             rego: components["schemas"]["CompletionSymbol"][];
             capabilities: components["schemas"]["CapabilityDoc"][];
         };
@@ -606,11 +673,40 @@ export interface components {
             doc?: string;
             default?: unknown;
         };
+        ArtifactConfig: {
+            html_enabled: boolean;
+            interactive_enabled: boolean;
+            max_file_bytes: number;
+            max_total_bytes: number;
+            max_files: number;
+            preview_ttl_seconds: number;
+        };
+        ArtifactPreview: {
+            path: string;
+            /** @enum {string} */
+            kind: "text" | "csv" | "json" | "html";
+            source: string;
+            source_truncated: boolean;
+            redacted: boolean;
+            size: number;
+            csv_rows?: string[][];
+            csv_total_rows?: number;
+            csv_truncated?: boolean;
+            preview_error?: string;
+            /** @description Short-lived bearer URL; do not log or share it */
+            preview_url?: string;
+            /** Format: date-time */
+            expires_at?: string;
+            interactive?: boolean;
+            sanitized?: boolean;
+        };
         ExtensionInfo: {
             source: string;
             name: string;
             version?: string;
             description?: string;
+            /** @description Authenticated same-origin packaged PNG endpoint */
+            icon_url?: string;
             dependencies: components["schemas"]["CapabilityName"][];
             ops: components["schemas"]["OpDoc"][];
             config: components["schemas"]["ExtConfigField"][];
@@ -1070,6 +1166,30 @@ export interface operations {
             401: components["responses"]["Error"];
         };
     };
+    extensionIcon: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                icon_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Validated packaged PNG icon */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
     listKeys: {
         parameters: {
             query?: never;
@@ -1327,6 +1447,108 @@ export interface operations {
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    artifactConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Artifact limits and enabled HTML preview modes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactConfig"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    previewArtifact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    path: string;
+                    /**
+                     * @default source
+                     * @enum {string}
+                     */
+                    mode?: "source" | "static" | "interactive";
+                };
+            };
+        };
+        responses: {
+            /** @description Bounded redacted source, CSV table, or isolated HTML snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactPreview"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+        };
+    };
+    exportArtifacts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    paths: string[];
+                    /** @enum {string} */
+                    format: "file" | "zip";
+                };
+            };
+        };
+        responses: {
+            /** @description Complete attachment prepared before response headers are written */
+            200: {
+                headers: {
+                    "Content-Disposition"?: string;
+                    "X-Calcside-Redacted"?: boolean;
+                    "X-Calcside-File-Count"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                    "application/zip": string;
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            429: components["responses"]["Error"];
         };
     };
     instancePrompt: {
@@ -1844,6 +2066,8 @@ type ReadonlyArray<T> = [
 ] extends [
     unknown[]
 ] ? Readonly<Exclude<T, undefined>> : Readonly<Exclude<T, undefined>[]>;
+export const pathsApiV1InstancesIdArtifactsPreviewPostRequestBodyContentApplicationJsonModeValues: ReadonlyArray<FlattenedDeepRequired<paths>["/api/v1/instances/{id}/artifacts/preview"]["post"]["requestBody"]["content"]["application/json"]["mode"]> = ["source", "static", "interactive"];
+export const pathsApiV1InstancesIdArtifactsExportPostRequestBodyContentApplicationJsonFormatValues: ReadonlyArray<FlattenedDeepRequired<paths>["/api/v1/instances/{id}/artifacts/export"]["post"]["requestBody"]["content"]["application/json"]["format"]> = ["file", "zip"];
 export const pathsAuthBasicLoginPostParametersHeaderXRequestedWithValues: ReadonlyArray<FlattenedDeepRequired<paths>["/auth/basic/login"]["post"]["parameters"]["header"]["X-Requested-With"]> = ["calcside"];
 export const instanceStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["InstanceStatus"]> = ["running", "deleted", "expired", "lost"];
 export const execStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExecStatus"]> = ["ok", "error"];
@@ -1856,4 +2080,5 @@ export const secretSourceValues: ReadonlyArray<FlattenedDeepRequired<components>
 export const aPIErrorCodeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["APIErrorCode"]> = ["auth_failed", "bad_capability", "bad_policy", "bad_request", "bad_secret", "bad_spec", "conflict", "csrf", "forbidden", "fs_error", "internal", "method_not_allowed", "no_fs", "not_found", "not_running", "secrets_disabled", "too_large", "too_many", "unauthorized"];
 export const fieldTypeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["FieldType"]> = ["int", "bool", "string", "string_list", "string_map"];
 export const authKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AuthKind"]> = ["session", "api_key", "anonymous"];
+export const artifactPreviewKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ArtifactPreview"]["kind"]> = ["text", "csv", "json", "html"];
 export const policyKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Policy"]["kind"]> = ["builtin", "rego"];
