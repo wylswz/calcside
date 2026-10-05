@@ -115,6 +115,31 @@ Instance spec (`POST /api/v1/instances`):
 
 For an instance that needs internal HTTP access, pass `"policies": []` (or an explicit list without `builtin.block_private_network`). This does not bypass the instance's host allowlist, secret domain restrictions, or mandatory server policies. No network capability means no network access regardless of policy selection.
 
+## Console sign-in
+
+Outside dev mode, the console supports Google SSO and an optional, server-configured administrator account using Basic Auth. Enable administrator sign-in by setting both `CALCSIDE_ADMIN_USERNAME` and `CALCSIDE_ADMIN_PASSWORD` (or `--admin-username` / `--admin-password`). There are no default credentials. Prefer supplying the password through your deployment's secret environment configuration rather than command-line arguments.
+
+For a local shell, after applying database migrations:
+
+```bash
+export CALCSIDE_ADMIN_USERNAME=admin
+read -rsp 'Calcside password: ' CALCSIDE_ADMIN_PASSWORD; printf '\n'
+export CALCSIDE_ADMIN_PASSWORD
+bin/calcside serve --dsn calcside.db
+```
+
+Do not pass `--dev`: dev mode deliberately bypasses login. Login names can be simple case-sensitive usernames (1–64 ASCII letters, digits, dots, underscores or hyphens) or email addresses (up to 254 UTF-8 bytes). Passwords must contain 8–72 UTF-8 bytes. In Docker, set the same variables in `docker/.env`. For production, serve the console over **HTTPS** and enable `CALCSIDE_COOKIE_SECURE=true` (or `--cookie-secure`). Basic Auth encoding does not encrypt the password.
+
+The form sends credentials only to `POST /auth/basic/login`, with `Authorization: Basic …` and `X-Requested-With: calcside`. Successful login issues an HttpOnly session cookie; subsequent API requests do not resend the password. Basic credentials are not accepted as API authentication: use a session or an API key instead. Login attempts are limited to 10 per minute per API process, with `429` and `Retry-After` when exceeded.
+
+The configured credentials are **bootstrap-only**. On first successful login, the server creates a local database user with `is_admin=true` and a bcrypt password hash. Bcrypt's stored encoding includes its algorithm version, cost, random salt and password hash; plaintext passwords are never stored. Later logins verify the database hash. Changing or removing the bootstrap password configuration does not reset the user's password, and local login remains available when the database already has password users.
+
+Local accounts are independent from Google accounts, even when the login name is an email address. Their internal email identity is `<URL-escaped-username>@basic.localhost`; existing simple usernames keep their original identity. Existing Basic Auth users without stored credentials are initialized in place without changing their user IDs or resources. Google and dev-mode users default to non-admin and do not acquire local passwords. `/api/v1/me` exposes `user.is_admin`, `user.username` and `user.has_password`, never the hash or salt.
+
+Click your login name in the console header to open **Profile** (`/profile`). Local users can change their password by confirming the current password and entering the new password twice. `POST /api/v1/me/password` requires a cookie session, the CSRF header, `current_password` and `new_password`. A successful change atomically updates the hash and revokes all of that user's sessions, including the current one; sign in again with the new password. API keys and other users' sessions are unaffected. API keys, anonymous users and Google-only accounts cannot use this endpoint.
+
+The configuration names are now `CALCSIDE_ADMIN_USERNAME` / `CALCSIDE_ADMIN_PASSWORD` (`--admin-username` / `--admin-password`), replacing the previous Basic Auth configuration names. Apply the new database migrations before upgrading. Keep the database backed up: the bootstrap configuration is not a password-reset mechanism.
+
 ## Database migrations
 
 SQLite is the default; PostgreSQL is selected with `--store postgres` and a PostgreSQL DSN. The server only connects to the database: **run migrations before starting it**. Atlas CLI manages migration history, checksums, locks, and transactions; the application binary does not need Atlas installed.

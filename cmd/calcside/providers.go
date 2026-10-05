@@ -165,6 +165,10 @@ func provideAuth(cfg config.Config, st store.Store) *auth.Service {
 	return auth.NewService(st, cfg.CookieSecure)
 }
 
+func provideBasic(ctx context.Context, cfg config.Config, svc *auth.Service) (*auth.BasicLogin, error) {
+	return auth.NewBasicLogin(ctx, svc, cfg.AdminUsername, cfg.AdminPassword)
+}
+
 func serverAddr(cfg config.Config) string {
 	if cfg.Dev && !cfg.AddrExplicit {
 		return "127.0.0.1:8080"

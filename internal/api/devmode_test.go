@@ -98,7 +98,7 @@ func TestDevModeAnonymous(t *testing.T) {
 	if m["kind"] != string(types.AuthAnonymous) {
 		t.Fatalf("kind = %v", m["kind"])
 	}
-	if u := m["user"].(map[string]any); u["email"] != "anonymous@localhost" {
+	if u := m["user"].(map[string]any); u["email"] != "anonymous@localhost" || u["is_admin"] != false {
 		t.Fatalf("user = %v", u)
 	}
 

@@ -1,6 +1,7 @@
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { api, AuthConfig } from '../api'
-import { Logo } from '../components/ui'
+import { Button, Field, inputCls, Loading, Logo, Notice } from '../components/ui'
 
 // Composition is a static Bauhaus arrangement of the three primitives.
 function Composition() {
@@ -16,10 +17,19 @@ function Composition() {
 }
 
 export default function Login() {
-  const { data: cfg } = useQuery({
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const { data: cfg, isLoading, error: configError } = useQuery({
     queryKey: ['auth-config'],
     queryFn: () => api.get<AuthConfig>('/api/v1/auth/config'),
     retry: false,
+  })
+  const login = useMutation({
+    mutationFn: () => api.basicLogin(username, password),
+    onSuccess: () => {
+      setPassword('')
+      window.location.replace('/')
+    },
   })
 
   return (
@@ -31,9 +41,7 @@ export default function Login() {
         </div>
         <div>
           <h1 className="text-5xl font-semibold leading-[1.05] tracking-tight">
-            Sandbox the effects,
-            <br />
-            not the kernel.
+            Sandbox the effects.
           </h1>
           <div className="mt-8 h-0.5 w-full bg-white/25" />
           <p className="mt-5 text-[15px] text-white/70">A capability-gated runtime for agent-written code.</p>
@@ -47,20 +55,61 @@ export default function Login() {
             <span className="text-[15px] font-semibold tracking-tight text-ink">calcside</span>
           </div>
           <h2 className="mt-12 text-[32px] font-semibold leading-tight tracking-tight text-ink">Sign in</h2>
-          <p className="mt-2 text-sm text-sec">Every side effect is gated, policy-checked and audited.</p>
           <div className="mt-10 border-t-2 border-ink pt-6">
-            {cfg?.dev_mode ? (
+            {new URLSearchParams(window.location.search).get('password_changed') === '1' && (
+              <div className="mb-6"><Notice tone="blue">Password changed. Sign in with your new password.</Notice></div>
+            )}
+            {isLoading ? <Loading label="loading sign-in methods…" /> : configError ? (
+              <Notice tone="red">Unable to load sign-in methods. Please refresh to try again.</Notice>
+            ) : cfg?.dev_mode ? (
               <p className="text-sm text-sec">The server is running in dev mode — you are signed in anonymously.</p>
             ) : (
               <>
-                <a
-                  href="/auth/google/login"
-                  className={`flex h-11 items-center justify-between border border-accent bg-accent px-4 text-sm font-medium text-white transition-colors hover:border-ink hover:bg-ink hover:text-paper ${cfg && !cfg.google ? 'pointer-events-none opacity-40' : ''}`}
-                >
-                  Sign in with Google
-                  <span aria-hidden>→</span>
-                </a>
-                {cfg && !cfg.google && <p className="mt-3 text-xs text-mute">Google sign-in is not configured</p>}
+                {cfg?.basic && (
+                  <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); login.mutate() }}>
+                    <Field label="Username or email">
+                      <input
+                        className={inputCls}
+                        name="username"
+                        autoComplete="username"
+                        autoCapitalize="none"
+                        spellCheck={false}
+                        required
+                        maxLength={254}
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        disabled={login.isPending}
+                      />
+                    </Field>
+                    <Field label="Password">
+                      <input
+                        className={inputCls}
+                        type="password"
+                        name="password"
+                        autoComplete="current-password"
+                        required
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        disabled={login.isPending}
+                      />
+                    </Field>
+                    {login.error && <div role="alert"><Notice tone="red">{login.error.message}</Notice></div>}
+                    <Button type="submit" variant="primary" className="h-11 w-full" disabled={login.isPending}>
+                      {login.isPending ? 'Signing in…' : 'Sign in'}
+                    </Button>
+                  </form>
+                )}
+                {cfg?.basic && cfg.google && <div className="my-6 text-center text-xs text-mute">or</div>}
+                {cfg?.google && (
+                  <a
+                    href="/auth/google/login"
+                    className="flex h-11 items-center justify-between border border-accent bg-accent px-4 text-sm font-medium text-white transition-colors hover:border-ink hover:bg-ink hover:text-paper"
+                  >
+                    Sign in with Google
+                    <span aria-hidden>→</span>
+                  </a>
+                )}
+                {cfg && !cfg.google && !cfg.basic && <p className="text-sm text-mute">No sign-in methods are configured. Contact your administrator.</p>}
               </>
             )}
           </div>

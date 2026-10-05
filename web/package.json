@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build && echo 'placeholder so `go build` works before `pnpm -C web build` generates the real assets' > dist/README.txt",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/components/completion.test.ts",
+    "test": "node --experimental-strip-types --test src/components/completion.test.ts src/api.test.ts",
     "lint": "eslint .",
     "gen": "openapi-typescript ../api/openapi.yaml -o src/api/schema.ts --enum-values"
   },

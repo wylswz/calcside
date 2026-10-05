@@ -35,6 +35,7 @@ type ErrorEnvelope struct {
 
 // AuthConfig is the auth/config body.
 type AuthConfig struct {
+	Basic   bool `json:"basic"`
 	Google  bool `json:"google"`
 	DevMode bool `json:"dev_mode"`
 	Secrets bool `json:"secrets"`
@@ -46,13 +47,17 @@ type User struct {
 	Email       string    `json:"email"`
 	Name        string    `json:"name"`
 	GoogleSub   string    `json:"google_sub,omitempty"`
+	IsAdmin     bool      `json:"is_admin"`
+	Username    string    `json:"username,omitempty"`
+	HasPassword bool      `json:"has_password"`
 	CreatedAt   time.Time `json:"created_at"`
 	LastLoginAt time.Time `json:"last_login_at"`
 }
 
 func NewUser(u *store.User) User {
 	return User{
-		ID: u.ID, Email: u.Email, Name: u.Name, GoogleSub: u.GoogleSub,
+		ID: u.ID, Email: u.Email, Name: u.Name, GoogleSub: u.GoogleSub, IsAdmin: u.IsAdmin,
+		Username: u.Username, HasPassword: u.PasswordHash != "",
 		CreatedAt: u.CreatedAt, LastLoginAt: u.LastLoginAt,
 	}
 }

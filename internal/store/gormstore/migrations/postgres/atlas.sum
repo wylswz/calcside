@@ -1,2 +1,4 @@
-h1:A6JhqNQqs/Gyx2xO2lGJpdeFthDRu45JF2VhT9KMbtE=
+h1:6Zpa0mOfpBO4mC/3ZmVER2WV9r6iV8Erq8rgsfI9w1Y=
 20261004092922_baseline.sql h1:9qEFyedMZDERN1yzv0aGKRZsWMqSDS8wMMvvwRa4p+o=
+20261005010219_add_user_is_admin.sql h1:MwLDuhS5qp8vabKzN9FJgGQ1jHJKb0UWSkZxLFoiyBU=
+20261005010732_add_local_user_credentials.sql h1:iHSyU3cS7ELeiKa/o7mmNrZ5hCa0RIgUsgRtqcXfaxY=

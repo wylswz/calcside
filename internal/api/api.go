@@ -42,6 +42,7 @@ type Deps struct {
 	Sandbox *sandbox.Service
 
 	Auth          *auth.Service
+	Basic         *auth.BasicLogin
 	Web           fs.FS       // static files served at /; nil for now
 	GoogleEnabled bool        // reported by /api/v1/auth/config
 	Dev           bool        // anonymous dev mode
@@ -75,6 +76,10 @@ func requestLogger() gin.HandlerFunc {
 // when there is no credential and no dev mode.
 func (d Deps) authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if c.Request.Method == http.MethodGet && c.Request.URL.Path == "/api/v1/auth/config" {
+			c.Next()
+			return
+		}
 		p, err := d.Auth.Resolve(c.Request.Context(), c.Request)
 		if err != nil {
 			// Dev mode: a stale session cookie from an earlier
@@ -179,6 +184,9 @@ func Handler(d Deps) http.Handler {
 	raw := r.Group("/auth")
 	raw.Use(d.resolveOnly())
 	raw.POST("/logout", gin.WrapH(d.Auth.LogoutHandler()))
+	if d.Basic != nil {
+		raw.POST("/basic/login", gin.WrapH(d.Basic))
+	}
 
 	r.NoRoute(d.noRoute())
 	return r

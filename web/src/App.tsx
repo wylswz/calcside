@@ -9,6 +9,7 @@ import Keys from './pages/Keys'
 import Policies from './pages/Policies'
 import Audit from './pages/Audit'
 import Secrets from './pages/Secrets'
+import Profile from './pages/Profile'
 import { Button, Loading, Logo, Mark, Notice } from './components/ui'
 
 function useMe(onBackendRetrying: (retrying: boolean) => void) {
@@ -99,7 +100,7 @@ export default function App() {
                 <Mark tone="yellow" />dev · anonymous
               </span>
             )}
-            <span className="text-xs text-sec">{user?.email}</span>
+            <Link to="/profile" className="text-xs text-sec hover:text-ink" title="Profile">{user?.username || user?.email}</Link>
             {!dev && <Button size="sm" onClick={logout}>Logout</Button>}
           </div>
         </div>
@@ -111,6 +112,7 @@ export default function App() {
           <Route path="/keys" element={<Keys />} />
           <Route path="/policies" element={<Policies />} />
           <Route path="/secrets" element={<Secrets />} />
+          <Route path="/profile" element={user && <Profile user={user} />} />
           <Route path="/audit" element={<Audit />} />
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />

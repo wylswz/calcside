@@ -13,6 +13,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -61,7 +63,9 @@ func open(_ context.Context, driver types.StoreDriver, dsn string) (store.Store,
 	}
 	g, err := gorm.Open(dialector, &gorm.Config{
 		TranslateError: true,
-		Logger:         glogger.Default.LogMode(glogger.Warn),
+		Logger: glogger.New(log.New(os.Stderr, "", log.LstdFlags), glogger.Config{
+			LogLevel: glogger.Warn, SlowThreshold: 200 * time.Millisecond, ParameterizedQueries: true,
+		}),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("gormstore: %w", err)
@@ -105,21 +109,28 @@ func col(name string, v any) clause.Assignment {
 // --- row structs ---
 
 type userRow struct {
-	ID          string `gorm:"primaryKey"`
-	Email       string `gorm:"uniqueIndex"`
-	Name        string
-	GoogleSub   string
-	CreatedAt   time.Time
-	LastLoginAt time.Time
+	ID           string `gorm:"primaryKey"`
+	Email        string `gorm:"uniqueIndex"`
+	Name         string
+	GoogleSub    string
+	IsAdmin      bool
+	Username     *string
+	PasswordHash string
+	CreatedAt    time.Time
+	LastLoginAt  time.Time
 }
 
 func (userRow) TableName() string { return "users" }
 
 func (u userRow) toStore() *store.User {
-	return &store.User{
-		ID: u.ID, Email: u.Email, Name: u.Name, GoogleSub: u.GoogleSub,
-		CreatedAt: u.CreatedAt.UTC(), LastLoginAt: u.LastLoginAt.UTC(),
+	user := &store.User{
+		ID: u.ID, Email: u.Email, Name: u.Name, GoogleSub: u.GoogleSub, IsAdmin: u.IsAdmin,
+		PasswordHash: u.PasswordHash, CreatedAt: u.CreatedAt.UTC(), LastLoginAt: u.LastLoginAt.UTC(),
 	}
+	if u.Username != nil {
+		user.Username = *u.Username
+	}
+	return user
 }
 
 type keyRow struct {
@@ -317,14 +328,9 @@ func (d *sqlDB) UpsertUserByEmail(ctx context.Context, email, name, googleSub st
 		case rerr != nil:
 			return rerr
 		default:
-			if name != "" {
-				row.Name = name
-			}
-			if googleSub != "" {
-				row.GoogleSub = googleSub
-			}
-			row.LastLoginAt = now
-			_, err := gorm.G[userRow](tx).Where("id = ?", row.ID).Updates(ctx, row)
+			_, err := gorm.G[userRow](tx).Where("id = ?", row.ID).Updates(ctx, userRow{
+				Name: name, GoogleSub: googleSub, LastLoginAt: now,
+			})
 			return err
 		}
 	})
@@ -336,6 +342,59 @@ func (d *sqlDB) UpsertUserByEmail(ctx context.Context, email, name, googleSub st
 		return nil, err
 	}
 	return row.toStore(), nil
+}
+
+func (d *sqlDB) BootstrapAdminUser(ctx context.Context, username, email, passwordHash string) (*store.User, error) {
+	now := time.Now().UTC()
+	row := userRow{
+		ID: store.NewID(store.PrefixUser), Email: email, Name: username, IsAdmin: true,
+		Username: &username, PasswordHash: passwordHash, CreatedAt: now, LastLoginAt: now,
+	}
+	if err := gorm.G[userRow](d.g, clause.OnConflict{
+		Columns: []clause.Column{{Name: "email"}},
+		DoUpdates: clause.Set{
+			col("username", username), col("password_hash", passwordHash), col("is_admin", true),
+			col("name", username), col("last_login_at", now),
+		},
+		Where: clause.Where{Exprs: []clause.Expression{
+			clause.Eq{Column: clause.Column{Table: "users", Name: "password_hash"}, Value: ""},
+		}},
+	}).Create(ctx, &row); err != nil {
+		return nil, mapWriteErr(err)
+	}
+	row, err := gorm.G[userRow](d.g).Where("email = ?", email).Take(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return row.toStore(), nil
+}
+
+func (d *sqlDB) GetUserByUsername(ctx context.Context, username string) (*store.User, error) {
+	row, err := gorm.G[userRow](d.g).Where("username = ?", username).Take(ctx)
+	if err != nil {
+		return nil, mapNotFound(err)
+	}
+	return row.toStore(), nil
+}
+
+func (d *sqlDB) HasPasswordUsers(ctx context.Context) (bool, error) {
+	n, err := gorm.G[userRow](d.g).Where("password_hash <> ''").Count(ctx, "*")
+	return n > 0, err
+}
+
+func (d *sqlDB) UpdateUserPassword(ctx context.Context, userID, oldHash, newHash string) error {
+	return d.g.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		n, err := gorm.G[userRow](tx).Where("id = ? AND password_hash = ? AND password_hash <> ''", userID, oldHash).
+			Update(ctx, "password_hash", newHash)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return store.ErrConflict
+		}
+		_, err = gorm.G[sessionRow](tx).Where("user_id = ?", userID).Delete(ctx)
+		return err
+	})
 }
 
 func (d *sqlDB) GetUser(ctx context.Context, id string) (*store.User, error) {
@@ -409,6 +468,20 @@ func (d *sqlDB) CreateSession(ctx context.Context, s *store.Session) error {
 	return gorm.G[sessionRow](d.g).Create(ctx, &sessionRow{
 		Hash: s.Hash, UserID: s.UserID,
 		CreatedAt: s.CreatedAt.UTC(), ExpiresAt: s.ExpiresAt.UTC(),
+	})
+}
+
+func (d *sqlDB) CreatePasswordSession(ctx context.Context, s *store.Session, passwordHash string) error {
+	return d.g.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		n, err := gorm.G[userRow](tx).Where("id = ? AND password_hash = ? AND password_hash <> ''", s.UserID, passwordHash).
+			Update(ctx, "last_login_at", s.CreatedAt.UTC())
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return store.ErrConflict
+		}
+		return (&sqlDB{g: tx}).CreateSession(ctx, s)
 	})
 }
 

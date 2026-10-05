@@ -30,8 +30,8 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		provideSandboxOptions, sandbox.New, vault.New,
 		wire.Value(time.Now), iam.New,
 		policysvc.New, auditsvc.New, catalog.New,
-		provideAuth, provideAnonymous, provideGoogle, provideWeb,
-		wire.Struct(new(api.Deps), "IAM", "Vault", "Policy", "Audit", "Catalog", "Sandbox", "Auth", "Web", "Anonymous"),
+		provideAuth, provideBasic, provideAnonymous, provideGoogle, provideWeb,
+		wire.Struct(new(api.Deps), "IAM", "Vault", "Policy", "Audit", "Catalog", "Sandbox", "Auth", "Basic", "Web", "Anonymous"),
 		provideServer, wire.Struct(new(application), "*"),
 	)
 	return nil, nil, nil

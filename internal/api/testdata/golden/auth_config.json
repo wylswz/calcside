@@ -1,5 +1,6 @@
 {
   "body": {
+    "basic": false,
     "dev_mode": false,
     "google": false,
     "secrets": true

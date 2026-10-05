@@ -52,6 +52,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change the current user's local password and revoke their sessions
+         * @description Requires a session and the current password. API keys and anonymous users cannot change passwords. Bootstrap configuration never resets an existing password.
+         */
+        post: operations["changePassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/capabilities": {
         parameters: {
             query?: never;
@@ -399,6 +419,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/basic/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign in with a database password or initialize the configured administrator
+         * @description Requires X-Requested-With even without an existing session. Credentials are used only for login, not for subsequent API requests. Limited to 10 attempts per minute per server process.
+         */
+        post: operations["basicLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/logout": {
         parameters: {
             query?: never;
@@ -490,6 +530,8 @@ export interface components {
         };
         AuthConfig: {
             google: boolean;
+            /** @description local password login enabled (bootstrap credentials or existing database users) */
+            basic: boolean;
             /** @description dev mode — anonymous login */
             dev_mode: boolean;
             /** @description vault secrets enabled (--secret-key set) */
@@ -500,6 +542,12 @@ export interface components {
             email: string;
             name: string;
             google_sub?: string;
+            /** @description persisted administrator identity */
+            is_admin: boolean;
+            /** @description independent local login name */
+            username?: string;
+            /** @description whether this account can change a local password */
+            has_password: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -923,6 +971,40 @@ export interface operations {
                 };
             };
             401: components["responses"]["Error"];
+        };
+    };
+    changePassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    current_password: string;
+                    /** @description 8-72 UTF-8 bytes */
+                    new_password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Password updated; all sessions revoked and session cookie cleared */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            500: components["responses"]["Error"];
         };
     };
     capabilities: {
@@ -1665,6 +1747,34 @@ export interface operations {
             503: components["responses"]["Error"];
         };
     };
+    basicLogin: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Requested-With": "calcside";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session created */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            500: components["responses"]["Error"];
+        };
+    };
     logout: {
         parameters: {
             query?: never;
@@ -1734,6 +1844,7 @@ type ReadonlyArray<T> = [
 ] extends [
     unknown[]
 ] ? Readonly<Exclude<T, undefined>> : Readonly<Exclude<T, undefined>[]>;
+export const pathsAuthBasicLoginPostParametersHeaderXRequestedWithValues: ReadonlyArray<FlattenedDeepRequired<paths>["/auth/basic/login"]["post"]["parameters"]["header"]["X-Requested-With"]> = ["calcside"];
 export const instanceStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["InstanceStatus"]> = ["running", "deleted", "expired", "lost"];
 export const execStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExecStatus"]> = ["ok", "error"];
 export const execErrorTypeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExecErrorType"]> = ["syntax", "runtime", "policy_denied", "out_of_scope", "timeout", "step_limit", "memory_limit"];

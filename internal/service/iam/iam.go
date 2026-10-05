@@ -7,9 +7,12 @@ import (
 	"errors"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"calcside/internal/auth"
 	"calcside/internal/service"
 	"calcside/internal/store"
+	"calcside/internal/types"
 )
 
 type Service struct {
@@ -72,6 +75,36 @@ func (s *Service) RevokeKey(ctx context.Context, a service.Actor, id string) err
 			return service.NotFound("key not found")
 		}
 		return service.Internal(err)
+	}
+	return nil
+}
+
+func (s *Service) ChangePassword(ctx context.Context, a service.Actor, currentPassword, newPassword string) error {
+	if a.Kind != types.AuthSession {
+		return service.Forbidden("session required to change password")
+	}
+	if err := auth.ValidatePassword(newPassword); err != nil {
+		return service.BadRequest("%s", err)
+	}
+	u, err := s.st.GetUser(ctx, a.UserID)
+	if err != nil {
+		return service.Internal(err)
+	}
+	if u.PasswordHash == "" {
+		return service.Forbidden("this account does not have a local password")
+	}
+	if len(currentPassword) > 72 || bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(currentPassword)) != nil {
+		return service.Forbidden("current password is incorrect")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return service.Internal(err)
+	}
+	if err := s.st.UpdateUserPassword(ctx, a.UserID, u.PasswordHash, string(hash)); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			return service.Conflict("password changed concurrently; sign in again")
+		}
+		return &service.Error{Code: types.ErrCodeInternal, Msg: "password update failed", Err: err}
 	}
 	return nil
 }

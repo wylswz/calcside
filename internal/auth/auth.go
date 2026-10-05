@@ -104,6 +104,10 @@ func hashToken(tok string) string {
 
 // CreateSession makes a session for the user and returns the cookie value.
 func (s *Service) CreateSession(ctx context.Context, userID string) (string, error) {
+	return s.createSession(ctx, userID, "")
+}
+
+func (s *Service) createSession(ctx context.Context, userID, passwordHash string) (string, error) {
 	raw := base64.RawURLEncoding.EncodeToString(randBytes(32))
 	sess := &store.Session{
 		Hash:      hashToken(raw),
@@ -111,7 +115,13 @@ func (s *Service) CreateSession(ctx context.Context, userID string) (string, err
 		CreatedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().Add(sessionDuration).UTC(),
 	}
-	if err := s.st.CreateSession(ctx, sess); err != nil {
+	var err error
+	if passwordHash != "" {
+		err = s.st.CreatePasswordSession(ctx, sess, passwordHash)
+	} else {
+		err = s.st.CreateSession(ctx, sess)
+	}
+	if err != nil {
 		return "", err
 	}
 	return raw, nil

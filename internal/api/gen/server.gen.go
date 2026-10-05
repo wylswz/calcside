@@ -348,6 +348,9 @@ type AuditResponse struct {
 
 // AuthConfig defines model for AuthConfig.
 type AuthConfig struct {
+	// Basic local password login enabled (bootstrap credentials or existing database users)
+	Basic bool `json:"basic"`
+
 	// DevMode dev mode — anonymous login
 	DevMode bool `json:"dev_mode"`
 	Google  bool `json:"google"`
@@ -745,12 +748,21 @@ type UpdateSecretRequest struct {
 
 // User defines model for User.
 type User struct {
-	CreatedAt   time.Time `json:"created_at"`
-	Email       string    `json:"email"`
-	GoogleSub   *string   `json:"google_sub,omitempty"`
-	Id          string    `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	Email     string    `json:"email"`
+	GoogleSub *string   `json:"google_sub,omitempty"`
+
+	// HasPassword whether this account can change a local password
+	HasPassword bool   `json:"has_password"`
+	Id          string `json:"id"`
+
+	// IsAdmin persisted administrator identity
+	IsAdmin     bool      `json:"is_admin"`
 	LastLoginAt time.Time `json:"last_login_at"`
 	Name        string    `json:"name"`
+
+	// Username independent local login name
+	Username *string `json:"username,omitempty"`
 }
 
 // ValidatePolicyRequest defines model for ValidatePolicyRequest.
@@ -802,6 +814,14 @@ type InstancePromptParams struct {
 	ToolPrefix *string `form:"tool_prefix,omitempty" json:"tool_prefix,omitempty"`
 }
 
+// ChangePasswordJSONBody defines parameters for ChangePassword.
+type ChangePasswordJSONBody struct {
+	CurrentPassword *string `json:"current_password,omitempty"`
+
+	// NewPassword 8-72 UTF-8 bytes
+	NewPassword *string `json:"new_password,omitempty"`
+}
+
 // CreateInstanceJSONRequestBody defines body for CreateInstance for application/json ContentType.
 type CreateInstanceJSONRequestBody = InstanceSpec
 
@@ -810,6 +830,9 @@ type ExecJSONRequestBody = ExecRequest
 
 // CreateKeyJSONRequestBody defines body for CreateKey for application/json ContentType.
 type CreateKeyJSONRequestBody = CreateKeyRequest
+
+// ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
+type ChangePasswordJSONRequestBody ChangePasswordJSONBody
 
 // CreatePolicyJSONRequestBody defines body for CreatePolicy for application/json ContentType.
 type CreatePolicyJSONRequestBody = PolicyRequest
@@ -891,6 +914,9 @@ type ServerInterface interface {
 
 	// (GET /api/v1/me)
 	Me(c *gin.Context)
+	// ChangePassword Change the current user's local password and revoke their sessions
+	// (POST /api/v1/me/password)
+	ChangePassword(c *gin.Context)
 
 	// (GET /api/v1/policies)
 	ListPolicies(c *gin.Context)
@@ -1433,6 +1459,19 @@ func (siw *ServerInterfaceWrapper) Me(c *gin.Context) {
 	siw.Handler.Me(c)
 }
 
+// ChangePassword operation middleware
+func (siw *ServerInterfaceWrapper) ChangePassword(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ChangePassword(c)
+}
+
 // ListPolicies operation middleware
 func (siw *ServerInterfaceWrapper) ListPolicies(c *gin.Context) {
 
@@ -1666,6 +1705,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/healthz", wrapper.Healthz)
 	router.GET(options.BaseURL+"/api/v1/auth/config", wrapper.AuthConfig)
 	router.GET(options.BaseURL+"/api/v1/me", wrapper.Me)
+	router.POST(options.BaseURL+"/api/v1/me/password", wrapper.ChangePassword)
 	router.GET(options.BaseURL+"/api/v1/capabilities", wrapper.Capabilities)
 	router.GET(options.BaseURL+"/api/v1/editor/metadata", wrapper.EditorMetadata)
 	router.GET(options.BaseURL+"/api/v1/extensions", wrapper.ListExtensions)
@@ -2831,6 +2871,108 @@ func (response Me401JSONResponse) VisitMeResponse(w http.ResponseWriter) error {
 	return err
 }
 
+type ChangePasswordRequestObject struct {
+	Body *ChangePasswordJSONRequestBody
+}
+
+type ChangePasswordResponseObject interface {
+	VisitChangePasswordResponse(w http.ResponseWriter) error
+}
+
+type ChangePassword200ResponseHeaders struct {
+	SetCookie *string
+}
+
+type ChangePassword200JSONResponse struct {
+	Body    OkResponse
+	Headers ChangePassword200ResponseHeaders
+}
+
+func (response ChangePassword200JSONResponse) VisitChangePasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.SetCookie != nil {
+		w.Header().Set("Set-Cookie", fmt.Sprint(*response.Headers.SetCookie))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ChangePassword400JSONResponse struct{ ErrorJSONResponse }
+
+func (response ChangePassword400JSONResponse) VisitChangePasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ChangePassword401JSONResponse ErrorEnvelope
+
+func (response ChangePassword401JSONResponse) VisitChangePasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ChangePassword403JSONResponse ErrorEnvelope
+
+func (response ChangePassword403JSONResponse) VisitChangePasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ChangePassword409JSONResponse ErrorEnvelope
+
+func (response ChangePassword409JSONResponse) VisitChangePasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ChangePassword500JSONResponse ErrorEnvelope
+
+func (response ChangePassword500JSONResponse) VisitChangePasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListPoliciesRequestObject struct {
 }
 
@@ -3599,6 +3741,9 @@ type StrictServerInterface interface {
 
 	// (GET /api/v1/me)
 	Me(ctx context.Context, request MeRequestObject) (MeResponseObject, error)
+	// ChangePassword Change the current user's local password and revoke their sessions
+	// (POST /api/v1/me/password)
+	ChangePassword(ctx context.Context, request ChangePasswordRequestObject) (ChangePasswordResponseObject, error)
 
 	// (GET /api/v1/policies)
 	ListPolicies(ctx context.Context, request ListPoliciesRequestObject) (ListPoliciesResponseObject, error)
@@ -4238,6 +4383,37 @@ func (sh *strictHandler) Me(ctx *gin.Context) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(MeResponseObject); ok {
 		if err := validResponse.VisitMeResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ChangePassword operation middleware
+func (sh *strictHandler) ChangePassword(ctx *gin.Context) {
+	var request ChangePasswordRequestObject
+
+	var body ChangePasswordJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ChangePassword(ctx, request.(ChangePasswordRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ChangePassword")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ChangePasswordResponseObject); ok {
+		if err := validResponse.VisitChangePasswordResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

@@ -13,6 +13,7 @@ require (
 	github.com/open-policy-agent/opa v1.20.2
 	go.starlark.net v0.0.0-20260908191801-89a6a09411d5
 	go.yaml.in/yaml/v3 v3.0.5
+	golang.org/x/crypto v0.55.0
 	golang.org/x/mod v0.38.0
 	golang.org/x/oauth2 v0.37.0
 	gorm.io/driver/postgres v1.6.3
@@ -97,7 +98,6 @@ require (
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	golang.org/x/arch v0.22.0 // indirect
-	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/exp v0.0.0-20241108190413-2d47ceb2692f // indirect
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect

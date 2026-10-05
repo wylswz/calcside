@@ -2,6 +2,7 @@
 package config
 
 import (
+	"calcside/internal/auth"
 	"calcside/internal/capability"
 	"calcside/internal/types"
 
@@ -25,6 +26,8 @@ type Config struct {
 	DSN                  string
 	PolicyDir            string
 	BaseURL              string
+	AdminUsername        string
+	AdminPassword        string
 	GoogleClientID       string
 	GoogleClientSecret   string
 	GoogleAllowedDomains []string
@@ -122,6 +125,9 @@ func Parse(args []string) (Config, error) {
 	fs.StringVar(&c.DSN, "dsn", envOr("DSN", "calcside.db"), "store DSN: sqlite file path, or postgres URL / key=value conn string")
 	fs.StringVar(&c.PolicyDir, "policy-dir", envOr("POLICY_DIR", ""), "global rego policy dir")
 	fs.StringVar(&c.BaseURL, "base-url", envOr("BASE_URL", "http://localhost:8080"), "external base URL")
+	fs.StringVar(&c.AdminUsername, "admin-username", envOr("ADMIN_USERNAME", ""), "bootstrap administrator username or email (independent from Google accounts)")
+	fs.StringVar(&c.AdminPassword, "admin-password", "", "initial administrator password, 8-72 bytes (prefer CALCSIDE_ADMIN_PASSWORD)")
+	c.AdminPassword = envOr("ADMIN_PASSWORD", "")
 	fs.StringVar(&c.GoogleClientID, "google-client-id", envOr("GOOGLE_CLIENT_ID", ""), "google oauth client id")
 	fs.StringVar(&c.GoogleClientSecret, "google-client-secret", envOr("GOOGLE_CLIENT_SECRET", ""), "google oauth client secret")
 	var domains string
@@ -160,6 +166,9 @@ func Parse(args []string) (Config, error) {
 		return c, err
 	}
 	if err := checkIsolation(c.InstanceIsolation); err != nil {
+		return c, err
+	}
+	if err := auth.ValidateAdminCredentials(c.AdminUsername, c.AdminPassword); err != nil {
 		return c, err
 	}
 	addrSet := false

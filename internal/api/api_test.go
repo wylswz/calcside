@@ -813,3 +813,29 @@ deny contains "server guardrail" if { input.capability == "io" }`})
 		t.Fatalf("server policy bypassed: %d %v", code, m)
 	}
 }
+
+func TestPasswordChangeRequiresLocalSession(t *testing.T) {
+	e := newEnv(t)
+	cookies := login(e, "google@example.com")
+	csrf := map[string]string{"X-Requested-With": "calcside"}
+	body := `{"current_password":"current-password","new_password":"changed-password"}`
+	code, me, _ := e.req("GET", "/api/v1/me", "", nil, cookies)
+	if code != 200 || me["user"].(map[string]any)["has_password"] != false {
+		t.Fatalf("passwordless profile: %d %v", code, me)
+	}
+	code, _, _ = e.req("POST", "/api/v1/me/password", body, csrf, cookies)
+	if code != 403 {
+		t.Fatalf("passwordless account changed password: %d", code)
+	}
+	for _, body := range []string{`{}`, `{"new_password":"changed-password"}`, `{"current_password":null,"new_password":"changed-password"}`, `not-json`} {
+		code, _, _ = e.req("POST", "/api/v1/me/password", body, csrf, cookies)
+		if code != 400 {
+			t.Fatalf("invalid password change body: %d", code)
+		}
+	}
+	dev := newDevEnv(t, nil)
+	code, _, _ = dev.req("POST", "/api/v1/me/password", body, csrf, nil)
+	if code != 403 {
+		t.Fatalf("anonymous account changed password: %d", code)
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"calcside/internal/auth"
 	"calcside/internal/config"
 	"calcside/internal/node"
 	"calcside/internal/node/subproc"
@@ -111,7 +112,13 @@ func TestInitializeApp(t *testing.T) {
 
 type trackedStore struct {
 	store.Store
-	closes int
+	closes       int
+	adminUpserts int
+}
+
+func (s *trackedStore) BootstrapAdminUser(ctx context.Context, username, email, passwordHash string) (*store.User, error) {
+	s.adminUpserts++
+	return s.Store.BootstrapAdminUser(ctx, username, email, passwordHash)
 }
 
 func (s *trackedStore) Close() error {
@@ -138,6 +145,7 @@ func TestInitializeAppFailureCleanup(t *testing.T) {
 		mutate func(*config.Config)
 		want   string
 	}{
+		{"basic-auth", func(c *config.Config) { c.AdminUsername = "admin" }, "--admin-username"},
 		{"cipher", func(c *config.Config) { c.SecretKey = "invalid" }, "--secret-key:"},
 		{"policy", func(c *config.Config) { c.PolicyDir = filepath.Join(t.TempDir(), "[") }, "--policy-dir:"},
 		{"worker-key", func(c *config.Config) { c.Workers = "w=127.0.0.1:1" }, "--workers requires --worker-key"},
@@ -237,4 +245,238 @@ func TestServerAddr(t *testing.T) {
 			t.Errorf("serverAddr(%+v) = %q, want %q", tc.cfg, got, tc.want)
 		}
 	}
+}
+
+func TestBasicLogin(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Dev = false
+	cfg.AdminUsername = "admin"
+	cfg.AdminPassword = "test-password:with-colon"
+	st := trackStore(t, &cfg)
+	app, cleanup, err := initializeApp(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	h := app.Server.Handler
+	if got := request(t, h, "GET", "/api/v1/auth/config", "", http.StatusOK); got["basic"] != true || got["google"] != false || got["dev_mode"] != false {
+		t.Fatalf("auth config: %v", got)
+	}
+	request(t, h, "GET", "/api/v1/me", "", http.StatusUnauthorized)
+	r := httptest.NewRequest("GET", "/api/v1/auth/config", nil)
+	r.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: "stale-session"})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("stale session blocked login configuration: %d", w.Code)
+	}
+	var cookies []*http.Cookie
+	for _, tc := range []struct {
+		name, username, password string
+		csrf                     bool
+		want                     int
+	}{
+		{"csrf", "admin", cfg.AdminPassword, false, http.StatusForbidden},
+		{"wrong-user", "other", cfg.AdminPassword, true, http.StatusUnauthorized},
+		{"wrong-password", "admin", "wrong", true, http.StatusUnauthorized},
+		{"empty", "", "", true, http.StatusUnauthorized},
+		{"success", "admin", cfg.AdminPassword, true, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest("POST", "/auth/basic/login", nil)
+			r.SetBasicAuth(tc.username, tc.password)
+			r.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: "stale-session"})
+			if tc.csrf {
+				r.Header.Set("X-Requested-With", "calcside")
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code != tc.want {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+			if tc.want == http.StatusOK {
+				cookies = w.Result().Cookies()
+			} else if len(w.Result().Cookies()) != 0 || st.adminUpserts != 0 {
+				t.Fatal("failed login issued a cookie or provisioned an administrator")
+			}
+		})
+	}
+	if len(cookies) != 1 || cookies[0].Name != auth.SessionCookie || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteLaxMode || cookies[0].Path != "/" {
+		t.Fatal("missing or unsafe session cookie")
+	}
+	call := func(method, path, body string, csrf bool, want int) map[string]any {
+		t.Helper()
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		if csrf {
+			r.Header.Set("X-Requested-With", "calcside")
+		}
+		for _, cookie := range cookies {
+			r.AddCookie(cookie)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatalf("%s %s: status=%d body=%s", method, path, w.Code, w.Body.String())
+		}
+		var out map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	me := call("GET", "/api/v1/me", "", false, http.StatusOK)
+	if me["kind"] != "session" || me["user"].(map[string]any)["name"] != "admin" || me["user"].(map[string]any)["is_admin"] != true {
+		t.Fatalf("not a Basic Auth session: %v", me)
+	}
+	persisted, err := st.GetUser(t.Context(), me["user"].(map[string]any)["id"].(string))
+	if err != nil || !persisted.IsAdmin || st.adminUpserts != 1 {
+		t.Fatalf("administrator not persisted on first login: %v", err)
+	}
+	call("POST", "/api/v1/keys", `{"name":"basic-key"}`, false, http.StatusForbidden)
+	call("POST", "/api/v1/keys", `{"name":"basic-key"}`, true, http.StatusCreated)
+	call("POST", "/auth/logout", "", true, http.StatusOK)
+	call("GET", "/api/v1/me", "", false, http.StatusUnauthorized)
+	r = httptest.NewRequest("GET", "/api/v1/me", nil)
+	r.SetBasicAuth(cfg.AdminUsername, cfg.AdminPassword)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatal("Basic credentials must not authenticate API requests directly")
+	}
+	r = httptest.NewRequest("POST", "/auth/basic/login", nil)
+	r.SetBasicAuth(cfg.AdminUsername, cfg.AdminPassword)
+	r.Header.Set("X-Requested-With", "calcside")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("repeat login: %d %s", w.Code, w.Body.String())
+	}
+	cookies = w.Result().Cookies()
+	again := call("GET", "/api/v1/me", "", false, http.StatusOK)
+	if again["user"].(map[string]any)["id"] != me["user"].(map[string]any)["id"] || again["user"].(map[string]any)["is_admin"] != true {
+		t.Fatal("repeat login changed user identity")
+	}
+	keys := call("GET", "/api/v1/keys", "", false, http.StatusOK)
+	if len(keys["keys"].([]any)) != 1 {
+		t.Fatal("repeat login lost access to API keys")
+	}
+}
+
+func TestBasicLoginDisabled(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Dev = false
+	app, cleanup, err := initializeApp(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	if got := request(t, app.Server.Handler, "GET", "/api/v1/auth/config", "", http.StatusOK); got["basic"] != false {
+		t.Fatalf("auth config: %v", got)
+	}
+	request(t, app.Server.Handler, "POST", "/auth/basic/login", "", http.StatusNotFound)
+}
+
+func TestConfiguredAdminUpgradesExistingUser(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Dev = false
+	cfg.AdminUsername, cfg.AdminPassword = "admin", "test-password"
+	st := trackStore(t, &cfg)
+	legacy, err := st.UpsertUserByEmail(t.Context(), "admin@basic.localhost", "admin", "")
+	if err != nil || legacy.IsAdmin {
+		t.Fatalf("create legacy user: %v", err)
+	}
+	app, cleanup, err := initializeApp(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	if st.adminUpserts != 0 {
+		t.Fatal("administrator provisioned before first login")
+	}
+	for _, password := range []string{"wrong", cfg.AdminPassword} {
+		r := httptest.NewRequest("POST", "/auth/basic/login", nil)
+		r.SetBasicAuth(cfg.AdminUsername, password)
+		r.Header.Set("X-Requested-With", "calcside")
+		w := httptest.NewRecorder()
+		app.Server.Handler.ServeHTTP(w, r)
+		wantAdmin, wantStatus := password == cfg.AdminPassword, http.StatusUnauthorized
+		if wantAdmin {
+			wantStatus = http.StatusOK
+		}
+		if w.Code != wantStatus {
+			t.Fatalf("login: %d %s", w.Code, w.Body.String())
+		}
+		got, err := st.GetUser(t.Context(), legacy.ID)
+		if err != nil || got.IsAdmin != wantAdmin || !got.CreatedAt.Equal(legacy.CreatedAt) {
+			t.Fatalf("unexpected legacy admin state: %v %+v", err, got)
+		}
+	}
+}
+
+func TestProfilePasswordChange(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Dev = false
+	cfg.AdminUsername, cfg.AdminPassword = "admin@example.com", "initial-password"
+	app, cleanup, err := initializeApp(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	send := func(method, path, body string, cookies []*http.Cookie, headers map[string]string, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		for key, value := range headers {
+			r.Header.Set(key, value)
+		}
+		for _, cookie := range cookies {
+			r.AddCookie(cookie)
+		}
+		w := httptest.NewRecorder()
+		app.Server.Handler.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatalf("%s %s: %d %s", method, path, w.Code, w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), "password_hash") || strings.Contains(w.Body.String(), "$2a$") {
+			t.Fatal("response exposed password hash")
+		}
+		return w
+	}
+	login := func(password string, want int) []*http.Cookie {
+		t.Helper()
+		r := httptest.NewRequest("POST", "/auth/basic/login", nil)
+		r.SetBasicAuth(cfg.AdminUsername, password)
+		return send("POST", "/auth/basic/login", "", nil, map[string]string{
+			"Authorization": r.Header.Get("Authorization"), "X-Requested-With": "calcside",
+		}, want).Result().Cookies()
+	}
+	csrf := map[string]string{"X-Requested-With": "calcside"}
+	cookies, otherSession := login(cfg.AdminPassword, 200), login(cfg.AdminPassword, 200)
+	me := send("GET", "/api/v1/me", "", cookies, nil, 200)
+	if !strings.Contains(me.Body.String(), `"has_password":true`) || !strings.Contains(me.Body.String(), `"is_admin":true`) {
+		t.Fatal("profile does not expose local administrator status")
+	}
+	body := `{"current_password":"initial-password","new_password":"changed-password"}`
+	send("POST", "/api/v1/me/password", body, nil, csrf, 401)
+	send("POST", "/api/v1/me/password", body, cookies, nil, 403)
+	send("POST", "/api/v1/me/password", `{"current_password":"wrong","new_password":"changed-password"}`, cookies, csrf, 403)
+	send("POST", "/api/v1/me/password", `{"current_password":"initial-password","new_password":"short"}`, cookies, csrf, 400)
+	send("POST", "/api/v1/me/password", `{"current_password":"initial-password","new_password":"`+strings.Repeat("a", 73)+`"}`, cookies, csrf, 400)
+	created := send("POST", "/api/v1/keys", `{"name":"profile-key"}`, cookies, csrf, 201)
+	var key map[string]any
+	if err := json.Unmarshal(created.Body.Bytes(), &key); err != nil {
+		t.Fatal(err)
+	}
+	send("POST", "/api/v1/me/password", body, nil, map[string]string{"Authorization": "Bearer " + key["secret"].(string)}, 403)
+	changed := send("POST", "/api/v1/me/password", body, cookies, csrf, 200)
+	cleared := changed.Result().Cookies()
+	if len(cleared) != 1 || cleared[0].Name != auth.SessionCookie || cleared[0].MaxAge != -1 {
+		t.Fatal("password change did not clear session cookie")
+	}
+	send("GET", "/api/v1/me", "", cookies, nil, 401)
+	send("GET", "/api/v1/me", "", otherSession, nil, 401)
+	login(cfg.AdminPassword, 401)
+	fresh := login("changed-password", 200)
+	send("GET", "/api/v1/me", "", fresh, nil, 200)
 }

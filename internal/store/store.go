@@ -46,12 +46,15 @@ func NewID(prefix IDPrefix) string {
 }
 
 type User struct {
-	ID          string    `json:"id"`
-	Email       string    `json:"email"`
-	Name        string    `json:"name"`
-	GoogleSub   string    `json:"google_sub,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	LastLoginAt time.Time `json:"last_login_at"`
+	ID           string    `json:"id"`
+	Email        string    `json:"email"`
+	Name         string    `json:"name"`
+	GoogleSub    string    `json:"google_sub,omitempty"`
+	IsAdmin      bool      `json:"is_admin"`
+	Username     string    `json:"username,omitempty"`
+	PasswordHash string    `json:"-"`
+	CreatedAt    time.Time `json:"created_at"`
+	LastLoginAt  time.Time `json:"last_login_at"`
 }
 
 type APIKey struct {
@@ -152,6 +155,10 @@ type Secret struct {
 
 type Store interface {
 	UpsertUserByEmail(ctx context.Context, email, name, googleSub string) (*User, error)
+	BootstrapAdminUser(ctx context.Context, username, email, passwordHash string) (*User, error)
+	GetUserByUsername(ctx context.Context, username string) (*User, error)
+	HasPasswordUsers(ctx context.Context) (bool, error)
+	UpdateUserPassword(ctx context.Context, userID, oldHash, newHash string) error
 	GetUser(ctx context.Context, id string) (*User, error)
 
 	CreateAPIKey(ctx context.Context, k *APIKey) error
@@ -161,6 +168,7 @@ type Store interface {
 	TouchAPIKey(ctx context.Context, id string, at time.Time) error
 
 	CreateSession(ctx context.Context, s *Session) error
+	CreatePasswordSession(ctx context.Context, s *Session, passwordHash string) error
 	GetSession(ctx context.Context, hash string) (*Session, error)
 	DeleteSession(ctx context.Context, hash string) error
 	DeleteExpiredSessions(ctx context.Context) (int, error)

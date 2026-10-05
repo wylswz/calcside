@@ -62,6 +62,36 @@ paths:
               schema:
                 $ref: '#/components/schemas/MeInfo'
         '401': { $ref: '#/components/responses/Error' }
+  /api/v1/me/password:
+    post:
+      operationId: changePassword
+      tags: [auth]
+      summary: Change the current user's local password and revoke their sessions
+      description: Requires a session and the current password. API keys and anonymous users cannot change passwords. Bootstrap configuration never resets an existing password.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string, writeOnly: true }
+                new_password: { type: string, writeOnly: true, description: 8-72 UTF-8 bytes }
+      responses:
+        '200':
+          description: Password updated; all sessions revoked and session cookie cleared
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OkResponse' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
   /api/v1/capabilities:
     get:
       operationId: capabilities
@@ -574,6 +604,33 @@ paths:
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '503': { $ref: '#/components/responses/Error' }
+  /auth/basic/login:
+    post:
+      operationId: basicLogin
+      tags: [auth-raw]
+      summary: Sign in with a database password or initialize the configured administrator
+      description: Requires X-Requested-With even without an existing session. Credentials are used only for login, not for subsequent API requests. Limited to 10 attempts per minute per server process.
+      security: [{ basicAuth: [] }]
+      parameters:
+        - name: X-Requested-With
+          in: header
+          required: true
+          schema: { type: string, enum: [calcside] }
+      responses:
+        '200':
+          description: Session created
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '500': { $ref: '#/components/responses/Error' }
   /auth/logout:
     post:
       operationId: logout
@@ -616,6 +673,10 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
   securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: Configured administrator credentials; only accepted by POST /auth/basic/login. Use HTTPS.
     bearerAuth:
       type: http
       scheme: bearer
@@ -678,19 +739,23 @@ components:
         ok: { type: boolean }
     AuthConfig:
       type: object
-      required: [google, dev_mode, secrets]
+      required: [google, basic, dev_mode, secrets]
       properties:
         google: { type: boolean }
+        basic: { type: boolean, description: local password login enabled (bootstrap credentials or existing database users) }
         dev_mode: { type: boolean, description: dev mode — anonymous login, no credentials needed }
         secrets: { type: boolean, description: vault secrets enabled (--secret-key set) }
     User:
       type: object
-      required: [id, email, name, created_at, last_login_at]
+      required: [id, email, name, is_admin, has_password, created_at, last_login_at]
       properties:
         id: { type: string }
         email: { type: string }
         name: { type: string }
         google_sub: { type: string }
+        is_admin: { type: boolean, description: persisted administrator identity }
+        username: { type: string, description: independent local login name }
+        has_password: { type: boolean, description: whether this account can change a local password }
         created_at: { type: string, format: date-time }
         last_login_at: { type: string, format: date-time }
     MeInfo:

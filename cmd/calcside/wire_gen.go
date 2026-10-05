@@ -70,6 +70,14 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	}
 	sandboxService := sandbox.New(options)
 	authService := provideAuth(cfg, store)
+	basicLogin, err := provideBasic(ctx, cfg, authService)
+	if err != nil {
+		cleanup4()
+		cleanup3()
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
 	fs := provideWeb()
 	user, err := provideAnonymous(ctx, cfg, store)
 	if err != nil {
@@ -87,6 +95,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		Catalog:   catalogService,
 		Sandbox:   sandboxService,
 		Auth:      authService,
+		Basic:     basicLogin,
 		Web:       fs,
 		Anonymous: user,
 	}

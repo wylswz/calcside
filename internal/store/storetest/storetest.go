@@ -5,6 +5,7 @@ package storetest
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if u.ID == "" || u.Email != "a@x.com" {
+		if u.ID == "" || u.Email != "a@x.com" || u.IsAdmin {
 			t.Fatalf("bad user %+v", u)
 		}
 		u2, err := s.UpsertUserByEmail(ctx, "a@x.com", "A2", "")
@@ -39,6 +40,129 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		}
 		if _, err := s.GetUser(ctx, "usr_missing"); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("expected ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("admin_users", func(t *testing.T) {
+		s := newStore(t)
+		u, err := s.BootstrapAdminUser(ctx, "admin", "admin@basic.localhost", "hash1")
+		if err != nil || u.ID == "" || !u.IsAdmin {
+			t.Fatalf("create admin: %v %+v", err, u)
+		}
+		got, err := s.GetUser(ctx, u.ID)
+		if err != nil || !got.IsAdmin {
+			t.Fatalf("admin flag not persisted: %v %+v", err, got)
+		}
+		again, err := s.BootstrapAdminUser(ctx, "admin", u.Email, "must-not-overwrite")
+		if err != nil || again.ID != u.ID || !again.IsAdmin || !again.CreatedAt.Equal(u.CreatedAt) || again.Name != "admin" || again.PasswordHash != "hash1" {
+			t.Fatalf("repeat admin login: %v %+v", err, again)
+		}
+		ordinary, err := s.UpsertUserByEmail(ctx, u.Email, "profile update", "")
+		if err != nil || !ordinary.IsAdmin || ordinary.PasswordHash != "hash1" || ordinary.Username != "admin" {
+			t.Fatalf("normal profile update demoted admin: %v %+v", err, ordinary)
+		}
+		legacy, err := s.UpsertUserByEmail(ctx, "legacy@basic.localhost", "legacy", "sub1")
+		if err != nil || legacy.IsAdmin {
+			t.Fatalf("create ordinary user: %v %+v", err, legacy)
+		}
+		upgraded, err := s.BootstrapAdminUser(ctx, "legacy", legacy.Email, "hash2")
+		if err != nil || upgraded.ID != legacy.ID || !upgraded.IsAdmin || upgraded.Name != legacy.Name || upgraded.GoogleSub != legacy.GoogleSub || !upgraded.CreatedAt.Equal(legacy.CreatedAt) {
+			t.Fatalf("upgrade existing user: %v %+v", err, upgraded)
+		}
+		other, err := s.UpsertUserByEmail(ctx, "google@example.com", "Google user", "sub2")
+		if err != nil || other.IsAdmin {
+			t.Fatalf("unrelated user became admin: %v %+v", err, other)
+		}
+	})
+
+	t.Run("concurrent_admin_creation", func(t *testing.T) {
+		s := newStore(t)
+		type result struct {
+			user *store.User
+			err  error
+		}
+		results := make(chan result, 8)
+		var wg sync.WaitGroup
+		for range cap(results) {
+			wg.Go(func() {
+				u, err := s.BootstrapAdminUser(ctx, "admin", "admin@basic.localhost", "hash1")
+				results <- result{u, err}
+			})
+		}
+		wg.Wait()
+		close(results)
+		var id string
+		for r := range results {
+			if r.err != nil || r.user == nil || !r.user.IsAdmin {
+				t.Fatalf("concurrent create: %v %+v", r.err, r.user)
+			}
+			if id != "" && r.user.ID != id {
+				t.Fatal("concurrent logins created different users")
+			}
+			id = r.user.ID
+		}
+	})
+
+	t.Run("passwords", func(t *testing.T) {
+		s := newStore(t)
+		if enabled, err := s.HasPasswordUsers(ctx); err != nil || enabled {
+			t.Fatalf("empty database local login: %t %v", enabled, err)
+		}
+		if _, err := s.GetUserByUsername(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("missing username: %v", err)
+		}
+		u, err := s.BootstrapAdminUser(ctx, "admin", "admin@basic.localhost", "old-hash")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if enabled, err := s.HasPasswordUsers(ctx); err != nil || !enabled {
+			t.Fatalf("local login not enabled: %t %v", enabled, err)
+		}
+		got, err := s.GetUserByUsername(ctx, "admin")
+		if err != nil || got.ID != u.ID || got.PasswordHash != "old-hash" {
+			t.Fatalf("lookup local credentials: %v", err)
+		}
+		other, err := s.UpsertUserByEmail(ctx, "google@example.com", "Google", "sub1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, session := range []*store.Session{
+			{Hash: "one", UserID: u.ID}, {Hash: "two", UserID: u.ID}, {Hash: "other", UserID: other.ID},
+		} {
+			if err := s.CreateSession(ctx, session); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := s.UpdateUserPassword(ctx, u.ID, "wrong-hash", "new-hash"); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("password compare-and-swap accepted stale hash: %v", err)
+		}
+		if _, err := s.GetSession(ctx, "one"); err != nil {
+			t.Fatal("failed password update revoked sessions")
+		}
+		if err := s.UpdateUserPassword(ctx, u.ID, "old-hash", "new-hash"); err != nil {
+			t.Fatal(err)
+		}
+		for _, hash := range []string{"one", "two"} {
+			if _, err := s.GetSession(ctx, hash); !errors.Is(err, store.ErrNotFound) {
+				t.Fatalf("password change did not revoke session: %v", err)
+			}
+		}
+		if _, err := s.GetSession(ctx, "other"); err != nil {
+			t.Fatal("password change revoked another user's session")
+		}
+		session := &store.Session{Hash: "new", UserID: u.ID, CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)}
+		if err := s.CreatePasswordSession(ctx, session, "old-hash"); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("stale password minted a session: %v", err)
+		}
+		if err := s.CreatePasswordSession(ctx, session, "new-hash"); err != nil {
+			t.Fatal(err)
+		}
+		after, err := s.GetUser(ctx, u.ID)
+		if err != nil || !after.IsAdmin || after.PasswordHash != "new-hash" {
+			t.Fatalf("password or admin status not persisted: %v", err)
+		}
+		if err := s.UpdateUserPassword(ctx, other.ID, "", "new-hash"); !errors.Is(err, store.ErrConflict) {
+			t.Fatal("passwordless Google account acquired local credentials")
 		}
 	})
 

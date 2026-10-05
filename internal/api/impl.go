@@ -80,6 +80,19 @@ type meResp struct{ rawJSON }
 
 func (r meResp) VisitMeResponse(w http.ResponseWriter) error { return r.write(w) }
 
+type changePasswordResp struct {
+	rawJSON
+	auth *auth.Service
+}
+
+func (r changePasswordResp) VisitChangePasswordResponse(w http.ResponseWriter) error {
+	w.Header().Set("Cache-Control", "no-store")
+	if r.auth != nil {
+		r.auth.ClearSessionCookie(w)
+	}
+	return r.write(w)
+}
+
 type capabilitiesResp struct{ rawJSON }
 
 func (r capabilitiesResp) VisitCapabilitiesResponse(w http.ResponseWriter) error {
@@ -234,7 +247,7 @@ func (s *strictImpl) Healthz(ctx context.Context, _ gen.HealthzRequestObject) (g
 func (s *strictImpl) AuthConfig(ctx context.Context, _ gen.AuthConfigRequestObject) (gen.AuthConfigResponseObject, error) {
 	ctx = realCtx(ctx)
 	return authConfigResp{rawJSON{http.StatusOK, dto.AuthConfig{
-		Google: s.d.GoogleEnabled, DevMode: s.d.Dev, Secrets: s.d.Vault.Enabled(),
+		Google: s.d.GoogleEnabled, Basic: s.d.Basic != nil, DevMode: s.d.Dev, Secrets: s.d.Vault.Enabled(),
 	}}}, nil
 }
 
@@ -247,6 +260,21 @@ func (s *strictImpl) Me(ctx context.Context, _ gen.MeRequestObject) (gen.MeRespo
 	return meResp{rawJSON{http.StatusOK, dto.Me{
 		User: dto.NewUser(p.User), ViaKey: p.ViaKey(), Kind: p.Kind,
 	}}}, nil
+}
+
+func (s *strictImpl) ChangePassword(ctx context.Context, req gen.ChangePasswordRequestObject) (gen.ChangePasswordResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return changePasswordResp{rawJSON: *e}, nil
+	}
+	if req.Body == nil || req.Body.CurrentPassword == nil || req.Body.NewPassword == nil {
+		return changePasswordResp{rawJSON: fail(service.BadRequest("password fields are required"))}, nil
+	}
+	if err := s.d.IAM.ChangePassword(ctx, actorOf(p), *req.Body.CurrentPassword, *req.Body.NewPassword); err != nil {
+		return changePasswordResp{rawJSON: fail(err)}, nil
+	}
+	return changePasswordResp{rawJSON: rawJSON{http.StatusOK, dto.OK{OK: true}}, auth: s.d.Auth}, nil
 }
 
 // --- capabilities ---

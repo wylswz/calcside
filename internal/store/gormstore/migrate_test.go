@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"calcside/internal/store"
 	"calcside/internal/store/storetest"
 	"calcside/internal/types"
 )
@@ -81,15 +82,15 @@ func TestMigrateLegacyBaseline(t *testing.T) {
 	if _, err := db.ExecContext(t.Context(), string(baseline)); err != nil {
 		t.Fatal(err)
 	}
-	u, err := d.UpsertUserByEmail(t.Context(), "legacy@example.com", "legacy", "")
-	if err != nil {
+	u := store.User{ID: "usr_legacy", Email: "legacy@example.com", Name: "legacy"}
+	if _, err := db.ExecContext(t.Context(), "INSERT INTO users (id, email, name) VALUES (?, ?, ?)", u.ID, u.Email, u.Name); err != nil {
 		t.Fatal(err)
 	}
 	_ = d.Close()
 	storetest.Atlas(t, types.DriverSQLite, dsn, "apply", "--baseline", "20261004092922")
 	d = openTest(t, types.DriverSQLite, dsn)
-	if _, err := d.GetUser(t.Context(), u.ID); err != nil {
-		t.Fatal(err)
+	if got, err := d.GetUser(t.Context(), u.ID); err != nil || got.Email != u.Email || got.IsAdmin {
+		t.Fatalf("existing user changed identity or became admin during migration: %v, %+v", err, got)
 	}
 }
 

@@ -4,7 +4,9 @@
     "user": {
       "created_at": "\u003cts\u003e",
       "email": "a@x.com",
+      "has_password": false,
       "id": "\u003cid:usr\u003e",
+      "is_admin": false,
       "last_login_at": "\u003cts\u003e",
       "name": ""
     },

@@ -93,7 +93,8 @@ raw.use({
   },
   async onResponse({ response }) {
     const url = new URL(response.url)
-    if (response.status === 401 && !devMode && !url.pathname.startsWith('/api/v1/auth/config')) {
+    if (response.status === 401 && !devMode && window.location.pathname !== '/login' &&
+        url.pathname !== '/auth/basic/login' && !url.pathname.startsWith('/api/v1/auth/config')) {
       window.location.assign('/login')
     }
     return response
@@ -103,17 +104,22 @@ raw.use({
 // api keeps the old { get, post, put, del } surface but is backed by
 // the generated openapi-fetch client.
 export const api = {
+  basicLogin: (username: string, password: string): Promise<{ ok: boolean }> => {
+    const bytes = new TextEncoder().encode(`${username}:${password}`)
+    const credentials = btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(''))
+    return call('post', '/auth/basic/login', undefined, { Authorization: `Basic ${credentials}` })
+  },
   get: async <T>(path: string): Promise<T> => call<T>('get', path),
   post: async <T>(path: string, body?: unknown): Promise<T> => call<T>('post', path, body ?? {}),
   put: async <T>(path: string, body: unknown): Promise<T> => call<T>('put', path, body),
   del: async <T>(path: string): Promise<T> => call<T>('delete', path),
 }
 
-async function call<T>(method: 'get' | 'post' | 'put' | 'delete', path: string, body?: unknown): Promise<T> {
+async function call<T>(method: 'get' | 'post' | 'put' | 'delete', path: string, body?: unknown, headers?: HeadersInit): Promise<T> {
   // openapi-fetch is typed per-path; the console's dynamic paths are
   // handled via the untyped escape hatch.
   const fn = (raw as any)[method.toUpperCase()].bind(raw)
-  const { data, error, response } = await fn(path as never, method === 'get' || method === 'delete' ? undefined : { body })
+  const { data, error, response } = await fn(path as never, { headers, ...(method === 'get' || method === 'delete' ? {} : { body }) })
   if (error !== undefined && error !== null) {
     const e = (error as any)?.error
     throw new ApiError(response.status, (e?.code ?? '') as ApiErrorCode | '', e?.message ?? response.statusText)
