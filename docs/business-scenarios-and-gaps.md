@@ -41,7 +41,7 @@ As inspected during this research:
   error, and execution statistics. A domain-specific structured result contract
   can initially be built with `print(json.encode(...))` and SDK conventions.
 - [EP-0001](proposals/0001-record-replay.md) through
-  [EP-0006](proposals/0006-pluggable-instance-vfs.md) are drafts, not shipped features.
+  [EP-0007](proposals/0007-artifact-preview-and-download.md) are drafts, not shipped features.
   Proposal coverage in this document must not be read as implementation status.
 
 ## Candidate domains
@@ -180,7 +180,7 @@ All entries below are open gaps at research time. Priority is a recommendation:
 | G04 | Provider-call reliability and budgets | Per-request timeout/size and execution limits exist; shared credential/account rate limits, provider cost budgets, safe bounded retries, and recoverable transport failures are not a unified feature. | Trusted runtime/connection layer plus provider-specific pagination and throttling rules. | P0 for honest failure/completeness handling; P1 for multi-instance quota coordination. Not specified by the existing EPs. |
 | G05 | Dynamic credentials and request signing | Static secret injection exists; outbound OAuth refresh, expiring provider credentials, and SigV4 are not connection primitives. | Trusted host connection/authentication layer, or existing authorized host tools. | P1 overall; a blocker for native AWS integration. Not covered by the current EPs. |
 | G06 | Business-operation and resource authorization | Gate, policies, allowlists, and secret domain restrictions exist; they do not automatically make an ext wrapper a narrower authority than its base capabilities. | Upstream least-privilege credentials, trusted tool/resource enforcement, and carefully designed policy metadata. | P0 for every live integration. EP-0003/0004 preserve boundaries but do not add a new business authorization mechanism. |
-| G07 | File input and structured result delivery | Print output and gated redacted file reads exist; upload and a standard machine-consumable evidence/result contract are missing. | Public API, SDK, console, and host-owned artifact storage where needed. | P0 for CSV inputs and usable outputs. EP-0005 covers upload, not durable artifacts or unrestricted binary download; EP-0006 is not required to replace memory. |
+| G07 | File input, artifact preview/download, and structured results | Print output and gated redacted reads exist; CSV tables, HTML report previews, file attachments, ZIP export, upload, and a standard evidence/result contract are missing. | Public API, SDK, console, and host-owned artifact storage where needed. | Current P0 focus: EP-0007 covers preview/download/ZIP; EP-0005 covers upload. Both remain drafts. Durable retention, general binary export, and a structured exec result contract are separate; no disk/S3 prerequisite. |
 | G08 | Asynchronous business orchestration | Bounded execs are not durable workflows for report generation, webhook waiting, scheduled runs, or recovery. | Hosting application/workflow orchestrator first; small runtime job primitives only if justified. | P1 when an integration requires it. EP-0001 replay is not a scheduler or a replacement for this lifecycle. |
 
 ### G03: proposed result convention
@@ -245,6 +245,23 @@ policy metadata must be bounded, validated, and derived from the operation being
 authorized; do not copy entire request/response bodies into hooks or audit. Adding
 editor completion fields alone does not implement enforcement.
 
+### G07: current priority is artifact preview and export
+
+The immediate product gap is **generate -> preview -> download/package**. A CSV
+or HTML file in VFS is not a complete deliverable when the console only shows
+source text and offers no download action.
+
+[EP-0007](proposals/0007-artifact-preview-and-download.md) proposes CSV table
+preview, isolated static/interactive HTML modes, single-file attachments, and
+ZIP export of selected files/directories. Every file read keeps Gate and secret
+redaction enforcement; an archive is not a way to bypass per-file policy.
+
+This can ship independently of upload, a new business connector, or a storage
+backend change: existing scripts can already write files. Keep memory VFS and
+instance-scoped lifetime, and distinguish static HTML from opt-in JavaScript
+charts with separate-origin requirements. Do not claim post-expiry availability
+or unrestricted binary download. The gap is still open until implemented.
+
 ## Relationship to the current proposals
 
 | Proposal | How it contributes | What remains outside it |
@@ -254,6 +271,7 @@ editor completion fields alone does not implement enforcement.
 | [EP-0004: discovery UI](proposals/0004-extension-discovery-ui.md) | Makes available extensions discoverable and configurable. | Correctness, completeness, and backend authorization cannot be replaced by UI labels. |
 | [EP-0005: uploads](proposals/0005-instance-file-uploads.md) | Enables the CSV input path while preserving Gate and quotas. | Larger transfers are a follow-up; durable artifacts and raw binary downloads are not included. |
 | [EP-0006: pluggable VFS](proposals/0006-pluggable-instance-vfs.md) | Keeps storage choices behind a stable application-defined contract. | No disk/S3 implementation or POSIX compatibility is required for these MVPs. |
+| [EP-0007: artifact delivery](proposals/0007-artifact-preview-and-download.md) | Adds CSV/HTML previews, file downloads, and ZIP selection with existing read authorization/redaction. | No durable retention, public sharing, or unrestricted binary export; interactive HTML requires explicit isolation. |
 | [EP-0001: replay](proposals/0001-record-replay.md) | Could later help reproduce and regress already useful workflows. | Not a prerequisite for initial usefulness, nor durable job scheduling; uploads need explicit recording semantics. |
 
 Keep memory as the default VFS implementation. Logical storage quotas and runtime
@@ -261,6 +279,14 @@ memory limits are still necessary, but neither S3 nor a POSIX filesystem fixes
 missing business rules, authentication, pagination, or evidence quality.
 
 ## Recommended validation sequence
+
+### Immediate deliverable: artifact viewing and export
+
+Prioritize EP-0007 before broadening the connector catalog. Use scripts that
+write a CSV, a static HTML/SVG report, and an optional self-contained JS chart.
+Verify preview behavior, complete single-file downloads, ZIP structure,
+redaction, policy-denied members, and instance expiry. This does not require
+upload or a new utility module to be implemented first.
 
 ### Reference A: CSV reconciliation
 
@@ -272,8 +298,9 @@ reporting; a live payment connector is not required.
 Acceptance fixtures cover duplicates, absent IDs, multiple payments per order,
 refunds across periods, currencies with different scales, rounding, malformed
 rows, and exceeded input/output limits. Verify output totals and exception rows
-against a deterministic reference. Initially retrieve the redacted text artifact
-through the SDK and save it in the host application; do not add S3 merely for this.
+against a deterministic reference. Use EP-0007 for CSV preview, attachment
+download, and ZIP export; SDK text reads remain a fallback. Do not add S3
+merely to deliver these instance-scoped results.
 
 ### Reference B: Sentry + GitHub release investigation
 

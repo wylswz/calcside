@@ -3,7 +3,7 @@
 - **Status:** Draft
 - **Created:** 2026-10-05
 - **Area:** Public/worker APIs, runtime, instance manager, fs capability, web, Python SDK
-- **Related:** [EP-0002](0002-standard-library-utilities.md), [EP-0006](0006-pluggable-instance-vfs.md), [EP-0001](0001-record-replay.md)
+- **Related:** [EP-0002](0002-standard-library-utilities.md), [EP-0006](0006-pluggable-instance-vfs.md), [EP-0001](0001-record-replay.md), [EP-0007](0007-artifact-preview-and-download.md)
 
 ## Summary
 
@@ -18,6 +18,11 @@ shared API/worker storage, or object storage.
 Ship a bounded single-file upload first. Larger transfers require a subsequent
 bounded-chunk protocol; do not increase request limits and call that streaming.
 All routes and limits below are proposed.
+
+Artifact preview, single-file download, and ZIP export are specified separately
+in [EP-0007](0007-artifact-preview-and-download.md). They can be delivered before
+upload using files that scripts already produce; both proposals retain memory
+VFS and the existing gated read/redaction boundary.
 
 ## Motivation and current state
 
@@ -259,5 +264,6 @@ for v1: the upload is instance data, not a new persistent store entity.
   prioritize chunked transfer instead of stretching the worker body limit.
 - Whether to later add content-version preconditions for replacements made by
   multiple clients. An explicit overwrite is initially last-writer-wins.
-- Whether a later artifact API should support binary download while preserving
-  the project's secret-handling contract; this proposal does not decide it.
+- General binary artifact export remains a separate design question. EP-0007
+  covers bounded text downloads and generated ZIP containers without bypassing
+  the project's secret-handling contract; it does not enable arbitrary binary reads.
