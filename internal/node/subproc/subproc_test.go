@@ -257,7 +257,7 @@ func TestArtifactExportThroughChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := run(t, s, "ins_artifact", "write", `fs.write("report.csv", "id,value\nA,001\n")`)
+	result, err := run(t, s, "ins_artifact", "write", `fs.write("report.csv", "id,value\nA,001\n"); fs.write("index.html", '<script type="module">import "./view.js";</script>'); fs.write("view.js", "window.child=1;")`)
 	if err != nil || result.Result.Error != nil {
 		t.Fatal("write failed")
 	}
@@ -265,6 +265,11 @@ func TestArtifactExportThroughChild(t *testing.T) {
 	if err != nil || out.Error != nil || len(out.Files) != 1 || string(out.Files[0].Content) != "id,value\nA,001\n" || len(out.Audit.Events) == 0 {
 		t.Fatalf("child export: %v", err)
 	}
+	out, err = s.Export(ctx, &runtime.ExportRequest{InstanceID: "ins_artifact", Owner: owner, Paths: []string{"index.html"}, PreviewMode: "interactive"})
+	if err != nil || out.Error != nil || len(out.Files) != 1 || !strings.Contains(string(out.PreviewHTML), "data:text/javascript;charset=utf-8;base64,") || len(out.Audit.Events) != 4 {
+		t.Fatalf("child inline preview: %v", err)
+	}
+
 	out, err = s.Export(ctx, &runtime.ExportRequest{InstanceID: "ins_artifact", Owner: owner, Paths: []string{"report.csv", "missing.txt"}, Recursive: true})
 	if err != nil || out.Error == nil || len(out.Files) != 0 || len(out.Audit.Events) == 0 {
 		t.Fatal("partial child export or missing failure audit")

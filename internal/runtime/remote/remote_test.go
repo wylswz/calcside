@@ -18,6 +18,7 @@ import (
 	"calcside/internal/placement"
 	"calcside/internal/runtime"
 	"calcside/internal/runtime/remote"
+	"calcside/internal/types"
 )
 
 var testKey = []byte("test-shared-key-0123456789abcdef")
@@ -247,13 +248,13 @@ func TestRemoteArtifactExport(t *testing.T) {
 	req := createReq("ins_artifact")
 	req.Spec = []byte(`{"capabilities":{"fs":{}}}`)
 	req.Policies = runtime.PolicyBundle{Global: map[string]string{"deny.rego": `package calcside.hooks
-deny contains "blocked" if { input.phase == "after"; input.op == "read"; input.args.path == "/work/denied.txt" }`}}
+deny contains "blocked" if { input.phase == "after"; input.op == "read"; input.args.path in {"/work/denied.txt", "/work/denied.js"} }`}}
 	created, err := client.Create(ctx, req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	bindings[req.InstanceID] = &placement.Binding{InstanceID: req.InstanceID, NodeID: created.NodeID, Epoch: created.Epoch}
-	result, err := client.Exec(ctx, &runtime.ExecRequest{InstanceID: req.InstanceID, Owner: req.Owner, Epoch: created.Epoch, ExecID: "write", Code: `fs.write("ok.csv", "a,b\r\n1,2\r\n"); fs.write("denied.txt", "private")`})
+	result, err := client.Exec(ctx, &runtime.ExecRequest{InstanceID: req.InstanceID, Owner: req.Owner, Epoch: created.Epoch, ExecID: "write", Code: `fs.write("ok.csv", "a,b\r\n1,2\r\n"); fs.write("denied.txt", "private"); fs.write("index.html", '<link rel="stylesheet" href="view.css"><script src="view.js" defer></script>'); fs.write("view.css", "h1 { color: red }"); fs.write("view.js", "window.remote=1;"); fs.write("denied.html", '<script type="module">import "./denied.js";</script>'); fs.write("denied.js", "window.private=1;")`})
 	if err != nil || result.Result.Error != nil {
 		t.Fatal("write failed")
 	}
@@ -274,4 +275,20 @@ deny contains "blocked" if { input.phase == "after"; input.op == "read"; input.a
 	if !denied {
 		t.Fatal("after-denial was lost over HTTP")
 	}
+	out, err = client.Export(ctx, &runtime.ExportRequest{InstanceID: req.InstanceID, Owner: req.Owner, Epoch: created.Epoch, Paths: []string{"index.html"}, PreviewMode: "interactive"})
+	if err != nil || out.Error != nil || len(out.Files) != 1 || !strings.Contains(string(out.PreviewHTML), "data:text/javascript;charset=utf-8;base64,") || !strings.Contains(string(out.PreviewHTML), "color: red") {
+		t.Fatalf("inline preview lost over HTTP: %v", err)
+	}
+	out, err = client.Export(ctx, &runtime.ExportRequest{InstanceID: req.InstanceID, Owner: req.Owner, Epoch: created.Epoch, Paths: []string{"denied.html"}, PreviewMode: "interactive"})
+	if err != nil || out.Error == nil || out.Error.Code != types.ErrCodeForbidden || len(out.Files) != 0 || len(out.PreviewHTML) != 0 {
+		t.Fatal("partial inline preview or denial lost over HTTP")
+	}
+	denied = false
+	for _, event := range out.Audit.Events {
+		denied = denied || event.Decision == "deny" && event.Phase == "after"
+	}
+	if !denied {
+		t.Fatal("inline denial audit lost over HTTP")
+	}
+
 }

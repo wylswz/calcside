@@ -317,3 +317,53 @@ test('the standalone viewer still requires console authentication', async ({ pag
   await expect(page.locator('iframe')).toHaveCount(0)
   expect(previews).toBe(0)
 })
+
+test('local CSS, deferred scripts and module dependencies render from one HTML snapshot', async ({ page }) => {
+  const html = `<!doctype html><html><head>
+    <link rel="stylesheet" href="assets/report.css">
+    <script>window.events=[]; document.addEventListener('DOMContentLoaded', () => window.events.push('ready'));</script>
+    <script src="assets/base.js"></script>
+    <script defer src="assets/first.js"></script><script defer src="assets/second.js"></script>
+    <script type="module" src="assets/main.mjs"></script><script async src="assets/async.js"></script>
+    </head><body><h1 id="state" class="report">not executed</h1><script>window.events.push('body');</script></body></html>`
+  const files: Record<string, string> = {
+    'report/index.html': html,
+    'report/assets/report.css': '@import "./nested/base.css"; .report { color: rgb(1, 2, 3) }',
+    'report/assets/nested/base.css': '.report { font-size: 25px }',
+    'report/assets/base.js': 'var reportBase = 10; window.events.push("base");',
+    'report/assets/first.js': 'window.events.push(document.getElementById("state") ? "defer1" : "too-early"); var reportValue = reportBase + 2;',
+    'report/assets/second.js': 'window.events.push(reportValue === 12 ? "defer2" : "no-global");',
+    'report/assets/main.mjs': 'import {answer} from "./nested/helper.js"; import data from "./data.json"; import "./module.css"; window.events.push("module"); document.getElementById("state").textContent = `value ${answer + data.value}`; import("./late.js").then(m => window.lateValue = m.value);',
+    'report/assets/nested/helper.js': 'export const answer = 40;',
+    'report/assets/data.json': '{"value":2}',
+    'report/assets/module.css': '.report {letter-spacing: 1px} .report::after {content:"</style><script>window.escapeRan=true</script>"}',
+    'report/assets/late.js': 'export const value = 99;',
+    'report/assets/async.js': 'window.asyncRan = true; window.unicodeText = "你好，图表";',
+    'report/unrelated.png': 'unreferenced binary extensions do not block preview',
+  }
+  const id = await instance(Object.entries(files).map(([name, content]) => `fs.write(${JSON.stringify(name)}, ${JSON.stringify(content)})`).join('\n'))
+  await page.goto(`${consoleURL}/instances/${id}/preview?path=${encodeURIComponent('/work/report/index.html')}`)
+  const content = page.frameLocator('iframe[title="Artifact preview"]')
+  await expect(content.getByText('not executed', { exact: true })).toHaveCSS('color', 'rgb(1, 2, 3)')
+  await expect(content.getByText('not executed', { exact: true })).toHaveCSS('font-size', '25px')
+  await page.getByRole('button', { name: 'Enable JavaScript', exact: true }).click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await expect(page.locator('iframe')).toHaveCSS('pointer-events', 'none')
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  const interactive = page.waitForResponse((response) => response.url().endsWith('/artifacts/preview') && response.request().postDataJSON()?.mode === 'interactive')
+  await page.getByRole('button', { name: 'Run interactive preview', exact: true }).click()
+  expect((await (await interactive).json()).interactive).toBe(true)
+  await expect(page.getByRole('dialog')).not.toBeVisible()
+  await expect(content.getByText('value 42', { exact: true })).toHaveCSS('letter-spacing', '1px')
+  const frame = page.frames().find((candidate) => candidate.url().includes('.preview.localhost'))!
+  await expect.poll(() => frame.evaluate('window.events')).toEqual(['base', 'body', 'defer1', 'defer2', 'module', 'ready'])
+  await expect.poll(() => frame.evaluate('window.lateValue')).toBe(99)
+  await expect.poll(() => frame.evaluate('window.asyncRan')).toBe(true)
+  expect(await frame.evaluate('window.unicodeText')).toBe('你好，图表')
+  expect(await frame.evaluate('window.escapeRan')).toBeUndefined()
+  expect(await frame.evaluate('Array.from(document.scripts).filter(s => s.src).every(s => s.src.startsWith("data:"))')).toBe(true)
+  expect(await frame.locator('link[rel="stylesheet"]').count()).toBe(0)
+  await page.getByRole('button', { name: 'Source', exact: true }).click()
+  await expect(page.locator('iframe')).toHaveCount(0)
+  await expect(page.getByLabel('File source')).toContainText('src="assets/main.mjs"')
+})

@@ -302,7 +302,7 @@ type ClientInterface interface {
 
 	// RuntimeExportWithBody Atomically collect authorized redacted text artifacts.
 	//
-	// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion.
+	// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion. An optional preview_mode (static or interactive) inlines local HTML dependencies under the same execution lock and Gate scope, returning preview_html alongside the entry file. Source reads and ordinary exports never perform this conversion.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -311,7 +311,7 @@ type ClientInterface interface {
 
 	// RuntimeExport Atomically collect authorized redacted text artifacts.
 	//
-	// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion.
+	// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion. An optional preview_mode (static or interactive) inlines local HTML dependencies under the same execution lock and Gate scope, returning preview_html alongside the entry file. Source reads and ordinary exports never perform this conversion.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -523,7 +523,7 @@ func (c *Client) RuntimeExec(ctx context.Context, body RuntimeExecJSONRequestBod
 
 // RuntimeExportWithBody Atomically collect authorized redacted text artifacts.
 //
-// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion.
+// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion. An optional preview_mode (static or interactive) inlines local HTML dependencies under the same execution lock and Gate scope, returning preview_html alongside the entry file. Source reads and ordinary exports never perform this conversion.
 //
 // Takes any type of body and a specified content type.
 //
@@ -542,7 +542,7 @@ func (c *Client) RuntimeExportWithBody(ctx context.Context, contentType string, 
 
 // RuntimeExport Atomically collect authorized redacted text artifacts.
 //
-// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion.
+// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion. An optional preview_mode (static or interactive) inlines local HTML dependencies under the same execution lock and Gate scope, returning preview_html alongside the entry file. Source reads and ordinary exports never perform this conversion.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -1107,7 +1107,7 @@ type ClientWithResponsesInterface interface {
 
 	// RuntimeExportWithBodyWithResponse Atomically collect authorized redacted text artifacts.
 	//
-	// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion.
+	// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion. An optional preview_mode (static or interactive) inlines local HTML dependencies under the same execution lock and Gate scope, returning preview_html alongside the entry file. Source reads and ordinary exports never perform this conversion.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -1116,7 +1116,7 @@ type ClientWithResponsesInterface interface {
 
 	// RuntimeExportWithResponse Atomically collect authorized redacted text artifacts.
 	//
-	// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion.
+	// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion. An optional preview_mode (static or interactive) inlines local HTML dependencies under the same execution lock and Gate scope, returning preview_html alongside the entry file. Source reads and ordinary exports never perform this conversion.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -1680,7 +1680,7 @@ func (c *ClientWithResponses) RuntimeExecWithResponse(ctx context.Context, body 
 
 // RuntimeExportWithBodyWithResponse Atomically collect authorized redacted text artifacts.
 //
-// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion.
+// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion. An optional preview_mode (static or interactive) inlines local HTML dependencies under the same execution lock and Gate scope, returning preview_html alongside the entry file. Source reads and ordinary exports never perform this conversion.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -1695,7 +1695,7 @@ func (c *ClientWithResponses) RuntimeExportWithBodyWithResponse(ctx context.Cont
 
 // RuntimeExportWithResponse Atomically collect authorized redacted text artifacts.
 //
-// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion.
+// Read-only; may be retried on a stale route. Once an instance is reached, operation failures are carried in the 200 response alongside the audit batch. A failed collection never returns partial files. File content uses base64 transport encoding to bound JSON expansion. An optional preview_mode (static or interactive) inlines local HTML dependencies under the same execution lock and Gate scope, returning preview_html alongside the entry file. Source reads and ordinary exports never perform this conversion.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //

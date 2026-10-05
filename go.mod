@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/containerd/cgroups/v3 v3.1.3
 	github.com/coreos/go-oidc/v3 v3.21.0
+	github.com/evanw/esbuild v0.28.2
 	github.com/gin-gonic/gin v1.12.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/google/wire v0.7.0

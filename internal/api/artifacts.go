@@ -84,7 +84,7 @@ func (s *strictImpl) PreviewArtifact(ctx context.Context, req gen.PreviewArtifac
 		return bad(service.Forbidden("interactive preview is disabled"))
 	}
 	actor := actorOf(principal)
-	snapshot, err := s.d.Sandbox.Export(ctx, actor, req.Id, []string{req.Body.Path}, false)
+	snapshot, err := s.d.Sandbox.Preview(ctx, actor, req.Id, req.Body.Path, mode)
 	if err != nil {
 		return bad(err)
 	}
@@ -112,19 +112,12 @@ func (s *strictImpl) PreviewArtifact(ctx context.Context, req gen.PreviewArtifac
 		if out.Kind != "html" {
 			return bad(service.BadRequest("rendered preview requires an HTML file"))
 		}
-		body := file.Content
-		if mode == "interactive" {
-			if err := artifact.CheckHTML(ctx, body); err != nil {
-				return bad(service.BadRequest("HTML cannot be rendered within preview limits"))
-			}
+		body := snapshot.PreviewHTML
+		if body == nil {
+			return bad(service.BadRequest("execution node did not produce an inline HTML preview"))
 		}
-		if mode == "static" {
-			body, err = artifact.StaticHTML(ctx, body)
-			if err != nil {
-				return bad(service.BadRequest("HTML cannot be rendered within preview limits"))
-			}
-			out.Sanitized = true
-		}
+		out.Sanitized = mode == "static"
+
 		previewURL, expires, err := s.d.Previews.create(actor.UserID, req.Id, snapshot.Epoch, body, mode == "interactive", snapshot.ExpiresAt)
 		if err != nil {
 			return bad(err)

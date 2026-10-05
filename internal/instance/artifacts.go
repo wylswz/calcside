@@ -10,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"calcside/internal/artifact"
 	"calcside/internal/capability"
 	capfs "calcside/internal/capability/fs"
 	"calcside/internal/runtime"
@@ -63,7 +64,20 @@ func (m *Manager) Export(ctx context.Context, req *runtime.ExportRequest) (*runt
 	}
 	in.sess.Gate.Arm(capability.ExecContext{ExecID: "artifact", InstanceID: in.id, UserID: in.owner.UserID, UserEmail: in.owner.Email, Labels: in.labels})
 	defer in.sess.Gate.Disarm()
-	files, err := collectArtifacts(ctx, in, capfs.NewAccessor(closer.V, in.sess.Gate), req)
+	reader := &artifactReader{ctx: ctx, in: in, acc: capfs.NewAccessor(closer.V, in.sess.Gate), names: map[string]string{}, files: map[string]runtime.ArtifactFile{}}
+	files, err := collectArtifacts(reader, req)
+	var preview []byte
+	if err == nil && req.PreviewMode != "" {
+		if req.Recursive || len(files) != 1 || artifact.TextKind(files[0].Path) != "html" || req.PreviewMode != "static" && req.PreviewMode != "interactive" {
+			err = artifactError(types.ErrCodeBadRequest, "invalid HTML preview request")
+		} else {
+			preview, err = artifact.InlineHTML(ctx, files[0].Path, files[0].Content, func(p string) ([]byte, error) {
+				file, err := reader.read(p, nil)
+				files[0].Redacted = files[0].Redacted || file.Redacted
+				return file.Content, err
+			}, req.PreviewMode == "interactive")
+		}
+	}
 	if err == nil && !in.sess.Gate.Armed() {
 		err = artifactError(types.ErrCodeNotRunning, "instance is no longer running")
 	}
@@ -89,34 +103,21 @@ func (m *Manager) Export(ctx context.Context, req *runtime.ExportRequest) (*runt
 		}
 		return resp, nil
 	}
-	resp.Files = files
+	resp.Files, resp.PreviewHTML = files, preview
 	return resp, nil
 }
 
-func collectArtifacts(ctx context.Context, in *inst, acc *capfs.Accessor, req *runtime.ExportRequest) ([]runtime.ArtifactFile, error) {
+func collectArtifacts(reader *artifactReader, req *runtime.ExportRequest) ([]runtime.ArtifactFile, error) {
+	ctx, acc := reader.ctx, reader.acc
 	if len(req.Paths) == 0 || len(req.Paths) > runtime.MaxArtifactFiles || !req.Recursive && len(req.Paths) != 1 {
 		return nil, artifactError(types.ErrCodeBadRequest, "invalid artifact selection")
 	}
 	queued := map[string]bool{}
-	portableNames := map[string]string{}
 	var pending []string
 	enqueue := func(p string) error {
-		if len(p) == 0 || len(p) > runtime.MaxArtifactPathBytes || !utf8.ValidString(p) || strings.ContainsAny(p, "\\:") || strings.IndexFunc(p, unicode.IsControl) >= 0 {
-			return artifactError(types.ErrCodeBadRequest, "invalid artifact path")
-		}
-		full, err := capfs.Resolve(p)
+		full, err := reader.resolve(p)
 		if err != nil {
-			return artifactError(types.ErrCodeBadRequest, "artifact path must stay inside /work")
-		}
-		if len(full) > runtime.MaxArtifactPathBytes {
-			return artifactError(types.ErrCodeTooLarge, "artifact path exceeds limit")
-		}
-		if err := capfs.CheckExportPath(full, portableNames); err != nil {
-			return artifactError(types.ErrCodeBadRequest, err.Error())
-		}
-		redacted, err := in.secrets.RedactBounded(ctx, full, runtime.MaxArtifactPathBytes)
-		if err != nil || redacted != full {
-			return artifactError(types.ErrCodeBadRequest, "artifact path cannot be exported")
+			return err
 		}
 		if queued[full] {
 			return nil
@@ -134,7 +135,6 @@ func collectArtifacts(ctx context.Context, in *inst, acc *capfs.Accessor, req *r
 		}
 	}
 	files := []runtime.ArtifactFile{}
-	total, sourceTotal, count := 0, 0, 0
 	for i := 0; i < len(pending); i++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -162,36 +162,95 @@ func collectArtifacts(ctx context.Context, in *inst, acc *capfs.Accessor, req *r
 			}
 			continue
 		}
-		count++
-		if count > runtime.MaxArtifactFiles || stat.Size > runtime.MaxArtifactFileBytes || stat.Size > int64(runtime.MaxArtifactTotalBytes-sourceTotal) {
-			return nil, artifactError(types.ErrCodeTooLarge, "artifact file count or byte limit exceeded")
-		}
-		sourceTotal += int(stat.Size)
-		switch strings.ToLower(path.Ext(p)) {
-		case "", ".txt", ".log", ".csv", ".tsv", ".html", ".htm", ".json", ".md", ".markdown", ".css", ".js", ".mjs", ".yaml", ".yml", ".xml", ".sql":
-		default:
-			return nil, artifactError(types.ErrCodeBadRequest, "unsupported artifact file type; only UTF-8 text artifacts can be exported")
-		}
-		content, err := acc.Read(ctx, p)
+		file, err := reader.read(p, &stat)
 		if err != nil {
 			return nil, err
 		}
-		if !utf8.ValidString(content) || strings.IndexByte(content, 0) >= 0 {
-			return nil, artifactError(types.ErrCodeBadRequest, "artifact is not NUL-free UTF-8 text")
-		}
-		redacted, err := in.secrets.RedactBounded(ctx, content, runtime.MaxArtifactFileBytes)
-		if err != nil {
-			return nil, artifactError(types.ErrCodeTooLarge, "redacted artifact exceeds limit")
-		}
-		if !utf8.ValidString(redacted) || strings.IndexByte(redacted, 0) >= 0 {
-			return nil, artifactError(types.ErrCodeBadRequest, "redacted artifact is not NUL-free UTF-8 text")
-		}
-		total += len(redacted)
-		if total > runtime.MaxArtifactTotalBytes {
-			return nil, artifactError(types.ErrCodeTooLarge, "artifact selection exceeds byte limit")
-		}
-		files = append(files, runtime.ArtifactFile{Path: p, Content: []byte(redacted), Redacted: redacted != content})
+		files = append(files, file)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return files, nil
+}
+
+type artifactReader struct {
+	ctx                context.Context
+	in                 *inst
+	acc                *capfs.Accessor
+	names              map[string]string
+	files              map[string]runtime.ArtifactFile
+	total, sourceTotal int
+}
+
+func (r *artifactReader) resolve(p string) (string, error) {
+	if len(p) == 0 || len(p) > runtime.MaxArtifactPathBytes || !utf8.ValidString(p) || strings.ContainsAny(p, "\\:") || strings.IndexFunc(p, unicode.IsControl) >= 0 {
+		return "", artifactError(types.ErrCodeBadRequest, "invalid artifact path")
+	}
+	full, err := capfs.Resolve(p)
+	if err != nil {
+		return "", artifactError(types.ErrCodeBadRequest, "artifact path must stay inside /work")
+	}
+	if len(full) > runtime.MaxArtifactPathBytes {
+		return "", artifactError(types.ErrCodeTooLarge, "artifact path exceeds limit")
+	}
+	if err := capfs.CheckExportPath(full, r.names); err != nil {
+		return "", artifactError(types.ErrCodeBadRequest, err.Error())
+	}
+	redacted, err := r.in.secrets.RedactBounded(r.ctx, full, runtime.MaxArtifactPathBytes)
+	if err != nil || redacted != full {
+		return "", artifactError(types.ErrCodeBadRequest, "artifact path cannot be exported")
+	}
+	return full, nil
+}
+
+func (r *artifactReader) read(p string, stat *capfs.Entry) (runtime.ArtifactFile, error) {
+	if err := r.ctx.Err(); err != nil {
+		return runtime.ArtifactFile{}, err
+	}
+	p, err := r.resolve(p)
+	if err != nil {
+		return runtime.ArtifactFile{}, err
+	}
+	if file, exists := r.files[p]; exists {
+		return file, nil
+	}
+	if stat == nil {
+		entry, err := r.acc.Stat(r.ctx, p)
+		if err != nil {
+			return runtime.ArtifactFile{}, err
+		}
+		stat = &entry
+	}
+	if stat.IsDir {
+		return runtime.ArtifactFile{}, artifactError(types.ErrCodeBadRequest, "preview dependency must be a file")
+	}
+	if len(r.files) >= runtime.MaxArtifactFiles || stat.Size > runtime.MaxArtifactFileBytes || stat.Size > int64(runtime.MaxArtifactTotalBytes-r.sourceTotal) {
+		return runtime.ArtifactFile{}, artifactError(types.ErrCodeTooLarge, "artifact file count or byte limit exceeded")
+	}
+	r.sourceTotal += int(stat.Size)
+	switch strings.ToLower(path.Ext(p)) {
+	case "", ".txt", ".log", ".csv", ".tsv", ".html", ".htm", ".json", ".md", ".markdown", ".css", ".js", ".mjs", ".yaml", ".yml", ".xml", ".sql":
+	default:
+		return runtime.ArtifactFile{}, artifactError(types.ErrCodeBadRequest, "unsupported artifact file type; only UTF-8 text artifacts can be exported")
+	}
+	content, err := r.acc.Read(r.ctx, p)
+	if err != nil {
+		return runtime.ArtifactFile{}, err
+	}
+	if !utf8.ValidString(content) || strings.IndexByte(content, 0) >= 0 {
+		return runtime.ArtifactFile{}, artifactError(types.ErrCodeBadRequest, "artifact is not NUL-free UTF-8 text")
+	}
+	redacted, err := r.in.secrets.RedactBounded(r.ctx, content, runtime.MaxArtifactFileBytes)
+	if err != nil {
+		return runtime.ArtifactFile{}, artifactError(types.ErrCodeTooLarge, "redacted artifact exceeds limit")
+	}
+	if !utf8.ValidString(redacted) || strings.IndexByte(redacted, 0) >= 0 {
+		return runtime.ArtifactFile{}, artifactError(types.ErrCodeBadRequest, "redacted artifact is not NUL-free UTF-8 text")
+	}
+	r.total += len(redacted)
+	if r.total > runtime.MaxArtifactTotalBytes {
+		return runtime.ArtifactFile{}, artifactError(types.ErrCodeTooLarge, "artifact selection exceeds byte limit")
+	}
+	file := runtime.ArtifactFile{Path: p, Content: []byte(redacted), Redacted: redacted != content}
+	r.files[p] = file
+	return file, nil
 }

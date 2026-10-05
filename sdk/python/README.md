@@ -92,7 +92,10 @@ than returning a partial successful download. Files must be downloaded while the
 instance is live; the SDK does not automatically keep it alive or retain artifacts.
 
 HTML modes `static` and `interactive` require the deployment's isolated preview
-domain. Interactive mode also requires operator opt-in. Treat `preview_url` as a
+domain. Local JS/CSS references inside the entry directory are automatically
+embedded in the preview; the SDK needs no extra resource options. Source reads and
+downloads remain the original redacted files; use ZIP for a multi-file report.
+Interactive mode also requires operator opt-in. Treat `preview_url` as a
 short-lived bearer credential: do not log it or attach API credentials when opening
 it. Browser scripts are outside Starlark resource limits, and CSP is not a complete
 network firewall. See the repository README for deployment and security boundaries.

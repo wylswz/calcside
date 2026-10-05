@@ -76,6 +76,30 @@ confirmation; switching to Source stops it. Select files/directories in the list
 for ZIP export. No disk backend or publication step is required; files remain in
 the memory VFS.
 
+HTML previews automatically embed local stylesheet and script references into a
+single in-memory HTML snapshot using esbuild's Go API. No resource directory
+selection, Node.js, browser process, or filesystem mount is needed. For example,
+`/work/report/index.html` can reference `./styles.css` and `./chart.js`; nested CSS
+`@import` and a module entry's relative JS/MJS/JSON imports (including literal
+`import("./part.js")`) are bundled too. Dependency paths must stay within the HTML
+entry's directory; no CDN, package registry, host files, or parent directories are
+read. Only referenced files are captured, each with Gate checks and redaction,
+under the same execution lock as the entry. A denied, missing, unsupported, or
+oversized JS/CSS dependency fails the preview instead of returning a partial
+report. Deploy the API and execution nodes together for conversion support.
+
+CSS is embedded as style elements. External scripts are compiled and embedded as
+base64 data URLs so classic globals, `defer`, `async`, and module scheduling retain
+native browser behavior. Static mode never reads or executes script dependencies.
+Interactive mode is still explicit. Supported module previews have one module
+entry; import maps, integrity-checked resources, binary image/font dependencies,
+non-literal module imports/glob discovery, and runtime data fetching are not
+supported. Runtime-computed URLs are not rewritten. Pre-embedded data images remain
+subject to CSP. This is a report packager, not a general website build system.
+
+Source view and downloads remain the original redacted file, not the converted
+preview. Download the report directory as ZIP when you need its dependent files.
+
 All exports pass through per-file Gate checks and known-secret redaction. ZIP
 capture is serialized against execution, preserves `/work`-relative paths and
 empty directories, and fails entirely on denied, missing, unsupported, colliding,
@@ -92,7 +116,8 @@ controls when opened locally.
 | Paths | 1,024 bytes, 255 bytes per component, at most 32 levels below `/work`; portable names with NFC/case-fold collision checks |
 | Source preview | 64 KiB, visibly marked when truncated |
 | CSV table preview | 200 rows, 32 columns, 512 bytes per cell, 256 KiB displayed text; full bounded input is parsed |
-| HTML markup | 8,192 tokens, nesting 64, 64 attributes per tag, 16,384 attributes total, 64 KiB per tag |
+| HTML markup | 8,192 tokens, nesting 64, 64 attributes per tag, 16,384 attributes total, 64 KiB per input tag |
+| Inline preview | 100 files / 4 MiB source and redacted dependencies, including the entry; final HTML including base64 expansion at most 1 MiB |
 | Capture / concurrent artifact requests | 10 seconds / 4 operations |
 | HTML snapshot access | 120 seconds, never beyond instance expiry |
 | Preview cache per API process | 128 snapshots / 32 MiB / 16 snapshots per user; a new preview replaces the previous one for that instance |
@@ -105,10 +130,11 @@ VFS nor the preview cache provides durable artifact retention.
 ### Configure isolated HTML previews
 
 Rendered HTML is disabled until a separate preview origin is configured; there
-is no same-origin fallback. Static mode uses a restricted HTML/CSS/simple-SVG
-allowlist, with scripts, links, forms, embedded frames, images, and unsupported
-markup removed. Interactive mode is a separate explicit action and is disabled
-by default at deployment level.
+is no same-origin fallback. Static mode uses a restricted HTML/simple-SVG
+allowlist and constrained style attributes. Compiled local stylesheets are embedded;
+scripts, remaining links, forms, frames, images, and unsupported markup are removed.
+Interactive mode is a separate explicit action and is disabled by default at
+deployment level.
 
 For example, with a console at `https://console.example.com` and a separately
 owned preview domain:
@@ -141,13 +167,19 @@ preview hosts to API, login, worker-callback, or console routes. No credentials
 from the console are put in the report. Keep cookies host-only, do not configure
 credentialed CORS for previews, and remove query strings from preview ingress/CDN
 access logs: the short-lived `ticket` query value is a bearer credential. The
-application does not log these preview requests. Relative assets and CDN libraries
-are not served; reports must be self-contained. The console host serves the UI,
-API and `/auth` routes together; there is no separately configurable API origin.
+application does not log these preview requests. Relative JS/CSS dependencies are
+embedded during capture, never served as separate routes; CDN libraries are not
+fetched. The console host serves the UI, API and `/auth` routes together; there is
+no separately configurable API origin.
 
 Both the iframe and the HTTP response enforce sandboxing without
 `allow-same-origin`. CSP blocks fetch/XHR, external scripts/styles, frames, workers,
 forms and base changes; permissions policy disables sensitive device/storage APIs.
+Interactive CSP allows inline and embedded data-URL scripts, not network script
+origins. Conversion parses/compiles JS but does not execute it. Conversion runs in
+the instance process with bounded inputs and cooperative cancellation, not under
+the Starlark instruction meter; use process isolation and cgroup limits when hard
+compiler resource isolation is required.
 **This is not a network firewall:** interactive JavaScript may navigate its own
 frame, and browser execution is outside Starlark CPU/memory limits. Keep interactive
 mode disabled for strict no-egress requirements. When enabled, the UI still

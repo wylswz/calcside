@@ -143,7 +143,10 @@ paths:
         Read-only; may be retried on a stale route. Once an instance is reached,
         operation failures are carried in the 200 response alongside the audit
         batch. A failed collection never returns partial files. File content uses
-        base64 transport encoding to bound JSON expansion.
+        base64 transport encoding to bound JSON expansion. An optional preview_mode
+        (static or interactive) inlines local HTML dependencies under the same
+        execution lock and Gate scope, returning preview_html alongside the entry
+        file. Source reads and ordinary exports never perform this conversion.
       requestBody:
         required: true
         content:

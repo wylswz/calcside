@@ -23,6 +23,7 @@ import (
 	capfs "calcside/internal/capability/fs"
 	"calcside/internal/runtime"
 	"calcside/internal/stdlib"
+	"calcside/internal/types"
 )
 
 const PreviewTTLSeconds = 120
@@ -188,7 +189,7 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	if len(p) > b.limit-b.data.Len() {
-		return 0, errors.New("artifact output exceeds byte limit")
+		return 0, &runtime.ArtifactError{Code: types.ErrCodeTooLarge, Message: "artifact output exceeds byte limit"}
 	}
 	return b.data.Write(p)
 }
@@ -198,6 +199,7 @@ func StaticHTML(ctx context.Context, src []byte) ([]byte, error) {
 		return nil, err
 	}
 	p := bluemonday.NewPolicy()
+	p.AllowAttrs("id", "class").Globally()
 	p.AllowElements("html", "head", "body", "title", "p", "div", "span", "h1", "h2", "h3", "h4", "h5", "h6", "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption", "ul", "ol", "li", "pre", "code", "strong", "em", "b", "i", "blockquote", "br", "hr", "section", "article", "dl", "dt", "dd", "small", "sub", "sup")
 	p.AllowElements("svg", "g", "rect", "circle", "ellipse", "line", "polyline", "polygon", "path", "text", "tspan")
 	p.AllowAttrs("x", "y", "x1", "y1", "x2", "y2", "width", "height", "cx", "cy", "r", "rx", "ry", "viewbox", "stroke-width", "opacity").Matching(regexp.MustCompile(`^[0-9eE+.,% -]{1,256}$`)).OnElements("svg", "g", "rect", "circle", "ellipse", "line", "polyline", "polygon", "path", "text", "tspan")

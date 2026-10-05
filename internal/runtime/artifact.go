@@ -9,12 +9,13 @@ const MaxArtifactEntries = 256
 const MaxArtifactPathBytes = 1024
 
 type ExportRequest struct {
-	CheckOnly  bool     `json:"check_only,omitempty"`
-	InstanceID string   `json:"instance_id"`
-	Owner      Owner    `json:"owner"`
-	Epoch      int64    `json:"epoch,omitempty"`
-	Paths      []string `json:"paths"`
-	Recursive  bool     `json:"recursive"`
+	PreviewMode string   `json:"preview_mode,omitempty"`
+	CheckOnly   bool     `json:"check_only,omitempty"`
+	InstanceID  string   `json:"instance_id"`
+	Owner       Owner    `json:"owner"`
+	Epoch       int64    `json:"epoch,omitempty"`
+	Paths       []string `json:"paths"`
+	Recursive   bool     `json:"recursive"`
 }
 
 type ArtifactFile struct {
@@ -32,7 +33,8 @@ type ArtifactError struct {
 func (e *ArtifactError) Error() string { return e.Message }
 
 type ExportResponse struct {
-	Files []ArtifactFile `json:"files,omitempty"`
-	Error *ArtifactError `json:"error,omitempty"`
-	Audit AuditBatch     `json:"audit"`
+	PreviewHTML []byte         `json:"preview_html,omitempty"`
+	Files       []ArtifactFile `json:"files,omitempty"`
+	Error       *ArtifactError `json:"error,omitempty"`
+	Audit       AuditBatch     `json:"audit"`
 }

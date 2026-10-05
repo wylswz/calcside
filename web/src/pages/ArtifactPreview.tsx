@@ -134,7 +134,7 @@ function Preview({ id, path, dev }: { id: string; path: string; dev: boolean }) 
       <details className="relative"><summary className="cursor-pointer hover:text-ink">About this preview</summary><div className="absolute bottom-7 right-0 z-10 w-72 max-w-[85vw] border border-line-strong bg-paper p-4 text-xs leading-relaxed shadow-sm">
         {preview?.expires_at && <p className="mb-2">Snapshot access expires {fmtTime(preview.expires_at)}.</p>}
         <p>Refresh and download read current files, not a saved copy. Files are available only while the instance is running.</p>
-        {html && <p className="mt-2">Static mode removes scripts and unsupported markup. Interactive mode is not a network firewall. Downloaded HTML runs outside these viewer controls.</p>}
+        {html && <p className="mt-2">Local JS/CSS is embedded in this preview only. Download the report directory as ZIP to keep dependent files. Static mode removes scripts and unsupported markup. Interactive mode is not a network firewall. Downloaded HTML runs outside these viewer controls.</p>}
         {csv && <p className="mt-2">Spreadsheet exports can contain formulas. Use <code>csv.format(..., spreadsheet_safe=True)</code> when needed.</p>}
       </div></details>
       {dev && <span className="inline-flex items-center gap-1.5 text-warn-text"><Mark tone="yellow" />dev · anonymous</span>}

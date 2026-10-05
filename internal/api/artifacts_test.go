@@ -305,3 +305,33 @@ func TestArtifactPreviewAdmission(t *testing.T) {
 		t.Fatal("preview delivery bypassed admission limit")
 	}
 }
+
+func TestArtifactInlinePreview(t *testing.T) {
+	e := newArtifactEnv(t, nil, nil, artifact.Config{BaseURL: "https://preview.example.net", ConsoleOrigin: "https://console.example.com", AllowScripts: true})
+	cookies := login(e, "inline@example.com")
+	id := artifactInstance(t, e, cookies, `fs.write("report/index.html", '<link rel="stylesheet" href="assets/report.css"><h1 class="report">Report</h1><script src="assets/chart.js" defer></script>')
+fs.write("report/assets/report.css", '@import "./base.css"; .report {color: rgb(1, 2, 3)}')
+fs.write("report/assets/base.css", 'h1 {font-size: 25px}')
+fs.write("report/assets/chart.js", 'window.chartValue = 42;')
+fs.write("report/unrelated.png", "not an exportable file")`)
+	status, body := issuePreview(t, e, cookies, id, "report/index.html", "static")
+	if status != 200 {
+		t.Fatalf("static: %d", status)
+	}
+	status, _, html := fetchPreview(t, e, body["preview_url"].(string))
+	if status != 200 || !strings.Contains(html, "25px") || !strings.Contains(html, `class="report"`) || strings.Contains(html, "<script") || strings.Contains(html, "href=") {
+		t.Fatal("local CSS was not inlined into static HTML")
+	}
+	status, body = issuePreview(t, e, cookies, id, "report/index.html", "interactive")
+	if status != 200 {
+		t.Fatalf("interactive: %d", status)
+	}
+	status, headers, html := fetchPreview(t, e, body["preview_url"].(string))
+	if status != 200 || !strings.Contains(html, "data:text/javascript;charset=utf-8;base64,") || strings.Contains(html, `src="assets/`) || !strings.Contains(headers.Get("Content-Security-Policy"), "connect-src 'none'") {
+		t.Fatal("local JS was not embedded safely")
+	}
+	status, source := issuePreview(t, e, cookies, id, "report/index.html", "source")
+	if status != 200 || !strings.Contains(source["source"].(string), `src="assets/chart.js"`) {
+		t.Fatal("conversion mutated the source file")
+	}
+}

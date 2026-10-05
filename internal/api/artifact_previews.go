@@ -218,7 +218,7 @@ func (p *ArtifactPreviews) serve(w http.ResponseWriter, r *http.Request) {
 	sandboxValue, script := "sandbox", "script-src 'none'"
 	if snapshot.interactive {
 		sandboxValue += " allow-scripts"
-		script = "script-src 'unsafe-inline'"
+		script = "script-src 'unsafe-inline' data:"
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Security-Policy", sandboxValue+"; default-src 'none'; "+script+"; style-src 'unsafe-inline'; img-src data:; font-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors "+p.consoleOrigin)

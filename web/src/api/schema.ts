@@ -276,7 +276,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Read and redact one bounded text file; optionally issue a short-lived isolated HTML snapshot URL. */
+        /** @description Read and redact one bounded text file; rendered HTML automatically inlines referenced local JS and CSS within the entry directory into a short-lived isolated snapshot. */
         post: operations["previewArtifact"];
         delete?: never;
         options?: never;
