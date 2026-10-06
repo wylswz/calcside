@@ -13,7 +13,7 @@ import (
 
 func TestLocalExtResolverRoundTrip(t *testing.T) {
 	// API side: a local root holding one extension tree.
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "contrib")
 	extDir := filepath.Join(root, "myext")
 	mustWrite := func(path, content string) {
 		t.Helper()
@@ -33,7 +33,7 @@ func TestLocalExtResolverRoundTrip(t *testing.T) {
 
 	cache := t.TempDir()
 	resolve := remote.LocalExtResolver(srv.URL, "w1", testKey, cache)
-	p := capext.ParsedIdentifier{Local: extDir}
+	p := capext.ParsedIdentifier{Local: "contrib/myext"}
 
 	dir, err := resolve(context.Background(), p)
 	if err != nil {
@@ -55,6 +55,22 @@ func TestLocalExtResolverRoundTrip(t *testing.T) {
 	// Outside the roots is refused by the API, not just locally.
 	if _, err := resolve(context.Background(), capext.ParsedIdentifier{Local: t.TempDir()}); err == nil {
 		t.Fatal("expected containment failure")
+	}
+	for _, source := range []string{"../myext", "contrib/../myext", "other/myext", extDir} {
+		if _, err := resolve(context.Background(), capext.ParsedIdentifier{Local: source}); err == nil {
+			t.Errorf("accepted invalid source %q", source)
+		}
+	}
+	mustWrite(filepath.Join(extDir, "main.star"), "def hello():\n    return 3\n")
+	mod, err := (&capext.CapabilityLoader{
+		Identifier: "contrib/myext",
+		Options:    &capext.Options{LocalResolver: resolve},
+	}).Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(mod.Sources["main.star"]) != "def hello():\n    return 3\n" {
+		t.Fatal("worker used a stale extension tree")
 	}
 }
 

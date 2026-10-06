@@ -986,7 +986,10 @@ components:
       type: object
       required: [source, name, dependencies, ops, config]
       properties:
-        source: { type: string }
+        source:
+          type: string
+          description: Server-local root-name/extension identifier; never a host filesystem path.
+          example: contrib/tavily
         name: { type: string }
         version: { type: string }
         description: { type: string }

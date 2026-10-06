@@ -614,6 +614,10 @@ type ExtensionInfo struct {
 	IconUrl *string `json:"icon_url,omitempty"`
 	Name    string  `json:"name"`
 	Ops     []OpDoc `json:"ops"`
+
+	// Source Server-local root-name/extension identifier; never a host filesystem path.
+	//
+	// Example: contrib/tavily
 	Source  string  `json:"source"`
 	Version *string `json:"version,omitempty"`
 }

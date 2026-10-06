@@ -107,7 +107,7 @@ function ExtRowEditor({ row, catalog, specNames, vaultNames, netOn, fsOn, onChan
       )}
       {row.custom && (
         <>
-          <input className={inputCls + ' font-mono text-xs'} placeholder="source (domain/group/name@version or /path)" value={row.source}
+          <input className={inputCls + ' font-mono text-xs'} placeholder="source (contrib/tavily or domain/group/name@version)" value={row.source}
             onChange={(e) => set({ source: e.target.value })} />
           <input className={inputCls + ' font-mono text-xs'} placeholder="h1:… (required for remote)" value={row.sum}
             onChange={(e) => set({ sum: e.target.value })} />

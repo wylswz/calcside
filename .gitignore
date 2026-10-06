@@ -6,7 +6,6 @@ web/dist/*
 calcside-dev.db*
 docker/data/
 docker/worker-cache/
-docker/.env
 .venv/
 __pycache__/
 
@@ -17,3 +16,4 @@ __pycache__/
 *.DS_Store
 web/test-results/
 web/playwright-report/
+.env

@@ -42,6 +42,10 @@ func (f factory) Available() Catalog {
 	}
 	seen := map[string]bool{}
 	for _, root := range f.opts.LocalRoots {
+		root, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
 		ents, err := os.ReadDir(root)
 		if err != nil {
 			continue
@@ -50,25 +54,20 @@ func (f factory) Available() Catalog {
 			if !e.IsDir() {
 				continue
 			}
-			dir, err := filepath.Abs(filepath.Join(root, e.Name()))
-			if err != nil {
-				continue
-			}
-			// Identifiers require absolute paths; resolve symlinks so
+			dir := filepath.Join(root, e.Name())
+			// Use the configured root name, not its host path, so
 			// source matches what a spec must reference.
-			if r, err := filepath.EvalSymlinks(dir); err == nil {
-				dir = r
-			}
+			source := filepath.Base(root) + "/" + e.Name()
 			if _, err := os.Stat(filepath.Join(dir, manifestFN)); err != nil {
 				continue
 			}
-			if seen[dir] {
+			if seen[source] {
 				continue
 			}
-			seen[dir] = true
+			seen[source] = true
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			m, err := (&CapabilityLoader{
-				Identifier: CapabilityIdentifier(dir),
+				Identifier: CapabilityIdentifier(source),
 				Options:    f.opts,
 				locks:      f.locks,
 			}).Load(ctx)
@@ -78,7 +77,7 @@ func (f factory) Available() Catalog {
 				continue
 			}
 			c.Extensions = append(c.Extensions, Info{
-				Source:       dir,
+				Source:       source,
 				Name:         m.Manifest.Name,
 				Version:      m.Manifest.Version,
 				Description:  m.Manifest.Description,

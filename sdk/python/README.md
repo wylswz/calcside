@@ -135,10 +135,32 @@ receives the server prompt and the full `/prompt` response dict.
 
 ### Lifecycle
 
-Per-run instances are deleted in `after_agent` (disable via
-`delete_on_finish=False`). If a run crashes permanently, the server-side
-TTL reaps the instance. Checkpointed runs resumed after an interrupt keep
-the same instance (state is tracked, not ephemeral).
+Per-run instances are deleted in `after_agent` by default. Set
+`delete_on_finish=False` to keep them running for inspection after the agent
+finishes (both `invoke` and `ainvoke`):
+
+```python
+mw = CalcsideMiddleware(
+    spec={"capabilities": {"fs": {}}, "ttl_seconds": 900},
+    delete_on_finish=False,
+)
+agent = create_agent(model, tools=[], middleware=[mw])
+agent.invoke({"messages": [{"role": "user", "content": "write a report"}]})
+instance_id = mw.last_instance_id
+```
+
+Inspect the instance in the console or through `Client`; delete it with
+`Client.delete_instance(instance_id)` when done. `last_instance_id` is a
+best-effort diagnostic for the most recent resolution, not a per-run identifier
+under concurrent use of one middleware object.
+
+Keeping an instance does not disable its server-side TTL or automatically send
+keepalives. The TTL also reaps instances left by crashed runs. With a checkpointer,
+subsequent turns in the same thread reuse the retained live instance; without
+checkpointed state, each invocation creates a new instance and leaves previous
+ones running. A context override that switches to a different instance still
+cleans up the previously owned instance. Checkpointed runs resumed after an
+interrupt keep the same instance (state is tracked, not ephemeral).
 
 ## Development
 

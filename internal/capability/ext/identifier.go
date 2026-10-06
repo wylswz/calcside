@@ -14,42 +14,48 @@ import (
 // {domain}/{group}/{name}
 // for example
 // github.com/wylswz/openai
-// for it can be a local path
-// /path/to/capability/root/dir
+// or it can be a server-local identifier
+// contrib/tavily
 //
 // Remote identifiers must carry an explicit version:
 // {domain}/{group}/{name}@{version} where version is a tag-like ref or a
-// 40-hex commit SHA. Local identifiers are absolute paths with no version.
+// 40-hex commit SHA. Local identifiers use {root-name}/{name}, without a version.
 type CapabilityIdentifier string
 
 var (
+	localRe    = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9._-]*/[A-Za-z0-9_-][A-Za-z0-9._-]*$`)
 	remoteRe   = regexp.MustCompile(`^([A-Za-z0-9.-]+)/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)@([A-Za-z0-9._+-]+)$`)
 	manifestFN = "capability.yaml"
 )
 
 // ParsedIdentifier is a parsed CapabilityIdentifier: either a remote
-// {domain,group,name,version} tuple or a local absolute path.
+// {domain,group,name,version} tuple or a server-local identifier.
 type ParsedIdentifier struct {
 	Domain  string
 	Group   string
 	Name    string
 	Version string
-	Local   string // absolute path when !IsRemote
+	Local   string // {root-name}/{name} when !IsRemote
 }
 
 // ParseIdentifier parses and validates a capability identifier.
 func ParseIdentifier(s string) (ParsedIdentifier, error) {
-	if s == "" {
-		return ParsedIdentifier{}, fmt.Errorf("ext: invalid identifier %q", s)
+	if s == "" || filepath.IsAbs(s) || strings.ContainsAny(s, " \t\r\n\x00\\:") {
+		return ParsedIdentifier{}, fmt.Errorf("ext: invalid identifier %q; use root-name/extension for local sources", s)
+	}
+	for _, segment := range strings.Split(s, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return ParsedIdentifier{}, fmt.Errorf("ext: invalid identifier %q", s)
+		}
 	}
 	id := CapabilityIdentifier(s)
 	if !id.IsRemote() {
-		if s == "" || strings.ContainsAny(s, " \t\n") {
-			return ParsedIdentifier{}, fmt.Errorf("ext: invalid local path %q", s)
+		if !localRe.MatchString(s) {
+			return ParsedIdentifier{}, fmt.Errorf("ext: invalid local identifier %q", s)
 		}
-		return ParsedIdentifier{Local: filepath.Clean(s)}, nil
+		return ParsedIdentifier{Local: s}, nil
 	}
-	if strings.ContainsAny(s, " \t\n") || strings.Contains(s, "..") {
+	if strings.Contains(s, "..") {
 		return ParsedIdentifier{}, fmt.Errorf("ext: invalid identifier %q", s)
 	}
 	m := remoteRe.FindStringSubmatch(s)
@@ -69,7 +75,7 @@ func ParseIdentifier(s string) (ParsedIdentifier, error) {
 }
 
 func (id CapabilityIdentifier) IsRemote() bool {
-	return !filepath.IsAbs(string(id))
+	return !filepath.IsAbs(string(id)) && (strings.Contains(string(id), "@") || strings.Count(string(id), "/") >= 2)
 }
 
 // CapabilityManifest is a full description of a extended capability

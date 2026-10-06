@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"calcside/internal/capability"
 	"calcside/internal/node"
 	"calcside/internal/runtime"
+	"calcside/internal/runtime/remote"
 )
 
 const childEnv = "CALCSIDE_SUBPROC_TEST_CHILD"
@@ -273,5 +275,47 @@ func TestArtifactExportThroughChild(t *testing.T) {
 	out, err = s.Export(ctx, &runtime.ExportRequest{InstanceID: "ins_artifact", Owner: owner, Paths: []string{"report.csv", "missing.txt"}, Recursive: true})
 	if err != nil || out.Error == nil || len(out.Files) != 0 || len(out.Audit.Events) == 0 {
 		t.Fatal("partial child export or missing failure audit")
+	}
+}
+
+func TestLocalExtensionSourceThroughChild(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "contrib")
+	dir := filepath.Join(root, "myext")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string]string{
+		"capability.yaml": "name: myext\nops: [{name: hello}]\n",
+		"main.star":       "def hello():\n    return 42\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	key := []byte("extension-test-shared-key")
+	srv := httptest.NewServer(remote.ExtTreeHandler([]string{root}, key))
+	defer srv.Close()
+	for _, mode := range []string{"local", "api"} {
+		t.Run(mode, func(t *testing.T) {
+			s := newSupervisor(t, func(o *Options) {
+				if mode == "local" {
+					o.Child.Node.ExtLocalRoots = []string{root}
+				} else {
+					o.Child.APIAddr, o.Child.NodeID, o.Child.APIKey = srv.URL, "worker-ext", key
+				}
+			})
+			_, err := s.Create(context.Background(), &runtime.CreateRequest{
+				InstanceID: "ins_ext", Owner: owner,
+				Spec:      []byte(`{"capabilities":{"ext":{"myext":{"source":"contrib/myext"}}}}`),
+				ExpiresAt: time.Now().Add(time.Hour),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := run(t, s, "ins_ext", "exec_ext", "print(ext.myext.hello())")
+			if err != nil || out.Result.Error != nil || out.Result.Output != "42\n" {
+				t.Fatalf("extension exec: err=%v res=%+v", err, out)
+			}
+		})
 	}
 }

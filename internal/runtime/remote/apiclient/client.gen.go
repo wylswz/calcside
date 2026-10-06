@@ -85,7 +85,7 @@ type Error = ErrorEnvelope
 
 // ExtTreeParams defines parameters for ExtTree.
 type ExtTreeParams struct {
-	// Path Absolute local identifier path to resolve.
+	// Path Server-local root-name/extension identifier to resolve, e.g. contrib/tavily.
 	Path string `form:"path" json:"path"`
 }
 

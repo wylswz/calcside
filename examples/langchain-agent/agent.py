@@ -1,7 +1,7 @@
 """LangChain agent with a calcside sandbox (fs + net + tavily extension).
 
-Served by `langgraph dev` — chat with it in Studio; each run gets a fresh
-sandbox instance (deleted on finish).
+Served by `langgraph dev` — chat with it in Studio; sandbox instances stay
+alive after a run for inspection, until their server-side TTL expires.
 
 Prereqs:
   - calcside dev server: `make serve-dev` (vault + local ext roots enabled)
@@ -13,16 +13,14 @@ Prereqs:
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
-from calcside import CalcsideError, Client
+from calcside import Client
 from calcside.langchain import CalcsideMiddleware
 from langchain.agents import create_agent
 
 os.environ.setdefault("CALCSIDE_SERVER", "http://127.0.0.1:8080")
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-TAVILY_SOURCE = REPO_ROOT / "contrib" / "tavily"
+TAVILY_SOURCE = "contrib/tavily"
 TAVILY_HOSTS = ["api.tavily.com"]
 
 
@@ -30,7 +28,7 @@ def make_model():
     if os.environ.get("OPENAI_API_KEY"):
         from langchain_openai import ChatOpenAI
 
-        return ChatOpenAI(model="gpt-4o-mini")
+        return ChatOpenAI(model="gpt-6-luna", use_responses_api=True)
     if os.environ.get("ANTHROPIC_API_KEY"):
         from langchain_anthropic import ChatAnthropic
 
@@ -41,13 +39,14 @@ client = Client()
 
 middleware = CalcsideMiddleware(
     client=client,
+    delete_on_finish=False,
     spec={
         "capabilities": {
             "fs": {},
             "net": {"allow_hosts": TAVILY_HOSTS, "methods": ["GET", "POST"]},
             "ext": {
                 "tavily": {
-                    "source": str(TAVILY_SOURCE),
+                    "source": TAVILY_SOURCE,
                     "config": {"api_key": "{{secrets.TAVILY_API_KEY}}"},
                 }
             },

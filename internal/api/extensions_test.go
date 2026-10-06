@@ -82,7 +82,7 @@ func TestListExtensions(t *testing.T) {
 		t.Fatalf("extensions: %v", m["extensions"])
 	}
 	ex := exts[0].(map[string]any)
-	if ex["name"] != "tavily" || ex["version"] != "0.1.0" {
+	if ex["source"] != "contrib/tavily" || ex["name"] != "tavily" || ex["version"] != "0.1.0" {
 		t.Fatalf("entry: %v", ex)
 	}
 	icon, _ := ex["icon_url"].(string)

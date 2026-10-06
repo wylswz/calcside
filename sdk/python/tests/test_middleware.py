@@ -80,6 +80,57 @@ def test_per_run_creates_and_deletes(server):
         assert e.status == 404
 
 
+@pytest.mark.parametrize("async_path", [False, True], ids=["sync", "async"])
+@pytest.mark.parametrize("checkpointed", [False, True], ids=["per-run", "checkpointed"])
+async def test_delete_on_finish_false_preserves_instance(
+    server, async_path, checkpointed
+):
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    code = 'x = 41\nfs.write("note.txt", "hello")'
+    model = ScriptedChatModel(
+        script=[
+            _tc("calcside_exec", {"code": code}),
+            AIMessage(content="saved"),
+            _tc("calcside_exec", {"code": "print(x + 1)" if checkpointed else code}),
+            AIMessage(content="done"),
+        ]
+    )
+    mw = CalcsideMiddleware(base_url=server, delete_on_finish=False)
+    agent = create_agent(
+        model,
+        tools=[],
+        middleware=[mw],
+        checkpointer=InMemorySaver() if checkpointed else None,
+    )
+    cfg = {"configurable": {"thread_id": "keep-instance"}}
+    ids = []
+    with Client(base_url=server) as c:
+        try:
+            for turn in range(2):
+                inputs = {"messages": [{"role": "user", "content": "go"}]}
+                result = (
+                    await agent.ainvoke(inputs, config=cfg)
+                    if async_path
+                    else agent.invoke(inputs, config=cfg)
+                )
+                iid = mw.last_instance_id
+                assert iid
+                ids.append(iid)
+                assert c.get_instance(iid)["status"] == "running"
+                assert c.files(iid, "/work/note.txt")["content"] == "hello"
+                if checkpointed and turn == 1:
+                    assert any("42" in output for output in _tool_outputs(result))
+
+            assert len(set(ids)) == (1 if checkpointed else 2)
+            for iid in set(ids):
+                assert c.get_instance(iid)["status"] == "running"
+                assert c.files(iid, "/work/note.txt")["content"] == "hello"
+        finally:
+            for iid in set(ids):
+                c.delete_instance(iid)
+
+
 def test_reuse_mode_persists_across_runs(server):
     c = Client(base_url=server)
     inst = c.create_instance({"capabilities": {"fs": {}}, "ttl_seconds": 900})

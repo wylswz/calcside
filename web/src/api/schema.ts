@@ -701,6 +701,10 @@ export interface components {
             sanitized?: boolean;
         };
         ExtensionInfo: {
+            /**
+             * @description Server-local root-name/extension identifier; never a host filesystem path.
+             * @example contrib/tavily
+             */
             source: string;
             name: string;
             version?: string;

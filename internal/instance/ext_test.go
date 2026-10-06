@@ -72,7 +72,7 @@ func TestExtEndToEnd(t *testing.T) {
 		"net": {"allow_hosts": [%q]},
 		"ext": {"tavily": {"source": %q, "config": {"base_url": %q}}}
 	}, "secrets": {"TAVILY_API_KEY": {"value": "s3cr3t-key", "allowed_domains": [%q]}}}`,
-		host, filepath.Join(extDir, "tavily"), srv.URL, host)
+		host, "contrib/tavily", srv.URL, host)
 	id, err := n.create(spec)
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestExtSecretOverride(t *testing.T) {
 		"net": {"allow_hosts": [%q]},
 		"ext": {"tavily": {"source": %q, "config": {"base_url": %q, "api_key": "{{secrets.MY_TAVILY}}"}}}
 	}, "secrets": {"MY_TAVILY": {"value": "other-key-9", "allowed_domains": [%q]}}}`,
-		host, filepath.Join(extDir, "tavily"), srv.URL, host)
+		host, "contrib/tavily", srv.URL, host)
 	id, err := n.create(spec)
 	if err != nil {
 		t.Fatal(err)
@@ -203,7 +203,7 @@ func TestExtMissingSecretRef(t *testing.T) {
 	spec := fmt.Sprintf(`{"policies":[],"capabilities":{
 		"net": {"allow_hosts": ["x.example"]},
 		"ext": {"tavily": {"source": %q}}}}`,
-		filepath.Join(extDir, "tavily"))
+		"contrib/tavily")
 	_, err := n.create(spec)
 	if err == nil || !strings.Contains(err.Error(), `references secret "TAVILY_API_KEY"`) {
 		t.Fatalf("want missing-secret error, got %v", err)
@@ -214,7 +214,7 @@ func TestExtMissingBaseDep(t *testing.T) {
 	extDir := contribDir(t)
 	n := extNode(t, []string{extDir})
 	spec := fmt.Sprintf(`{"policies":[],"capabilities":{"ext":{"tavily":{"source":%q}}}}`,
-		filepath.Join(extDir, "tavily"))
+		"contrib/tavily")
 	_, err := n.create(spec)
 	if err == nil || !strings.Contains(err.Error(), `requires capability "net"`) {
 		t.Fatalf("want requires-capability error, got %v", err)
@@ -228,7 +228,7 @@ func TestExtNetAllowlistEnforced(t *testing.T) {
 		"net": {"allow_hosts": ["nowhere.example"]},
 		"ext": {"tavily": {"source": %q, "config": {"base_url": "http://127.0.0.1:1"}}}},
 		"secrets": {"TAVILY_API_KEY": {"value": "x", "allowed_domains": ["127.0.0.1:1"]}}}`,
-		filepath.Join(extDir, "tavily"))
+		"contrib/tavily")
 	id, err := n.create(spec)
 	if err != nil {
 		t.Fatal(err)
@@ -265,7 +265,7 @@ func TestExtInitOutOfScope(t *testing.T) {
 		"main.star":       "net.get(url=\"http://x.example\")\ndef go():\n    return 1\n",
 	})
 	n := extNode(t, []string{root})
-	spec := fmt.Sprintf(`{"policies":[],"capabilities":{"net":{"allow_hosts":["x.example"]},"ext":{"bad":{"source":%q}}}}`, dir)
+	spec := fmt.Sprintf(`{"policies":[],"capabilities":{"net":{"allow_hosts":["x.example"]},"ext":{"bad":{"source":%q}}}}`, filepath.Base(root)+"/"+filepath.Base(dir))
 	_, err := n.create(spec)
 	if err == nil || !strings.Contains(err.Error(), "outside its scope") {
 		t.Fatalf("want out-of-scope error, got %v", err)

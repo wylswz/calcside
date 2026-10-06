@@ -24,7 +24,7 @@ config:
 	})
 	f := Factory(Options{LocalRoots: []string{dir, filepath.Dir(dir)}})
 	spec, _ := json.Marshal(map[string]any{
-		"t": map[string]any{"source": dir, "config": cfg},
+		"t": map[string]any{"source": localID(dir), "config": cfg},
 	})
 	_, err := f.Validate(spec, capability.ServerLimits{})
 	return err
@@ -50,9 +50,9 @@ func TestSecretConfigValidate(t *testing.T) {
 		"capability.yaml": "name: t\nops: [{name: a}]\nconfig:\n  - {name: key, type: secret}\n",
 		"main.star":       "def a():\n    return 1\n",
 	})
-	f := Factory(Options{LocalRoots: []string{dir}})
+	f := Factory(Options{LocalRoots: []string{filepath.Dir(dir)}})
 	spec, _ := json.Marshal(map[string]any{
-		"t": map[string]any{"source": dir, "config": map[string]any{"key": "{{  secrets.MY_KEY }}"}},
+		"t": map[string]any{"source": localID(dir), "config": map[string]any{"key": "{{  secrets.MY_KEY }}"}},
 	})
 	v, err := f.Validate(spec, capability.ServerLimits{})
 	if err != nil {

@@ -16,7 +16,7 @@ extension tree (32 KiB, at most 256 by 256 pixels). External URLs and traversal
 are rejected. Catalog icons are decoded/re-encoded and served by authenticated
 content-addressed endpoints; missing or invalid image bytes use the UI fallback.
 The bundled Tavily icon is a project-authored monogram. Existing custom manifests
-without icons remain valid; saved specs using the old example path need updating.
+without icons remain valid; saved specs using absolute source paths need updating to `root-name/extension`.
 
 ```
 myext/
@@ -109,7 +109,7 @@ def search(query, max_results=None):
     "net": {"allow_hosts": ["api.tavily.com"]},
     "ext": {
       "tavily": {
-        "source": "/abs/path/to/tavily",
+        "source": "contrib/tavily",
         "config": {"api_key": "{{secrets.TAVILY_API_KEY}}"}
       }
     }
@@ -127,7 +127,9 @@ Send this spec to `POST /api/v1/instances`, or pass it to the Python SDK's `Clie
 
 ## Sources and integrity
 
-**Local** — an absolute path. It must resolve (after symlink evaluation) under one of the server's `--ext-local-roots` directories; empty roots disable local sources entirely. `sum` is optional for local sources.
+**Local** — `{root-name}/{extension}`, e.g. `contrib/tavily`. The server searches its `--ext-local-roots` for a directory whose basename matches `root-name`, then loads the named immediate subdirectory. With roots `/opt/calcside/contrib,/data/ext`, `contrib/tavily` resolves under the first root and `ext/myext` under the second. Development and containers use the same identifiers; clients never send host paths. The catalog returns these identifiers unchanged for use in specs.
+
+Absolute paths, traversal, backslashes, and sources that escape their root after symlink evaluation are rejected. If multiple roots contain different trees for the same identifier, resolution fails as ambiguous rather than picking one silently. Repeated roots pointing at the same tree are harmless. Empty roots disable local sources entirely. `sum` is optional for local sources; remote version and sum requirements are unchanged.
 
 **Remote** — `{domain}/{group}/{name}@{version}`, e.g. `github.com/acme/tools@v1.2.0`. The server shallow-fetches `https://{domain}/{group}/{name}.git` at `@version` (a tag-like ref or full commit SHA) using the git CLI with https-only transport, strips `.git`, and caches the tree under `--ext-cache-dir` (default: the user cache dir; override with `--ext-cache-dir`, timeout with `--ext-fetch-timeout`).
 
@@ -150,7 +152,7 @@ Extension ops produce gate records with `capability: "ext"` and `op: "<alias>.<o
 
 ## Development loop
 
-From the repository root, run `make build` once for the embedded console. Save the spec above as `spec.json`, setting the source to the extension's absolute path and supplying your own secret locally. Start the dev server, then run the API requests in another terminal. These examples use anonymous dev-mode auth; outside dev mode, include an `Authorization: Bearer` API key header.
+From the repository root, run `make build` once for the embedded console. Save the spec above as `spec.json`, keeping `source: contrib/tavily` and supplying your own secret locally. Start the dev server, then run the API requests in another terminal. These examples use anonymous dev-mode auth; outside dev mode, include an `Authorization: Bearer` API key header.
 
 ```bash
 # serve with local sources enabled

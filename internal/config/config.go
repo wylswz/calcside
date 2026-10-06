@@ -161,7 +161,7 @@ func Parse(args []string) (Config, error) {
 	fs.BoolVar(&c.SecretsAllowHTTP, "secrets-allow-http", envBool("SECRETS_ALLOW_HTTP", false), "allow secret injection into http:// URLs (INSECURE)")
 	var extSources, extRoots string
 	fs.StringVar(&extSources, "ext-allow-sources", envOr("EXT_ALLOW_SOURCES", ""), "comma-separated allowed remote ext source prefixes (empty disables remote ext)")
-	fs.StringVar(&extRoots, "ext-local-roots", envOr("EXT_LOCAL_ROOTS", ""), "comma-separated local dirs ext sources may live under (empty disables local ext)")
+	fs.StringVar(&extRoots, "ext-local-roots", envOr("EXT_LOCAL_ROOTS", ""), "comma-separated local extension roots (sources use root-name/extension) (empty disables local ext)")
 	fs.StringVar(&c.ExtCacheDir, "ext-cache-dir", envOr("EXT_CACHE_DIR", defaultExtCacheDir()), "extension fetch cache dir")
 	fs.DurationVar(&c.ExtFetchTimeout, "ext-fetch-timeout", envDur("EXT_FETCH_TIMEOUT", 30*time.Second), "ext remote fetch timeout")
 	fs.StringVar(&c.InstanceIsolation, "instance-isolation", envOr("INSTANCE_ISOLATION", IsolationInproc), "in-process execution tier: inproc runs instances in this process, process gives each instance its own OS process")
@@ -313,7 +313,7 @@ func ParseWorker(args []string) (WorkerConfig, error) {
 	fs.BoolVar(&c.SecretsAllowHTTP, "secrets-allow-http", envBool("SECRETS_ALLOW_HTTP", false), "allow secret injection into http:// URLs (INSECURE)")
 	var extSources, extRoots string
 	fs.StringVar(&extSources, "ext-allow-sources", envOr("EXT_ALLOW_SOURCES", ""), "comma-separated allowed remote ext source prefixes")
-	fs.StringVar(&extRoots, "ext-local-roots", envOr("EXT_LOCAL_ROOTS", ""), "comma-separated local dirs ext sources may live under")
+	fs.StringVar(&extRoots, "ext-local-roots", envOr("EXT_LOCAL_ROOTS", ""), "comma-separated local extension roots (sources use root-name/extension)")
 	fs.StringVar(&c.ExtCacheDir, "ext-cache-dir", envOr("EXT_CACHE_DIR", defaultExtCacheDir()), "extension fetch/resolve cache dir")
 	fs.DurationVar(&c.ExtFetchTimeout, "ext-fetch-timeout", envDur("EXT_FETCH_TIMEOUT", 30*time.Second), "remote ext fetch timeout")
 	fs.StringVar(&c.InstanceIsolation, "instance-isolation", envOr("INSTANCE_ISOLATION", IsolationProcess), "process gives each instance its own OS process; inproc runs instances in the worker process")

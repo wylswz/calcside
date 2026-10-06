@@ -29,14 +29,23 @@ in `.env` to override.
 `langgraph dev` prints a Studio URL (the graph `calcside_agent` is defined
 in `langgraph.json`). Type a task there — e.g. "use tavily search to find
 the latest stable Python release and write the results to
-/work/results.json". Each run gets a fresh sandbox instance, deleted when
-the run finishes (a continuing thread resumes the same instance).
+/work/results.json". The example sets `delete_on_finish=False`, so the sandbox
+stays running after the agent finishes. Inspect its files and state in the
+calcside console; `middleware.last_instance_id` exposes the most recently
+resolved instance ID for local debugging. A continuing checkpointed thread
+reuses the same live instance; a new thread creates a new one.
+
+The server-side TTL still applies (`ttl_seconds=900` in `agent.py`). Increase
+it for a longer inspection window, or delete the instance manually when done.
+Set `delete_on_finish=True` to restore automatic cleanup after each run.
 
 ## What it does
 
 `CalcsideMiddleware` creates a sandbox instance per run with `fs`, `net`
 (allow_hosts `api.tavily.com`), and the `tavily` extension loaded from
-`contrib/tavily`. The instance spec references vault secret
+`contrib/tavily`, resolved by the server from its configured extension roots
+(the client does not need a local checkout or a server filesystem path).
+The instance spec references vault secret
 `TAVILY_API_KEY`; the extension's `api_key` config is the
 `{{secrets.TAVILY_API_KEY}}` placeholder, so the key is injected by the
 `net` capability at send time — the script and the model only ever see the

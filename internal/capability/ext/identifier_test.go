@@ -14,7 +14,21 @@ func TestParseIdentifier(t *testing.T) {
 		{"github.com/wylswz/tavily@v0.1.0", "", true},
 		{"github.com/wylswz/tavily@0123456789abcdef0123456789abcdef0123", "", true},
 		{"github.com/a/b_c-d.e@v1", "", true},
-		{"/tmp/ext/tavily", "", false},
+		{"contrib/tavily", "", false},
+		{"ext/my-extension", "", false},
+		{"/tmp/ext/tavily", "invalid", false},
+		{"tavily", "invalid", false},
+		{"./contrib/tavily", "invalid", false},
+		{"../tavily", "invalid", false},
+		{"contrib/../tavily", "invalid", false},
+		{"contrib/..", "invalid", false},
+		{"contrib/.", "invalid", false},
+		{"contrib//tavily", "invalid", false},
+		{"contrib/tavily/", "invalid", false},
+		{"contrib\\tavily", "invalid", false},
+		{"C:/tavily", "invalid", false},
+		{"contrib/tavily\x00", "invalid", false},
+		{"contrib/tavily\n", "invalid", false},
 		{"github.com/wylswz/tavily", "@version", true},
 		{"github.com//tavily@v1", "invalid", true},
 		{"github.com/../x@v1", "invalid", true},
@@ -49,7 +63,7 @@ func TestIsRemote(t *testing.T) {
 	if !CapabilityIdentifier("github.com/a/b@v1").IsRemote() {
 		t.Fatal("remote id not remote")
 	}
-	if CapabilityIdentifier("/abs/path").IsRemote() {
+	if CapabilityIdentifier("contrib/tavily").IsRemote() {
 		t.Fatal("local path marked remote")
 	}
 }

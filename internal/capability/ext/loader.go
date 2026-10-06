@@ -83,7 +83,7 @@ func (l *CapabilityLoader) Load(ctx context.Context) (*Module, error) {
 		if !strings.HasSuffix(rel, ".star") {
 			continue
 		}
-		f, err := fileOpts.Parse(filepath.Join(root, rel), src, 0)
+		f, err := fileOpts.Parse(string(l.Identifier)+"/"+rel, src, 0)
 		if err != nil {
 			return nil, fmt.Errorf("ext %s %s: %w", l.Identifier, rel, err)
 		}

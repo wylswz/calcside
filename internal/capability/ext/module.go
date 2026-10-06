@@ -8,7 +8,6 @@ package ext
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"go.starlark.net/starlark"
@@ -59,7 +58,7 @@ func (m *Module) init(ctx context.Context, bindings map[types.CapabilityName]sta
 		thread.SetMaxExecutionSteps(maxSteps)
 	}
 	// ExecFileOptions freezes the returned globals.
-	globals, err := starlark.ExecFileOptions(fileOpts, thread, filepath.Join(m.Root, "main.star"), m.Sources["main.star"], pre)
+	globals, err := starlark.ExecFileOptions(fileOpts, thread, string(m.ID)+"/main.star", m.Sources["main.star"], pre)
 	if err != nil {
 		return nil, fmt.Errorf("ext %s: %w", m.ID, err)
 	}
@@ -76,7 +75,7 @@ func (b *boundModule) load(thread *starlark.Thread, name string) (starlark.Strin
 	if g, ok := b.cache[rel]; ok {
 		return g, nil
 	}
-	g, err := starlark.ExecFileOptions(fileOpts, thread, filepath.Join(b.mod.Root, rel), b.mod.Sources[rel], b.pre)
+	g, err := starlark.ExecFileOptions(fileOpts, thread, string(b.mod.ID)+"/"+rel, b.mod.Sources[rel], b.pre)
 	if err != nil {
 		return nil, fmt.Errorf("ext %s: load(%q): %w", b.mod.ID, name, err)
 	}

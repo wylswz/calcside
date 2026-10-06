@@ -215,7 +215,7 @@ paths:
         - name: path
           in: query
           required: true
-          description: Absolute local identifier path to resolve.
+          description: Server-local root-name/extension identifier to resolve, e.g. contrib/tavily.
           schema:
             type: string
       responses:

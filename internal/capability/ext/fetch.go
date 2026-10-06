@@ -27,8 +27,8 @@ type Options struct {
 	// "github.com/acme" or "github.com") the server permits; empty
 	// disables remote sources entirely.
 	AllowSources []string
-	// LocalRoots bounds local (absolute path) sources; identifiers must
-	// resolve inside one of these roots. Empty disables local sources.
+	// LocalRoots bounds local sources; each root basename namespaces its
+	// extensions as root-name/extension. Empty disables local sources.
 	LocalRoots []string
 	// LocalResolver, when set, replaces filesystem access for local
 	// sources: it returns a directory containing the source tree. A
@@ -87,24 +87,47 @@ func (o *Options) allowSource(p ParsedIdentifier) bool {
 // localRoot resolves a local identifier and checks LocalRoots containment
 // after EvalSymlinks so symlinks cannot escape the permitted roots.
 func (o *Options) localRoot(p ParsedIdentifier) (string, error) {
-	root, err := filepath.EvalSymlinks(p.Local)
+	parsed, err := ParseIdentifier(p.Local)
 	if err != nil {
-		return "", fmt.Errorf("ext: resolving %q: %w", p.Local, err)
+		return "", err
 	}
+	if parsed.Local == "" {
+		return "", fmt.Errorf("ext: invalid local identifier %q", p.Local)
+	}
+	namespace, name, _ := strings.Cut(parsed.Local, "/")
+	var found string
 	for _, r := range o.LocalRoots {
-		if ar, err := filepath.Abs(r); err == nil {
-			r = ar
+		ar, err := filepath.Abs(r)
+		if err != nil || filepath.Base(ar) != namespace {
+			continue
 		}
-		rr, err := filepath.EvalSymlinks(r)
+		rr, err := filepath.EvalSymlinks(ar)
 		if err != nil {
 			continue
 		}
-		rel, err := filepath.Rel(rr, root)
-		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return root, nil
+		root, err := filepath.EvalSymlinks(filepath.Join(rr, name))
+		if os.IsNotExist(err) {
+			continue
 		}
+		if err != nil {
+			return "", fmt.Errorf("ext: cannot resolve local source %q", p.Local)
+		}
+		rel, err := filepath.Rel(rr, root)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("ext: local source %q is outside ext local roots", p.Local)
+		}
+		if st, err := os.Stat(root); err != nil || !st.IsDir() {
+			return "", fmt.Errorf("ext: local source %q is not a directory", p.Local)
+		}
+		if found != "" && found != root {
+			return "", fmt.Errorf("ext: local source %q is ambiguous across ext local roots", p.Local)
+		}
+		found = root
 	}
-	return "", fmt.Errorf("ext: local path %q is outside ext local roots", p.Local)
+	if found == "" {
+		return "", fmt.Errorf("ext: local source %q not found in ext local roots", p.Local)
+	}
+	return found, nil
 }
 
 // cacheDir is where the fetched tree lands.
@@ -259,7 +282,7 @@ func (o *Options) fetchRemote(ctx context.Context, p ParsedIdentifier, wantSum s
 // h1 sum all match what resolveLocal enforces.
 func ReadLocalTree(roots []string, path string) (files map[string][]byte, sum string, err error) {
 	o := Options{LocalRoots: roots}
-	root, err := o.localRoot(ParsedIdentifier{Local: filepath.Clean(path)})
+	root, err := o.localRoot(ParsedIdentifier{Local: path})
 	if err != nil {
 		return nil, "", err
 	}
