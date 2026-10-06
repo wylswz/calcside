@@ -1,7 +1,10 @@
 package remote
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -24,7 +27,7 @@ var _ runtime.Runtime = (*Direct)(nil)
 func NewDirect(baseURL string, hc *http.Client, key []byte, callerNode string) (*Direct, error) {
 	cl, err := gen.NewClientWithResponses(baseURL,
 		gen.WithHTTPClient(hc),
-		gen.WithRequestEditorFn(signEditor(key, callerNode, time.Now)))
+		gen.WithRequestEditorFn(SignEditor(key, callerNode, time.Now)))
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +39,7 @@ func (d *Direct) Create(ctx context.Context, req *runtime.CreateRequest) (*runti
 	if err != nil {
 		return nil, err
 	}
-	return respOf(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
+	return UnwrapResponse(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
 }
 
 func (d *Direct) Exec(ctx context.Context, req *runtime.ExecRequest) (*runtime.ExecResponse, error) {
@@ -44,7 +47,7 @@ func (d *Direct) Exec(ctx context.Context, req *runtime.ExecRequest) (*runtime.E
 	if err != nil {
 		return nil, err
 	}
-	return respOf(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
+	return UnwrapResponse(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
 }
 
 func (d *Direct) Keepalive(ctx context.Context, req *runtime.KeepaliveRequest) (*runtime.KeepaliveResponse, error) {
@@ -52,7 +55,7 @@ func (d *Direct) Keepalive(ctx context.Context, req *runtime.KeepaliveRequest) (
 	if err != nil {
 		return nil, err
 	}
-	return respOf(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
+	return UnwrapResponse(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
 }
 
 func (d *Direct) Delete(ctx context.Context, req *runtime.DeleteRequest) (*runtime.DeleteResponse, error) {
@@ -60,7 +63,7 @@ func (d *Direct) Delete(ctx context.Context, req *runtime.DeleteRequest) (*runti
 	if err != nil {
 		return nil, err
 	}
-	return respOf(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
+	return UnwrapResponse(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
 }
 
 func (d *Direct) Browse(ctx context.Context, req *runtime.BrowseRequest) (*runtime.BrowseResponse, error) {
@@ -68,7 +71,7 @@ func (d *Direct) Browse(ctx context.Context, req *runtime.BrowseRequest) (*runti
 	if err != nil {
 		return nil, err
 	}
-	return respOf(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
+	return UnwrapResponse(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
 }
 
 func (d *Direct) Prompt(ctx context.Context, req *runtime.PromptRequest) (*runtime.PromptResponse, error) {
@@ -76,7 +79,7 @@ func (d *Direct) Prompt(ctx context.Context, req *runtime.PromptRequest) (*runti
 	if err != nil {
 		return nil, err
 	}
-	return respOf(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
+	return UnwrapResponse(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
 }
 
 func (d *Direct) Inspect(ctx context.Context, req *runtime.InspectRequest) (*runtime.InspectResponse, error) {
@@ -84,7 +87,7 @@ func (d *Direct) Inspect(ctx context.Context, req *runtime.InspectRequest) (*run
 	if err != nil {
 		return nil, err
 	}
-	return respOf(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
+	return UnwrapResponse(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
 }
 
 func (d *Direct) Export(ctx context.Context, req *runtime.ExportRequest) (*runtime.ExportResponse, error) {
@@ -92,5 +95,30 @@ func (d *Direct) Export(ctx context.Context, req *runtime.ExportRequest) (*runti
 	if err != nil {
 		return nil, err
 	}
-	return respOf(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
+	return UnwrapResponse(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
+}
+
+// SignEditor signs the serialized request body per worker.openapi.yaml.
+func SignEditor(key []byte, callerNode string, now func() time.Time) gen.RequestEditorFn {
+	return func(ctx context.Context, req *http.Request) error {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return err
+		}
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		SignRequest(key, callerNode, req, body, now())
+		return nil
+	}
+}
+
+// UnwrapResponse unwraps a generated response: success payload, error envelope,
+// or a transport-level failure.
+func UnwrapResponse[Resp any](ok *Resp, def *gen.Error, hresp *http.Response) (*Resp, error) {
+	if ok != nil {
+		return ok, nil
+	}
+	if def != nil {
+		return nil, errorOf(string(def.Error.Kind), def.Error.Message)
+	}
+	return nil, fmt.Errorf("remote: worker returned %s", hresp.Status)
 }

@@ -21,6 +21,8 @@ const (
 	maxTreeFiles        = 256
 )
 
+type LocalResolver func(ctx context.Context, p ParsedIdentifier) (dir string, err error)
+
 // Options configures the ext capability server side.
 type Options struct {
 	// AllowSources lists remote identifier prefixes (e.g.
@@ -34,7 +36,7 @@ type Options struct {
 	// sources: it returns a directory containing the source tree. A
 	// worker node resolves local identifiers through the API tier over
 	// the wire instead of reading a filesystem it does not have.
-	LocalResolver func(ctx context.Context, p ParsedIdentifier) (dir string, err error)
+	LocalResolver LocalResolver
 	// CacheDir holds fetched remote trees ({domain}/{group}/{name}@{ver}).
 	CacheDir string
 	// FetchTimeout bounds each remote fetch; default 30s.
@@ -135,8 +137,8 @@ func (o *Options) cacheDir(p ParsedIdentifier) string {
 	return filepath.Join(o.CacheDir, p.Domain, p.Group, p.Name+"@"+p.Version)
 }
 
-// hashTree computes the go-style h1: sum over a directory tree.
-func hashTree(dir string) (string, error) {
+// HashTree computes the go-style h1: sum over a directory tree.
+func HashTree(dir string) (string, error) {
 	return dirhash.HashDir(dir, "", dirhash.Hash1)
 }
 
@@ -176,7 +178,7 @@ func checkTree(dir string) error {
 // verifySum checks the tree's h1 sum; want=="" (or a mismatch) is an
 // error that always carries the computed value so users can pin it.
 func verifySum(dir, want string) error {
-	got, err := hashTree(dir)
+	got, err := HashTree(dir)
 	if err != nil {
 		return fmt.Errorf("ext: hashing extension: %w", err)
 	}
@@ -277,31 +279,8 @@ func (o *Options) fetchRemote(ctx context.Context, p ParsedIdentifier, wantSum s
 	return dest, commit, nil
 }
 
-// ReadLocalTree loads a local source dir as an in-memory tree for the
-// API tier to serve to worker nodes. Containment, file caps, and the
-// h1 sum all match what resolveLocal enforces.
-func ReadLocalTree(roots []string, path string) (files map[string][]byte, sum string, err error) {
-	o := Options{LocalRoots: roots}
-	root, err := o.localRoot(ParsedIdentifier{Local: path})
-	if err != nil {
-		return nil, "", err
-	}
-	if err := checkTree(root); err != nil {
-		return nil, "", err
-	}
-	files, err = readSources(root)
-	if err != nil {
-		return nil, "", fmt.Errorf("ext: reading %q: %w", path, err)
-	}
-	sum, err = hashTree(root)
-	if err != nil {
-		return nil, "", err
-	}
-	return files, sum, nil
-}
-
-// resolveLocal validates a local source dir and verifies sum if given.
-func (o *Options) resolveLocal(p ParsedIdentifier, sum string) (string, error) {
+// ResolveLocal validates a local source dir and verifies sum if given.
+func (o *Options) ResolveLocal(p ParsedIdentifier, sum string) (string, error) {
 	root, err := o.localRoot(p)
 	if err != nil {
 		return "", err
@@ -317,9 +296,9 @@ func (o *Options) resolveLocal(p ParsedIdentifier, sum string) (string, error) {
 	return root, nil
 }
 
-// readSources loads all regular files under root into a map keyed by
+// ReadSources loads all regular files under root into a map keyed by
 // slash-relative path.
-func readSources(root string) (map[string][]byte, error) {
+func ReadSources(root string) (map[string][]byte, error) {
 	out := map[string][]byte{}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

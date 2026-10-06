@@ -144,3 +144,8 @@ func statusOf(err error) int {
 		return http.StatusInternalServerError
 	}
 }
+
+// ExtTreePath is the API-side endpoint a worker resolves local ext
+// sources through — an api-callback operation in worker.openapi.yaml,
+// served by the API tier because workers carry no filesystem roots.
+const ExtTreePath = "/internal/v1/ext/tree"

@@ -74,11 +74,11 @@ gen:
 
 gen-check: wire-check
 	$(MAKE) gen
-	git diff --exit-code -- internal/api/gen internal/api/intgen internal/runtime/remote/gen internal/runtime/remote/apiclient web/src/api/schema.ts cmd/calcside/wire_gen.go cmd/calcside-worker/wire_gen.go internal/node/wire_gen.go
+	git diff --exit-code -- cmd/calcside/internal/api/gen cmd/calcside/internal/api/intgen internal/runtime/remote/gen cmd/calcside-worker/internal/apiclient web/src/api/schema.ts cmd/calcside/wire_gen.go cmd/calcside-worker/wire_gen.go internal/node/wire_gen.go
 
 # Store schema migrations (Atlas, see atlas.hcl): hand-written SQL, one
 # dir per dialect, same version in each. Requires the atlas CLI.
-MIGRATIONS := internal/store/gormstore/migrations
+MIGRATIONS := cmd/calcside/internal/gormstore/migrations
 MIGRATION_DIALECTS := sqlite postgres
 
 MIGRATION_ENV ?= sqlite
@@ -118,7 +118,7 @@ test-postgres:
 	  if docker exec "$$cid" pg_isready -U postgres -h 127.0.0.1 >/dev/null 2>&1; then ready=1; break; fi; sleep 1; \
 	done; test $$ready -eq 1; \
 	CALCSIDE_TEST_POSTGRES_DSN="postgres://postgres:postgres@127.0.0.1:$(TEST_PG_PORT)/postgres?sslmode=disable" \
-	  go test -race -count=1 ./internal/store/...
+	  go test -race -count=1 ./internal/store/... ./cmd/calcside/internal/gormstore/...
 
 # DEV ONLY — fixed throwaway key so `make dev` enables the secrets vault.
 CALCSIDE_SECRET_KEY ?= MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=

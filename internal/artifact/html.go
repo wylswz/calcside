@@ -412,7 +412,7 @@ func InlineHTML(ctx context.Context, entry string, src []byte, read func(string)
 	if err := visit(doc); err != nil {
 		return nil, err
 	}
-	out := &boundedBuffer{limit: runtime.MaxArtifactFileBytes, ctx: ctx}
+	out := &BoundedBuffer{limit: runtime.MaxArtifactFileBytes, ctx: ctx}
 	if !interactive {
 		for _, style := range styles {
 			style.Parent.RemoveChild(style)

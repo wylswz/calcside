@@ -7,22 +7,26 @@ import (
 	"log/slog"
 	"net/http"
 
-	"calcside/internal/api"
-	"calcside/internal/artifact"
-	"calcside/internal/audit"
-	"calcside/internal/auth"
+	"calcside/cmd/calcside/internal/api"
+	"calcside/cmd/calcside/internal/artifact"
+	"calcside/cmd/calcside/internal/audit"
+	"calcside/cmd/calcside/internal/auth"
+	"calcside/cmd/calcside/internal/config"
+	"calcside/cmd/calcside/internal/extensions"
+	_ "calcside/cmd/calcside/internal/gormstore"
+	policysvc "calcside/cmd/calcside/internal/service/policy"
+	"calcside/cmd/calcside/internal/service/sandbox"
+	"calcside/cmd/calcside/internal/vaultcipher"
+	"calcside/cmd/calcside/internal/worker"
 	"calcside/internal/capability"
-	"calcside/internal/config"
+	capext "calcside/internal/capability/ext"
+	common "calcside/internal/config"
 	"calcside/internal/node"
 	"calcside/internal/node/subproc"
 	"calcside/internal/placement"
-	"calcside/internal/policy"
 	"calcside/internal/runtime"
 	"calcside/internal/runtime/remote"
-	"calcside/internal/secrets"
-	"calcside/internal/service/sandbox"
 	"calcside/internal/store"
-	_ "calcside/internal/store/gormstore"
 	webpkg "calcside/web"
 )
 
@@ -44,12 +48,12 @@ func provideRecorder(st store.Store) (*audit.Recorder, func()) {
 	return rec, rec.Close
 }
 
-func provideCipher(cfg config.Config) (*secrets.Cipher, error) {
+func provideCipher(cfg config.Config) (*vaultcipher.Cipher, error) {
 	if cfg.SecretKey == "" {
 		slog.Warn("secrets vault disabled (no --secret-key)")
 		return nil, nil
 	}
-	cipher, err := secrets.NewCipher(cfg.SecretKey)
+	cipher, err := vaultcipher.NewCipher(cfg.SecretKey)
 	if err != nil {
 		return nil, fmt.Errorf("--secret-key: %w", err)
 	}
@@ -95,7 +99,7 @@ func provideRuntime(cfg config.Config, st store.Store, ncfg node.Config, nd *nod
 			return nil, nil, err
 		}
 		slog.Info("remote execution tier", "workers", len(nodes))
-		client := remote.NewClient(
+		client := worker.NewClient(
 			[]byte(cfg.WorkerKey),
 			cfg.NodeID,
 			func(context.Context) ([]placement.NodeRef, error) { return nodes, nil },
@@ -110,7 +114,7 @@ func provideRuntime(cfg config.Config, st store.Store, ncfg node.Config, nd *nod
 				return &placement.Binding{InstanceID: id, NodeID: in.NodeID, Epoch: in.LeaseEpoch}, nil
 			})
 		return client, client.HTTP.CloseIdleConnections, nil
-	} else if cfg.InstanceIsolation == config.IsolationProcess {
+	} else if cfg.InstanceIsolation == common.IsolationProcess {
 		sup, err := subproc.New(subproc.Options{
 			Child:              subproc.ChildConfig{Node: ncfg},
 			MaxInstances:       cfg.MaxInstancesPerNode,
@@ -133,7 +137,7 @@ func provideRuntime(cfg config.Config, st store.Store, ncfg node.Config, nd *nod
 func provideGlobalPolicies(cfg config.Config) (map[string]string, error) {
 	// Global policies are read once here and travel with every create
 	// request, so a node never depends on its own copy of --policy-dir.
-	globalPolicies, err := policy.LoadDir(cfg.PolicyDir)
+	globalPolicies, err := policysvc.LoadDir(cfg.PolicyDir)
 	if err != nil {
 		return nil, fmt.Errorf("--policy-dir: %w", err)
 	}
@@ -222,7 +226,7 @@ func provideServer(cfg config.Config, deps api.Deps, flow *auth.GoogleFlow) *htt
 		// they have no filesystem roots of their own. Signed with the
 		// same shared key as the runtime protocol.
 		mux2 := http.NewServeMux()
-		mux2.Handle(remote.ExtTreePath, remote.ExtTreeHandler(cfg.ExtLocalRoots, []byte(cfg.WorkerKey)))
+		mux2.Handle(remote.ExtTreePath, extensions.ExtTreeHandler(cfg.ExtLocalRoots, []byte(cfg.WorkerKey)))
 		mux2.Handle("/", mux)
 		mux = mux2
 	}
@@ -249,4 +253,8 @@ func provideArtifacts(cfg config.Config, sbx *sandbox.Service) (*api.ArtifactPre
 		return nil, nil, err
 	}
 	return previews, previews.Close, nil
+}
+
+func provideExtCatalog(cfg config.Config) capext.CatalogProvider {
+	return extensions.NewCatalog(capext.Options{LocalRoots: cfg.ExtLocalRoots, AllowSources: cfg.ExtAllowSources, CacheDir: cfg.ExtCacheDir, FetchTimeout: cfg.ExtFetchTimeout})
 }

@@ -4,7 +4,6 @@
 package node
 
 import (
-	"context"
 	"time"
 
 	"calcside/internal/capability"
@@ -26,8 +25,8 @@ type Config struct {
 	// ExtLocalResolver replaces filesystem local-source resolution when
 	// set — a remote worker resolves local identifiers through the API.
 	// It is not serializable; an instance process rebuilds it from its
-	// own config (see internal/node/subproc).
-	ExtLocalResolver   func(ctx context.Context, p capext.ParsedIdentifier) (string, error) `json:"-"`
+	// own config (see cmd/calcside-worker).
+	ExtLocalResolver   capext.LocalResolver `json:"-"`
 	ExtCacheDir        string
 	ExtFetchTimeout    time.Duration
 	MaxConcurrentExecs int

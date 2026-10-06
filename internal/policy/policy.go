@@ -11,8 +11,6 @@ package policy
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -37,8 +35,8 @@ var userBlockedBuiltins = []string{
 	"print",
 }
 
-// userCapabilities is ast.CapabilitiesForThisVersion minus blocked builtins.
-func userCapabilities() *ast.Capabilities {
+// UserCapabilities is ast.CapabilitiesForThisVersion minus blocked builtins.
+func UserCapabilities() *ast.Capabilities {
 	caps := ast.CapabilitiesForThisVersion()
 	blocked := map[string]bool{}
 	for _, b := range userBlockedBuiltins {
@@ -68,35 +66,6 @@ type Hook struct {
 	timeout time.Duration
 }
 
-// LoadDir reads and validates every *.rego in dir, returning module
-// name -> source. An empty dir name yields no modules.
-//
-// The API tier calls this once at startup and ships the result with
-// each create request, so that an execution node compiles exactly the
-// snapshot the API tier had, rather than whatever happens to be on that
-// node's disk.
-func LoadDir(dir string) (map[string]string, error) {
-	if dir == "" {
-		return nil, nil
-	}
-	entries, err := filepath.Glob(filepath.Join(dir, "*.rego"))
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]string{}
-	for _, e := range entries {
-		data, err := os.ReadFile(e)
-		if err != nil {
-			return nil, err
-		}
-		if err := validateModule(e, string(data)); err != nil {
-			return nil, err
-		}
-		out[filepath.Base(e)] = string(data)
-	}
-	return out, nil
-}
-
 // NewHook compiles a policy snapshot: global modules (full
 // capabilities, keyed by module name) and per-user policies (restricted
 // capabilities, keyed by policy ID). Any compile error is fatal.
@@ -115,7 +84,7 @@ func NewHook(globalModules, userPolicies map[string]string, evalTimeout time.Dur
 		mods := make([]func(*rego.Rego), 0, len(names))
 		for _, name := range names {
 			src := globalModules[name]
-			if err := validateModule(name, src); err != nil {
+			if err := ValidateModule(name, src); err != nil {
 				return nil, err
 			}
 			mods = append(mods, rego.Module(name, src))
@@ -139,10 +108,10 @@ func NewHook(globalModules, userPolicies map[string]string, evalTimeout time.Dur
 // CompileUserPolicy validates and compiles a single user policy with
 // restricted capabilities.
 func CompileUserPolicy(name, src string) (*Set, error) {
-	if err := validateModule(name, src); err != nil {
+	if err := ValidateModule(name, src); err != nil {
 		return nil, err
 	}
-	return compile(name, userCapabilities(), rego.Module(name+".rego", src))
+	return compile(name, UserCapabilities(), rego.Module(name+".rego", src))
 }
 
 func compile(name string, caps *ast.Capabilities, opts ...func(*rego.Rego)) (*Set, error) {
@@ -160,10 +129,10 @@ func compile(name string, caps *ast.Capabilities, opts ...func(*rego.Rego)) (*Se
 	return &Set{name: name, pq: pq}, nil
 }
 
-// validateModule parses the module, requires `package calcside.hooks`, and
+// ValidateModule parses the module, requires `package calcside.hooks`, and
 // rejects calls to blocked builtins (the capabilities check alone does not
 // catch e.g. print(), which the parser handles specially).
-func validateModule(name, src string) error {
+func ValidateModule(name, src string) error {
 	mod, err := ast.ParseModuleWithOpts(name, src, ast.ParserOptions{RegoVersion: ast.RegoV1})
 	if err != nil {
 		return fmt.Errorf("%s: %w", name, err)
@@ -208,10 +177,10 @@ func validateModule(name, src string) error {
 // Validate checks a rego source for API use: syntax, required package, and
 // compilation under the restricted user capabilities.
 func Validate(src string) error {
-	if err := validateModule("input", src); err != nil {
+	if err := ValidateModule("input", src); err != nil {
 		return err
 	}
-	_, err := compile("validate", userCapabilities(), rego.Module("input.rego", src))
+	_, err := compile("validate", UserCapabilities(), rego.Module("input.rego", src))
 	return err
 }
 
@@ -222,7 +191,7 @@ func (h *Hook) SetUserPolicies(pols map[string]*Set) {
 	h.perUser = pols
 }
 
-func inputFor(phase types.Phase, c *capability.Call, r *capability.Result) map[string]any {
+func InputFor(phase types.Phase, c *capability.Call, r *capability.Result) map[string]any {
 	in := map[string]any{
 		"phase":      string(phase),
 		"user":       map[string]any{"id": c.UserID, "email": c.UserEmail},
@@ -276,7 +245,7 @@ func (h *Hook) evalSet(ctx context.Context, s *Set, in map[string]any) (string, 
 }
 
 func (h *Hook) eval(ctx context.Context, phase types.Phase, c *capability.Call, r *capability.Result) error {
-	in := inputFor(phase, c, r)
+	in := InputFor(phase, c, r)
 	if h.global != nil {
 		if reason, denied := h.evalSet(ctx, h.global, in); denied {
 			return fmt.Errorf("global policy: %s", reason)

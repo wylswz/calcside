@@ -7,7 +7,7 @@
 package main
 
 import (
-	"calcside/internal/config"
+	"calcside/cmd/calcside-worker/internal/config"
 )
 
 // Injectors from wire.go:

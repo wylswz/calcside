@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/oapi-codegen/oapi-codegen/v2.8.0/configuration-schema.json
-# Run via `go generate` (CWD = internal/runtime/remote/apiclient) or `make gen`.
+# Run via `go generate` (CWD = cmd/calcside-worker/internal/apiclient) or `make gen`.
 # The worker→API side of the protocol: a client for the endpoints the
 # API serves back to workers (ext tree resolution). Models live in
 # worker.gen.go — this file lives in its own package because oapi-codegen client plumbing names collide.

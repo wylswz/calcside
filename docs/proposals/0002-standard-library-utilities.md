@@ -38,8 +38,8 @@ the model to manipulate data itself. Examples include:
 - Normalize explicit timestamps before comparing events from several APIs.
 
 The implementation entry points are `internal/engine/engine.go`,
-`internal/capability/ext/module.go`, `internal/service/catalog/catalog.go`, and
-`internal/prompt/prompt.md.tmpl`. Adding only engine globals would leave extensions,
+`internal/capability/ext/module.go`, `cmd/calcside/internal/service/catalog/catalog.go`, and
+`cmd/calcside/internal/prompt/prompt.md.tmpl`. Adding only engine globals would leave extensions,
 editor completion, and agent instructions inconsistent.
 
 ## Goals

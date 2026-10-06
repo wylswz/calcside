@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/oapi-codegen/oapi-codegen/v2.8.0/configuration-schema.json
-# Run via `go generate` (CWD = internal/api) or `make gen`.
+# Run via `go generate` (CWD = cmd/calcside/internal/api) or `make gen`.
 package: gen
 output: gen/server.gen.go
 generate:

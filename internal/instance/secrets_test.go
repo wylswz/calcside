@@ -14,7 +14,7 @@ import (
 )
 
 // Vault reference resolution — decryption and allowlist narrowing —
-// belongs to the API tier and is tested in internal/service/vault. By
+// belongs to the API tier and is tested in cmd/calcside/internal/service/vault. By
 // the time a spec reaches a node, its secrets are already plaintext
 // values with an effective allowlist, which is what these cover.
 

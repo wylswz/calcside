@@ -7,20 +7,20 @@
 package main
 
 import (
-	"calcside/internal/api"
-	"calcside/internal/config"
-	"calcside/internal/service/audit"
-	"calcside/internal/service/catalog"
-	"calcside/internal/service/iam"
-	"calcside/internal/service/policy"
-	"calcside/internal/service/sandbox"
-	"calcside/internal/service/vault"
+	"calcside/cmd/calcside/internal/api"
+	"calcside/cmd/calcside/internal/config"
+	"calcside/cmd/calcside/internal/service/audit"
+	"calcside/cmd/calcside/internal/service/catalog"
+	"calcside/cmd/calcside/internal/service/iam"
+	"calcside/cmd/calcside/internal/service/policy"
+	"calcside/cmd/calcside/internal/service/sandbox"
+	"calcside/cmd/calcside/internal/service/vault"
 	"context"
 	"time"
 )
 
 import (
-	_ "calcside/internal/store/gormstore"
+	_ "calcside/cmd/calcside/internal/gormstore"
 )
 
 // Injectors from wire.go:
@@ -44,7 +44,8 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	nodeConfig := provideNodeConfig(cfg, serverLimits)
 	node, cleanup2 := provideNode(nodeConfig)
 	registry := node.Registry
-	catalogService := catalog.New(registry)
+	catalogProvider := provideExtCatalog(cfg)
+	catalogService := catalog.New(registry, catalogProvider)
 	runtime, cleanup3, err := provideRuntime(cfg, store, nodeConfig, node)
 	if err != nil {
 		cleanup2()

@@ -15,7 +15,6 @@ import (
 	"calcside/internal/capability"
 	"calcside/internal/node"
 	"calcside/internal/runtime"
-	"calcside/internal/runtime/remote"
 )
 
 const childEnv = "CALCSIDE_SUBPROC_TEST_CHILD"
@@ -24,7 +23,7 @@ const childEnv = "CALCSIDE_SUBPROC_TEST_CHILD"
 // re-executes this test binary with childEnv set.
 func TestMain(m *testing.M) {
 	if os.Getenv(childEnv) == "1" {
-		if err := RunChild(os.Stdin, os.Stdout); err != nil {
+		if err := RunChild(os.Stdin, os.Stdout, nil); err != nil {
 			fmt.Fprintln(os.Stderr, "child:", err)
 			os.Exit(1)
 		}
@@ -292,30 +291,17 @@ func TestLocalExtensionSourceThroughChild(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	key := []byte("extension-test-shared-key")
-	srv := httptest.NewServer(remote.ExtTreeHandler([]string{root}, key))
-	defer srv.Close()
-	for _, mode := range []string{"local", "api"} {
-		t.Run(mode, func(t *testing.T) {
-			s := newSupervisor(t, func(o *Options) {
-				if mode == "local" {
-					o.Child.Node.ExtLocalRoots = []string{root}
-				} else {
-					o.Child.APIAddr, o.Child.NodeID, o.Child.APIKey = srv.URL, "worker-ext", key
-				}
-			})
-			_, err := s.Create(context.Background(), &runtime.CreateRequest{
-				InstanceID: "ins_ext", Owner: owner,
-				Spec:      []byte(`{"capabilities":{"ext":{"myext":{"source":"contrib/myext"}}}}`),
-				ExpiresAt: time.Now().Add(time.Hour),
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			out, err := run(t, s, "ins_ext", "exec_ext", "print(ext.myext.hello())")
-			if err != nil || out.Result.Error != nil || out.Result.Output != "42\n" {
-				t.Fatalf("extension exec: err=%v res=%+v", err, out)
-			}
-		})
+	s := newSupervisor(t, func(o *Options) { o.Child.Node.ExtLocalRoots = []string{root} })
+	_, err := s.Create(context.Background(), &runtime.CreateRequest{
+		InstanceID: "ins_ext", Owner: owner,
+		Spec:      []byte(`{"capabilities":{"ext":{"myext":{"source":"contrib/myext"}}}}`),
+		ExpiresAt: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, s, "ins_ext", "exec_ext", "print(ext.myext.hello())")
+	if err != nil || out.Result.Error != nil || out.Result.Output != "42\n" {
+		t.Fatalf("extension exec: err=%v res=%+v", err, out)
 	}
 }

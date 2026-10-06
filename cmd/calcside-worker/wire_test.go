@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,16 +9,16 @@ import (
 	"testing"
 	"time"
 
-	"calcside/internal/config"
+	"calcside/cmd/calcside-worker/internal/config"
+	common "calcside/internal/config"
 	"calcside/internal/node/subproc"
-	"calcside/internal/placement"
 	"calcside/internal/runtime"
 	"calcside/internal/runtime/remote"
 )
 
 func TestMain(m *testing.M) {
 	if len(os.Args) == 2 && os.Args[1] == subproc.ChildArg {
-		if err := subproc.RunChild(os.Stdin, os.Stdout); err != nil {
+		if err := subproc.RunChild(os.Stdin, os.Stdout, configureChild); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -29,7 +28,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestInitializeWorker(t *testing.T) {
-	for _, mode := range []string{config.IsolationInproc, config.IsolationProcess} {
+	for _, mode := range []string{common.IsolationInproc, common.IsolationProcess} {
 		t.Run(mode, func(t *testing.T) {
 			cfg := config.WorkerConfig{
 				Addr: "127.0.0.1:0", SharedKey: "test-worker-key", NodeID: "worker-test",
@@ -57,10 +56,10 @@ func TestInitializeWorker(t *testing.T) {
 			}
 			srv := httptest.NewServer(app.Server.Handler)
 			t.Cleanup(srv.Close)
-			rt := remote.NewClient([]byte(cfg.SharedKey), "api-test",
-				func(context.Context) ([]placement.NodeRef, error) {
-					return []placement.NodeRef{{NodeID: cfg.NodeID, Addr: strings.TrimPrefix(srv.URL, "http://")}}, nil
-				}, nil)
+			rt, err := remote.NewDirect(srv.URL, srv.Client(), []byte(cfg.SharedKey), "api-test")
+			if err != nil {
+				t.Fatal(err)
+			}
 			owner := runtime.Owner{UserID: "usr_test"}
 			created, err := rt.Create(t.Context(), &runtime.CreateRequest{
 				InstanceID: "ins_test", Owner: owner, Spec: []byte(`{"capabilities":{}}`), ExpiresAt: time.Now().Add(time.Minute),

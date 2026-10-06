@@ -1,12 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
-	"calcside/internal/config"
+	"calcside/cmd/calcside-worker/internal/config"
+	common "calcside/internal/config"
 	"calcside/internal/node"
 	"calcside/internal/node/subproc"
 	"calcside/internal/runtime"
@@ -46,20 +48,22 @@ func provideNodeConfig(cfg config.WorkerConfig, nodeID string) node.Config {
 	if cfg.APIAddr != "" {
 		// Local ext sources live on the API tier's filesystem; resolve
 		// them over the wire into our own cache volume.
-		ncfg.ExtLocalResolver = remote.LocalExtResolver(cfg.APIAddr, nodeID, []byte(cfg.SharedKey), cfg.ExtCacheDir)
+		ncfg.ExtLocalResolver = LocalExtResolver(cfg.APIAddr, nodeID, []byte(cfg.SharedKey), cfg.ExtCacheDir)
 	}
 	return ncfg
 }
 
 func provideRuntime(cfg config.WorkerConfig, nodeID string, ncfg node.Config) (runtime.Runtime, func(), error) {
 	slog.Info("instance isolation", "mode", cfg.InstanceIsolation)
-	if cfg.InstanceIsolation == config.IsolationProcess {
+	if cfg.InstanceIsolation == common.IsolationProcess {
+		extra, err := json.Marshal(childExtensions{APIAddr: cfg.APIAddr, NodeID: nodeID, APIKey: []byte(cfg.SharedKey)})
+		if err != nil {
+			return nil, nil, err
+		}
 		sup, err := subproc.New(subproc.Options{
 			Child: subproc.ChildConfig{
-				Node:    ncfg,
-				APIAddr: cfg.APIAddr,
-				NodeID:  nodeID,
-				APIKey:  []byte(cfg.SharedKey),
+				Node:  ncfg,
+				Extra: extra,
 			},
 			MaxInstances:       cfg.MaxInstances,
 			MaxConcurrentExecs: cfg.MaxConcurrentExecs,

@@ -44,12 +44,8 @@ type ChildConfig struct {
 	// Socket is the unix socket the child serves on.
 	Socket string `json:"socket"`
 	// Key authenticates supervisor→child calls; minted per child.
-	Key []byte `json:"key"`
-	// APIAddr, NodeID and APIKey let the child resolve local ext sources
-	// through the API tier, as an in-process worker node would.
-	APIAddr string `json:"api_addr,omitempty"`
-	NodeID  string `json:"node_id,omitempty"`
-	APIKey  []byte `json:"api_key,omitempty"`
+	Key   []byte          `json:"key"`
+	Extra json.RawMessage `json:"extra,omitempty"`
 }
 
 // RunChild is the instance-process entrypoint. It reads a ChildConfig
@@ -57,7 +53,7 @@ type ChildConfig struct {
 // returns once stdin reaches EOF: the supervisor holds the pipe open for
 // as long as it wants the instance, so EOF means it is done with us or
 // has died — either way the instance must not outlive it.
-func RunChild(stdin io.Reader, stdout io.Writer) error {
+func RunChild(stdin io.Reader, stdout io.Writer, configure func(*ChildConfig) error) error {
 	// Terminal signals go to the whole process group; lifecycle is the
 	// supervisor's call, made through stdin.
 	signal.Ignore(os.Interrupt, syscall.SIGTERM)
@@ -69,11 +65,12 @@ func RunChild(stdin io.Reader, stdout io.Writer) error {
 	if err := dec.Decode(&cfg); err != nil {
 		return fmt.Errorf("subproc: read config: %w", err)
 	}
-	nc := cfg.Node
-	if cfg.APIAddr != "" {
-		nc.ExtLocalResolver = remote.LocalExtResolver(cfg.APIAddr, cfg.NodeID, cfg.APIKey, nc.ExtCacheDir)
+	if configure != nil {
+		if err := configure(&cfg); err != nil {
+			return fmt.Errorf("subproc: configure node: %w", err)
+		}
 	}
-	nd := node.Build(nc)
+	nd := node.Build(cfg.Node)
 	defer nd.Close()
 
 	ln, err := net.Listen("unix", cfg.Socket)

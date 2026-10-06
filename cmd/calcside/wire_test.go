@@ -12,8 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"calcside/internal/auth"
-	"calcside/internal/config"
+	"calcside/cmd/calcside/internal/auth"
+	"calcside/cmd/calcside/internal/config"
+	common "calcside/internal/config"
 	"calcside/internal/node"
 	"calcside/internal/node/subproc"
 	"calcside/internal/runtime/remote"
@@ -24,7 +25,7 @@ import (
 
 func TestMain(m *testing.M) {
 	if len(os.Args) == 2 && os.Args[1] == subproc.ChildArg {
-		if err := subproc.RunChild(os.Stdin, os.Stdout); err != nil {
+		if err := subproc.RunChild(os.Stdin, os.Stdout, nil); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -40,7 +41,7 @@ func testConfig(t *testing.T) config.Config {
 		Store: types.DriverSQLite, DSN: storetest.SQLite(t), NodeID: "api-test",
 		DefaultTTL: time.Minute, MaxTTL: time.Hour, MaxExecTimeout: time.Minute,
 		MaxConcurrentExecs: 2, ReaperInterval: time.Hour, PolicyEvalTimeout: time.Second,
-		ExtCacheDir: t.TempDir(), InstanceIsolation: config.IsolationInproc,
+		ExtCacheDir: t.TempDir(), InstanceIsolation: common.IsolationInproc,
 	}
 }
 
@@ -62,7 +63,7 @@ func request(t *testing.T, h http.Handler, method, path, body string, want int) 
 }
 
 func TestInitializeApp(t *testing.T) {
-	for _, mode := range []string{config.IsolationInproc, config.IsolationProcess, "remote"} {
+	for _, mode := range []string{common.IsolationInproc, common.IsolationProcess, "remote"} {
 		t.Run(mode, func(t *testing.T) {
 			cfg := testConfig(t)
 			if mode == "remote" {

@@ -5,7 +5,7 @@ package main
 import (
 	"github.com/google/wire"
 
-	"calcside/internal/config"
+	"calcside/cmd/calcside-worker/internal/config"
 )
 
 func initializeWorker(cfg config.WorkerConfig) (*workerApp, func(), error) {

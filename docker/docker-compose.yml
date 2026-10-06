@@ -8,7 +8,7 @@ services:
       ATLAS_DB_URL: ${ATLAS_DB_URL:-sqlite:///data/calcside.db}
     volumes:
       - ../atlas.hcl:/workspace/atlas.hcl:ro
-      - ../internal/store/gormstore/migrations:/workspace/internal/store/gormstore/migrations:ro
+      - ../cmd/calcside/internal/gormstore/migrations:/workspace/cmd/calcside/internal/gormstore/migrations:ro
       - ./data:/data
 
   calcside:

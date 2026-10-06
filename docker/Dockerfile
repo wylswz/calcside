@@ -44,7 +44,7 @@ USER calcside
 VOLUME /data
 EXPOSE 8080
 
-# All flags also read from CALCSIDE_* env vars (see internal/config).
+# All flags also read from CALCSIDE_* env vars (see cmd/calcside/internal/config).
 ENV CALCSIDE_ADDR=":8080" \
     CALCSIDE_DSN="/data/calcside.db" \
     CALCSIDE_POLICY_DIR="/data/policies" \

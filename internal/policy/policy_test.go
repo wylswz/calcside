@@ -2,8 +2,6 @@ package policy
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -18,26 +16,16 @@ func call(host string) *capability.Call {
 	}
 }
 
-func writeDir(t *testing.T, files map[string]string) string {
+// modules validates the snapshot the API tier ships to an execution
+// node before constructing the test hook.
+func modules(t *testing.T, files map[string]string) map[string]string {
 	t.Helper()
-	d := t.TempDir()
 	for name, src := range files {
-		if err := os.WriteFile(filepath.Join(d, name), []byte(src), 0o644); err != nil {
+		if err := ValidateModule(name, src); err != nil {
 			t.Fatal(err)
 		}
 	}
-	return d
-}
-
-// modules writes files to a temp dir and loads them the way the API
-// tier does before shipping them to an execution node.
-func modules(t *testing.T, files map[string]string) map[string]string {
-	t.Helper()
-	m, err := LoadDir(writeDir(t, files))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return m
+	return files
 }
 
 func TestBeforeDenyOnHost(t *testing.T) {
@@ -202,15 +190,5 @@ func TestPackageClauseParsing(t *testing.T) {
 	}
 	if err := Validate("package calcside.hooksx\ndeny contains \"x\" if { true }"); err == nil {
 		t.Fatal("calcside.hooksx accepted")
-	}
-}
-
-func TestWrongPackageRejectedAtLoad(t *testing.T) {
-	dir := writeDir(t, map[string]string{
-		"bad.rego": `package wrong.name
-x := 1`,
-	})
-	if _, err := LoadDir(dir); err == nil {
-		t.Fatal("expected package rejection")
 	}
 }

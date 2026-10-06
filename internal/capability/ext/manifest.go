@@ -27,7 +27,7 @@ func parseManifest(data []byte) (*CapabilityManifest, error) {
 }
 
 func validateManifest(m *CapabilityManifest) error {
-	if m.Icon != "" && !validIconPath(m.Icon) {
+	if m.Icon != "" && !ValidIconPath(m.Icon) {
 		return fmt.Errorf("ext: invalid icon path")
 	}
 	for _, d := range m.Dependencies {

@@ -23,7 +23,7 @@ import (
 //
 // Vault references are deliberately not supported here. Resolving them
 // needs the store and the cipher, which is the API tier's job and is
-// tested where that code lives (internal/service/vault).
+// tested where that code lives (cmd/calcside/internal/service/vault).
 type node struct {
 	t      *testing.T
 	m      *Manager

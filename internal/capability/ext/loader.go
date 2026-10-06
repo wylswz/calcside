@@ -56,13 +56,13 @@ func (l *CapabilityLoader) Load(ctx context.Context) (*Module, error) {
 			err = verifySum(root, l.Sum)
 		}
 	} else {
-		root, err = l.Options.resolveLocal(p, l.Sum)
+		root, err = l.Options.ResolveLocal(p, l.Sum)
 	}
 	if err != nil {
 		return nil, err
 	}
 
-	sources, err := readSources(root)
+	sources, err := ReadSources(root)
 	if err != nil {
 		return nil, fmt.Errorf("ext: reading %s: %w", l.Identifier, err)
 	}

@@ -16,13 +16,13 @@ import (
 	"syscall"
 	"time"
 
-	"calcside/internal/config"
+	"calcside/cmd/calcside-worker/internal/config"
 	"calcside/internal/node/subproc"
 )
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == subproc.ChildArg {
-		if err := subproc.RunChild(os.Stdin, os.Stdout); err != nil {
+		if err := subproc.RunChild(os.Stdin, os.Stdout, configureChild); err != nil {
 			fmt.Fprintln(os.Stderr, "instance:", err)
 			os.Exit(1)
 		}

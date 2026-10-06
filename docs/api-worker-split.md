@@ -61,7 +61,7 @@ Additive; no behaviour change yet.
 
 ## Phase 3 — transport  ✅ landed (static node list; Redis liveness in P5)
 
-1. `internal/runtime/remote`: `remote.Client` — a `Runtime` that resolves
+1. `cmd/calcside/internal/worker`: `worker.Client` — a `Runtime` that resolves
    placement and calls the owning node over HTTP/JSON. The protocol is
    defined in `api/worker.openapi.yaml`; gin routes and the typed client
    are generated (`internal/runtime/remote/gen`), message bodies map via
