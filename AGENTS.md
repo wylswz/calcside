@@ -1,6 +1,7 @@
 # AGENTS.md
 
 ## Commands
+- API benchmark: `make benchmark` runs `benchmark/api.js` with k6 against an already-running dedicated server; `make benchmark-smoke` checks exec/lifecycle/read with one VU and one iteration each. Configure `CALCSIDE_BASE_URL`, optional `CALCSIDE_API_KEY`, and `BENCH_*` variables (see README); do not use k6 CLI VU/iteration overrides or distributed execution. Instances are cleaned up, but execution/audit/instance history remains in the database.
 - Go checks: `go build ./... && go vet ./... && gofmt -l . && go test -race ./...`
 - Web checks: `pnpm -C web typecheck && pnpm -C web lint && pnpm -C web build`
 - Editor completion tests: `pnpm -C web test` (Node >= 22.18, built-in test runner and TypeScript stripping; no browser needed).

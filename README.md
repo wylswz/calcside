@@ -42,6 +42,79 @@ Instance spec (`POST /api/v1/instances`):
 
 For an instance that needs internal HTTP access, pass `"policies": []` (or an explicit list without `builtin.block_private_network`). This does not bypass the instance's host allowlist, secret domain restrictions, or mandatory server policies. No network capability means no network access regardless of policy selection.
 
+## API benchmark (k6)
+
+Install [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/), then start a
+dedicated server with a temporary database in one terminal:
+
+```bash
+make serve-dev DEV_DSN="$(mktemp -d)/benchmark.db"
+```
+
+In another terminal (or against an existing dedicated test server):
+
+```bash
+make benchmark-smoke
+make benchmark
+BENCH_SCENARIO=lifecycle BENCH_VUS=5 BENCH_DURATION=1m make benchmark
+BENCH_SCENARIO=read BENCH_VUS=5 BENCH_DURATION=1m make benchmark
+BENCH_SCENARIO=exec BENCH_VUS=2 BENCH_ITERATIONS=10 make benchmark
+```
+
+`benchmark/api.js` benchmarks the HTTP handlers in `cmd/calcside/internal/api/impl.go`:
+
+| Scenario | Work per iteration |
+| --- | --- |
+| `exec` (default) | Execute on a warmed, dedicated instance per VU. Sum the squares of 0–999 in Starlark, write/read a VFS file, and verify the printed result. |
+| `lifecycle` | Create an instance, execute the same workload, and delete it in `finally`. Includes instance startup cost. |
+| `read` | Read identity, capability catalog, running instances, instance detail, directory, file, globals, prompt, execution history/detail, and audit. Also keep the instance alive once per iteration. |
+
+| Environment variable | Default | Meaning |
+| --- | --- | --- |
+| `CALCSIDE_BASE_URL` | `http://127.0.0.1:8787` | Server origin, without `/api/v1`. |
+| `CALCSIDE_API_KEY` | unset | Bearer key; omit only for a `--dev` server. |
+| `BENCH_SCENARIO` | `exec` | `exec`, `lifecycle`, or `read`. |
+| `BENCH_VUS` | `5` | Concurrent virtual users; one independent instance per VU. |
+| `BENCH_DURATION` | `30s` | Load duration, or maximum duration when using fixed iterations. |
+| `BENCH_ITERATIONS` | unset | Fixed iterations **per VU**, instead of a timed run. |
+| `BENCH_P95_MS` | unset | Optional p95 latency threshold for each measured operation. |
+| `BENCH_REQUEST_TIMEOUT` | `30s` | Timeout per HTTP request. |
+| `BENCH_SETUP_TIMEOUT` | `2m` | Timeout for setup and teardown, each. |
+| `BENCH_TTL_SECONDS` | `900` | Sliding TTL for benchmark instances; must fit the server's maximum. |
+
+Use these environment variables rather than k6's `--vus`, `--duration`, or
+`--iterations` flags; the script configures explicit scenarios and fixture counts.
+Run with a single k6 process, not distributed execution. For an authenticated
+server, export `CALCSIDE_API_KEY` from your secret manager/environment rather than
+putting it in command-line arguments. No login, key, password, policy, or secret
+mutations are benchmarked.
+
+The summary includes per-operation p90/p95/p99 latency, measured HTTP request
+count/rate (`http_reqs{phase:benchmark}`), iteration count, and success rate.
+`benchmark_exec_duration` is the server-reported execution time, not end-to-end
+HTTP latency. Setup/warm-up/teardown requests are tagged separately; use the
+`phase:benchmark` metrics for comparisons, not the aggregate HTTP metrics.
+Response content is checked as well as status, including script errors returned
+with HTTP 200. Failed checks or zero/incomplete fixed iterations fail the run.
+There is no default latency SLO; set `BENCH_P95_MS` for automated regression gates.
+Short smoke runs verify correctness, not throughput; k6 summary rates include
+setup/teardown wall time even when request samples are filtered by phase.
+For machine-readable results:
+
+```bash
+k6 run --no-usage-report --summary-export=/tmp/k6-summary.json benchmark/api.js
+```
+
+Use a disposable database or dedicated benchmark account: executions, audit rows,
+and deleted-instance metadata remain in the store. Only instances created by this
+run are deleted. Interrupted runs or failed deletes rely on TTL to release live
+resources. The default per-user limit is 10 live instances; account for existing
+instances and configure `--max-instances-per-user` / worker capacity when raising
+`BENCH_VUS`. Record database backend, dataset size, isolation mode (`inproc` versus
+`process`), local versus remote worker routing, and server concurrency limits when
+comparing runs. This is a closed-loop benchmark without think time, not a fixed
+arrival-rate test; run the load generator on a separate machine for capacity results.
+
 ## Built-in utilities
 
 Every instance and extension has `json`, `math`, `url`, `csv`, `base64`, `hashlib`,

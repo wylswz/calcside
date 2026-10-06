@@ -3,7 +3,7 @@ SHELL := /bin/bash
 BINARIES := bin/calcside bin/calcside-worker
 WIRE_PACKAGES := ./internal/node ./cmd/calcside ./cmd/calcside-worker
 
-.PHONY: build test test-cgroup test-cgroup-host lint web dev serve-dev tidy gen gen-check wire wire-check migrate-new migrate-hash migrate-validate migrate-apply migrate-status test-postgres sdk-test sdk-lint docker-env
+.PHONY: build test test-cgroup test-cgroup-host lint web dev serve-dev tidy gen gen-check wire wire-check migrate-new migrate-hash migrate-validate migrate-apply migrate-status test-postgres sdk-test sdk-lint docker-env benchmark benchmark-smoke
 
 # First-run compose setup: generate docker/.env with a random shared
 # key, or copy docker/.env.example to fill in yourself.
@@ -28,6 +28,15 @@ web:
 
 test:
 	go test -race ./...
+
+benchmark:
+	k6 run --no-usage-report benchmark/api.js
+
+benchmark-smoke:
+	@for scenario in exec lifecycle read; do \
+	  BENCH_SCENARIO=$$scenario BENCH_VUS=1 BENCH_ITERATIONS=1 \
+	    k6 run --no-usage-report benchmark/api.js || exit $$?; \
+	done
 
 # Per-instance cgroup memory limit test (Linux, root). Runs the test binary
 # in a throwaway privileged container; the container's processes move to
