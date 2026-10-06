@@ -19,7 +19,7 @@ from calcside import CalcsideError, Client
 from calcside.langchain import CalcsideMiddleware
 from langchain.agents import create_agent
 
-os.environ.setdefault("CALCSIDE_SERVER", "http://127.0.0.1:8787")
+os.environ.setdefault("CALCSIDE_SERVER", "http://127.0.0.1:8080")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TAVILY_SOURCE = REPO_ROOT / "contrib" / "tavily"
@@ -37,28 +37,7 @@ def make_model():
         return ChatAnthropic(model="claude-haiku-4-5")
     raise SystemExit("set OPENAI_API_KEY or ANTHROPIC_API_KEY (env or .env)")
 
-
-def check_tavily_secret(client: Client) -> None:
-    """Verify the vault has a TAVILY_API_KEY secret; point the user at the
-    web console to create it otherwise (secrets are session-only, so an
-    API-key client cannot create them)."""
-    try:
-        names = {s["name"] for s in client.list_secrets()}
-    except CalcsideError as e:
-        raise SystemExit(
-            f"cannot list vault secrets ({e}) — start the server with "
-            "--secret-key (make serve-dev sets one)"
-        ) from e
-    if "TAVILY_API_KEY" not in names:
-        raise SystemExit(
-            "vault secret TAVILY_API_KEY not found — create it in the web "
-            "console (Secrets page) with allowed domain api.tavily.com, "
-            "then rerun."
-        )
-
-
 client = Client()
-check_tavily_secret(client)
 
 middleware = CalcsideMiddleware(
     client=client,
@@ -80,6 +59,7 @@ middleware = CalcsideMiddleware(
             }
         },
         "ttl_seconds": 900,
+        "policies": [],
     },
 )
 
