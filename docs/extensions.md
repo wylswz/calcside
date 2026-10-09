@@ -15,7 +15,7 @@ An optional `icon: icon.png` manifest field refers to a regular PNG within the
 extension tree (32 KiB, at most 256 by 256 pixels). External URLs and traversal
 are rejected. Catalog icons are decoded/re-encoded and served by authenticated
 content-addressed endpoints; missing or invalid image bytes use the UI fallback.
-The bundled Tavily icon is a project-authored monogram. Existing custom manifests
+The bundled Tavily icon is Tavily's official app icon (from tavily.com). Existing custom manifests
 without icons remain valid; saved specs using absolute source paths need updating to `root-name/extension`.
 
 ```

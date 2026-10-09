@@ -28,7 +28,9 @@ def make_model():
     if os.environ.get("OPENAI_API_KEY"):
         from langchain_openai import ChatOpenAI
 
-        return ChatOpenAI(model="gpt-6-luna", use_responses_api=True)
+        return ChatOpenAI(
+            model="gpt-6-luna", use_responses_api=True, output_version="responses/v1"
+        )
     if os.environ.get("ANTHROPIC_API_KEY"):
         from langchain_anthropic import ChatAnthropic
 
