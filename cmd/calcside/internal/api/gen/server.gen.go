@@ -900,6 +900,19 @@ type ValidationResult struct {
 	Valid bool    `json:"valid"`
 }
 
+// Workspace defines model for Workspace.
+type Workspace struct {
+	Id       string `json:"id"`
+	Name     string `json:"name"`
+	Personal bool   `json:"personal"`
+	Role     string `json:"role"`
+}
+
+// WorkspacesResponse defines model for WorkspacesResponse.
+type WorkspacesResponse struct {
+	Workspaces *[]Workspace `json:"workspaces,omitempty"`
+}
+
 // IdPath defines model for IdPath.
 type IdPath = string
 
@@ -912,11 +925,18 @@ type ListAuditParams struct {
 	ExecId     *string    `form:"exec_id,omitempty" json:"exec_id,omitempty"`
 	Limit      *int       `form:"limit,omitempty" json:"limit,omitempty"`
 	Before     *time.Time `form:"before,omitempty" json:"before,omitempty"`
+	Workspace  *string    `form:"workspace,omitempty" json:"workspace,omitempty"`
 }
 
 // ListInstancesParams defines parameters for ListInstances.
 type ListInstancesParams struct {
-	Status *InstanceStatus `form:"status,omitempty" json:"status,omitempty"`
+	Status    *InstanceStatus `form:"status,omitempty" json:"status,omitempty"`
+	Workspace *string         `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
+// CreateInstanceParams defines parameters for CreateInstance.
+type CreateInstanceParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
 }
 
 // ExportArtifactsJSONBody defines parameters for ExportArtifacts.
@@ -956,12 +976,42 @@ type InstancePromptParams struct {
 	ToolPrefix *string `form:"tool_prefix,omitempty" json:"tool_prefix,omitempty"`
 }
 
+// ListKeysParams defines parameters for ListKeys.
+type ListKeysParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
+// CreateKeyParams defines parameters for CreateKey.
+type CreateKeyParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
 // ChangePasswordJSONBody defines parameters for ChangePassword.
 type ChangePasswordJSONBody struct {
 	CurrentPassword *string `json:"current_password,omitempty"`
 
 	// NewPassword 8-72 UTF-8 bytes
 	NewPassword *string `json:"new_password,omitempty"`
+}
+
+// ListPoliciesParams defines parameters for ListPolicies.
+type ListPoliciesParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
+// CreatePolicyParams defines parameters for CreatePolicy.
+type CreatePolicyParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
+// ListSecretsParams defines parameters for ListSecrets.
+type ListSecretsParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
+// CreateSecretParams defines parameters for CreateSecret.
+type CreateSecretParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
 }
 
 // CreateInstanceJSONRequestBody defines body for CreateInstance for application/json ContentType.
@@ -1028,7 +1078,7 @@ type ServerInterface interface {
 	ListInstances(c *gin.Context, params ListInstancesParams)
 
 	// (POST /api/v1/instances)
-	CreateInstance(c *gin.Context)
+	CreateInstance(c *gin.Context, params CreateInstanceParams)
 
 	// (DELETE /api/v1/instances/{id})
 	DeleteInstance(c *gin.Context, id IdPath)
@@ -1064,10 +1114,10 @@ type ServerInterface interface {
 	InstancePrompt(c *gin.Context, id IdPath, params InstancePromptParams)
 
 	// (GET /api/v1/keys)
-	ListKeys(c *gin.Context)
+	ListKeys(c *gin.Context, params ListKeysParams)
 
 	// (POST /api/v1/keys)
-	CreateKey(c *gin.Context)
+	CreateKey(c *gin.Context, params CreateKeyParams)
 
 	// (DELETE /api/v1/keys/{id})
 	DeleteKey(c *gin.Context, id IdPath)
@@ -1079,10 +1129,10 @@ type ServerInterface interface {
 	ChangePassword(c *gin.Context)
 
 	// (GET /api/v1/policies)
-	ListPolicies(c *gin.Context)
+	ListPolicies(c *gin.Context, params ListPoliciesParams)
 
 	// (POST /api/v1/policies)
-	CreatePolicy(c *gin.Context)
+	CreatePolicy(c *gin.Context, params CreatePolicyParams)
 
 	// (POST /api/v1/policies/validate)
 	ValidatePolicy(c *gin.Context)
@@ -1097,16 +1147,19 @@ type ServerInterface interface {
 	UpdatePolicy(c *gin.Context, id IdPath)
 
 	// (GET /api/v1/secrets)
-	ListSecrets(c *gin.Context)
+	ListSecrets(c *gin.Context, params ListSecretsParams)
 
 	// (POST /api/v1/secrets)
-	CreateSecret(c *gin.Context)
+	CreateSecret(c *gin.Context, params CreateSecretParams)
 
 	// (DELETE /api/v1/secrets/{id})
 	DeleteSecret(c *gin.Context, id IdPath)
 
 	// (PUT /api/v1/secrets/{id})
 	UpdateSecret(c *gin.Context, id IdPath)
+
+	// (GET /api/v1/workspaces)
+	ListWorkspaces(c *gin.Context)
 
 	// (GET /healthz)
 	Healthz(c *gin.Context)
@@ -1172,6 +1225,14 @@ func (siw *ServerInterfaceWrapper) ListAudit(c *gin.Context) {
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "before", c.Request.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
 	if err != nil {
 		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter before: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
 		return
 	}
 
@@ -1304,6 +1365,14 @@ func (siw *ServerInterfaceWrapper) ListInstances(c *gin.Context) {
 		return
 	}
 
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -1317,6 +1386,20 @@ func (siw *ServerInterfaceWrapper) ListInstances(c *gin.Context) {
 // CreateInstance operation middleware
 func (siw *ServerInterfaceWrapper) CreateInstance(c *gin.Context) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateInstanceParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -1324,7 +1407,7 @@ func (siw *ServerInterfaceWrapper) CreateInstance(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.CreateInstance(c)
+	siw.Handler.CreateInstance(c, params)
 }
 
 // DeleteInstance operation middleware
@@ -1646,6 +1729,20 @@ func (siw *ServerInterfaceWrapper) InstancePrompt(c *gin.Context) {
 // ListKeys operation middleware
 func (siw *ServerInterfaceWrapper) ListKeys(c *gin.Context) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListKeysParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -1653,12 +1750,26 @@ func (siw *ServerInterfaceWrapper) ListKeys(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.ListKeys(c)
+	siw.Handler.ListKeys(c, params)
 }
 
 // CreateKey operation middleware
 func (siw *ServerInterfaceWrapper) CreateKey(c *gin.Context) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateKeyParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -1666,7 +1777,7 @@ func (siw *ServerInterfaceWrapper) CreateKey(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.CreateKey(c)
+	siw.Handler.CreateKey(c, params)
 }
 
 // DeleteKey operation middleware
@@ -1723,6 +1834,20 @@ func (siw *ServerInterfaceWrapper) ChangePassword(c *gin.Context) {
 // ListPolicies operation middleware
 func (siw *ServerInterfaceWrapper) ListPolicies(c *gin.Context) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListPoliciesParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -1730,12 +1855,26 @@ func (siw *ServerInterfaceWrapper) ListPolicies(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.ListPolicies(c)
+	siw.Handler.ListPolicies(c, params)
 }
 
 // CreatePolicy operation middleware
 func (siw *ServerInterfaceWrapper) CreatePolicy(c *gin.Context) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreatePolicyParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -1743,7 +1882,7 @@ func (siw *ServerInterfaceWrapper) CreatePolicy(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.CreatePolicy(c)
+	siw.Handler.CreatePolicy(c, params)
 }
 
 // ValidatePolicy operation middleware
@@ -1837,6 +1976,20 @@ func (siw *ServerInterfaceWrapper) UpdatePolicy(c *gin.Context) {
 // ListSecrets operation middleware
 func (siw *ServerInterfaceWrapper) ListSecrets(c *gin.Context) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListSecretsParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -1844,12 +1997,26 @@ func (siw *ServerInterfaceWrapper) ListSecrets(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.ListSecrets(c)
+	siw.Handler.ListSecrets(c, params)
 }
 
 // CreateSecret operation middleware
 func (siw *ServerInterfaceWrapper) CreateSecret(c *gin.Context) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateSecretParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -1857,7 +2024,7 @@ func (siw *ServerInterfaceWrapper) CreateSecret(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.CreateSecret(c)
+	siw.Handler.CreateSecret(c, params)
 }
 
 // DeleteSecret operation middleware
@@ -1908,6 +2075,19 @@ func (siw *ServerInterfaceWrapper) UpdateSecret(c *gin.Context) {
 	}
 
 	siw.Handler.UpdateSecret(c, id)
+}
+
+// ListWorkspaces operation middleware
+func (siw *ServerInterfaceWrapper) ListWorkspaces(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListWorkspaces(c)
 }
 
 // Healthz operation middleware
@@ -1976,6 +2156,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/instances/:id/inspect", wrapper.InstanceInspect)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/executions", wrapper.ListExecutions)
 	router.GET(options.BaseURL+"/api/v1/executions/:id", wrapper.GetExecution)
+	router.GET(options.BaseURL+"/api/v1/workspaces", wrapper.ListWorkspaces)
 	router.GET(options.BaseURL+"/api/v1/audit", wrapper.ListAudit)
 	router.GET(options.BaseURL+"/api/v1/policies", wrapper.ListPolicies)
 	router.POST(options.BaseURL+"/api/v1/policies", wrapper.CreatePolicy)
@@ -2345,7 +2526,8 @@ func (response ListInstances401JSONResponse) VisitListInstancesResponse(w http.R
 }
 
 type CreateInstanceRequestObject struct {
-	Body *CreateInstanceJSONRequestBody
+	Params CreateInstanceParams
+	Body   *CreateInstanceJSONRequestBody
 }
 
 type CreateInstanceResponseObject interface {
@@ -3297,6 +3479,7 @@ func (response InstancePrompt409JSONResponse) VisitInstancePromptResponse(w http
 }
 
 type ListKeysRequestObject struct {
+	Params ListKeysParams
 }
 
 type ListKeysResponseObject interface {
@@ -3346,7 +3529,8 @@ func (response ListKeys403JSONResponse) VisitListKeysResponse(w http.ResponseWri
 }
 
 type CreateKeyRequestObject struct {
-	Body *CreateKeyJSONRequestBody
+	Params CreateKeyParams
+	Body   *CreateKeyJSONRequestBody
 }
 
 type CreateKeyResponseObject interface {
@@ -3611,6 +3795,7 @@ func (response ChangePassword500JSONResponse) VisitChangePasswordResponse(w http
 }
 
 type ListPoliciesRequestObject struct {
+	Params ListPoliciesParams
 }
 
 type ListPoliciesResponseObject interface {
@@ -3646,7 +3831,8 @@ func (response ListPolicies401JSONResponse) VisitListPoliciesResponse(w http.Res
 }
 
 type CreatePolicyRequestObject struct {
-	Body *CreatePolicyJSONRequestBody
+	Params CreatePolicyParams
+	Body   *CreatePolicyJSONRequestBody
 }
 
 type CreatePolicyResponseObject interface {
@@ -3967,6 +4153,7 @@ func (response UpdatePolicy409JSONResponse) VisitUpdatePolicyResponse(w http.Res
 }
 
 type ListSecretsRequestObject struct {
+	Params ListSecretsParams
 }
 
 type ListSecretsResponseObject interface {
@@ -4030,7 +4217,8 @@ func (response ListSecrets503JSONResponse) VisitListSecretsResponse(w http.Respo
 }
 
 type CreateSecretRequestObject struct {
-	Body *CreateSecretJSONRequestBody
+	Params CreateSecretParams
+	Body   *CreateSecretJSONRequestBody
 }
 
 type CreateSecretResponseObject interface {
@@ -4292,6 +4480,41 @@ func (response UpdateSecret503JSONResponse) VisitUpdateSecretResponse(w http.Res
 	return err
 }
 
+type ListWorkspacesRequestObject struct {
+}
+
+type ListWorkspacesResponseObject interface {
+	VisitListWorkspacesResponse(w http.ResponseWriter) error
+}
+
+type ListWorkspaces200JSONResponse WorkspacesResponse
+
+func (response ListWorkspaces200JSONResponse) VisitListWorkspacesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkspaces401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListWorkspaces401JSONResponse) VisitListWorkspacesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type HealthzRequestObject struct {
 }
 
@@ -4423,6 +4646,9 @@ type StrictServerInterface interface {
 
 	// (PUT /api/v1/secrets/{id})
 	UpdateSecret(ctx context.Context, request UpdateSecretRequestObject) (UpdateSecretResponseObject, error)
+
+	// (GET /api/v1/workspaces)
+	ListWorkspaces(ctx context.Context, request ListWorkspacesRequestObject) (ListWorkspacesResponseObject, error)
 
 	// (GET /healthz)
 	Healthz(ctx context.Context, request HealthzRequestObject) (HealthzResponseObject, error)
@@ -4710,8 +4936,10 @@ func (sh *strictHandler) ListInstances(ctx *gin.Context, params ListInstancesPar
 }
 
 // CreateInstance operation middleware
-func (sh *strictHandler) CreateInstance(ctx *gin.Context) {
+func (sh *strictHandler) CreateInstance(ctx *gin.Context, params CreateInstanceParams) {
 	var request CreateInstanceRequestObject
+
+	request.Params = params
 
 	var body CreateInstanceJSONRequestBody
 	if err := ctx.ShouldBindJSON(&body); err != nil {
@@ -5051,8 +5279,10 @@ func (sh *strictHandler) InstancePrompt(ctx *gin.Context, id IdPath, params Inst
 }
 
 // ListKeys operation middleware
-func (sh *strictHandler) ListKeys(ctx *gin.Context) {
+func (sh *strictHandler) ListKeys(ctx *gin.Context, params ListKeysParams) {
 	var request ListKeysRequestObject
+
+	request.Params = params
 
 	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
 		return sh.ssi.ListKeys(ctx, request.(ListKeysRequestObject))
@@ -5075,8 +5305,10 @@ func (sh *strictHandler) ListKeys(ctx *gin.Context) {
 }
 
 // CreateKey operation middleware
-func (sh *strictHandler) CreateKey(ctx *gin.Context) {
+func (sh *strictHandler) CreateKey(ctx *gin.Context, params CreateKeyParams) {
 	var request CreateKeyRequestObject
+
+	request.Params = params
 
 	var body CreateKeyJSONRequestBody
 	if err := ctx.ShouldBindJSON(&body); err != nil {
@@ -5187,8 +5419,10 @@ func (sh *strictHandler) ChangePassword(ctx *gin.Context) {
 }
 
 // ListPolicies operation middleware
-func (sh *strictHandler) ListPolicies(ctx *gin.Context) {
+func (sh *strictHandler) ListPolicies(ctx *gin.Context, params ListPoliciesParams) {
 	var request ListPoliciesRequestObject
+
+	request.Params = params
 
 	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
 		return sh.ssi.ListPolicies(ctx, request.(ListPoliciesRequestObject))
@@ -5211,8 +5445,10 @@ func (sh *strictHandler) ListPolicies(ctx *gin.Context) {
 }
 
 // CreatePolicy operation middleware
-func (sh *strictHandler) CreatePolicy(ctx *gin.Context) {
+func (sh *strictHandler) CreatePolicy(ctx *gin.Context, params CreatePolicyParams) {
 	var request CreatePolicyRequestObject
+
+	request.Params = params
 
 	var body CreatePolicyJSONRequestBody
 	if err := ctx.ShouldBindJSON(&body); err != nil {
@@ -5358,8 +5594,10 @@ func (sh *strictHandler) UpdatePolicy(ctx *gin.Context, id IdPath) {
 }
 
 // ListSecrets operation middleware
-func (sh *strictHandler) ListSecrets(ctx *gin.Context) {
+func (sh *strictHandler) ListSecrets(ctx *gin.Context, params ListSecretsParams) {
 	var request ListSecretsRequestObject
+
+	request.Params = params
 
 	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
 		return sh.ssi.ListSecrets(ctx, request.(ListSecretsRequestObject))
@@ -5382,8 +5620,10 @@ func (sh *strictHandler) ListSecrets(ctx *gin.Context) {
 }
 
 // CreateSecret operation middleware
-func (sh *strictHandler) CreateSecret(ctx *gin.Context) {
+func (sh *strictHandler) CreateSecret(ctx *gin.Context, params CreateSecretParams) {
 	var request CreateSecretRequestObject
+
+	request.Params = params
 
 	var body CreateSecretJSONRequestBody
 	if err := ctx.ShouldBindJSON(&body); err != nil {
@@ -5464,6 +5704,30 @@ func (sh *strictHandler) UpdateSecret(ctx *gin.Context, id IdPath) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(UpdateSecretResponseObject); ok {
 		if err := validResponse.VisitUpdateSecretResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWorkspaces operation middleware
+func (sh *strictHandler) ListWorkspaces(ctx *gin.Context) {
+	var request ListWorkspacesRequestObject
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWorkspaces(ctx, request.(ListWorkspacesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWorkspaces")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ListWorkspacesResponseObject); ok {
+		if err := validResponse.VisitListWorkspacesResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

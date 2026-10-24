@@ -11,6 +11,7 @@ import (
 	"calcside/cmd/calcside/internal/api"
 	"calcside/cmd/calcside/internal/audit"
 	"calcside/cmd/calcside/internal/config"
+	"calcside/cmd/calcside/internal/service/access"
 	auditsvc "calcside/cmd/calcside/internal/service/audit"
 	"calcside/cmd/calcside/internal/service/catalog"
 	"calcside/cmd/calcside/internal/service/iam"
@@ -29,12 +30,12 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		wire.Bind(new(sandbox.AuditSink), new(*audit.Recorder)),
 		provideSandboxOptions, sandbox.New, vault.New,
 		wire.Bind(new(iam.SpecValidator), new(*sandbox.Service)),
-		wire.Bind(new(auditsvc.InstanceChecker), new(*sandbox.Service)),
 		wire.FieldsOf(new(config.Config), "MaxInstancesPerUser"),
+		access.New,
 		wire.Value(time.Now), iam.New,
 		policysvc.New, auditsvc.New, provideExtCatalog, catalog.New,
 		provideAuth, provideBasic, provideAnonymous, provideGoogle, provideWeb, provideArtifacts,
-		wire.Struct(new(api.Deps), "IAM", "Vault", "Policy", "Audit", "Catalog", "Sandbox", "Auth", "Basic", "Web", "Anonymous", "Previews"),
+		wire.Struct(new(api.Deps), "IAM", "Vault", "Policy", "Audit", "Catalog", "Sandbox", "Access", "Auth", "Basic", "Web", "Anonymous", "Previews"),
 		provideServer, wire.Struct(new(application), "*"),
 	)
 	return nil, nil, nil

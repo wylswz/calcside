@@ -9,6 +9,7 @@ package main
 import (
 	"calcside/cmd/calcside/internal/api"
 	"calcside/cmd/calcside/internal/config"
+	"calcside/cmd/calcside/internal/service/access"
 	"calcside/cmd/calcside/internal/service/audit"
 	"calcside/cmd/calcside/internal/service/catalog"
 	"calcside/cmd/calcside/internal/service/iam"
@@ -30,6 +31,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	if err != nil {
 		return nil, nil, err
 	}
+	checker := access.New(store)
 	serverLimits := provideLimits(cfg)
 	nodeConfig := provideNodeConfig(cfg, serverLimits)
 	node, cleanup2 := provideNode(nodeConfig)
@@ -46,7 +48,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		cleanup()
 		return nil, nil, err
 	}
-	service := vault.New(store, cipher)
+	service := vault.New(store, cipher, checker)
 	recorder, cleanup4 := provideRecorder(store)
 	registry := node.Registry
 	v, err := provideGlobalPolicies(cfg)
@@ -57,7 +59,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		cleanup()
 		return nil, nil, err
 	}
-	options, err := provideSandboxOptions(ctx, cfg, store, runtime, service, recorder, registry, serverLimits, v)
+	options, err := provideSandboxOptions(ctx, cfg, store, runtime, service, recorder, registry, serverLimits, v, checker)
 	if err != nil {
 		cleanup4()
 		cleanup3()
@@ -68,9 +70,9 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	sandboxService := sandbox.New(options)
 	int2 := cfg.MaxInstancesPerUser
 	v2 := _wireValue
-	iamService := iam.New(store, sandboxService, int2, v2)
-	policyService := policy.New(store)
-	auditService := audit.New(store, sandboxService)
+	iamService := iam.New(store, checker, sandboxService, int2, v2)
+	policyService := policy.New(store, checker)
+	auditService := audit.New(store, checker)
 	catalogProvider := provideExtCatalog(cfg)
 	catalogService := catalog.New(registry, catalogProvider)
 	authService := provideAuth(cfg, store)
@@ -106,6 +108,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		Audit:     auditService,
 		Catalog:   catalogService,
 		Sandbox:   sandboxService,
+		Access:    checker,
 		Auth:      authService,
 		Basic:     basicLogin,
 		Web:       fs,

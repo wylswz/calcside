@@ -23,6 +23,10 @@ type Actor struct {
 	// KeyMaxInstances bounds live instances for a restricted key (0 = the
 	// per-user limit only).
 	KeyMaxInstances int
+	// WorkspaceID is the workspace this request acts in: a key's own
+	// workspace, or the session workspace resolved per request
+	// (personal by default).
+	WorkspaceID string
 }
 
 // ViaKey reports whether the actor authenticated by API key.

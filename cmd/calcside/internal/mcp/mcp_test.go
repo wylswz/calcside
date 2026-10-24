@@ -14,6 +14,7 @@ import (
 	"calcside/cmd/calcside/internal/audit"
 	"calcside/cmd/calcside/internal/auth"
 	_ "calcside/cmd/calcside/internal/gormstore"
+	"calcside/cmd/calcside/internal/service/access"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/vault"
 	"calcside/internal/capability"
@@ -48,7 +49,8 @@ func newEnv(t *testing.T) (*httptest.Server, store.Store, *audit.Recorder, strin
 	t.Cleanup(mgr.StopReaper)
 	rec := audit.NewRecorder(st)
 	t.Cleanup(rec.Close)
-	sbx := sandbox.New(sandbox.Options{Store: st, Runtime: mgr, Secrets: vault.New(st, nil), Audit: rec, Registry: reg, Limits: limits, MaxInstancesPerUser: 10})
+	ac := access.New(st)
+	sbx := sandbox.New(sandbox.Options{Store: st, Runtime: mgr, Secrets: vault.New(st, nil, ac), Audit: rec, Registry: reg, Limits: limits, Access: ac, MaxInstancesPerUser: 10})
 
 	// Auth resolution against the store, as the api middleware does.
 	authsvc := auth.NewService(st, false)
@@ -68,10 +70,13 @@ func newEnv(t *testing.T) (*httptest.Server, store.Store, *audit.Recorder, strin
 	secret, restricted := auth.NewAPIKey(u.ID, "rk", nil)
 	restricted.Spec = []byte(spec)
 	restricted.MaxInstances = 2
+	restricted.WorkspaceID = store.PersonalWorkspaceID(u.ID)
 	if err := st.CreateAPIKey(context.Background(), restricted); err != nil {
 		t.Fatal(err)
 	}
 	secret2, full := auth.NewAPIKey(u.ID, "fk", nil)
+	// ws set below
+	full.WorkspaceID = store.PersonalWorkspaceID(u.ID)
 	if err := st.CreateAPIKey(context.Background(), full); err != nil {
 		t.Fatal(err)
 	}
@@ -193,6 +198,8 @@ func TestMCPTools(t *testing.T) {
 	s2, k2 := auth.NewAPIKey(u2.ID, "rk2", nil)
 	k2.Spec = []byte(`{"ttl_seconds":600,"capabilities":{"fs":{}}}`)
 	k2.MaxInstances = 1
+	// ws set below
+	k2.WorkspaceID = store.PersonalWorkspaceID(u2.ID)
 	if err := st.CreateAPIKey(context.Background(), k2); err != nil {
 		t.Fatal(err)
 	}
@@ -249,6 +256,8 @@ func TestMCPNoFS(t *testing.T) {
 	s3, k3 := auth.NewAPIKey(u.ID, "nofk", nil)
 	k3.Spec = []byte(`{"ttl_seconds":600}`)
 	k3.MaxInstances = 1
+	// ws set below
+	k3.WorkspaceID = store.PersonalWorkspaceID(u.ID)
 	if err := st.CreateAPIKey(context.Background(), k3); err != nil {
 		t.Fatal(err)
 	}

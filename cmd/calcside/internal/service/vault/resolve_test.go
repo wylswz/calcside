@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	_ "calcside/cmd/calcside/internal/gormstore"
+	"calcside/cmd/calcside/internal/service/access"
 	"calcside/cmd/calcside/internal/vaultcipher"
 	"calcside/internal/runtime"
 	"calcside/internal/store"
@@ -36,7 +37,7 @@ func testSvc(t *testing.T, cipher *vaultcipher.Cipher) (*Service, store.Store, *
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(st, cipher), st, u
+	return New(st, cipher, access.New(st)), st, u
 }
 
 func addVaultSecret(t *testing.T, st store.Store, c *vaultcipher.Cipher, u *store.User, name, value string, domains []string) {
@@ -46,7 +47,7 @@ func addVaultSecret(t *testing.T, st store.Store, c *vaultcipher.Cipher, u *stor
 		t.Fatal(err)
 	}
 	if err := st.CreateSecret(context.Background(), &store.Secret{
-		UserID: u.ID, Name: name, Ciphertext: ct, AllowedDomains: domains,
+		UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID), Name: name, Ciphertext: ct, AllowedDomains: domains,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +86,7 @@ func TestResolve(t *testing.T) {
 		{"neither", `{"secrets":{"T":{}}}`, "exactly one"},
 	}
 	for _, tc := range cases {
-		_, _, err := svc.Resolve(ctx, u.ID, parseSecrets(t, tc.spec))
+		_, _, err := svc.Resolve(ctx, store.PersonalWorkspaceID(u.ID), parseSecrets(t, tc.spec))
 		if tc.wantErr == "" {
 			if err != nil {
 				t.Errorf("%s: unexpected error %v", tc.name, err)
@@ -109,7 +110,7 @@ func TestResolveNarrowsUnrestrictedVaultSecret(t *testing.T) {
 	svc, st, u := testSvc(t, c)
 	addVaultSecret(t, st, c, u, "WIDE", "vault-secret-1", nil)
 
-	out, sanitized, err := svc.Resolve(ctx, u.ID,
+	out, sanitized, err := svc.Resolve(ctx, store.PersonalWorkspaceID(u.ID),
 		parseSecrets(t, `{"secrets":{"T":{"ref":"WIDE","allowed_domains":["a.example"]}}}`))
 	if err != nil {
 		t.Fatal(err)
@@ -128,12 +129,12 @@ func TestResolveNarrowsUnrestrictedVaultSecret(t *testing.T) {
 func TestResolveVaultRefWithoutKey(t *testing.T) {
 	ctx := context.Background()
 	svc, _, u := testSvc(t, nil)
-	_, _, err := svc.Resolve(ctx, u.ID, parseSecrets(t, `{"secrets":{"T":{"ref":"GH_TOKEN"}}}`))
+	_, _, err := svc.Resolve(ctx, store.PersonalWorkspaceID(u.ID), parseSecrets(t, `{"secrets":{"T":{"ref":"GH_TOKEN"}}}`))
 	if err == nil || !strings.Contains(err.Error(), "disabled") {
 		t.Fatalf("expected disabled error, got %v", err)
 	}
 	// Inline secrets still work without a cipher.
-	if _, _, err := svc.Resolve(ctx, u.ID,
+	if _, _, err := svc.Resolve(ctx, store.PersonalWorkspaceID(u.ID),
 		parseSecrets(t, `{"secrets":{"T":{"value":"v","allowed_domains":["x.com"]}}}`)); err != nil {
 		t.Fatalf("inline secret without key: %v", err)
 	}
@@ -148,7 +149,7 @@ func TestResolveSanitizesInlineValues(t *testing.T) {
 		`{"secrets":{"INL":{"value":"SUPERSECRETINLINE","allowed_domains":["x.com"]}},"env":{"A":"1"}}`), &spec); err != nil {
 		t.Fatal(err)
 	}
-	_, sanitized, err := svc.Resolve(ctx, u.ID, spec.Secrets)
+	_, sanitized, err := svc.Resolve(ctx, store.PersonalWorkspaceID(u.ID), spec.Secrets)
 	if err != nil {
 		t.Fatal(err)
 	}

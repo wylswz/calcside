@@ -385,6 +385,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description the caller's workspaces (sessions list all memberships; keys get their one workspace) */
+        get: operations["listWorkspaces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit": {
         parameters: {
             query?: never;
@@ -748,6 +765,15 @@ export interface components {
             spec?: components["schemas"]["InstanceSpec"];
             /** @description required 1..maxPerUser when spec is set; must be absent for full access */
             max_instances?: number;
+        };
+        Workspace: {
+            id: string;
+            name: string;
+            personal: boolean;
+            role: string;
+        };
+        WorkspacesResponse: {
+            workspaces?: components["schemas"]["Workspace"][];
         };
         CreatedKey: {
             key?: components["schemas"]["APIKey"];
@@ -1214,7 +1240,9 @@ export interface operations {
     };
     listKeys: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1236,7 +1264,9 @@ export interface operations {
     };
     createKey: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1290,6 +1320,7 @@ export interface operations {
         parameters: {
             query?: {
                 status?: components["schemas"]["InstanceStatus"];
+                workspace?: string;
             };
             header?: never;
             path?: never;
@@ -1312,7 +1343,9 @@ export interface operations {
     };
     createInstance: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1702,6 +1735,27 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
+    listWorkspaces: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description workspaces */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacesResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
     listAudit: {
         parameters: {
             query?: {
@@ -1709,6 +1763,7 @@ export interface operations {
                 exec_id?: string;
                 limit?: number;
                 before?: string;
+                workspace?: string;
             };
             header?: never;
             path?: never;
@@ -1730,7 +1785,9 @@ export interface operations {
     };
     listPolicies: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1751,7 +1808,9 @@ export interface operations {
     };
     createPolicy: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1884,7 +1943,9 @@ export interface operations {
     };
     listSecrets: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1907,7 +1968,9 @@ export interface operations {
     };
     createSecret: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;

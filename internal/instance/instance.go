@@ -361,6 +361,7 @@ func (m *Manager) exec(ctx context.Context, req *runtime.ExecRequest, in *inst) 
 		}
 		timeout = d
 	}
+	in.sess.SetActor(req.Actor.UserID, req.Actor.Email)
 	in.sess.Out.Reset()
 	res := m.eng.Exec(ctx, in.sess, req.ExecID, req.Code, timeout, in.spec.Limits.MaxSteps, in.sess.Out.String)
 	// Defense in depth: scrub any secret value that escaped into output.
@@ -492,18 +493,19 @@ func truncate(s string, max int) string {
 
 // withConsole arms the gate for a host-side console operation and hands
 // fn the gate plus the named capability's closer.
-func (m *Manager) withConsole(in *inst, cap types.CapabilityName, fn func(gate *capability.Gate, closer io.Closer) error) error {
+func (m *Manager) withConsole(in *inst, cap types.CapabilityName, actor runtime.Owner, fn func(gate *capability.Gate, closer io.Closer) error) error {
 	closer, ok := in.sess.Closers[cap]
 	if !ok {
 		return runtime.ErrNoCapability
 	}
 	in.sess.ExecMu.Lock()
 	defer in.sess.ExecMu.Unlock()
+	in.sess.SetActor(actor.UserID, actor.Email)
 	in.sess.Gate.Arm(capability.ExecContext{
 		ExecID:     "console",
 		InstanceID: in.id,
-		UserID:     in.owner.UserID,
-		UserEmail:  in.owner.Email,
+		UserID:     in.sess.UserID,
+		UserEmail:  in.sess.UserEmail,
 		Labels:     in.labels,
 	})
 	defer in.sess.Gate.Disarm()

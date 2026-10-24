@@ -170,7 +170,8 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		s := newStore(t)
 		u, _ := s.UpsertUserByEmail(ctx, "k@x.com", "", "")
 		k := &store.APIKey{UserID: u.ID, Name: "n", Prefix: "cs_abcdefg", Hash: "h1",
-			Spec: []byte(`{"capabilities":{"fs":{}}}`), MaxInstances: 2}
+			Spec: []byte(`{"capabilities":{"fs":{}}}`), MaxInstances: 2,
+			WorkspaceID: store.PersonalWorkspaceID(u.ID)}
 		if err := s.CreateAPIKey(ctx, k); err != nil {
 			t.Fatal(err)
 		}
@@ -181,7 +182,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		if string(got.Spec) != `{"capabilities":{"fs":{}}}` || got.MaxInstances != 2 {
 			t.Fatalf("key spec round-trip: %+v", got)
 		}
-		keys, err := s.ListAPIKeys(ctx, u.ID)
+		keys, err := s.ListAPIKeys(ctx, store.PersonalWorkspaceID(u.ID))
 		if err != nil || len(keys) != 1 {
 			t.Fatalf("ListAPIKeys: %v %d", err, len(keys))
 		}
@@ -232,7 +233,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		u, _ := s.UpsertUserByEmail(ctx, "i@x.com", "", "")
 		now := time.Now().UTC()
 		in := &store.Instance{
-			UserID: u.ID, Spec: []byte(`{"ttl_seconds":60}`),
+			UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID), Spec: []byte(`{"ttl_seconds":60}`),
 			Labels: map[string]string{"team": "x"}, Status: types.InstanceRunning,
 			CreatedAt: now, LastActiveAt: now, ExpiresAt: now.Add(time.Minute),
 		}
@@ -243,7 +244,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		if err != nil || got.Labels["team"] != "x" {
 			t.Fatalf("GetInstance: %v %+v", err, got)
 		}
-		lst, err := s.ListInstances(ctx, store.InstanceFilter{UserID: u.ID, Status: types.InstanceRunning})
+		lst, err := s.ListInstances(ctx, store.InstanceFilter{WorkspaceID: store.PersonalWorkspaceID(u.ID), Status: types.InstanceRunning})
 		if err != nil || len(lst) != 1 {
 			t.Fatalf("ListInstances: %v %d", err, len(lst))
 		}
@@ -253,15 +254,15 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		if err := s.UpdateInstance(ctx, in); err != nil {
 			t.Fatal(err)
 		}
-		lst, _ = s.ListInstances(ctx, store.InstanceFilter{UserID: u.ID, Status: types.InstanceRunning})
+		lst, _ = s.ListInstances(ctx, store.InstanceFilter{WorkspaceID: store.PersonalWorkspaceID(u.ID), Status: types.InstanceRunning})
 		if len(lst) != 0 {
 			t.Fatalf("expected 0 running, got %d", len(lst))
 		}
-		lst, _ = s.ListInstances(ctx, store.InstanceFilter{UserID: u.ID})
+		lst, _ = s.ListInstances(ctx, store.InstanceFilter{WorkspaceID: store.PersonalWorkspaceID(u.ID)})
 		if len(lst) != 1 {
 			t.Fatalf("expected 1 total, got %d", len(lst))
 		}
-		keyed := &store.Instance{UserID: u.ID, Spec: []byte(`{}`), Status: types.InstanceExpired,
+		keyed := &store.Instance{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID), Spec: []byte(`{}`), Status: types.InstanceExpired,
 			KeyID: "key_abc", CreatedAt: now, LastActiveAt: now, ExpiresAt: now.Add(time.Minute)}
 		if err := s.CreateInstance(ctx, keyed); err != nil {
 			t.Fatal(err)
@@ -270,15 +271,15 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		if kg.KeyID != "key_abc" {
 			t.Fatalf("KeyID round-trip: %+v", kg)
 		}
-		lst, _ = s.ListInstances(ctx, store.InstanceFilter{UserID: u.ID, KeyID: "key_abc"})
+		lst, _ = s.ListInstances(ctx, store.InstanceFilter{WorkspaceID: store.PersonalWorkspaceID(u.ID), KeyID: "key_abc"})
 		if len(lst) != 1 || lst[0].ID != keyed.ID {
 			t.Fatalf("ListInstances KeyID: %+v", lst)
 		}
-		lst, _ = s.ListInstances(ctx, store.InstanceFilter{UserID: u.ID, KeyID: "key_other"})
+		lst, _ = s.ListInstances(ctx, store.InstanceFilter{WorkspaceID: store.PersonalWorkspaceID(u.ID), KeyID: "key_other"})
 		if len(lst) != 0 {
 			t.Fatalf("ListInstances other KeyID: %+v", lst)
 		}
-		in2 := &store.Instance{UserID: u.ID, Spec: []byte(`{}`), Status: types.InstanceRunning,
+		in2 := &store.Instance{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID), Spec: []byte(`{}`), Status: types.InstanceRunning,
 			CreatedAt: now, LastActiveAt: now, ExpiresAt: now.Add(time.Minute)}
 		if err := s.CreateInstance(ctx, in2); err != nil {
 			t.Fatal(err)
@@ -318,7 +319,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 			t.Fatalf("expected lost: %+v", got)
 		}
 		// Binding is a claim: a second node loses, a lost row binds nobody.
-		in3 := &store.Instance{UserID: u.ID, Spec: []byte(`{}`), Status: types.InstanceRunning,
+		in3 := &store.Instance{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID), Spec: []byte(`{}`), Status: types.InstanceRunning,
 			CreatedAt: now, LastActiveAt: now, ExpiresAt: now.Add(time.Minute)}
 		if err := s.CreateInstance(ctx, in3); err != nil {
 			t.Fatal(err)
@@ -335,7 +336,8 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		s := newStore(t)
 		u, _ := s.UpsertUserByEmail(ctx, "e@x.com", "", "")
 		now := time.Now().UTC()
-		in := &store.Instance{UserID: u.ID, Spec: []byte(`{}`), Status: types.InstanceRunning,
+		in := &store.Instance{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID),
+			Spec: []byte(`{}`), Status: types.InstanceRunning,
 			CreatedAt: now, LastActiveAt: now, ExpiresAt: now.Add(time.Minute)}
 		if err := s.CreateInstance(ctx, in); err != nil {
 			t.Fatal(err)
@@ -368,25 +370,53 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 	t.Run("audit", func(t *testing.T) {
 		s := newStore(t)
 		now := time.Now().UTC()
+		// Workspace scoping goes through the instance's workspace, so
+		// the events need a real instance row to match.
+		u, _ := s.UpsertUserByEmail(ctx, "a@x.com", "", "")
+		ws := store.PersonalWorkspaceID(u.ID)
+		in := &store.Instance{UserID: u.ID, WorkspaceID: ws, Spec: []byte(`{}`), Status: types.InstanceRunning,
+			CreatedAt: now, LastActiveAt: now, ExpiresAt: now.Add(time.Minute)}
+		if err := s.CreateInstance(ctx, in); err != nil {
+			t.Fatal(err)
+		}
 		evs := []store.AuditEvent{
-			{Ts: now, UserID: "u1", InstanceID: "i1", ExecID: "e1", Capability: types.CapFS, Op: "read", Args: `{"path":"/work/a"}`, Decision: types.DecisionAllow},
-			{Ts: now.Add(time.Second), UserID: "u1", InstanceID: "i1", ExecID: "e2", Capability: types.CapNet, Op: "get", Args: `{}`, Decision: types.DecisionDeny, Phase: types.PhaseBefore, Reason: "nope"},
+			{Ts: now, UserID: "u1", InstanceID: in.ID, ExecID: "e1", Capability: types.CapFS, Op: "read", Args: `{"path":"/work/a"}`, Decision: types.DecisionAllow},
+			{Ts: now.Add(time.Second), UserID: "u1", InstanceID: in.ID, ExecID: "e2", Capability: types.CapNet, Op: "get", Args: `{}`, Decision: types.DecisionDeny, Phase: types.PhaseBefore, Reason: "nope"},
 		}
 		if err := s.InsertAuditEvents(ctx, evs); err != nil {
 			t.Fatal(err)
 		}
-		lst, err := s.ListAuditEvents(ctx, store.AuditFilter{UserID: "u1", Limit: 10})
+		lst, err := s.ListAuditEvents(ctx, store.AuditFilter{WorkspaceID: ws, Limit: 10})
 		if err != nil || len(lst) != 2 {
 			t.Fatalf("ListAuditEvents: %v %d", err, len(lst))
 		}
-		lst, _ = s.ListAuditEvents(ctx, store.AuditFilter{UserID: "u1", ExecID: "e1"})
+		lst, _ = s.ListAuditEvents(ctx, store.AuditFilter{WorkspaceID: "ws_other"})
+		if len(lst) != 0 {
+			t.Fatalf("other workspace: %d", len(lst))
+		}
+		lst, _ = s.ListAuditEvents(ctx, store.AuditFilter{WorkspaceID: ws, ExecID: "e1"})
 		if len(lst) != 1 || lst[0].Op != "read" {
 			t.Fatalf("exec filter: %+v", lst)
 		}
 		before := now.Add(500 * time.Millisecond)
-		lst, _ = s.ListAuditEvents(ctx, store.AuditFilter{UserID: "u1", Before: &before})
+		lst, _ = s.ListAuditEvents(ctx, store.AuditFilter{WorkspaceID: ws, Before: &before})
 		if len(lst) != 1 {
 			t.Fatalf("before filter: %d", len(lst))
+		}
+	})
+
+	t.Run("workspace id required", func(t *testing.T) {
+		s := newStore(t)
+		u, _ := s.UpsertUserByEmail(ctx, "w@x.com", "", "")
+		for name, fn := range map[string]func() error{
+			"instance": func() error { return s.CreateInstance(ctx, &store.Instance{UserID: u.ID}) },
+			"policy":   func() error { return s.CreatePolicy(ctx, &store.Policy{UserID: u.ID, Name: "p"}) },
+			"secret":   func() error { return s.CreateSecret(ctx, &store.Secret{UserID: u.ID, Name: "s"}) },
+			"key":      func() error { return s.CreateAPIKey(ctx, &store.APIKey{UserID: u.ID, Prefix: "cs_x", Hash: "h"}) },
+		} {
+			if err := fn(); err == nil {
+				t.Fatalf("%s without workspace: expected error", name)
+			}
 		}
 	})
 
@@ -394,7 +424,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		s := newStore(t)
 		u, _ := s.UpsertUserByEmail(ctx, "v@x.com", "", "")
 		now := time.Now().UTC()
-		bad := &store.Instance{UserID: u.ID, Spec: []byte(`{}`), Status: types.InstanceStatus("bogus"),
+		bad := &store.Instance{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID), Spec: []byte(`{}`), Status: types.InstanceStatus("bogus"),
 			CreatedAt: now, LastActiveAt: now, ExpiresAt: now.Add(time.Minute)}
 		if err := s.CreateInstance(ctx, bad); err == nil {
 			t.Fatal("CreateInstance accepted invalid status")
@@ -432,7 +462,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 	t.Run("policies", func(t *testing.T) {
 		s := newStore(t)
 		u, _ := s.UpsertUserByEmail(ctx, "p@x.com", "", "")
-		p := &store.Policy{UserID: u.ID, Name: "pol", Rego: "package calcside.hooks"}
+		p := &store.Policy{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID), Name: "pol", Rego: "package calcside.hooks"}
 		if err := s.CreatePolicy(ctx, p); err != nil {
 			t.Fatal(err)
 		}
@@ -440,15 +470,15 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		if err != nil || got.Name != "pol" {
 			t.Fatalf("GetPolicy: %v %+v", err, got)
 		}
-		dup := &store.Policy{UserID: u.ID, Name: "pol", Rego: "package calcside.hooks"}
+		dup := &store.Policy{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID), Name: "pol", Rego: "package calcside.hooks"}
 		if err := s.CreatePolicy(ctx, dup); !errors.Is(err, store.ErrConflict) {
 			t.Fatalf("duplicate name: want ErrConflict, got %v", err)
 		}
 		other, _ := s.UpsertUserByEmail(ctx, "p2@x.com", "", "")
-		if err := s.CreatePolicy(ctx, &store.Policy{UserID: other.ID, Name: "pol", Rego: "package calcside.hooks"}); err != nil {
+		if err := s.CreatePolicy(ctx, &store.Policy{UserID: other.ID, WorkspaceID: store.PersonalWorkspaceID(other.ID), Name: "pol", Rego: "package calcside.hooks"}); err != nil {
 			t.Fatalf("same name for another user: %v", err)
 		}
-		p2 := &store.Policy{UserID: u.ID, Name: "pol2", Rego: "package calcside.hooks"}
+		p2 := &store.Policy{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID), Name: "pol2", Rego: "package calcside.hooks"}
 		if err := s.CreatePolicy(ctx, p2); err != nil {
 			t.Fatal(err)
 		}
@@ -467,7 +497,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		if got.Rego != p.Rego {
 			t.Fatalf("UpdatePolicy: %+v", got)
 		}
-		lst, _ := s.ListPolicies(ctx, u.ID)
+		lst, _ := s.ListPolicies(ctx, store.PersonalWorkspaceID(u.ID))
 		if len(lst) != 1 {
 			t.Fatalf("ListPolicies: %d", len(lst))
 		}
@@ -483,7 +513,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		s := newStore(t)
 		u, _ := s.UpsertUserByEmail(ctx, "sec@x.com", "", "")
 		u2, _ := s.UpsertUserByEmail(ctx, "sec2@x.com", "", "")
-		sec := &store.Secret{UserID: u.ID, Name: "TOKEN", Ciphertext: []byte("sealed"), AllowedDomains: []string{"api.x.com"}}
+		sec := &store.Secret{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID), Name: "TOKEN", Ciphertext: []byte("sealed"), AllowedDomains: []string{"api.x.com"}}
 		if err := s.CreateSecret(ctx, sec); err != nil {
 			t.Fatal(err)
 		}
@@ -491,12 +521,12 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 			t.Fatal("expected generated id")
 		}
 		// duplicate name for same user -> ErrConflict
-		dup := &store.Secret{UserID: u.ID, Name: "TOKEN", Ciphertext: []byte("x"), AllowedDomains: []string{"a.com"}}
+		dup := &store.Secret{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID), Name: "TOKEN", Ciphertext: []byte("x"), AllowedDomains: []string{"a.com"}}
 		if err := s.CreateSecret(ctx, dup); !errors.Is(err, store.ErrConflict) {
 			t.Fatalf("expected ErrConflict, got %v", err)
 		}
 		// same name for another user is fine
-		other := &store.Secret{UserID: u2.ID, Name: "TOKEN", Ciphertext: []byte("y"), AllowedDomains: []string{"b.com"}}
+		other := &store.Secret{UserID: u2.ID, WorkspaceID: store.PersonalWorkspaceID(u2.ID), Name: "TOKEN", Ciphertext: []byte("y"), AllowedDomains: []string{"b.com"}}
 		if err := s.CreateSecret(ctx, other); err != nil {
 			t.Fatal(err)
 		}
@@ -504,14 +534,14 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		if err != nil || got.Name != "TOKEN" || string(got.Ciphertext) != "sealed" {
 			t.Fatalf("GetSecret: %v %+v", err, got)
 		}
-		got, err = s.GetSecretByName(ctx, u.ID, "TOKEN")
+		got, err = s.GetSecretByName(ctx, store.PersonalWorkspaceID(u.ID), "TOKEN")
 		if err != nil || got.ID != sec.ID {
 			t.Fatalf("GetSecretByName: %v %+v", err, got)
 		}
-		if _, err := s.GetSecretByName(ctx, u2.ID, "TOKEN"); err != nil {
+		if _, err := s.GetSecretByName(ctx, store.PersonalWorkspaceID(u2.ID), "TOKEN"); err != nil {
 			t.Fatalf("per-user GetSecretByName: %v", err)
 		}
-		lst, _ := s.ListSecrets(ctx, u.ID)
+		lst, _ := s.ListSecrets(ctx, store.PersonalWorkspaceID(u.ID))
 		if len(lst) != 1 || lst[0].Name != "TOKEN" {
 			t.Fatalf("ListSecrets: %+v", lst)
 		}

@@ -22,6 +22,7 @@ import (
 	"calcside/cmd/calcside/internal/artifact"
 	"calcside/cmd/calcside/internal/auth"
 	mcpapi "calcside/cmd/calcside/internal/mcp"
+	"calcside/cmd/calcside/internal/service/access"
 	auditsvc "calcside/cmd/calcside/internal/service/audit"
 	"calcside/cmd/calcside/internal/service/catalog"
 	"calcside/cmd/calcside/internal/service/iam"
@@ -42,6 +43,7 @@ type Deps struct {
 	Audit    *auditsvc.Service
 	Catalog  *catalog.Service
 	Sandbox  *sandbox.Service
+	Access   *access.Checker
 	Previews *ArtifactPreviews
 
 	Auth          *auth.Service
@@ -147,6 +149,7 @@ func Handler(d Deps) http.Handler {
 		{"Audit", d.Audit != nil},
 		{"Catalog", d.Catalog != nil},
 		{"Sandbox", d.Sandbox != nil},
+		{"Access", d.Access != nil},
 		{"Auth", d.Auth != nil},
 	} {
 		if !dep.ok {

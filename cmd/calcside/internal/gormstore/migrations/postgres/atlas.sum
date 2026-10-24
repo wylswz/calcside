@@ -1,6 +1,7 @@
-h1:bc86kVGKTlDA4rPuA9RWDHOJndCnbkojepMMv6KFaUw=
+h1:Ii4GrczQ/RGCG7eQP2yI06XhRcUIlqhMh6+bRsJvzSM=
 20261004092922_baseline.sql h1:9qEFyedMZDERN1yzv0aGKRZsWMqSDS8wMMvvwRa4p+o=
 20261005010219_add_user_is_admin.sql h1:MwLDuhS5qp8vabKzN9FJgGQ1jHJKb0UWSkZxLFoiyBU=
 20261005010732_add_local_user_credentials.sql h1:iHSyU3cS7ELeiKa/o7mmNrZ5hCa0RIgUsgRtqcXfaxY=
 20261024043012_add_execution_output.sql h1:YO/Xwf0UcTW3p7298NxZecr0lGPpEvKaekGU2hX3EYk=
 20261024054906_add_key_spec.sql h1:dnOoGIz0AkjP6LZq1Bb9pazdim6vz2Xq9s+vqVgJ+rk=
+20261024063140_add_workspaces.sql h1:5xh6DM4DT2ewnSQpvxOMzkaIfzvsAPGbubYrrolx7Bo=

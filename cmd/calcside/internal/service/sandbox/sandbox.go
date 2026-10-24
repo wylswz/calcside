@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"calcside/cmd/calcside/internal/service"
+	"calcside/cmd/calcside/internal/service/access"
 	"calcside/internal/capability"
 	"calcside/internal/runtime"
 	"calcside/internal/store"
@@ -63,6 +64,7 @@ type Options struct {
 	Audit    AuditSink
 	Registry *capability.Registry
 	Limits   capability.ServerLimits
+	Access   *access.Checker
 	// GlobalPolicies is the --policy-dir snapshot, loaded once at
 	// startup and shipped with every create request so that every node
 	// evaluates the same modules.
@@ -80,6 +82,7 @@ type Service struct {
 	audit      AuditSink
 	reg        *capability.Registry
 	limits     capability.ServerLimits
+	access     *access.Checker
 	globalPols map[string]string
 	maxPerUser int
 	now        func() time.Time
@@ -94,7 +97,7 @@ func New(o Options) *Service {
 	}
 	return &Service{
 		st: o.Store, rt: o.Runtime, secrets: o.Secrets, audit: o.Audit,
-		reg: o.Registry, limits: o.Limits, globalPols: o.GlobalPolicies,
+		reg: o.Registry, limits: o.Limits, access: o.Access, globalPols: o.GlobalPolicies,
 		maxPerUser: o.MaxInstancesPerUser, now: o.Now,
 	}
 }
@@ -123,33 +126,15 @@ func fail(err error) error {
 	}
 }
 
-// owned fetches the instance enforcing ownership: other users'
-// instances are not_found.
-//
-// This is a store read on the hot path. It is the natural place for the
-// instance cache once Redis lands — the row is immutable apart from
-// status and the sliding TTL.
-func (s *Service) owned(ctx context.Context, a service.Actor, id string) (*store.Instance, error) {
-	in, err := s.st.GetInstance(ctx, id)
-	if err != nil || in.UserID != a.UserID {
-		return nil, service.NotFound("instance not found")
-	}
-	if a.Restricted() && in.KeyID != a.KeyID {
-		return nil, service.NotFound("instance not found")
-	}
-	return in, nil
-}
-
-// CheckInstanceAccess enforces the instance ownership rule for callers
-// outside this package (audit scoping for restricted keys).
-func (s *Service) CheckInstanceAccess(ctx context.Context, a service.Actor, id string) error {
-	_, err := s.owned(ctx, a, id)
-	return err
+// owned fetches the instance enforcing access: invisible instances are
+// not_found. All ownership rules live in service/access.
+func (s *Service) owned(ctx context.Context, a service.Actor, id string, act access.Action) (*store.Instance, error) {
+	return s.access.Instance(ctx, a, id, act)
 }
 
 // running fetches an owned instance and requires it to be live.
-func (s *Service) running(ctx context.Context, a service.Actor, id string) (*store.Instance, error) {
-	in, err := s.owned(ctx, a, id)
+func (s *Service) running(ctx context.Context, a service.Actor, id string, act access.Action) (*store.Instance, error) {
+	in, err := s.owned(ctx, a, id, act)
 	if err != nil {
 		return nil, err
 	}
@@ -160,6 +145,13 @@ func (s *Service) running(ctx context.Context, a service.Actor, id string) (*sto
 }
 
 func owner(a service.Actor) runtime.Owner {
+	return runtime.Owner{UserID: a.UserID, Email: a.Email}
+}
+
+// actorOwner is the request actor carried to the node: audit events and
+// policy input name who acted, which may differ from the instance
+// creator in a shared workspace.
+func actorOwner(a service.Actor) runtime.Owner {
 	return runtime.Owner{UserID: a.UserID, Email: a.Email}
 }
 
@@ -175,10 +167,11 @@ func renewal(in *store.Instance, now time.Time) time.Time {
 }
 
 func (s *Service) List(ctx context.Context, a service.Actor, status types.InstanceStatus) ([]*store.Instance, error) {
-	f := store.InstanceFilter{UserID: a.UserID, Status: status}
-	if a.Restricted() {
-		f.KeyID = a.KeyID
+	f, err := s.access.Instances(ctx, a)
+	if err != nil {
+		return nil, err
 	}
+	f.Status = status
 	lst, err := s.st.ListInstances(ctx, f)
 	if err != nil {
 		return nil, service.Internal(err)
@@ -193,11 +186,11 @@ func (s *Service) List(ctx context.Context, a service.Actor, status types.Instan
 // spec, keyed by name; built-ins run natively. Unknown names fail: silently
 // creating an instance without a policy it asked for would fail open.
 // Compilation happens on the node; only sources cross the boundary.
-func (s *Service) selectedPolicies(ctx context.Context, userID string, names []string) (map[string]string, error) {
+func (s *Service) selectedPolicies(ctx context.Context, wsID string, names []string) (map[string]string, error) {
 	if len(names) == 0 {
 		return nil, nil
 	}
-	pols, err := s.st.ListPolicies(ctx, userID)
+	pols, err := s.st.ListPolicies(ctx, wsID)
 	if err != nil {
 		return nil, service.Internal(err)
 	}
@@ -245,11 +238,11 @@ func (s *Service) validateSpec(ctx context.Context, a service.Actor, rawSpec []b
 			}
 		}
 	}
-	resolved, sanitized, err := s.secrets.Resolve(ctx, a.UserID, spec.Secrets)
+	resolved, sanitized, err := s.secrets.Resolve(ctx, a.WorkspaceID, spec.Secrets)
 	if err != nil {
 		return nil, nil, nil, service.Errf(types.ErrCodeBadSpec, "%s", err.Error())
 	}
-	if _, err := s.selectedPolicies(ctx, a.UserID, spec.Policies); err != nil {
+	if _, err := s.selectedPolicies(ctx, a.WorkspaceID, spec.Policies); err != nil {
 		return nil, nil, nil, err
 	}
 	return spec, resolved, sanitized, nil
@@ -259,8 +252,8 @@ func (s *Service) validateSpec(ctx context.Context, a service.Actor, rawSpec []b
 // the binding — rolling the placement back if the store write fails.
 // ttl is the effective TTL: it is written into the stored spec so
 // renewal slides by the same amount the instance was created with.
-func (s *Service) place(ctx context.Context, a service.Actor, spec *runtime.Spec, resolved []runtime.Secret, secs map[string]runtime.SecretSpec, labels map[string]string, ttl int64, keyID string) (*store.Instance, error) {
-	userPols, err := s.selectedPolicies(ctx, a.UserID, spec.Policies)
+func (s *Service) place(ctx context.Context, a service.Actor, spec *runtime.Spec, resolved []runtime.Secret, secs map[string]runtime.SecretSpec, labels map[string]string, ttl int64, keyID, workspaceID string) (*store.Instance, error) {
+	userPols, err := s.selectedPolicies(ctx, a.WorkspaceID, spec.Policies)
 	if err != nil {
 		return nil, err
 	}
@@ -279,6 +272,7 @@ func (s *Service) place(ctx context.Context, a service.Actor, spec *runtime.Spec
 		LastActiveAt: now,
 		ExpiresAt:    now.Add(time.Duration(ttl) * time.Second),
 		KeyID:        keyID,
+		WorkspaceID:  workspaceID,
 	}
 
 	// Place first, persist second. A row marked running that no node
@@ -305,7 +299,7 @@ func (s *Service) place(ctx context.Context, a service.Actor, spec *runtime.Spec
 		meta.LeaseEpoch = cresp.Epoch
 	}
 	if err := s.st.CreateInstance(ctx, meta); err != nil {
-		_, _ = s.rt.Delete(ctx, &runtime.DeleteRequest{InstanceID: meta.ID, Owner: owner(a), Epoch: meta.LeaseEpoch})
+		_, _ = s.rt.Delete(ctx, &runtime.DeleteRequest{InstanceID: meta.ID, Owner: runtime.Owner{UserID: meta.UserID}, Epoch: meta.LeaseEpoch})
 		return nil, service.Internal(err)
 	}
 	return meta, nil
@@ -317,6 +311,9 @@ func (s *Service) Create(ctx context.Context, a service.Actor, rawSpec []byte) (
 	if a.Restricted() {
 		return s.createRestricted(ctx, a, rawSpec)
 	}
+	if err := s.access.Workspace(ctx, a, a.WorkspaceID, access.Run); err != nil {
+		return nil, err
+	}
 	spec, resolved, secs, err := s.validateSpec(ctx, a, rawSpec, false)
 	if err != nil {
 		return nil, err
@@ -324,7 +321,7 @@ func (s *Service) Create(ctx context.Context, a service.Actor, rawSpec []byte) (
 	if err := s.checkUserLimit(ctx, a); err != nil {
 		return nil, err
 	}
-	return s.place(ctx, a, spec, resolved, secs, spec.Labels, spec.TTLSeconds, "")
+	return s.place(ctx, a, spec, resolved, secs, spec.Labels, spec.TTLSeconds, "", a.WorkspaceID)
 }
 
 // checkUserLimit enforces the cluster-wide live-instance quota.
@@ -332,7 +329,7 @@ func (s *Service) checkUserLimit(ctx context.Context, a service.Actor) error {
 	if s.maxPerUser <= 0 {
 		return nil
 	}
-	live, err := s.st.ListInstances(ctx, store.InstanceFilter{UserID: a.UserID, Status: types.InstanceRunning})
+	live, err := s.st.ListInstances(ctx, store.InstanceFilter{WorkspaceID: a.WorkspaceID, UserID: a.UserID, Status: types.InstanceRunning})
 	if err != nil {
 		return service.Internal(err)
 	}
@@ -357,6 +354,9 @@ func (s *Service) createRestricted(ctx context.Context, a service.Actor, rawSpec
 			return nil, service.Forbidden("a restricted key's create accepts only labels and ttl_seconds")
 		}
 	}
+	if err := s.access.Workspace(ctx, a, a.WorkspaceID, access.Run); err != nil {
+		return nil, err
+	}
 	spec, resolved, secs, err := s.validateSpec(ctx, a, a.KeySpec, false)
 	if err != nil {
 		return nil, err
@@ -371,7 +371,7 @@ func (s *Service) createRestricted(ctx context.Context, a service.Actor, rawSpec
 	if err := s.checkUserLimit(ctx, a); err != nil {
 		return nil, err
 	}
-	live, err := s.st.ListInstances(ctx, store.InstanceFilter{UserID: a.UserID, Status: types.InstanceRunning, KeyID: a.KeyID})
+	live, err := s.st.ListInstances(ctx, store.InstanceFilter{WorkspaceID: a.WorkspaceID, Status: types.InstanceRunning, KeyID: a.KeyID})
 	if err != nil {
 		return nil, service.Internal(err)
 	}
@@ -385,19 +385,19 @@ func (s *Service) createRestricted(ctx context.Context, a service.Actor, rawSpec
 	for k, v := range spec.Labels {
 		labels[k] = v
 	}
-	return s.place(ctx, a, spec, resolved, secs, labels, ttl, a.KeyID)
+	return s.place(ctx, a, spec, resolved, secs, labels, ttl, a.KeyID, a.WorkspaceID)
 }
 
 func (s *Service) Get(ctx context.Context, a service.Actor, id string) (*store.Instance, error) {
-	return s.owned(ctx, a, id)
+	return s.owned(ctx, a, id, access.View)
 }
 
 func (s *Service) Delete(ctx context.Context, a service.Actor, id string) error {
-	in, err := s.owned(ctx, a, id)
+	in, err := s.owned(ctx, a, id, access.Run)
 	if err != nil {
 		return err
 	}
-	if _, err := s.rt.Delete(ctx, &runtime.DeleteRequest{InstanceID: in.ID, Owner: owner(a), Epoch: in.LeaseEpoch}); err != nil {
+	if _, err := s.rt.Delete(ctx, &runtime.DeleteRequest{InstanceID: in.ID, Owner: runtime.Owner{UserID: in.UserID}, Epoch: in.LeaseEpoch}); err != nil {
 		// A node that no longer knows the instance is not a client
 		// error: settle the row either way.
 		if !errors.Is(err, runtime.ErrNotFound) {
@@ -419,14 +419,14 @@ func (s *Service) settle(ctx context.Context, in *store.Instance, status types.I
 }
 
 func (s *Service) Keepalive(ctx context.Context, a service.Actor, id string) (*store.Instance, error) {
-	in, err := s.running(ctx, a, id)
+	in, err := s.running(ctx, a, id, access.Run)
 	if err != nil {
 		return nil, err
 	}
 	now := s.now().UTC()
 	deadline := renewal(in, now)
 	if _, err := s.rt.Keepalive(ctx, &runtime.KeepaliveRequest{
-		InstanceID: in.ID, Owner: owner(a), RenewedExpiresAt: deadline, Epoch: in.LeaseEpoch,
+		InstanceID: in.ID, Owner: runtime.Owner{UserID: in.UserID}, RenewedExpiresAt: deadline, Epoch: in.LeaseEpoch,
 	}); err != nil {
 		return nil, fail(err)
 	}
@@ -441,7 +441,7 @@ func (s *Service) Keepalive(ctx context.Context, a service.Actor, id string) (*s
 // Exec runs code on a live, owned instance and persists the execution
 // record, the audit batch, and the renewed TTL.
 func (s *Service) Exec(ctx context.Context, a service.Actor, id, code string, timeout time.Duration) (*ExecView, error) {
-	in, err := s.running(ctx, a, id)
+	in, err := s.running(ctx, a, id, access.Run)
 	if err != nil {
 		return nil, err
 	}
@@ -515,7 +515,7 @@ func capStored(s string) (string, bool) {
 }
 
 func (s *Service) ListExecutions(ctx context.Context, a service.Actor, instanceID string, limit int) ([]*store.Execution, error) {
-	in, err := s.owned(ctx, a, instanceID)
+	in, err := s.owned(ctx, a, instanceID, access.View)
 	if err != nil {
 		return nil, err
 	}
@@ -532,15 +532,7 @@ func (s *Service) ListExecutions(ctx context.Context, a service.Actor, instanceI
 // GetExecution returns one execution with its full code. Ownership is
 // enforced via the execution's user_id: other users' execs are 404.
 func (s *Service) GetExecution(ctx context.Context, a service.Actor, id string) (*store.Execution, error) {
-	ex, err := s.st.GetExecution(ctx, id)
-	if err != nil || ex.UserID != a.UserID {
-		return nil, service.NotFound("execution not found")
-	}
-	// Restricted keys may only read executions of their own instances.
-	if _, err := s.owned(ctx, a, ex.InstanceID); err != nil {
-		return nil, service.NotFound("execution not found")
-	}
-	return ex, nil
+	return s.access.Execution(ctx, a, id)
 }
 
 // ExpireDue transitions instances whose sliding TTL elapsed and tells

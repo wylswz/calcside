@@ -207,3 +207,26 @@ y = "s3cr3t" + "a" * (1 << 20)`)
 		t.Fatal("oversized value should be omitted without exposing a secret prefix")
 	}
 }
+
+// An actor different from the owner executes: the audit batch names the
+// actor while the ownership check still compares Owner to the creator.
+func TestExecActorDistinctFromOwner(t *testing.T) {
+	now := time.Now()
+	n := newNode(t, Options{Limits: defaultLimits()}, &now)
+	id := n.mustCreate(`{"capabilities":{"fs":{}}}`)
+
+	actor := runtime.Owner{UserID: "usr_actor", Email: "actor@x.com"}
+	resp, err := n.m.Exec(context.Background(), &runtime.ExecRequest{
+		InstanceID: id, Owner: n.owner, Actor: actor,
+		ExecID: "exe_actor01", Code: "fs.write('/work/a.txt','hi')",
+		RenewedExpiresAt: now.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range resp.Audit.Events {
+		if ev.UserID != actor.UserID {
+			t.Fatalf("audit event user = %q, want actor %q", ev.UserID, actor.UserID)
+		}
+	}
+}

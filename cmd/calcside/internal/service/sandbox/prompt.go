@@ -7,6 +7,7 @@ import (
 
 	promptpkg "calcside/cmd/calcside/internal/prompt"
 	"calcside/cmd/calcside/internal/service"
+	"calcside/cmd/calcside/internal/service/access"
 	"calcside/internal/runtime"
 	"calcside/internal/types"
 )
@@ -28,17 +29,17 @@ type PromptView struct {
 func (s *Service) Prompt(ctx context.Context, a service.Actor, id, toolPrefix string) (*PromptView, error) {
 	// Ownership is checked before the argument so that probing for
 	// another user's instance cannot be distinguished by the error.
-	if _, err := s.owned(ctx, a, id); err != nil {
+	if _, err := s.owned(ctx, a, id, access.View); err != nil {
 		return nil, err
 	}
 	if !toolPrefixRe.MatchString(toolPrefix) {
 		return nil, service.BadRequest("invalid tool_prefix")
 	}
-	in, err := s.running(ctx, a, id)
+	in, err := s.running(ctx, a, id, access.View)
 	if err != nil {
 		return nil, err
 	}
-	data, err := s.rt.Prompt(ctx, &runtime.PromptRequest{InstanceID: in.ID, Owner: owner(a), Epoch: in.LeaseEpoch})
+	data, err := s.rt.Prompt(ctx, &runtime.PromptRequest{InstanceID: in.ID, Owner: runtime.Owner{UserID: in.UserID}, Actor: actorOwner(a), Epoch: in.LeaseEpoch})
 	if err != nil {
 		return nil, fail(err)
 	}

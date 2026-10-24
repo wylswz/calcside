@@ -33,7 +33,7 @@ func (m *Manager) Browse(ctx context.Context, req *runtime.BrowseRequest) (*runt
 	var stat capfs.Entry
 	var listing []capfs.Entry
 	var content string
-	opErr := m.withConsole(in, types.CapFS, func(gate *capability.Gate, c io.Closer) error {
+	opErr := m.withConsole(in, types.CapFS, req.Actor, func(gate *capability.Gate, c io.Closer) error {
 		fc, ok := c.(*capfs.Closer)
 		if !ok {
 			return errors.New("bad fs binding")

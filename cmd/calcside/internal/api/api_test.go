@@ -15,6 +15,7 @@ import (
 	"calcside/cmd/calcside/internal/audit"
 	"calcside/cmd/calcside/internal/auth"
 	_ "calcside/cmd/calcside/internal/gormstore"
+	"calcside/cmd/calcside/internal/service/access"
 	auditsvc "calcside/cmd/calcside/internal/service/audit"
 	"calcside/cmd/calcside/internal/service/catalog"
 	"calcside/cmd/calcside/internal/service/iam"
@@ -106,10 +107,11 @@ func newArtifactEnv(t *testing.T, cipher *vaultcipher.Cipher, global map[string]
 	})
 	e.mgr = mgr
 	t.Cleanup(mgr.StopReaper)
-	vaultSvc := vault.New(st, cipher)
+	ac := access.New(st)
+	vaultSvc := vault.New(st, cipher, ac)
 	e.sbx = sandbox.New(sandbox.Options{
 		Store: st, Runtime: mgr, Secrets: vaultSvc, Audit: rec,
-		Registry: reg, Limits: limits, MaxInstancesPerUser: 10, GlobalPolicies: global,
+		Registry: reg, Limits: limits, Access: ac, MaxInstancesPerUser: 10, GlobalPolicies: global,
 	})
 	previews, err := NewArtifactPreviews(cfg, e.sbx)
 	if err != nil {
@@ -118,9 +120,9 @@ func newArtifactEnv(t *testing.T, cipher *vaultcipher.Cipher, global map[string]
 	t.Cleanup(previews.Close)
 	svc := auth.NewService(st, false)
 	h := Handler(Deps{
-		IAM: iam.New(st, e.sbx, 10, nil), Vault: vaultSvc,
-		Policy: policysvc.New(st), Audit: auditsvc.New(st, e.sbx),
-		Catalog: catalog.New(reg, nil), Sandbox: e.sbx,
+		IAM: iam.New(st, ac, e.sbx, 10, nil), Vault: vaultSvc,
+		Policy: policysvc.New(st, ac), Audit: auditsvc.New(st, ac),
+		Catalog: catalog.New(reg, nil), Sandbox: e.sbx, Access: ac,
 		Auth: svc, Previews: previews,
 	})
 	srv := httptest.NewServer(h)

@@ -149,6 +149,10 @@ paths:
       operationId: listKeys
       tags: [keys]
       description: Session or anonymous (dev) auth only — API keys get 403.
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
       responses:
         '200':
           description: the user's API keys
@@ -161,6 +165,10 @@ paths:
     post:
       operationId: createKey
       tags: [keys]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
       description: Session or anonymous (dev) auth only — API keys get 403.
       requestBody:
         required: true
@@ -202,6 +210,9 @@ paths:
         - name: status
           in: query
           schema: { $ref: '#/components/schemas/InstanceStatus' }
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
       responses:
         '200':
           description: the user's instances
@@ -214,6 +225,10 @@ paths:
     post:
       operationId: createInstance
       tags: [instances]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
       requestBody:
         required: true
         content:
@@ -507,6 +522,20 @@ paths:
                 $ref: '#/components/schemas/ExecutionDetail'
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
+  /api/v1/workspaces:
+    get:
+      operationId: listWorkspaces
+      tags: [workspaces]
+      description: the caller's workspaces (sessions list all memberships; keys get their one workspace)
+      responses:
+        '200':
+          description: workspaces
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspacesResponse'
+        '401': { $ref: '#/components/responses/Error' }
+
   /api/v1/audit:
     get:
       operationId: listAudit
@@ -524,6 +553,9 @@ paths:
         - name: before
           in: query
           schema: { type: string, format: date-time }
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
       responses:
         '200':
           description: audit events
@@ -536,6 +568,10 @@ paths:
     get:
       operationId: listPolicies
       tags: [policies]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
       responses:
         '200':
           description: Built-in policies and the user's Rego policies
@@ -547,6 +583,10 @@ paths:
     post:
       operationId: createPolicy
       tags: [policies]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
       requestBody:
         required: true
         content:
@@ -636,6 +676,10 @@ paths:
     get:
       operationId: listSecrets
       tags: [secrets]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
       description: Session or anonymous (dev) auth only — API keys get 403. Never returns values.
       responses:
         '200':
@@ -650,6 +694,10 @@ paths:
     post:
       operationId: createSecret
       tags: [secrets]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
       description: Session or anonymous (dev) auth only — API keys get 403. Value is write-only.
       requestBody:
         required: true
@@ -1041,6 +1089,20 @@ components:
         max_instances:
           type: integer
           description: required 1..maxPerUser when spec is set; must be absent for full access
+    Workspace:
+      type: object
+      required: [id, name, personal, role]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        personal: { type: boolean }
+        role: { type: string }
+    WorkspacesResponse:
+      type: object
+      properties:
+        workspaces:
+          type: array
+          items: { $ref: '#/components/schemas/Workspace' }
     CreatedKey:
       type: object
       properties:

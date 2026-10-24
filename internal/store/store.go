@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -24,6 +25,7 @@ type IDPrefix string
 // ID prefixes.
 const (
 	PrefixUser      IDPrefix = "usr_"
+	PrefixWorkspace IDPrefix = "ws_"
 	PrefixAPIKey    IDPrefix = "key_"
 	PrefixInstance  IDPrefix = "ins_"
 	PrefixExecution IDPrefix = "exe_"
@@ -43,6 +45,38 @@ func NewID(prefix IDPrefix) string {
 		b[i] = alphabet[int(raw[i])%len(alphabet)]
 	}
 	return string(prefix) + string(b)
+}
+
+// PersonalWorkspaceID is the deterministic personal workspace for a
+// user: ws_ + the user id's unique tail.
+func PersonalWorkspaceID(userID string) string {
+	return string(PrefixWorkspace) + strings.TrimPrefix(userID, string(PrefixUser))
+}
+
+type Workspace struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Personal  bool      `json:"personal"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Member roles, weakest to strongest.
+const (
+	RoleViewer = "viewer"
+	RoleEditor = "editor"
+	RoleOwner  = "owner"
+)
+
+type Member struct {
+	WorkspaceID string `json:"workspace_id"`
+	UserID      string `json:"user_id"`
+	Role        string `json:"role"`
+}
+
+// Membership is one workspace a user belongs to, with their role.
+type Membership struct {
+	Workspace *Workspace `json:"workspace"`
+	Role      string     `json:"role"`
 }
 
 type User struct {
@@ -72,6 +106,7 @@ type APIKey struct {
 	// access. MaxInstances bounds live instances for a restricted key.
 	Spec         json.RawMessage `json:"-"`
 	MaxInstances int             `json:"-"`
+	WorkspaceID  string          `json:"-"`
 }
 
 type Session struct {
@@ -101,13 +136,17 @@ type Instance struct {
 	// KeyID is the restricted API key that created the instance; empty
 	// for console sessions and full-access keys.
 	KeyID string `json:"-"`
+	// WorkspaceID owns the instance; user_id stays "created by".
+	WorkspaceID string `json:"-"`
 }
 
-// InstanceFilter selects instances by owner, status and creating key.
+// InstanceFilter selects instances by workspace, creating user
+// (per-user quota only), status and creating key.
 type InstanceFilter struct {
-	UserID string
-	Status types.InstanceStatus
-	KeyID  string
+	WorkspaceID string
+	UserID      string
+	Status      types.InstanceStatus
+	KeyID       string
 }
 
 type Execution struct {
@@ -148,26 +187,29 @@ type AuditEvent struct {
 }
 
 type AuditFilter struct {
-	UserID     string
-	InstanceID string
-	ExecID     string
-	Limit      int
-	Before     *time.Time
+	// WorkspaceID scopes via instance_id IN (instances of the workspace).
+	WorkspaceID string
+	InstanceID  string
+	ExecID      string
+	Limit       int
+	Before      *time.Time
 }
 
 type Policy struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	Name      string    `json:"name"`
-	Rego      string    `json:"rego"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	UserID      string    `json:"user_id"`
+	WorkspaceID string    `json:"-"`
+	Name        string    `json:"name"`
+	Rego        string    `json:"rego"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // Secret is a vault secret. Ciphertext is never serialized by the API.
 type Secret struct {
 	ID             string    `json:"id"`
 	UserID         string    `json:"user_id"`
+	WorkspaceID    string    `json:"-"`
 	Name           string    `json:"name"`
 	Ciphertext     []byte    `json:"-"`
 	AllowedDomains []string  `json:"allowed_domains"`
@@ -184,8 +226,9 @@ type Store interface {
 	GetUser(ctx context.Context, id string) (*User, error)
 
 	CreateAPIKey(ctx context.Context, k *APIKey) error
-	ListAPIKeys(ctx context.Context, userID string) ([]*APIKey, error)
+	ListAPIKeys(ctx context.Context, workspaceID string) ([]*APIKey, error)
 	GetAPIKeyByHash(ctx context.Context, hash string) (*APIKey, error)
+	GetAPIKey(ctx context.Context, id string) (*APIKey, error)
 	RevokeAPIKey(ctx context.Context, userID, id string) error
 	TouchAPIKey(ctx context.Context, id string, at time.Time) error
 
@@ -225,16 +268,22 @@ type Store interface {
 
 	CreatePolicy(ctx context.Context, p *Policy) error
 	GetPolicy(ctx context.Context, id string) (*Policy, error)
-	ListPolicies(ctx context.Context, userID string) ([]*Policy, error)
+	ListPolicies(ctx context.Context, workspaceID string) ([]*Policy, error)
 	UpdatePolicy(ctx context.Context, p *Policy) error
 	DeletePolicy(ctx context.Context, id string) error
 
 	CreateSecret(ctx context.Context, s *Secret) error
 	GetSecret(ctx context.Context, id string) (*Secret, error)
-	GetSecretByName(ctx context.Context, userID, name string) (*Secret, error)
-	ListSecrets(ctx context.Context, userID string) ([]*Secret, error)
+	GetSecretByName(ctx context.Context, workspaceID, name string) (*Secret, error)
+	ListSecrets(ctx context.Context, workspaceID string) ([]*Secret, error)
 	UpdateSecret(ctx context.Context, s *Secret) error
 	DeleteSecret(ctx context.Context, id string) error
+
+	CreateWorkspace(ctx context.Context, w *Workspace) error
+	GetWorkspace(ctx context.Context, id string) (*Workspace, error)
+	AddMember(ctx context.Context, m *Member) error
+	GetMember(ctx context.Context, workspaceID, userID string) (*Member, error)
+	ListMemberships(ctx context.Context, userID string) ([]*Membership, error)
 
 	Close() error
 }

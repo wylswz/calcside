@@ -12,6 +12,7 @@ import (
 	"calcside/cmd/calcside/internal/api/gen"
 	"calcside/cmd/calcside/internal/auth"
 	"calcside/cmd/calcside/internal/service"
+	"calcside/cmd/calcside/internal/service/access"
 	auditsvc "calcside/cmd/calcside/internal/service/audit"
 	"calcside/internal/types"
 )
@@ -68,6 +69,24 @@ func needAuth(ctx context.Context) (*auth.Principal, *rawJSON) {
 // actorOf maps the transport principal onto the service-layer actor.
 func actorOf(p *auth.Principal) service.Actor {
 	return p.Actor()
+}
+
+// actor resolves the actor for a request that accepts a workspace
+// parameter: sessions may act in any workspace they belong to; a key is
+// fixed to its own workspace.
+func (s *strictImpl) actor(ctx context.Context, p *auth.Principal, ws *string) (service.Actor, error) {
+	a := p.Actor()
+	if ws == nil || *ws == "" || *ws == a.WorkspaceID {
+		return a, nil
+	}
+	if a.ViaKey() {
+		return a, service.Forbidden("a key belongs to one workspace")
+	}
+	a.WorkspaceID = *ws
+	if err := s.d.Access.Workspace(ctx, a, *ws, access.View); err != nil {
+		return a, err
+	}
+	return a, nil
 }
 
 // Per-operation response wrappers (generated files are never edited).
@@ -299,15 +318,44 @@ func (s *strictImpl) ListExtensions(ctx context.Context, _ gen.ListExtensionsReq
 	return listExtensionsResp{rawJSON{http.StatusOK, dto.ExtensionsEnvelope(s.d.Catalog.Extensions())}}, nil
 }
 
+// --- workspaces ---
+
+type listWorkspacesResp struct{ rawJSON }
+
+func (r listWorkspacesResp) VisitListWorkspacesResponse(w http.ResponseWriter) error {
+	return r.write(w)
+}
+
+func (s *strictImpl) ListWorkspaces(ctx context.Context, _ gen.ListWorkspacesRequestObject) (gen.ListWorkspacesResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return listWorkspacesResp{*e}, nil
+	}
+	ms, err := s.d.Access.Memberships(ctx, actorOf(p))
+	if err != nil {
+		return listWorkspacesResp{fail(err)}, nil
+	}
+	out := make([]gen.Workspace, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, gen.Workspace{Id: m.Workspace.ID, Name: m.Workspace.Name, Personal: m.Workspace.Personal, Role: m.Role})
+	}
+	return listWorkspacesResp{rawJSON{200, gen.WorkspacesResponse{Workspaces: &out}}}, nil
+}
+
 // --- api keys (session only) ---
 
-func (s *strictImpl) ListKeys(ctx context.Context, _ gen.ListKeysRequestObject) (gen.ListKeysResponseObject, error) {
+func (s *strictImpl) ListKeys(ctx context.Context, req gen.ListKeysRequestObject) (gen.ListKeysResponseObject, error) {
 	ctx = realCtx(ctx)
 	p, e := needAuth(ctx)
 	if e != nil {
 		return listKeysResp{*e}, nil
 	}
-	keys, err := s.d.IAM.ListKeys(ctx, actorOf(p))
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return listKeysResp{fail(err)}, nil
+	}
+	keys, err := s.d.IAM.ListKeys(ctx, a)
 	if err != nil {
 		return listKeysResp{fail(err)}, nil
 	}
@@ -338,7 +386,11 @@ func (s *strictImpl) CreateKey(ctx context.Context, req gen.CreateKeyRequestObje
 			maxInstances = *req.Body.MaxInstances
 		}
 	}
-	key, secret, err := s.d.IAM.CreateKey(ctx, actorOf(p), name, expiresIn, spec, maxInstances)
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return createKeyResp{fail(err)}, nil
+	}
+	key, secret, err := s.d.IAM.CreateKey(ctx, a, name, expiresIn, spec, maxInstances)
 	if err != nil {
 		return createKeyResp{fail(err)}, nil
 	}
@@ -372,7 +424,11 @@ func (s *strictImpl) ListInstances(ctx context.Context, req gen.ListInstancesReq
 			return listInstancesResp{fail(service.BadRequest("invalid status filter"))}, nil
 		}
 	}
-	lst, err := s.d.Sandbox.List(ctx, actorOf(p), status)
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return listInstancesResp{fail(err)}, nil
+	}
+	lst, err := s.d.Sandbox.List(ctx, a, status)
 	if err != nil {
 		return listInstancesResp{fail(err)}, nil
 	}
@@ -393,7 +449,11 @@ func (s *strictImpl) CreateInstance(ctx context.Context, req gen.CreateInstanceR
 		}
 		raw = b
 	}
-	meta, err := s.d.Sandbox.Create(ctx, actorOf(p), raw)
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return createInstanceResp{fail(err)}, nil
+	}
+	meta, err := s.d.Sandbox.Create(ctx, a, raw)
 	if err != nil {
 		return createInstanceResp{fail(err)}, nil
 	}
@@ -572,7 +632,11 @@ func (s *strictImpl) ListAudit(ctx context.Context, req gen.ListAuditRequestObje
 		b := req.Params.Before.UTC()
 		f.Before = &b
 	}
-	lst, err := s.d.Audit.List(ctx, actorOf(p), f)
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return listAuditResp{fail(err)}, nil
+	}
+	lst, err := s.d.Audit.List(ctx, a, f)
 	if err != nil {
 		return listAuditResp{fail(err)}, nil
 	}
@@ -581,13 +645,17 @@ func (s *strictImpl) ListAudit(ctx context.Context, req gen.ListAuditRequestObje
 
 // --- policies ---
 
-func (s *strictImpl) ListPolicies(ctx context.Context, _ gen.ListPoliciesRequestObject) (gen.ListPoliciesResponseObject, error) {
+func (s *strictImpl) ListPolicies(ctx context.Context, req gen.ListPoliciesRequestObject) (gen.ListPoliciesResponseObject, error) {
 	ctx = realCtx(ctx)
 	p, e := needAuth(ctx)
 	if e != nil {
 		return listPoliciesResp{*e}, nil
 	}
-	lst, err := s.d.Policy.List(ctx, actorOf(p))
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return listPoliciesResp{fail(err)}, nil
+	}
+	lst, err := s.d.Policy.List(ctx, a)
 	if err != nil {
 		return listPoliciesResp{fail(err)}, nil
 	}
@@ -604,7 +672,11 @@ func (s *strictImpl) CreatePolicy(ctx context.Context, req gen.CreatePolicyReque
 	if req.Body != nil {
 		name, rego = req.Body.Name, req.Body.Rego
 	}
-	pol, err := s.d.Policy.Create(ctx, actorOf(p), name, rego)
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return createPolicyResp{fail(err)}, nil
+	}
+	pol, err := s.d.Policy.Create(ctx, a, name, rego)
 	if err != nil {
 		return createPolicyResp{fail(err)}, nil
 	}
@@ -670,13 +742,17 @@ func (s *strictImpl) DeletePolicy(ctx context.Context, req gen.DeletePolicyReque
 
 // --- secrets vault (session only) ---
 
-func (s *strictImpl) ListSecrets(ctx context.Context, _ gen.ListSecretsRequestObject) (gen.ListSecretsResponseObject, error) {
+func (s *strictImpl) ListSecrets(ctx context.Context, req gen.ListSecretsRequestObject) (gen.ListSecretsResponseObject, error) {
 	ctx = realCtx(ctx)
 	p, e := needAuth(ctx)
 	if e != nil {
 		return listSecretsResp{*e}, nil
 	}
-	lst, err := s.d.Vault.List(ctx, actorOf(p))
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return listSecretsResp{fail(err)}, nil
+	}
+	lst, err := s.d.Vault.List(ctx, a)
 	if err != nil {
 		return listSecretsResp{fail(err)}, nil
 	}
@@ -697,7 +773,11 @@ func (s *strictImpl) CreateSecret(ctx context.Context, req gen.CreateSecretReque
 			domains = *req.Body.AllowedDomains
 		}
 	}
-	sec, err := s.d.Vault.Create(ctx, actorOf(p), name, value, domains)
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return createSecretResp{fail(err)}, nil
+	}
+	sec, err := s.d.Vault.Create(ctx, a, name, value, domains)
 	if err != nil {
 		return createSecretResp{fail(err)}, nil
 	}

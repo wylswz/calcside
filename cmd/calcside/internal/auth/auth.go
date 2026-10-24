@@ -30,6 +30,7 @@ type Principal struct {
 	KeyID           string          // set when Kind == api_key
 	KeySpec         json.RawMessage // restricted key's instance spec; nil = full access
 	KeyMaxInstances int
+	KeyWorkspaceID  string // the workspace the key belongs to
 	Session         string // raw session token when cookie-auth
 }
 
@@ -43,9 +44,14 @@ func (p *Principal) Restricted() bool { return len(p.KeySpec) > 0 }
 // Actor maps the transport principal onto the service-layer actor — the
 // single mapping used by the REST handlers and the MCP endpoint.
 func (p *Principal) Actor() service.Actor {
+	ws := p.KeyWorkspaceID
+	if !p.ViaKey() {
+		ws = store.PersonalWorkspaceID(p.User.ID)
+	}
 	return service.Actor{
 		UserID: p.User.ID, Email: p.User.Email, Kind: p.Kind,
 		KeyID: p.KeyID, KeySpec: p.KeySpec, KeyMaxInstances: p.KeyMaxInstances,
+		WorkspaceID: ws,
 	}
 }
 
@@ -197,7 +203,7 @@ func (s *Service) Resolve(ctx context.Context, r *http.Request) (*Principal, err
 			return nil, errors.New("key owner missing")
 		}
 		_ = s.st.TouchAPIKey(ctx, k.ID, now)
-		return &Principal{User: u, Kind: types.AuthAPIKey, KeyID: k.ID, KeySpec: k.Spec, KeyMaxInstances: k.MaxInstances}, nil
+		return &Principal{User: u, Kind: types.AuthAPIKey, KeyID: k.ID, KeySpec: k.Spec, KeyMaxInstances: k.MaxInstances, KeyWorkspaceID: k.WorkspaceID}, nil
 	}
 	if c, err := r.Cookie(sessionCookie); err == nil && c.Value != "" {
 		sess, err := s.st.GetSession(ctx, hashToken(c.Value))

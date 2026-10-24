@@ -132,6 +132,23 @@ func (u userRow) toStore() *store.User {
 	return user
 }
 
+type workspaceRow struct {
+	ID        string `gorm:"primaryKey"`
+	Name      string
+	Personal  bool
+	CreatedAt time.Time
+}
+
+func (workspaceRow) TableName() string { return "workspaces" }
+
+type memberRow struct {
+	WorkspaceID string `gorm:"primaryKey"`
+	UserID      string `gorm:"primaryKey;index:idx_members_user"`
+	Role        string
+}
+
+func (memberRow) TableName() string { return "members" }
+
 type keyRow struct {
 	ID           string `gorm:"primaryKey"`
 	UserID       string
@@ -144,6 +161,7 @@ type keyRow struct {
 	RevokedAt    *time.Time
 	Spec         []byte
 	MaxInstances int
+	WorkspaceID  string
 }
 
 func (keyRow) TableName() string { return "api_keys" }
@@ -153,7 +171,7 @@ func (k keyRow) toStore() *store.APIKey {
 		ID: k.ID, UserID: k.UserID, Name: k.Name, Prefix: k.Prefix, Hash: k.Hash,
 		CreatedAt: k.CreatedAt.UTC(), LastUsedAt: k.LastUsedAt,
 		ExpiresAt: k.ExpiresAt, RevokedAt: k.RevokedAt,
-		Spec: k.Spec, MaxInstances: k.MaxInstances,
+		Spec: k.Spec, MaxInstances: k.MaxInstances, WorkspaceID: k.WorkspaceID,
 	}
 	utcPtr := func(t *time.Time) *time.Time {
 		if t == nil {
@@ -189,6 +207,7 @@ type instanceRow struct {
 	NodeID       string `gorm:"index:idx_instances_node"`
 	LeaseEpoch   int64
 	KeyID        string `gorm:"index"`
+	WorkspaceID  string `gorm:"index"`
 }
 
 func (instanceRow) TableName() string { return "instances" }
@@ -203,6 +222,7 @@ func (r instanceRow) toStore() *store.Instance {
 		NodeID:       r.NodeID,
 		LeaseEpoch:   r.LeaseEpoch,
 		KeyID:        r.KeyID,
+		WorkspaceID:  r.WorkspaceID,
 	}
 	if in.Labels == nil {
 		in.Labels = map[string]string{}
@@ -284,27 +304,29 @@ func (r auditRow) toStore() *store.AuditEvent {
 }
 
 type policyRow struct {
-	ID        string `gorm:"primaryKey"`
-	UserID    string `gorm:"uniqueIndex:idx_policies_user_name"`
-	Name      string `gorm:"uniqueIndex:idx_policies_user_name"`
-	Rego      string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID          string `gorm:"primaryKey"`
+	UserID      string
+	WorkspaceID string `gorm:"uniqueIndex:idx_policies_workspace_name"`
+	Name        string `gorm:"uniqueIndex:idx_policies_workspace_name"`
+	Rego        string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 func (policyRow) TableName() string { return "policies" }
 
 func (r policyRow) toStore() *store.Policy {
 	return &store.Policy{
-		ID: r.ID, UserID: r.UserID, Name: r.Name, Rego: r.Rego,
+		ID: r.ID, UserID: r.UserID, WorkspaceID: r.WorkspaceID, Name: r.Name, Rego: r.Rego,
 		CreatedAt: r.CreatedAt.UTC(), UpdatedAt: r.UpdatedAt.UTC(),
 	}
 }
 
 type secretRow struct {
 	ID             string `gorm:"primaryKey"`
-	UserID         string `gorm:"uniqueIndex:idx_secrets_user_name"`
-	Name           string `gorm:"uniqueIndex:idx_secrets_user_name"`
+	UserID         string
+	WorkspaceID    string `gorm:"uniqueIndex:idx_secrets_workspace_name"`
+	Name           string `gorm:"uniqueIndex:idx_secrets_workspace_name"`
 	Ciphertext     []byte
 	AllowedDomains []string `gorm:"serializer:json"`
 	CreatedAt      time.Time
@@ -315,7 +337,7 @@ func (secretRow) TableName() string { return "secrets" }
 
 func (r secretRow) toStore() *store.Secret {
 	s := &store.Secret{
-		ID: r.ID, UserID: r.UserID, Name: r.Name, Ciphertext: r.Ciphertext,
+		ID: r.ID, UserID: r.UserID, WorkspaceID: r.WorkspaceID, Name: r.Name, Ciphertext: r.Ciphertext,
 		AllowedDomains: r.AllowedDomains,
 		CreatedAt:      r.CreatedAt.UTC(), UpdatedAt: r.UpdatedAt.UTC(),
 	}
@@ -338,7 +360,10 @@ func (d *sqlDB) UpsertUserByEmail(ctx context.Context, email, name, googleSub st
 				Name: name, GoogleSub: googleSub,
 				CreatedAt: now, LastLoginAt: now,
 			}
-			return gorm.G[userRow](tx).Create(ctx, &row)
+			if err := gorm.G[userRow](tx).Create(ctx, &row); err != nil {
+				return err
+			}
+			return createPersonalWorkspace(ctx, tx, row.toStore(), now)
 		case rerr != nil:
 			return rerr
 		default:
@@ -364,17 +389,28 @@ func (d *sqlDB) BootstrapAdminUser(ctx context.Context, username, email, passwor
 		ID: store.NewID(store.PrefixUser), Email: email, Name: username, IsAdmin: true,
 		Username: &username, PasswordHash: passwordHash, CreatedAt: now, LastLoginAt: now,
 	}
-	if err := gorm.G[userRow](d.g, clause.OnConflict{
-		Columns: []clause.Column{{Name: "email"}},
-		DoUpdates: clause.Set{
-			col("username", username), col("password_hash", passwordHash), col("is_admin", true),
-			col("name", username), col("last_login_at", now),
-		},
-		Where: clause.Where{Exprs: []clause.Expression{
-			clause.Eq{Column: clause.Column{Table: "users", Name: "password_hash"}, Value: ""},
-		}},
-	}).Create(ctx, &row); err != nil {
-		return nil, mapWriteErr(err)
+	if err := d.g.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := gorm.G[userRow](tx, clause.OnConflict{
+			Columns: []clause.Column{{Name: "email"}},
+			DoUpdates: clause.Set{
+				col("username", username), col("password_hash", passwordHash), col("is_admin", true),
+				col("name", username), col("last_login_at", now),
+			},
+			Where: clause.Where{Exprs: []clause.Expression{
+				clause.Eq{Column: clause.Column{Table: "users", Name: "password_hash"}, Value: ""},
+			}},
+		}).Create(ctx, &row); err != nil {
+			return mapWriteErr(err)
+		}
+		// The workspace may already exist (the row was updated, not
+		// inserted); only create it on first bootstrap.
+		n, err := gorm.G[workspaceRow](tx).Where("id = ?", store.PersonalWorkspaceID(row.ID)).Count(ctx, "*")
+		if err != nil || n > 0 {
+			return err
+		}
+		return createPersonalWorkspace(ctx, tx, row.toStore(), now)
+	}); err != nil {
+		return nil, err
 	}
 	row, err := gorm.G[userRow](d.g).Where("email = ?", email).Take(ctx)
 	if err != nil {
@@ -422,6 +458,9 @@ func (d *sqlDB) GetUser(ctx context.Context, id string) (*store.User, error) {
 // --- api keys ---
 
 func (d *sqlDB) CreateAPIKey(ctx context.Context, k *store.APIKey) error {
+	if err := requireWorkspaceID(k.WorkspaceID); err != nil {
+		return err
+	}
 	if k.ID == "" {
 		k.ID = store.NewID(store.PrefixAPIKey)
 	}
@@ -432,13 +471,13 @@ func (d *sqlDB) CreateAPIKey(ctx context.Context, k *store.APIKey) error {
 		ID: k.ID, UserID: k.UserID, Name: k.Name, Prefix: k.Prefix, Hash: k.Hash,
 		CreatedAt: k.CreatedAt.UTC(), LastUsedAt: k.LastUsedAt,
 		ExpiresAt: k.ExpiresAt, RevokedAt: k.RevokedAt,
-		Spec: k.Spec, MaxInstances: k.MaxInstances,
+		Spec: k.Spec, MaxInstances: k.MaxInstances, WorkspaceID: k.WorkspaceID,
 	}
 	return mapWriteErr(gorm.G[keyRow](d.g).Create(ctx, &row))
 }
 
-func (d *sqlDB) ListAPIKeys(ctx context.Context, userID string) ([]*store.APIKey, error) {
-	rows, err := gorm.G[keyRow](d.g).Where("user_id = ?", userID).
+func (d *sqlDB) ListAPIKeys(ctx context.Context, workspaceID string) ([]*store.APIKey, error) {
+	rows, err := gorm.G[keyRow](d.g).Where("workspace_id = ?", workspaceID).
 		Order("created_at").Find(ctx)
 	if err != nil {
 		return nil, err
@@ -452,6 +491,14 @@ func (d *sqlDB) ListAPIKeys(ctx context.Context, userID string) ([]*store.APIKey
 
 func (d *sqlDB) GetAPIKeyByHash(ctx context.Context, hash string) (*store.APIKey, error) {
 	row, err := gorm.G[keyRow](d.g).Where("hash = ?", hash).Take(ctx)
+	if err != nil {
+		return nil, mapNotFound(err)
+	}
+	return row.toStore(), nil
+}
+
+func (d *sqlDB) GetAPIKey(ctx context.Context, id string) (*store.APIKey, error) {
+	row, err := gorm.G[keyRow](d.g).Where("id = ?", id).Take(ctx)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
@@ -522,7 +569,18 @@ func (d *sqlDB) DeleteExpiredSessions(ctx context.Context) (int, error) {
 
 // --- instances ---
 
+// requireWorkspaceID rejects rows written before workspace backfill.
+func requireWorkspaceID(ws string) error {
+	if ws == "" {
+		return errors.New("gormstore: WorkspaceID required")
+	}
+	return nil
+}
+
 func (d *sqlDB) CreateInstance(ctx context.Context, in *store.Instance) error {
+	if err := requireWorkspaceID(in.WorkspaceID); err != nil {
+		return err
+	}
 	if !in.Status.Valid() {
 		return fmt.Errorf("gormstore: invalid instance status %q", in.Status)
 	}
@@ -539,6 +597,7 @@ func (d *sqlDB) CreateInstance(ctx context.Context, in *store.Instance) error {
 		CreatedAt: in.CreatedAt.UTC(), LastActiveAt: in.LastActiveAt.UTC(),
 		ExpiresAt: in.ExpiresAt.UTC(), EndedAt: in.EndedAt,
 		NodeID: in.NodeID, LeaseEpoch: in.LeaseEpoch, KeyID: in.KeyID,
+		WorkspaceID: in.WorkspaceID,
 	})
 }
 
@@ -551,7 +610,10 @@ func (d *sqlDB) GetInstance(ctx context.Context, id string) (*store.Instance, er
 }
 
 func (d *sqlDB) ListInstances(ctx context.Context, f store.InstanceFilter) ([]*store.Instance, error) {
-	q := gorm.G[instanceRow](d.g).Where("user_id = ?", f.UserID).Order("created_at DESC")
+	q := gorm.G[instanceRow](d.g).Where("workspace_id = ?", f.WorkspaceID).Order("created_at DESC")
+	if f.UserID != "" {
+		q = q.Where("user_id = ?", f.UserID)
+	}
 	if f.Status != "" {
 		q = q.Where("status = ?", string(f.Status))
 	}
@@ -728,8 +790,8 @@ func (d *sqlDB) InsertAuditEvents(ctx context.Context, evs []store.AuditEvent) e
 
 func (d *sqlDB) ListAuditEvents(ctx context.Context, f store.AuditFilter) ([]*store.AuditEvent, error) {
 	q := gorm.G[auditRow](d.g).Order("ts DESC")
-	if f.UserID != "" {
-		q = q.Where("user_id = ?", f.UserID)
+	if f.WorkspaceID != "" {
+		q = q.Where("instance_id IN (SELECT id FROM instances WHERE workspace_id = ?)", f.WorkspaceID)
 	}
 	if f.InstanceID != "" {
 		q = q.Where("instance_id = ?", f.InstanceID)
@@ -757,6 +819,9 @@ func (d *sqlDB) ListAuditEvents(ctx context.Context, f store.AuditFilter) ([]*st
 // --- policies ---
 
 func (d *sqlDB) CreatePolicy(ctx context.Context, p *store.Policy) error {
+	if err := requireWorkspaceID(p.WorkspaceID); err != nil {
+		return err
+	}
 	if p.ID == "" {
 		p.ID = store.NewID(store.PrefixPolicy)
 	}
@@ -766,7 +831,7 @@ func (d *sqlDB) CreatePolicy(ctx context.Context, p *store.Policy) error {
 	}
 	p.UpdatedAt = now
 	err := gorm.G[policyRow](d.g).Create(ctx, &policyRow{
-		ID: p.ID, UserID: p.UserID, Name: p.Name, Rego: p.Rego,
+		ID: p.ID, UserID: p.UserID, WorkspaceID: p.WorkspaceID, Name: p.Name, Rego: p.Rego,
 		CreatedAt: p.CreatedAt.UTC(), UpdatedAt: p.UpdatedAt.UTC(),
 	})
 	return mapWriteErr(err)
@@ -780,8 +845,8 @@ func (d *sqlDB) GetPolicy(ctx context.Context, id string) (*store.Policy, error)
 	return row.toStore(), nil
 }
 
-func (d *sqlDB) ListPolicies(ctx context.Context, userID string) ([]*store.Policy, error) {
-	rows, err := gorm.G[policyRow](d.g).Where("user_id = ?", userID).
+func (d *sqlDB) ListPolicies(ctx context.Context, workspaceID string) ([]*store.Policy, error) {
+	rows, err := gorm.G[policyRow](d.g).Where("workspace_id = ?", workspaceID).
 		Order("created_at").Find(ctx)
 	if err != nil {
 		return nil, err
@@ -817,6 +882,9 @@ func (d *sqlDB) DeletePolicy(ctx context.Context, id string) error {
 // --- secrets ---
 
 func (d *sqlDB) CreateSecret(ctx context.Context, s *store.Secret) error {
+	if err := requireWorkspaceID(s.WorkspaceID); err != nil {
+		return err
+	}
 	if s.ID == "" {
 		s.ID = store.NewID(store.PrefixSecret)
 	}
@@ -830,7 +898,7 @@ func (d *sqlDB) CreateSecret(ctx context.Context, s *store.Secret) error {
 		domains = []string{}
 	}
 	err := gorm.G[secretRow](d.g).Create(ctx, &secretRow{
-		ID: s.ID, UserID: s.UserID, Name: s.Name, Ciphertext: s.Ciphertext,
+		ID: s.ID, UserID: s.UserID, WorkspaceID: s.WorkspaceID, Name: s.Name, Ciphertext: s.Ciphertext,
 		AllowedDomains: domains, CreatedAt: s.CreatedAt.UTC(), UpdatedAt: s.UpdatedAt.UTC(),
 	})
 	return mapWriteErr(err)
@@ -844,17 +912,17 @@ func (d *sqlDB) GetSecret(ctx context.Context, id string) (*store.Secret, error)
 	return row.toStore(), nil
 }
 
-func (d *sqlDB) GetSecretByName(ctx context.Context, userID, name string) (*store.Secret, error) {
+func (d *sqlDB) GetSecretByName(ctx context.Context, workspaceID, name string) (*store.Secret, error) {
 	row, err := gorm.G[secretRow](d.g).
-		Where("user_id = ? AND name = ?", userID, name).Take(ctx)
+		Where("workspace_id = ? AND name = ?", workspaceID, name).Take(ctx)
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
 	return row.toStore(), nil
 }
 
-func (d *sqlDB) ListSecrets(ctx context.Context, userID string) ([]*store.Secret, error) {
-	rows, err := gorm.G[secretRow](d.g).Where("user_id = ?", userID).
+func (d *sqlDB) ListSecrets(ctx context.Context, workspaceID string) ([]*store.Secret, error) {
+	rows, err := gorm.G[secretRow](d.g).Where("workspace_id = ?", workspaceID).
 		Order("name").Find(ctx)
 	if err != nil {
 		return nil, err
@@ -893,4 +961,76 @@ func (d *sqlDB) UpdateSecret(ctx context.Context, s *store.Secret) error {
 func (d *sqlDB) DeleteSecret(ctx context.Context, id string) error {
 	_, err := gorm.G[secretRow](d.g).Where("id = ?", id).Delete(ctx)
 	return err
+}
+
+// --- workspaces ---
+
+func (d *sqlDB) CreateWorkspace(ctx context.Context, w *store.Workspace) error {
+	if w.ID == "" {
+		w.ID = store.NewID(store.PrefixWorkspace)
+	}
+	if w.CreatedAt.IsZero() {
+		w.CreatedAt = time.Now().UTC()
+	}
+	return mapWriteErr(gorm.G[workspaceRow](d.g).Create(ctx, &workspaceRow{
+		ID: w.ID, Name: w.Name, Personal: w.Personal, CreatedAt: w.CreatedAt.UTC(),
+	}))
+}
+
+func (d *sqlDB) GetWorkspace(ctx context.Context, id string) (*store.Workspace, error) {
+	w, err := gorm.G[workspaceRow](d.g).Where("id = ?", id).Take(ctx)
+	if err != nil {
+		return nil, mapNotFound(err)
+	}
+	return &store.Workspace{ID: w.ID, Name: w.Name, Personal: w.Personal, CreatedAt: w.CreatedAt.UTC()}, nil
+}
+
+func (d *sqlDB) AddMember(ctx context.Context, m *store.Member) error {
+	return mapWriteErr(gorm.G[memberRow](d.g).Create(ctx, &memberRow{
+		WorkspaceID: m.WorkspaceID, UserID: m.UserID, Role: m.Role,
+	}))
+}
+
+func (d *sqlDB) GetMember(ctx context.Context, workspaceID, userID string) (*store.Member, error) {
+	row, err := gorm.G[memberRow](d.g).
+		Where("workspace_id = ? AND user_id = ?", workspaceID, userID).Take(ctx)
+	if err != nil {
+		return nil, mapNotFound(err)
+	}
+	return &store.Member{WorkspaceID: row.WorkspaceID, UserID: row.UserID, Role: row.Role}, nil
+}
+
+func (d *sqlDB) ListMemberships(ctx context.Context, userID string) ([]*store.Membership, error) {
+	rows, err := gorm.G[memberRow](d.g).Where("user_id = ?", userID).Find(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*store.Membership, 0, len(rows))
+	for _, r := range rows {
+		w, err := gorm.G[workspaceRow](d.g).Where("id = ?", r.WorkspaceID).Take(ctx)
+		if err != nil {
+			return nil, mapNotFound(err)
+		}
+		out = append(out, &store.Membership{
+			Workspace: &store.Workspace{ID: w.ID, Name: w.Name, Personal: w.Personal, CreatedAt: w.CreatedAt.UTC()},
+			Role:      r.Role,
+		})
+	}
+	return out, nil
+}
+
+// createPersonalWorkspace writes the personal workspace + owner
+// membership inside an existing transaction.
+func createPersonalWorkspace(ctx context.Context, tx *gorm.DB, u *store.User, now time.Time) error {
+	ws := workspaceRow{ID: store.PersonalWorkspaceID(u.ID), Personal: true, CreatedAt: now}
+	ws.Name = u.Name
+	if ws.Name == "" {
+		ws.Name = u.Email
+	}
+	if err := gorm.G[workspaceRow](tx).Create(ctx, &ws); err != nil {
+		return mapWriteErr(err)
+	}
+	return mapWriteErr(gorm.G[memberRow](tx).Create(ctx, &memberRow{
+		WorkspaceID: ws.ID, UserID: u.ID, Role: store.RoleOwner,
+	}))
 }
