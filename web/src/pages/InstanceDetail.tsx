@@ -5,6 +5,7 @@ import { api, Instance } from '../api'
 import { instanceName } from '../activity'
 import { Button, Loading, SectionTitle, StatusText, TimeLeft } from '../components/ui'
 import ShareDialog from '../components/ShareDialog'
+import ConnectAgent from '../components/ConnectAgent'
 import { Allowed } from '../components/Allowed'
 import { Activity } from '../components/Activity'
 import { RunCode } from '../components/RunCode'
@@ -21,6 +22,7 @@ export default function InstanceDetail() {
   const qc = useQueryClient()
   const [running, setRunning] = useState(false)
   const [share, setShare] = useState(false)
+  const [agent, setAgent] = useState(false)
   const [panel, setPanel] = useState<'code' | 'prompt' | null>(null)
 
   const { data: inst } = useQuery({
@@ -76,6 +78,7 @@ export default function InstanceDetail() {
           <Button onClick={() => toggle('prompt')} aria-expanded={panel === 'prompt'}>Agent prompt</Button>
           {live && <Button onClick={keepalive}>Keep alive</Button>}
           <Button onClick={() => setShare(true)}>Share</Button>
+          <Button onClick={() => setAgent(true)}>Connect agent</Button>
           {inst.status !== 'deleted' && <Button onClick={del}>Delete</Button>}
         </div>
       </div>
@@ -86,6 +89,7 @@ export default function InstanceDetail() {
         </div>
       )}
       {share && <ShareDialog instanceId={id!} workspaceId={inst.workspace_id ?? ''} onClose={() => setShare(false)} />}
+      {agent && <ConnectAgent id={id!} onClose={() => setAgent(false)} />}
       {panel === 'prompt' && (
         <div className="mb-10">
           <PromptPanel id={id} running={live} />

@@ -154,7 +154,9 @@ type APIKey struct {
 	Spec         json.RawMessage `json:"-"`
 	MaxInstances int             `json:"-"`
 	WorkspaceID  string          `json:"-"`
-	ViewOnly     bool            `json:"-"`
+	// InstanceID binds the key to a single instance (nullable).
+	InstanceID string `json:"instance_id,omitempty"`
+	ViewOnly   bool   `json:"-"`
 }
 
 type Session struct {
@@ -195,6 +197,8 @@ type InstanceFilter struct {
 	UserID      string
 	Status      types.InstanceStatus
 	KeyID       string
+	// KeyInstanceID filters to one instance for instance-bound keys.
+	KeyInstanceID string
 }
 
 type Execution struct {
@@ -219,19 +223,20 @@ type Execution struct {
 }
 
 type AuditEvent struct {
-	ID         string               `json:"id"`
-	Ts         time.Time            `json:"ts"`
-	UserID     string               `json:"user_id"`
-	InstanceID string               `json:"instance_id"`
-	ExecID     string               `json:"exec_id"`
-	Capability types.CapabilityName `json:"capability"`
-	Op         types.Op             `json:"op"`
-	Args       string               `json:"args"` // JSON, truncated to 4KB
-	Phase      types.Phase          `json:"phase"`
-	Decision   types.Decision       `json:"decision"`
-	Reason     string               `json:"reason"`
-	Error      string               `json:"error"`
-	DurationMs int64                `json:"duration_ms"`
+	ID          string               `json:"id"`
+	WorkspaceID string               `json:"workspace_id"`
+	Ts          time.Time            `json:"ts"`
+	UserID      string               `json:"user_id"`
+	InstanceID  string               `json:"instance_id"`
+	ExecID      string               `json:"exec_id"`
+	Capability  types.CapabilityName `json:"capability"`
+	Op          types.Op             `json:"op"`
+	Args        string               `json:"args"` // JSON, truncated to 4KB
+	Phase       types.Phase          `json:"phase"`
+	Decision    types.Decision       `json:"decision"`
+	Reason      string               `json:"reason"`
+	Error       string               `json:"error"`
+	DurationMs  int64                `json:"duration_ms"`
 }
 
 type AuditFilter struct {
@@ -351,6 +356,7 @@ type Store interface {
 	ListChanges(ctx context.Context, workspaceID string, limit int) ([]*WorkspaceChange, error)
 
 	RevokeUserKeys(ctx context.Context, workspaceID, userID string) error
+	RevokeKeysByInstance(ctx context.Context, instanceID string) error
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
 
 	// Tx runs fn against one store connection in a single transaction.

@@ -49,21 +49,32 @@ func (r *Recorder) Record(b runtime.AuditBatch) {
 	if b.Dropped > 0 {
 		slog.Warn("audit batch overflowed on the execution node", "dropped", b.Dropped)
 	}
+	ws := map[string]string{}
 	for _, ev := range b.Events {
+		w := ws[ev.InstanceID]
+		if w == "" && ev.InstanceID != "" {
+			if _, ok := ws[ev.InstanceID]; !ok {
+				if in, err := r.st.GetInstance(context.Background(), ev.InstanceID); err == nil {
+					ws[ev.InstanceID] = in.WorkspaceID
+				}
+				w = ws[ev.InstanceID]
+			}
+		}
 		r.enqueue(store.AuditEvent{
-			ID:         store.NewID(store.PrefixAudit),
-			Ts:         ev.Ts,
-			UserID:     ev.UserID,
-			InstanceID: ev.InstanceID,
-			ExecID:     ev.ExecID,
-			Capability: ev.Capability,
-			Op:         ev.Op,
-			Args:       ev.Args,
-			Phase:      ev.Phase,
-			Decision:   ev.Decision,
-			Reason:     ev.Reason,
-			Error:      ev.Error,
-			DurationMs: ev.DurationMs,
+			ID:          store.NewID(store.PrefixAudit),
+			WorkspaceID: w,
+			Ts:          ev.Ts,
+			UserID:      ev.UserID,
+			InstanceID:  ev.InstanceID,
+			ExecID:      ev.ExecID,
+			Capability:  ev.Capability,
+			Op:          ev.Op,
+			Args:        ev.Args,
+			Phase:       ev.Phase,
+			Decision:    ev.Decision,
+			Reason:      ev.Reason,
+			Error:       ev.Error,
+			DurationMs:  ev.DurationMs,
 		})
 	}
 }

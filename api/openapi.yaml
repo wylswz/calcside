@@ -1316,6 +1316,7 @@ components:
           description: the instance spec a restricted key may create (absent = full access)
         max_instances: { type: integer, description: live-instance bound for a restricted key }
         view_only: { type: boolean, description: ceiling capped at view — cannot run code }
+        instance_id: { type: string, description: when set the key can only reach this instance }
     CreateKeyRequest:
       type: object
       required: [name]
@@ -1331,6 +1332,9 @@ components:
         view_only:
           type: boolean
           description: view-only key — sees the workspace's instances, runs and files; cannot run code
+        instance_id:
+          type: string
+          description: bind the key to this instance only; mutually exclusive with spec and view_only
     MemberRole:
       type: string
       enum: [viewer, editor, owner]

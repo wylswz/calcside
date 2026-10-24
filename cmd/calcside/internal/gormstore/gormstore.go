@@ -186,6 +186,7 @@ type keyRow struct {
 	MaxInstances int
 	WorkspaceID  string
 	ViewOnly     bool
+	InstanceID   string `gorm:"index"`
 }
 
 func (keyRow) TableName() string { return "api_keys" }
@@ -196,7 +197,7 @@ func (k keyRow) toStore() *store.APIKey {
 		CreatedAt: k.CreatedAt.UTC(), LastUsedAt: k.LastUsedAt,
 		ExpiresAt: k.ExpiresAt, RevokedAt: k.RevokedAt,
 		Spec: k.Spec, MaxInstances: k.MaxInstances, WorkspaceID: k.WorkspaceID,
-		ViewOnly: k.ViewOnly,
+		ViewOnly: k.ViewOnly, InstanceID: k.InstanceID,
 	}
 	utcPtr := func(t *time.Time) *time.Time {
 		if t == nil {
@@ -300,19 +301,20 @@ func (r execRow) toStore() *store.Execution {
 }
 
 type auditRow struct {
-	ID         string    `gorm:"primaryKey"`
-	Ts         time.Time `gorm:"index:idx_audit_user_ts"`
-	UserID     string    `gorm:"index:idx_audit_user_ts"`
-	InstanceID string    `gorm:"index"`
-	ExecID     string
-	Capability string
-	Op         string
-	Args       string
-	Phase      string
-	Decision   string
-	Reason     string
-	Error      string
-	DurationMs int64
+	ID          string    `gorm:"primaryKey"`
+	Ts          time.Time `gorm:"index:idx_audit_user_ts"`
+	UserID      string    `gorm:"index:idx_audit_user_ts"`
+	InstanceID  string    `gorm:"index"`
+	WorkspaceID string    `gorm:"index:idx_audit_ws_ts"`
+	ExecID      string
+	Capability  string
+	Op          string
+	Args        string
+	Phase       string
+	Decision    string
+	Reason      string
+	Error       string
+	DurationMs  int64
 }
 
 func (auditRow) TableName() string { return "audit_events" }
@@ -498,6 +500,7 @@ func (d *sqlDB) CreateAPIKey(ctx context.Context, k *store.APIKey) error {
 		CreatedAt: k.CreatedAt.UTC(), LastUsedAt: k.LastUsedAt,
 		ExpiresAt: k.ExpiresAt, RevokedAt: k.RevokedAt,
 		Spec: k.Spec, MaxInstances: k.MaxInstances, WorkspaceID: k.WorkspaceID,
+		InstanceID: k.InstanceID,
 	}
 	return mapWriteErr(gorm.G[keyRow](d.g).Create(ctx, &row))
 }
@@ -645,6 +648,9 @@ func (d *sqlDB) ListInstances(ctx context.Context, f store.InstanceFilter) ([]*s
 	}
 	if f.KeyID != "" {
 		q = q.Where("key_id = ?", f.KeyID)
+	}
+	if f.KeyInstanceID != "" {
+		q = q.Where("id = ?", f.KeyInstanceID)
 	}
 	rows, err := q.Find(ctx)
 	if err != nil {
@@ -799,9 +805,12 @@ func (d *sqlDB) InsertAuditEvents(ctx context.Context, evs []store.AuditEvent) e
 			if e.ID == "" {
 				e.ID = store.NewID(store.PrefixAudit)
 			}
+			if e.WorkspaceID == "" {
+				return fmt.Errorf("gormstore: audit event %s workspace_id required", e.ID)
+			}
 			row := auditRow{
 				ID: e.ID, Ts: e.Ts.UTC(), UserID: e.UserID,
-				InstanceID: e.InstanceID, ExecID: e.ExecID,
+				InstanceID: e.InstanceID, WorkspaceID: e.WorkspaceID, ExecID: e.ExecID,
 				Capability: string(e.Capability), Op: string(e.Op),
 				Args: e.Args, Phase: string(e.Phase), Decision: string(e.Decision),
 				Reason: e.Reason, Error: e.Error, DurationMs: e.DurationMs,
@@ -817,7 +826,7 @@ func (d *sqlDB) InsertAuditEvents(ctx context.Context, evs []store.AuditEvent) e
 func (d *sqlDB) ListAuditEvents(ctx context.Context, f store.AuditFilter) ([]*store.AuditEvent, error) {
 	q := gorm.G[auditRow](d.g).Order("ts DESC")
 	if f.WorkspaceID != "" {
-		q = q.Where("instance_id IN (SELECT id FROM instances WHERE workspace_id = ?)", f.WorkspaceID)
+		q = q.Where("workspace_id = ?", f.WorkspaceID)
 	}
 	if f.InstanceID != "" {
 		q = q.Where("instance_id = ?", f.InstanceID)
@@ -1260,6 +1269,13 @@ func (d *sqlDB) CountMembers(ctx context.Context, workspaceID string, role types
 	n, err := gorm.G[memberRow](d.g).
 		Where("workspace_id = ? AND role = ?", workspaceID, string(role)).Count(ctx, "*")
 	return int(n), err
+}
+
+func (d *sqlDB) RevokeKeysByInstance(ctx context.Context, instanceID string) error {
+	now := time.Now().UTC()
+	_, err := gorm.G[keyRow](d.g).Where("instance_id = ? AND revoked_at IS NULL", instanceID).
+		Update(ctx, "revoked_at", now)
+	return err
 }
 
 func (d *sqlDB) RevokeUserKeys(ctx context.Context, workspaceID, userID string) error {

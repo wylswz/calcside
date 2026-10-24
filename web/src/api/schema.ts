@@ -854,6 +854,8 @@ export interface components {
             max_instances?: number;
             /** @description ceiling capped at view — cannot run code */
             view_only?: boolean;
+            /** @description when set the key can only reach this instance */
+            instance_id?: string;
         };
         CreateKeyRequest: {
             name: string;
@@ -865,6 +867,8 @@ export interface components {
             max_instances?: number;
             /** @description view-only key — sees the workspace's instances, runs and files; cannot run code */
             view_only?: boolean;
+            /** @description bind the key to this instance only; mutually exclusive with spec and view_only */
+            instance_id?: string;
         };
         /** @enum {string} */
         MemberRole: "viewer" | "editor" | "owner";

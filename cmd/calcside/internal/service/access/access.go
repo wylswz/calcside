@@ -129,6 +129,13 @@ func (c *Checker) checkInstance(ctx context.Context, a service.Actor, in *store.
 
 // Workspace checks act on a workspace itself.
 func (c *Checker) Workspace(ctx context.Context, a service.Actor, wsID string, act Action) error {
+	// Instance-bound keys cannot create instances.
+	if a.KeyInstanceID != "" && act > View {
+		if err := c.check(ctx, a, wsID, View, service.NotFound("workspace not found")); err != nil {
+			return err
+		}
+		return service.Forbidden("forbidden")
+	}
 	return c.check(ctx, a, wsID, act, service.NotFound("workspace not found"))
 }
 
@@ -148,8 +155,25 @@ func (c *Checker) Instance(ctx context.Context, a service.Actor, id string, act 
 	if a.Restricted() && in.KeyID != a.KeyID {
 		return nil, service.NotFound("instance not found")
 	}
+	// An instance-bound key only ever sees its own instance.
+	if a.KeyInstanceID != "" && in.ID != a.KeyInstanceID {
+		return nil, service.NotFound("instance not found")
+	}
 	if err := c.checkInstance(ctx, a, in, act); err != nil {
 		return nil, err
+	}
+	return in, nil
+}
+
+// Delete checks Run on the instance but additionally forbids
+// instance-bound keys: the human owns the instance's lifetime.
+func (c *Checker) Delete(ctx context.Context, a service.Actor, id string) (*store.Instance, error) {
+	in, err := c.Instance(ctx, a, id, Run)
+	if err != nil {
+		return nil, err
+	}
+	if a.KeyInstanceID != "" {
+		return nil, service.Forbidden("forbidden")
 	}
 	return in, nil
 }
@@ -235,6 +259,9 @@ func (c *Checker) Instances(ctx context.Context, a service.Actor) (store.Instanc
 	f := store.InstanceFilter{WorkspaceID: a.WorkspaceID}
 	if a.Restricted() {
 		f.KeyID = a.KeyID
+	}
+	if a.KeyInstanceID != "" {
+		f.KeyInstanceID = a.KeyInstanceID
 	}
 	return f, nil
 }

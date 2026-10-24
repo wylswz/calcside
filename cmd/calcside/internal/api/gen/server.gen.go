@@ -396,9 +396,12 @@ type APIErrorCode string
 
 // APIKey defines model for APIKey.
 type APIKey struct {
-	CreatedAt  time.Time  `json:"created_at"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
-	Id         string     `json:"id"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Id        string     `json:"id"`
+
+	// InstanceId when set the key can only reach this instance
+	InstanceId *string    `json:"instance_id,omitempty"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 
 	// MaxInstances live-instance bound for a restricted key
@@ -529,6 +532,9 @@ type CompletionSymbol struct {
 // CreateKeyRequest defines model for CreateKeyRequest.
 type CreateKeyRequest struct {
 	ExpiresInSeconds *int64 `json:"expires_in_seconds,omitempty"`
+
+	// InstanceId bind the key to this instance only; mutually exclusive with spec and view_only
+	InstanceId *string `json:"instance_id,omitempty"`
 
 	// MaxInstances required 1..maxPerUser when spec is set; must be absent for full access
 	MaxInstances *int          `json:"max_instances,omitempty"`

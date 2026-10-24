@@ -15,6 +15,7 @@ import (
 
 	"calcside/cmd/calcside/internal/auth"
 	"calcside/cmd/calcside/internal/service"
+	"calcside/cmd/calcside/internal/service/access"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/internal/store"
 	"calcside/internal/types"
@@ -75,23 +76,34 @@ type deleteArgs struct {
 
 // newServer builds one stateless server for the actor resolved from the
 // request; fs tools are registered only when the key's spec grants fs.
-func newServer(sb Sandbox, a service.Actor) *mcp.Server {
-	srv := mcp.NewServer(&mcp.Implementation{Name: "calcside"}, &mcp.ServerOptions{Instructions: instructions})
-	mcp.AddTool(srv, &mcp.Tool{Name: "create_instance",
-		Description: "Create an instance from this key's instance spec. Returns instance_id, expires_at and the agent prompt."},
-		func(ctx context.Context, _ *mcp.CallToolRequest, in createArgs) (*mcp.CallToolResult, any, error) {
-			body, _ := json.Marshal(in)
-			inst, err := sb.Create(ctx, a, body)
-			if err != nil {
-				return errText(err), nil, nil
-			}
-			pv, err := sb.Prompt(ctx, a, inst.ID, "")
-			if err != nil {
-				return errText(err), nil, nil
-			}
-			res, err := jsonText(createOut{InstanceID: inst.ID, ExpiresAt: inst.ExpiresAt.Format(time.RFC3339), Prompt: pv.Prompt})
-			return res, nil, err
-		})
+func newServer(sb Sandbox, a service.Actor) *mcp.Server { return newServerMode(sb, a, "", nil, "") }
+
+// newServerMode builds one stateless server; when bound is non-empty
+// the server is pinned to that instance: no create tool, exec/files
+// only on bound, and its agent prompt as instructions.
+func newServerMode(sb Sandbox, a service.Actor, bound string, boundIn *store.Instance, prompt string) *mcp.Server {
+	inst := instructions
+	if prompt != "" {
+		inst = prompt
+	}
+	srv := mcp.NewServer(&mcp.Implementation{Name: "calcside"}, &mcp.ServerOptions{Instructions: inst})
+	if bound == "" {
+		mcp.AddTool(srv, &mcp.Tool{Name: "create_instance",
+			Description: "Create an instance from this key's instance spec. Returns instance_id, expires_at and the agent prompt."},
+			func(ctx context.Context, _ *mcp.CallToolRequest, in createArgs) (*mcp.CallToolResult, any, error) {
+				body, _ := json.Marshal(in)
+				inst, err := sb.Create(ctx, a, body)
+				if err != nil {
+					return errText(err), nil, nil
+				}
+				pv, err := sb.Prompt(ctx, a, inst.ID, "")
+				if err != nil {
+					return errText(err), nil, nil
+				}
+				res, err := jsonText(createOut{InstanceID: inst.ID, ExpiresAt: inst.ExpiresAt.Format(time.RFC3339), Prompt: pv.Prompt})
+				return res, nil, err
+			})
+	}
 	mcp.AddTool(srv, &mcp.Tool{Name: "exec",
 		Description: "Run Starlark code on an instance; returns printed output or the error."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in execArgs) (*mcp.CallToolResult, any, error) {
@@ -111,10 +123,14 @@ func newServer(sb Sandbox, a service.Actor) *mcp.Server {
 			}
 			return text(res.Output), nil, nil
 		})
+	specJSON := a.KeySpec
+	if bound != "" && boundIn != nil {
+		specJSON = boundIn.Spec
+	}
 	var spec struct {
 		Capabilities map[string]json.RawMessage `json:"capabilities"`
 	}
-	if err := json.Unmarshal(a.KeySpec, &spec); err == nil {
+	if err := json.Unmarshal(specJSON, &spec); err == nil {
 		if _, ok := spec.Capabilities["fs"]; ok {
 			mcp.AddTool(srv, &mcp.Tool{Name: "list_files",
 				Description: "List a directory in the instance filesystem."},
@@ -138,14 +154,16 @@ func newServer(sb Sandbox, a service.Actor) *mcp.Server {
 				})
 		}
 	}
-	mcp.AddTool(srv, &mcp.Tool{Name: "delete_instance",
-		Description: "Delete an instance created by this key."},
-		func(ctx context.Context, _ *mcp.CallToolRequest, in deleteArgs) (*mcp.CallToolResult, any, error) {
-			if err := sb.Delete(ctx, a, in.InstanceID); err != nil {
-				return errText(err), nil, nil
-			}
-			return text("deleted"), nil, nil
-		})
+	if bound == "" {
+		mcp.AddTool(srv, &mcp.Tool{Name: "delete_instance",
+			Description: "Delete an instance created by this key."},
+			func(ctx context.Context, _ *mcp.CallToolRequest, in deleteArgs) (*mcp.CallToolResult, any, error) {
+				if err := sb.Delete(ctx, a, in.InstanceID); err != nil {
+					return errText(err), nil, nil
+				}
+				return text("deleted"), nil, nil
+			})
+	}
 	return srv
 }
 
@@ -164,8 +182,45 @@ func Handler(sb Sandbox) http.Handler {
 		switch {
 		case p == nil:
 			writeErr(w, http.StatusUnauthorized, types.ErrCodeUnauthorized, "restricted API key required")
+		case p.ViaKey() && p.KeyInstanceID != "":
+			writeErr(w, http.StatusForbidden, types.ErrCodeForbidden, "this key is bound to an instance — use the instance URL")
 		case !p.ViaKey() || !p.Restricted():
 			writeErr(w, http.StatusForbidden, types.ErrCodeForbidden, "MCP requires a restricted API key")
+		default:
+			h.ServeHTTP(w, r)
+		}
+	})
+}
+
+// InstanceHandler pins the session to one instance; any key with Run
+// on it (bound, restricted, full) may use it.
+func InstanceHandler(sb Sandbox, ac *access.Checker, instanceID string) http.Handler {
+	h := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
+		p := auth.FromContext(r.Context())
+		if p == nil {
+			return nil
+		}
+		a := p.Actor()
+		in, err := ac.Instance(r.Context(), a, instanceID, access.Run)
+		if err != nil {
+			return nil
+		}
+		pv, _ := sb.Prompt(r.Context(), a, instanceID, "")
+		prompt := ""
+		if pv != nil {
+			prompt = pv.Prompt
+		}
+		return newServerMode(sb, a, instanceID, in, prompt)
+	}, &mcp.StreamableHTTPOptions{Stateless: true, MaxRequestBodyBytes: sandbox.MaxCodeBytes + 64<<10})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := auth.FromContext(r.Context())
+		switch {
+		case p == nil:
+			writeErr(w, http.StatusUnauthorized, types.ErrCodeUnauthorized, "API key required")
+		case !p.ViaKey():
+			writeErr(w, http.StatusForbidden, types.ErrCodeForbidden, "API key required")
+		case p.KeyViewOnly:
+			writeErr(w, http.StatusForbidden, types.ErrCodeForbidden, "view-only keys cannot use MCP")
 		default:
 			h.ServeHTTP(w, r)
 		}

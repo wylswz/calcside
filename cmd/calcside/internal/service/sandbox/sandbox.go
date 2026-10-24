@@ -393,7 +393,7 @@ func (s *Service) Get(ctx context.Context, a service.Actor, id string) (*store.I
 }
 
 func (s *Service) Delete(ctx context.Context, a service.Actor, id string) error {
-	in, err := s.owned(ctx, a, id, access.Run)
+	in, err := s.access.Delete(ctx, a, id)
 	if err != nil {
 		return err
 	}
@@ -407,12 +407,26 @@ func (s *Service) Delete(ctx context.Context, a service.Actor, id string) error 
 	return s.settle(ctx, in, types.InstanceDeleted)
 }
 
+// markAuditWs stamps the instance's workspace on audit events so the
+// audit index can filter by workspace directly.
+func (s *Service) markAuditWs(in *store.Instance, events []store.AuditEvent) {
+	for i := range events {
+		if events[i].WorkspaceID == "" {
+			events[i].WorkspaceID = in.WorkspaceID
+		}
+	}
+}
+
 // settle records a terminal status for an instance.
 func (s *Service) settle(ctx context.Context, in *store.Instance, status types.InstanceStatus) error {
 	now := s.now().UTC()
 	in.Status = status
 	in.EndedAt = &now
 	if err := s.st.UpdateInstance(ctx, in); err != nil {
+		return service.Internal(err)
+	}
+	// Keys bound to this instance die with it.
+	if err := s.st.RevokeKeysByInstance(ctx, in.ID); err != nil {
 		return service.Internal(err)
 	}
 	return nil

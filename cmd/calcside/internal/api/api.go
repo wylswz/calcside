@@ -204,8 +204,14 @@ func Handler(d Deps) http.Handler {
 	// 401/403); no session middleware means no CSRF surface.
 	mcpGroup := r.Group("/mcp")
 	mcpGroup.Use(d.resolveOnly())
+	// Explicit routes only: gin rejects /*path alongside /instances/:id.
+	// Empty and single-slash cover the workspace endpoint; deeper paths
+	// 404 — streamable HTTP has no subpaths.
+	mcpGroup.Any("/instances/:id", func(c *gin.Context) {
+		mcpapi.InstanceHandler(d.Sandbox, d.Access, c.Param("id")).ServeHTTP(c.Writer, c.Request)
+	})
 	mcpGroup.Any("", gin.WrapH(mcpapi.Handler(d.Sandbox)))
-	mcpGroup.Any("/*path", gin.WrapH(mcpapi.Handler(d.Sandbox)))
+	mcpGroup.Any("/", gin.WrapH(mcpapi.Handler(d.Sandbox)))
 
 	r.NoRoute(d.noRoute())
 	return d.Previews.Wrap(r)

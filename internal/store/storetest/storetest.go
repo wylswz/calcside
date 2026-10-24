@@ -380,11 +380,14 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 			t.Fatal(err)
 		}
 		evs := []store.AuditEvent{
-			{Ts: now, UserID: "u1", InstanceID: in.ID, ExecID: "e1", Capability: types.CapFS, Op: "read", Args: `{"path":"/work/a"}`, Decision: types.DecisionAllow},
-			{Ts: now.Add(time.Second), UserID: "u1", InstanceID: in.ID, ExecID: "e2", Capability: types.CapNet, Op: "get", Args: `{}`, Decision: types.DecisionDeny, Phase: types.PhaseBefore, Reason: "nope"},
+			{Ts: now, UserID: "u1", InstanceID: in.ID, WorkspaceID: ws, ExecID: "e1", Capability: types.CapFS, Op: "read", Args: `{"path":"/work/a"}`, Decision: types.DecisionAllow},
+			{Ts: now.Add(time.Second), UserID: "u1", InstanceID: in.ID, WorkspaceID: ws, ExecID: "e2", Capability: types.CapNet, Op: "get", Args: `{}`, Decision: types.DecisionDeny, Phase: types.PhaseBefore, Reason: "nope"},
 		}
 		if err := s.InsertAuditEvents(ctx, evs); err != nil {
 			t.Fatal(err)
+		}
+		if err := s.InsertAuditEvents(ctx, []store.AuditEvent{{Ts: time.Now(), UserID: u.ID, InstanceID: in.ID, Phase: types.PhaseBefore, Decision: types.DecisionAllow, Capability: types.CapFS}}); err == nil {
+			t.Fatal("audit event without workspace_id accepted")
 		}
 		lst, err := s.ListAuditEvents(ctx, store.AuditFilter{WorkspaceID: ws, Limit: 10})
 		if err != nil || len(lst) != 2 {

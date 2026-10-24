@@ -442,3 +442,69 @@ func TestViewOnlyKey(t *testing.T) {
 		t.Fatalf("view-only mcp: %d", code)
 	}
 }
+
+// Instance-bound key: sees only its instance, cannot create/delete;
+// list scoped; revoked when the instance is deleted.
+func TestInstanceBoundKey(t *testing.T) {
+	e := newEnv(t)
+	cookies := login(e, "a@x.com")
+	csrf := map[string]string{"X-Requested-With": "calcside"}
+	code, m, _ := e.req("POST", "/api/v1/instances", `{"capabilities":{"fs":{}}}`, csrf, cookies)
+	inst := m["instance"].(map[string]any)["id"].(string)
+	code, m, _ = e.req("POST", "/api/v1/instances", `{"capabilities":{"fs":{}}}`, csrf, cookies)
+	other := m["instance"].(map[string]any)["id"].(string)
+
+	code, m, _ = e.req("POST", "/api/v1/keys", `{"name":"agent","instance_id":"`+inst+`"}`, csrf, cookies)
+	if code != 201 {
+		t.Fatalf("bound key create: %d %v", code, m)
+	}
+	bearer := map[string]string{"Authorization": "Bearer " + m["secret"].(string)}
+	code, _, _ = e.req("GET", "/api/v1/instances/"+inst, "", bearer, nil)
+	if code != 200 {
+		t.Fatalf("bound get: %d", code)
+	}
+	code, _, _ = e.req("GET", "/api/v1/instances/"+other, "", bearer, nil)
+	if code != 404 {
+		t.Fatalf("bound other: %d", code)
+	}
+	code, m, _ = e.req("GET", "/api/v1/instances", "", bearer, nil)
+	if code != 200 || len(m["instances"].([]any)) != 1 {
+		t.Fatalf("bound list: %d %v", code, m)
+	}
+	code, _, _ = e.req("POST", "/api/v1/instances/"+inst+"/exec", `{"code":"print(1)"}`, bearer, nil)
+	if code != 200 {
+		t.Fatalf("bound exec: %d", code)
+	}
+	code, _, _ = e.req("DELETE", "/api/v1/instances/"+inst, "", bearer, nil)
+	if code != 403 {
+		t.Fatalf("bound delete: %d", code)
+	}
+	code, _, _ = e.req("POST", "/api/v1/instances", `{"capabilities":{"fs":{}}}`, bearer, nil)
+	if code != 403 {
+		t.Fatalf("bound create: %d", code)
+	}
+	// bound + spec → 400
+	code, _, _ = e.req("POST", "/api/v1/keys", `{"name":"bad","instance_id":"`+inst+`","spec":{"capabilities":{}},"max_instances":1}`, csrf, cookies)
+	if code != 400 {
+		t.Fatalf("bound+spec: %d", code)
+	}
+	// delete the instance → key revoked
+	code, _, _ = e.req("DELETE", "/api/v1/instances/"+inst, "", csrf, cookies)
+	if code != 200 {
+		t.Fatalf("delete: %d", code)
+	}
+	code, m, _ = e.req("GET", "/api/v1/keys", "", nil, cookies)
+	found := false
+	for _, k := range m["keys"].([]any) {
+		kv := k.(map[string]any)
+		if kv["instance_id"] == inst {
+			found = true
+			if kv["revoked_at"] == nil {
+				t.Fatal("bound key not revoked on delete")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("bound key missing")
+	}
+}

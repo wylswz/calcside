@@ -1,52 +1,18 @@
+import { Link } from 'react-router-dom'
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, APIKey, CreateKeyRequest, wsPath } from '../api'
 import { Button, EmptyRow, Field, Modal, Notice, PageHeader, inputCls } from '../components/ui'
 import { SpecForm, type SpecFormHandle } from '../components/SpecForm'
+import { CopyBlock, MCPGuide } from '../components/MCP'
+import { mcpURL } from '../mcpSnippets'
 import { fmtTime } from '../format'
 import { allowedSummary } from '../activity'
-import { claudeCodeSnippet, cursorSnippet, headerSnippet, mcpURL } from '../mcpSnippets'
 
 type Access = 'restricted' | 'full' | 'view'
 
-// CopyBlock renders copyable text (secret or client snippet) with a
-// copy button — one component for every "copy this once" surface.
-function CopyBlock({ text, mono }: { text: string; mono?: boolean }) {
-  const [copied, setCopied] = useState(false)
-  return (
-    <div className="flex gap-2">
-      <pre className={`pre flex-1 overflow-auto break-all ${mono ? 'border-ink' : ''}`}>{text}</pre>
-      <Button onClick={async () => { await navigator.clipboard.writeText(text); setCopied(true) }}>{copied ? 'Copied' : 'Copy'}</Button>
-    </div>
-  )
-}
 
 // SecretBlock shows the one-time secret with a copy button.
-// MCPGuide shows the connect instructions once, next to the secret.
-function MCPGuide({ secret }: { secret: string }) {
-  const url = mcpURL(window.location.origin)
-  const tabs = [
-    ['Claude Code', claudeCodeSnippet(url, secret)],
-    ['Cursor / VS Code', cursorSnippet(url, secret)],
-    ['Any client', `URL: ${url}\n${headerSnippet(secret)}`],
-  ] as const
-  const [tab, setTab] = useState(0)
-  return (
-    <div className="space-y-2">
-      <p className="text-xs text-sec">
-        MCP endpoint: <code className="font-mono text-ink">{url}</code> — this restricted key is all an MCP client needs.
-      </p>
-      <div className="flex gap-1 border-b border-line">
-        {tabs.map(([label], i) => (
-          <button key={label}
-            className={`px-3 py-1.5 text-xs ${i === tab ? 'border-b-2 border-ink font-medium text-ink' : 'text-mute'}`}
-            onClick={() => setTab(i)}>{label}</button>
-        ))}
-      </div>
-      <CopyBlock text={tabs[tab][1]} />
-    </div>
-  )
-}
 
 export default function Keys() {
   const qc = useQueryClient()
@@ -108,7 +74,9 @@ export default function Keys() {
                 <td className={k.revoked_at ? 'line-through' : 'font-medium text-ink'}>{k.name}</td>
                 <td className="font-mono text-xs">{k.prefix}…</td>
                 <td className="max-w-[320px]">
-                  {k.view_only
+                  {k.instance_id
+                    ? <Link to={`/instances/${k.instance_id}`} className="link font-mono text-xs">this instance · {k.instance_id.slice(0, 12)}</Link>
+                    : k.view_only
                     ? <span className="font-mono text-xs text-sec">view only</span>
                     : k.restricted
                       ? <span className="block truncate font-mono text-xs text-sec" title={allowedSummary(k.spec)}>restricted · {allowedSummary(k.spec)}</span>

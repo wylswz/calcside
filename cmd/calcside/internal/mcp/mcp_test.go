@@ -14,6 +14,7 @@ import (
 	"calcside/cmd/calcside/internal/audit"
 	"calcside/cmd/calcside/internal/auth"
 	_ "calcside/cmd/calcside/internal/gormstore"
+	"calcside/cmd/calcside/internal/service"
 	"calcside/cmd/calcside/internal/service/access"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/vault"
@@ -35,7 +36,7 @@ func (b bearerRT) RoundTrip(r *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(r2)
 }
 
-func newEnv(t *testing.T) (*httptest.Server, store.Store, *audit.Recorder, string, string) {
+func newEnv(t *testing.T) (*httptest.Server, store.Store, *audit.Recorder, string, string, *sandbox.Service, *store.APIKey, *store.APIKey) {
 	st, err := store.Open(context.Background(), "sqlite", storetest.SQLite(t))
 	if err != nil {
 		t.Fatal(err)
@@ -59,6 +60,10 @@ func newEnv(t *testing.T) (*httptest.Server, store.Store, *audit.Recorder, strin
 		if err == nil && p != nil {
 			r = r.WithContext(auth.WithPrincipal(r.Context(), p))
 		}
+		if strings.HasPrefix(r.URL.Path, "/mcp/instances/") {
+			InstanceHandler(sbx, ac, strings.TrimPrefix(r.URL.Path, "/mcp/instances/")).ServeHTTP(w, r)
+			return
+		}
 		Handler(sbx).ServeHTTP(w, r)
 	})
 	srv := httptest.NewServer(h)
@@ -80,7 +85,7 @@ func newEnv(t *testing.T) (*httptest.Server, store.Store, *audit.Recorder, strin
 	if err := st.CreateAPIKey(context.Background(), full); err != nil {
 		t.Fatal(err)
 	}
-	return srv, st, rec, secret, secret2
+	return srv, st, rec, secret, secret2, sbx, restricted, full
 }
 
 func connect(t *testing.T, url, tok string) *sdkmcp.ClientSession {
@@ -108,7 +113,7 @@ func toolText(t *testing.T, res *sdkmcp.CallToolResult) string {
 }
 
 func TestMCPTools(t *testing.T) {
-	srv, st, _, secret, fullSecret := newEnv(t)
+	srv, st, _, secret, fullSecret, _, _, _ := newEnv(t)
 
 	// full-access key rejected
 	code := 0
@@ -251,7 +256,7 @@ func TestMCPTools(t *testing.T) {
 }
 
 func TestMCPNoFS(t *testing.T) {
-	srv, st, _, _, _ := newEnv(t)
+	srv, st, _, _, _, _, _, _ := newEnv(t)
 	u, _ := st.UpsertUserByEmail(context.Background(), "nf@x.com", "", "")
 	s3, k3 := auth.NewAPIKey(u.ID, "nofk", nil)
 	k3.Spec = []byte(`{"ttl_seconds":600}`)
@@ -271,4 +276,131 @@ func TestMCPNoFS(t *testing.T) {
 			t.Fatalf("fs tool listed without fs grant: %v", tl.Name)
 		}
 	}
+}
+
+// Instance mode: tools = exec (+fs when the instance has fs);
+// instructions carry the agent prompt; only keys with Run may use it.
+func TestMCPInstanceMode(t *testing.T) {
+	srv, st, _, restrictedSecret, fullSecret, sbx, rk, _ := newEnv(t)
+	ctx := context.Background()
+	u, _ := st.UpsertUserByEmail(ctx, "m@x.com", "", "")
+	a := service.Actor{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID)}
+	// create via the restricted key's actor so that key owns the instance
+	ra := service.Actor{UserID: u.ID, Kind: types.AuthAPIKey, KeyID: rk.ID,
+		KeySpec:         json.RawMessage(`{"ttl_seconds":600,"capabilities":{"fs":{}}}`),
+		KeyMaxInstances: 2, WorkspaceID: store.PersonalWorkspaceID(u.ID)}
+	in, err := sbx.Create(ctx, ra, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	in2, err := sbx.Create(ctx, a, json.RawMessage(`{"capabilities":{"fs":{}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// bound key
+	boundSecret, bound := auth.NewAPIKey(u.ID, "bk", nil)
+	bound.WorkspaceID = store.PersonalWorkspaceID(u.ID)
+	bound.InstanceID = in.ID
+	if err := st.CreateAPIKey(ctx, bound); err != nil {
+		t.Fatal(err)
+	}
+	// view-only key
+	voSecret, vo := auth.NewAPIKey(u.ID, "vo", nil)
+	vo.WorkspaceID = store.PersonalWorkspaceID(u.ID)
+	vo.ViewOnly = true
+	if err := st.CreateAPIKey(ctx, vo); err != nil {
+		t.Fatal(err)
+	}
+	url := srv.URL + "/mcp/instances/" + in.ID
+
+	tools := func(t *testing.T, cs *sdkmcp.ClientSession) []string {
+		res, err := cs.ListTools(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, tl := range res.Tools {
+			out = append(out, tl.Name)
+		}
+		return out
+	}
+	has := func(list []string, name string) bool {
+		for _, n := range list {
+			if n == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	// exec round trip + instructions carry the prompt
+	cs := connect(t, url, boundSecret)
+	lt := tools(t, cs)
+	if !has(lt, "exec") || !has(lt, "list_files") || !has(lt, "read_file") || has(lt, "create_instance") || has(lt, "delete_instance") {
+		t.Fatalf("bound key tools: %v", lt)
+	}
+	res, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "exec", Arguments: map[string]any{"instance_id": in.ID, "code": "print(41+1)"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(toolText(t, res), "42") {
+		t.Fatalf("exec: %v", res)
+	}
+	// other instance id on the bound key → isError
+	res2, _ := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "exec", Arguments: map[string]any{"instance_id": in2.ID, "code": "print(1)"}})
+	if res2 == nil || !res2.IsError {
+		t.Fatal("bound key reached another instance")
+	}
+	// non-existent instance URL → 403/404 envelope (getServer nil → no tools/session)
+	csX := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "x"}, nil)
+	_, err = csX.Connect(ctx, &sdkmcp.StreamableClientTransport{Endpoint: srv.URL + "/mcp/instances/ins_zzz", HTTPClient: &http.Client{Transport: bearerRT{boundSecret}}}, nil)
+	if err == nil {
+		t.Fatal("nonexistent instance connected")
+	}
+	// full + creator-restricted keys work on the instance URL
+	csFull := connect(t, url, fullSecret)
+	if !has(mustTools(t, csFull), "exec") {
+		t.Fatal("full key missing exec")
+	}
+	connect(t, url, restrictedSecret)
+	// view-only → 403
+	code := postInitialize(t, url, voSecret)
+	if code != 403 {
+		t.Fatalf("view-only: %d", code)
+	}
+	// bound key on workspace /mcp → 403
+	code = postInitialize(t, srv.URL+"/mcp", boundSecret)
+	if code != 403 {
+		t.Fatalf("bound on /mcp: %d", code)
+	}
+	// no key → 401
+	req, _ := http.NewRequest("POST", url, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"x","version":"0"}}}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != 401 {
+		t.Fatalf("no key: %d", resp.StatusCode)
+	}
+}
+
+func mustTools(t *testing.T, cs *sdkmcp.ClientSession) []string {
+	res, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, tl := range res.Tools {
+		out = append(out, tl.Name)
+	}
+	return out
+}
+
+func postInitialize(t *testing.T, url, tok string) int {
+	req, _ := http.NewRequest("POST", url, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"x","version":"0"}}}`))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp.StatusCode
 }
