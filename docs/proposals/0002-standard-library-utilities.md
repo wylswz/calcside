@@ -14,6 +14,23 @@ describe the shipped names, signatures and limits; design alternatives below are
 not additional implemented APIs. No I/O, host clock or new capability grants are
 introduced.
 
+A numeric tranche adds `stats` and `linalg`, backed by the pure-Go gonum
+library (no cgo, no native plugins). Inputs are finite ints/floats, outputs are
+finite floats (NaN/Inf and `-0` never escape), `stats` accepts at most 100,000
+values and every `linalg` matrix axis is at most 256, which bounds O(n^3) work
+that Starlark step limits cannot see. gonum panics are recovered as errors.
+
+A follow-up analysis tranche extends `stats` with multiple OLS, logistic
+regression and common hypothesis tests/confidence intervals, and adds `dist`
+(CDF/SF/PDF/PPF for common distributions), `series` (length-preserving
+time-series transforms; undefined positions are `None`) and `decimal` (exact
+base-10 strings with explicit scale and rounding, for money). Results are tested
+against SciPy/statsmodels reference values. Additional bounds: 64 regression
+predictors and 1,000,000 design cells, 64 per contingency-table axis, Fisher
+totals up to 1,000,000, 256 ANOVA groups, 10,000,000 rolling-window cells, and
+128-character decimal operands with at most 1,000 result digits. Long loops
+check for cancellation.
+
 ## Summary
 
 Provide a documented, deterministic standard library for common agent data

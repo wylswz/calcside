@@ -88,7 +88,7 @@ func TestUtilityPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"url.parse", "csv.parse_dicts", "base64.encode", "hashlib.sha256", "regex.search", "datetime.parse_date"} {
+	for _, name := range []string{"url.parse", "csv.parse_dicts", "base64.encode", "hashlib.sha256", "regex.search", "datetime.parse_date", "stats.ols", "linalg.solve", "dist.ppf", "series.pct_change", "decimal.round"} {
 		if !strings.Contains(out, name) {
 			t.Errorf("missing utility %s", name)
 		}

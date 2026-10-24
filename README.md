@@ -118,7 +118,7 @@ arrival-rate test; run the load generator on a separate machine for capacity res
 ## Built-in utilities
 
 Every instance and extension has `json`, `math`, `url`, `csv`, `base64`, `hashlib`,
-`regex`, and `datetime`. These are bounded pure functions, not capability grants:
+`regex`, `datetime`, `stats`, `linalg`, `dist`, `series`, and `decimal`. These are bounded pure functions, not capability grants:
 no implicit I/O, secrets, current clock, randomness, or host timezone. The server
 prompt and editor completion describe their signatures and limits.
 
@@ -135,9 +135,47 @@ text utilities require explicit decoding. Regex uses RE2 (not Python regex),
 UTF-8 byte offsets, and literal replacement strings. Module names are reserved
 predeclared bindings; rename existing script variables that used these names.
 
+Numeric modules are backed by [gonum](https://github.com/gonum/gonum):
+
+- `stats`: descriptive statistics, covariance/correlation, simple and multiple
+  OLS (`ols`), logistic regression (`logit`), t-tests, Mann-Whitney U,
+  Pearson/Spearman tests, chi-square and Fisher's exact tests, one-way ANOVA,
+  and mean/proportion confidence intervals. Results match SciPy/statsmodels
+  conventions (Welch's t-test by default; Mann-Whitney uses the normal
+  approximation with tie and continuity correction).
+- `linalg`: matmul, solve, lstsq, inv, det.
+- `dist`: `cdf`/`sf`/`pdf`/`ppf` for normal, t, chi2, f, lognormal,
+  exponential, uniform, beta, gamma, binomial and poisson, with distribution
+  parameters as keywords (`dist.ppf("t", 0.975, df=10)`).
+- `series`: diff, pct_change, log_return, shift, cumsum, cumprod, drawdown,
+  rolling windows and EWMA. Outputs keep the input length, with `None` where a
+  position is undefined.
+
+They take finite ints/floats (convert CSV cells with `float()`), return floats,
+and fail instead of returning NaN/Inf. Matrices are nested lists of rows; a flat
+`b` in `linalg.solve`/`lstsq` is a vector. Floating-point results may differ in
+the last bits across CPU architectures.
+
+`decimal` does exact base-10 arithmetic for money: operands are decimal strings
+or ints (floats are rejected), results are strings, and division/rounding take an
+explicit scale and rounding mode (default `half_even`). `to_minor`/`from_minor`
+convert to and from integer minor units.
+
+```python
+rows = csv.parse_dicts(fs.read("sales.csv"))
+spend = [float(r["ad_spend"]) for r in rows]
+revenue = [float(r["revenue"]) for r in rows]
+print(stats.describe(revenue), stats.linear_regression(spend, revenue))
+print(stats.ttest_ind(revenue[:10], revenue[10:])["p_value"])
+print(decimal.div(decimal.sum([r["revenue"] for r in rows]), len(rows), 2))
+```
+
 Limits include 8 MiB general input/output, 10,000 CSV records / 100,000 cells,
-256 CSV columns / 256 KiB fields, 64 KiB URLs / 1,024 query pairs, and 1 MiB regex
-text / 8 KiB patterns / 10,000 matches, with a separate pattern-complexity bound.
+256 CSV columns / 256 KiB fields, 64 KiB URLs / 1,024 query pairs, 1 MiB regex
+text / 8 KiB patterns / 10,000 matches (with a separate pattern-complexity bound),
+100,000 `stats`/`series` values, 256 per `linalg` matrix axis, 64 regression
+predictors / 1,000,000 design cells, 64 per contingency-table axis, 10,000,000
+rolling-window cells, and 128-character `decimal` operands / 1,000-digit results.
 
 ## Artifacts: preview and download
 

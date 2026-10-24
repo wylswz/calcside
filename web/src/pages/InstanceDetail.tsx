@@ -13,7 +13,8 @@ import { AuditTable, ExecCode } from '../components/AuditTable'
 import { ArtifactBrowser } from '../components/Artifacts'
 
 const DEFAULT_CODE = `# Starlark. Capabilities appear as globals when granted.
-# Utilities: json, math, url, csv, base64, hashlib, regex, datetime.
+# Utilities: json, math, url, csv, base64, hashlib, regex, datetime,
+# stats, linalg, dist, series, decimal.
 print("hello from calcside")
 `
 
