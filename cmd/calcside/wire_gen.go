@@ -16,6 +16,7 @@ import (
 	"calcside/cmd/calcside/internal/service/policy"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/vault"
+	"calcside/cmd/calcside/internal/service/workspace"
 	"context"
 	"time"
 )
@@ -75,6 +76,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	auditService := audit.New(store, checker)
 	catalogProvider := provideExtCatalog(cfg)
 	catalogService := catalog.New(registry, catalogProvider)
+	workspaceService := workspace.New(store, checker)
 	authService := provideAuth(cfg, store)
 	basicLogin, err := provideBasic(ctx, cfg, authService)
 	if err != nil {
@@ -108,6 +110,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		Audit:     auditService,
 		Catalog:   catalogService,
 		Sandbox:   sandboxService,
+		Workspace: workspaceService,
 		Access:    checker,
 		Auth:      authService,
 		Basic:     basicLogin,

@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, Instance } from '../api'
+import { api, SharedInstance, Instance, wsPath } from '../api'
+import { useRole } from '../workspace'
 import { Button, EmptyRow, Loading, Modal, PageHeader, StatusText, TimeLeft } from '../components/ui'
 import { SpecForm, type SpecFormHandle } from '../components/SpecForm'
 import { fmtTime } from '../format'
@@ -13,7 +14,7 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
   const form = useRef<SpecFormHandle>(null)
   const [err, setErr] = useState('')
   const create = useMutation({
-    mutationFn: (spec: any) => api.post<{ instance: Instance }>('/api/v1/instances', spec),
+    mutationFn: (spec: any) => api.post<{ instance: Instance }>(wsPath('/api/v1/instances'), spec),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['instances'] })
       onClose()
@@ -45,16 +46,21 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
 
 export default function Instances() {
   const [showNew, setShowNew] = useState(false)
+  const role = useRole()
   const { data, isLoading } = useQuery({
     queryKey: ['instances'],
-    queryFn: () => api.get<{ instances: Instance[] }>('/api/v1/instances'),
+    queryFn: () => api.get<{ instances: Instance[] }>(wsPath('/api/v1/instances')),
     refetchInterval: 15000,
+  })
+  const { data: shared } = useQuery({
+    queryKey: ['shared'],
+    queryFn: () => api.get<{ instances: SharedInstance[] }>('/api/v1/instances?shared=true'),
   })
 
   return (
     <div>
       <PageHeader title="Instances"
-        actions={<Button variant="primary" onClick={() => setShowNew(true)}>New instance</Button>}>
+        actions={role !== 'viewer' ? <Button variant="primary" onClick={() => setShowNew(true)}>New instance</Button> : undefined}>
         Each instance is a Starlark session with its own globals, VFS and policy snapshot. Only the capabilities granted in its spec exist.
       </PageHeader>
       {isLoading && <Loading />}
@@ -97,6 +103,26 @@ export default function Instances() {
         </table>
       </div>
       {showNew && <NewInstanceDialog onClose={() => setShowNew(false)} />}
+      {(shared?.instances.length ?? 0) > 0 && (
+        <div className="mt-8">
+          <h2 className="mb-3 text-xs font-medium uppercase tracking-label text-faint">Shared with you</h2>
+          <div className="tbl-wrap">
+            <table className="tbl">
+              <thead><tr><th>Name</th><th>Workspace</th><th>Role</th><th>Status</th></tr></thead>
+              <tbody>
+                {shared!.instances.map((si) => (
+                  <tr key={si.instance.id} className="row-hover">
+                    <td><Link to={`/instances/${si.instance.id}`} className="link font-medium">{instanceName(si.instance)}</Link></td>
+                    <td className="text-xs text-sec">{si.workspace_name}</td>
+                    <td className="text-xs text-sec">{si.role}</td>
+                    <td><StatusText status={si.instance.status} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

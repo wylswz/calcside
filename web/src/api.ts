@@ -8,6 +8,7 @@ import type { paths, components } from './api/schema'
 
 export type User = components['schemas']['User']
 export type Instance = components['schemas']['Instance']
+export type SharedInstance = components['schemas']['SharedInstance']
 export type InstanceSpec = components['schemas']['InstanceSpec']
 export type ExecResult = components['schemas']['ExecResult']
 export type ExecError = components['schemas']['ExecError']
@@ -125,6 +126,38 @@ raw.use({
 
 // api keeps the old { get, post, put, del } surface but is backed by
 // the generated openapi-fetch client.
+// --- workspace selection ---
+// The console acts inside one workspace at a time (personal by default).
+// wsPath threads `?workspace=` through every list/create call.
+
+const WS_KEY = 'calcside.workspace'
+
+export interface Workspace { id: string; name: string; personal: boolean; role: string }
+
+let currentWS: string | null = null
+try { currentWS = window.localStorage.getItem(WS_KEY) } catch { currentWS = null }
+
+export function currentWorkspace(): string | null { return currentWS }
+
+export function setWorkspace(id: string | null): void {
+  currentWS = id
+  try {
+    if (id) window.localStorage.setItem(WS_KEY, id)
+    else window.localStorage.removeItem(WS_KEY)
+  } catch { /* storage unavailable */ }
+}
+
+export function wsPath(path: string): string {
+  if (!currentWS) return path
+  const sep = path.includes('?') ? '&' : '?'
+  return `${path}${sep}workspace=${encodeURIComponent(currentWS)}`
+}
+
+export async function workspaces(): Promise<Workspace[]> {
+  const r = await api.get<{ workspaces?: Workspace[] }>('/api/v1/workspaces')
+  return r.workspaces ?? []
+}
+
 export const api = {
   basicLogin: (username: string, password: string): Promise<{ ok: boolean }> => {
     const bytes = new TextEncoder().encode(`${username}:${password}`)
@@ -149,14 +182,15 @@ export const api = {
   get: async <T>(path: string): Promise<T> => call<T>('get', path),
   post: async <T>(path: string, body?: unknown): Promise<T> => call<T>('post', path, body ?? {}),
   put: async <T>(path: string, body: unknown): Promise<T> => call<T>('put', path, body),
+  patch: async <T>(path: string, body: unknown): Promise<T> => call<T>('patch', path, body),
   del: async <T>(path: string): Promise<T> => call<T>('delete', path),
 }
 
-async function call<T>(method: 'get' | 'post' | 'put' | 'delete', path: string, body?: unknown, headers?: HeadersInit): Promise<T> {
+async function call<T>(method: 'get' | 'post' | 'put' | 'patch' | 'delete', path: string, body?: unknown, headers?: HeadersInit): Promise<T> {
   return (await request(method, path, body, headers)).data as T
 }
 
-async function request(method: 'get' | 'post' | 'put' | 'delete', path: string, body?: unknown, headers?: HeadersInit, parseAs: 'json' | 'blob' = 'json'): Promise<{ data: unknown; response: Response }> {
+async function request(method: 'get' | 'post' | 'put' | 'patch' | 'delete', path: string, body?: unknown, headers?: HeadersInit, parseAs: 'json' | 'blob' = 'json'): Promise<{ data: unknown; response: Response }> {
   // openapi-fetch is typed per-path; the console's dynamic paths are
   // handled via the untyped escape hatch.
   const fn = (raw as any)[method.toUpperCase()].bind(raw)

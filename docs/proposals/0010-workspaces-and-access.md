@@ -1,6 +1,6 @@
 # EP-0010: Workspaces, sharing, and key access
 
-- **Status:** Draft
+- **Status: Implemented
 - **Scope:** API-tier authorization (`cmd/calcside/internal/service`), store
   schema, API keys, console navigation. Depends on EP-0008 (restricted keys).
 
@@ -168,8 +168,8 @@ a different `workspace` value is `forbidden`.
 New routes: `GET/POST /workspaces`, `PATCH/DELETE /workspaces/{id}`,
 `GET/PUT/DELETE /workspaces/{id}/members/{user}` (add by email of an
 existing user), `GET/PUT/DELETE /instances/{id}/shares/{user}`, and
-`shared` in the instance list response marking instances reached via a
-share.
+`GET /api/v1/instances?shared=true` returning instances reached via a
+share with their share role and owning workspace name (keys get 403).
 
 ### Store
 

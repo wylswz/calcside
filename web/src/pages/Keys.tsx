@@ -1,13 +1,13 @@
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, APIKey, CreateKeyRequest } from '../api'
+import { api, APIKey, CreateKeyRequest, wsPath } from '../api'
 import { Button, EmptyRow, Field, Modal, Notice, PageHeader, inputCls } from '../components/ui'
 import { SpecForm, type SpecFormHandle } from '../components/SpecForm'
 import { fmtTime } from '../format'
 import { allowedSummary } from '../activity'
 import { claudeCodeSnippet, cursorSnippet, headerSnippet, mcpURL } from '../mcpSnippets'
 
-type Access = 'restricted' | 'full'
+type Access = 'restricted' | 'full' | 'view'
 
 // CopyBlock renders copyable text (secret or client snippet) with a
 // copy button — one component for every "copy this once" surface.
@@ -62,10 +62,10 @@ export default function Keys() {
 
   const { data } = useQuery({
     queryKey: ['keys'],
-    queryFn: () => api.get<{ keys: APIKey[] }>('/api/v1/keys'),
+    queryFn: () => api.get<{ keys: APIKey[] }>(wsPath('/api/v1/keys')),
   })
   const create = useMutation({
-    mutationFn: (body: CreateKeyRequest) => api.post<{ key: APIKey; secret: string }>('/api/v1/keys', body),
+    mutationFn: (body: CreateKeyRequest) => api.post<{ key: APIKey; secret: string }>(wsPath('/api/v1/keys'), body),
     onSuccess: (r) => {
       setSecret(r.secret)
       setSecretRestricted(!!r.key.restricted)
@@ -87,6 +87,7 @@ export default function Keys() {
       body.spec = spec
       body.max_instances = maxInstances
     }
+    if (access === 'view') body.view_only = true
     create.mutate(body)
   }
 
@@ -107,9 +108,11 @@ export default function Keys() {
                 <td className={k.revoked_at ? 'line-through' : 'font-medium text-ink'}>{k.name}</td>
                 <td className="font-mono text-xs">{k.prefix}…</td>
                 <td className="max-w-[320px]">
-                  {k.restricted
-                    ? <span className="block truncate font-mono text-xs text-sec" title={allowedSummary(k.spec)}>restricted · {allowedSummary(k.spec)}</span>
-                    : <span className="font-mono text-xs text-sec">full access</span>}
+                  {k.view_only
+                    ? <span className="font-mono text-xs text-sec">view only</span>
+                    : k.restricted
+                      ? <span className="block truncate font-mono text-xs text-sec" title={allowedSummary(k.spec)}>restricted · {allowedSummary(k.spec)}</span>
+                      : <span className="font-mono text-xs text-sec">full access</span>}
                 </td>
                 <td className="whitespace-nowrap text-xs text-sec">{fmtTime(k.created_at)}</td>
                 <td className="whitespace-nowrap text-xs text-sec">{k.expires_at ? fmtTime(k.expires_at) : 'never'}</td>
@@ -134,15 +137,19 @@ export default function Keys() {
               </div>
               <Field label="Access">
                 <div className="flex gap-3">
-                  {(['restricted', 'full'] as const).map((a) => (
+                  {(['restricted', 'full', 'view'] as const).map((a) => (
                     <label key={a} className={`flex flex-1 items-start gap-2 border px-3 py-2 text-xs ${access === a ? 'border-ink' : 'border-line'}`}>
                       <input type="radio" className="mt-0.5" checked={access === a} onChange={() => setAccess(a)} />
                       <span>
-                        <span className="block font-medium text-ink">{a === 'restricted' ? 'Restricted' : 'Full access'}</span>
+                        <span className="block font-medium text-ink">
+                          {a === 'restricted' ? 'Restricted' : a === 'full' ? 'Full access' : 'View only'}
+                        </span>
                         <span className="block text-mute">
                           {a === 'restricted'
                             ? 'creates and uses instances from the spec below — for agents'
-                            : 'the key can create any instance and use every instance and vault secret reference'}
+                            : a === 'full'
+                              ? 'the key can create any instance and use every instance and vault secret reference'
+                              : "can see this workspace's instances, runs and files; cannot run code"}
                         </span>
                       </span>
                     </label>

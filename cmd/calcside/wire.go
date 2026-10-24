@@ -18,6 +18,7 @@ import (
 	policysvc "calcside/cmd/calcside/internal/service/policy"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/vault"
+	workspacesvc "calcside/cmd/calcside/internal/service/workspace"
 	"calcside/internal/node"
 )
 
@@ -33,9 +34,10 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		wire.FieldsOf(new(config.Config), "MaxInstancesPerUser"),
 		access.New,
 		wire.Value(time.Now), iam.New,
-		policysvc.New, auditsvc.New, provideExtCatalog, catalog.New,
+		policysvc.New,
+		workspacesvc.New, auditsvc.New, provideExtCatalog, catalog.New,
 		provideAuth, provideBasic, provideAnonymous, provideGoogle, provideWeb, provideArtifacts,
-		wire.Struct(new(api.Deps), "IAM", "Vault", "Policy", "Audit", "Catalog", "Sandbox", "Access", "Auth", "Basic", "Web", "Anonymous", "Previews"),
+		wire.Struct(new(api.Deps), "IAM", "Vault", "Policy", "Audit", "Catalog", "Sandbox", "Workspace", "Access", "Auth", "Basic", "Web", "Anonymous", "Previews"),
 		provideServer, wire.Struct(new(application), "*"),
 	)
 	return nil, nil, nil

@@ -29,16 +29,20 @@ func TestRouteCoverage(t *testing.T) {
 		"Files": true, "ListExecutions": true, "GetExecution": true,
 		"DeleteKey": true, "GetPolicy": true, "UpdatePolicy": true,
 		"DeletePolicy": true, "UpdateSecret": true, "DeleteSecret": true,
+		"UpdateWorkspace": true, "DeleteWorkspace": true, "ListMembers": true,
+		"AddMember": true, "SetMemberRole": true, "RemoveMember": true,
+		"ListChanges": true, "ListShares": true, "PutShare": true,
+		"DeleteShare": true,
 	}
 	safe := map[string]bool{
 		"Healthz": true, "AuthConfig": true, "Me": true, "ChangePassword": true,
 		"Capabilities": true, "EditorMetadata": true, "ListExtensions": true,
 		"ExtensionIcon": true, "ListKeys": true, "CreateKey": true,
 		"ListInstances": true, "CreateInstance": true, "ListAudit": true,
-		"ListWorkspaces": true, "ListPolicies": true, "CreatePolicy": true,
-		"ValidatePolicy": true, "ListSecrets": true, "CreateSecret": true,
-		"ArtifactConfig": true, "PreviewArtifact": true, "ExportArtifacts": true,
-		"InstanceCompletions": true,
+		"ListWorkspaces": true, "CreateWorkspace": true, "ListPolicies": true,
+		"CreatePolicy": true, "ValidatePolicy": true, "ListSecrets": true,
+		"CreateSecret": true, "ArtifactConfig": true, "PreviewArtifact": true,
+		"ExportArtifacts": true, "InstanceCompletions": true,
 	}
 	for i := 0; i < ifaceType.NumMethod(); i++ {
 		op := ifaceType.Method(i).Name
@@ -238,5 +242,203 @@ func TestRule5FullKeyNoConfigure(t *testing.T) {
 		if code != 403 {
 			t.Errorf("%s %s with full key: %d (want 403)", op.method, op.path, code)
 		}
+	}
+}
+
+// Team-workspace routes: manage rules, last-owner, email resolution,
+// leave, delete conflict, change log.
+func TestWorkspaceRoutes(t *testing.T) {
+	e := newEnv(t)
+	cookiesA := login(e, "a@x.com")
+	cookiesB := login(e, "b@x.com")
+	csrf := map[string]string{"X-Requested-With": "calcside"}
+
+	code, m, _ := e.req("POST", "/api/v1/workspaces", `{"name":"team"}`, csrf, cookiesA)
+	if code != 201 {
+		t.Fatalf("create workspace: %d %v", code, m)
+	}
+	ws := m["workspace"].(map[string]any)["id"].(string)
+
+	// B cannot manage
+	code, _, _ = e.req("GET", "/api/v1/workspaces/"+ws+"/members", "", nil, cookiesB)
+	if code != 404 {
+		t.Fatalf("stranger members: %d", code)
+	}
+	code, _, _ = e.req("PATCH", "/api/v1/workspaces/"+ws, `{"name":"x"}`, csrf, cookiesB)
+	if code != 404 {
+		t.Fatalf("stranger rename: %d", code)
+	}
+
+	// unknown email → 404; personal ws member ops → 403
+	code, _, _ = e.req("POST", "/api/v1/workspaces/"+ws+"/members", `{"email":"ghost@x.com","role":"viewer"}`, csrf, cookiesA)
+	if code != 404 {
+		t.Fatalf("unknown email: %d", code)
+	}
+	personal := store.PersonalWorkspaceID("usr_x")
+	code, _, _ = e.req("POST", "/api/v1/workspaces/"+personal+"/members", `{"email":"b@x.com","role":"viewer"}`, csrf, cookiesB)
+	if code != 403 && code != 404 {
+		t.Fatalf("personal add member: %d", code)
+	}
+
+	code, m, _ = e.req("POST", "/api/v1/workspaces/"+ws+"/members", `{"email":"b@x.com","role":"viewer"}`, csrf, cookiesA)
+	if code != 201 {
+		t.Fatalf("add member: %d %v", code, m)
+	}
+	bID := m["member"].(map[string]any)["user_id"].(string)
+	code, _, _ = e.req("POST", "/api/v1/workspaces/"+ws+"/members", `{"email":"b@x.com","role":"viewer"}`, csrf, cookiesA)
+	if code != 409 {
+		t.Fatalf("duplicate member: %d", code)
+	}
+	// B (viewer) now sees members but cannot add
+	code, m, _ = e.req("GET", "/api/v1/workspaces/"+ws+"/members", "", nil, cookiesB)
+	if code != 200 || len(m["members"].([]any)) != 2 {
+		t.Fatalf("viewer members: %d %v", code, m)
+	}
+	code, _, _ = e.req("PUT", "/api/v1/workspaces/"+ws+"/members/"+bID, `{"role":"editor"}`, csrf, cookiesB)
+	if code != 403 {
+		t.Fatalf("viewer set role: %d", code)
+	}
+	// demote last owner → 409
+	code, m, _ = e.req("GET", "/api/v1/workspaces/"+ws+"/members", "", nil, cookiesA)
+	aID := m["members"].([]any)[0].(map[string]any)["user_id"].(string)
+	for _, mm := range m["members"].([]any) {
+		if mm.(map[string]any)["role"] == "owner" {
+			aID = mm.(map[string]any)["user_id"].(string)
+		}
+	}
+	code, m2, _ := e.req("PUT", "/api/v1/workspaces/"+ws+"/members/"+aID, `{"role":"editor"}`, csrf, cookiesA)
+	if code != 409 {
+		t.Fatalf("demote last owner: %d ws=%s aID=%s %v", code, ws, aID, m2)
+	}
+	// leave as B
+	code, _, _ = e.req("DELETE", "/api/v1/workspaces/"+ws+"/members/"+bID, "", csrf, cookiesB)
+	if code != 200 {
+		t.Fatalf("leave: %d", code)
+	}
+	// change log
+	code, m, _ = e.req("GET", "/api/v1/workspaces/"+ws+"/changes", "", nil, cookiesA)
+	if code != 200 {
+		t.Fatalf("changes: %d", code)
+	}
+	if len(m["changes"].([]any)) < 2 { // member_added + member_removed
+		t.Fatalf("changes: %v", m)
+	}
+	// delete with running instance → 409
+	code, m, _ = e.req("POST", "/api/v1/instances?workspace="+ws, `{"capabilities":{"fs":{}}}`, csrf, cookiesA)
+	if code != 201 {
+		t.Fatalf("create in ws: %d %v", code, m)
+	}
+	code, _, _ = e.req("DELETE", "/api/v1/workspaces/"+ws, "", csrf, cookiesA)
+	if code != 409 {
+		t.Fatalf("delete with running: %d", code)
+	}
+	code, _, _ = e.req("DELETE", "/api/v1/workspaces/"+personal, "", csrf, cookiesB)
+	if code == 200 {
+		t.Fatal("personal delete succeeded")
+	}
+}
+
+// Shares: owner shares an instance; recipient sees it; editor can run;
+// member role wins over share; key never follows a share.
+func TestShares(t *testing.T) {
+	e := newEnv(t)
+	cookiesA := login(e, "a@x.com")
+	cookiesB := login(e, "b@x.com")
+	csrf := map[string]string{"X-Requested-With": "calcside"}
+
+	code, m, _ := e.req("POST", "/api/v1/instances", `{"capabilities":{"fs":{}}}`, csrf, cookiesA)
+	if code != 201 {
+		t.Fatalf("create: %d", code)
+	}
+	inst := m["instance"].(map[string]any)["id"].(string)
+
+	code, m, _ = e.req("PUT", "/api/v1/instances/"+inst+"/shares", `{"email":"b@x.com","role":"viewer"}`, csrf, cookiesA)
+	if code != 200 {
+		t.Fatalf("share: %d %v", code, m)
+	}
+	// B can view but not exec
+	code, _, _ = e.req("GET", "/api/v1/instances/"+inst, "", nil, cookiesB)
+	if code != 200 {
+		t.Fatalf("shared view: %d", code)
+	}
+	code, _, _ = e.req("POST", "/api/v1/instances/"+inst+"/exec", `{"code":"print(1)"}`, csrf, cookiesB)
+	if code != 403 {
+		t.Fatalf("viewer exec: %d", code)
+	}
+	// upgrade to editor → run allowed
+	code, _, _ = e.req("PUT", "/api/v1/instances/"+inst+"/shares", `{"email":"b@x.com","role":"editor"}`, csrf, cookiesA)
+	if code != 200 {
+		t.Fatalf("reshare editor: %d", code)
+	}
+	code, m, _ = e.req("POST", "/api/v1/instances/"+inst+"/exec", `{"code":"print(1)"}`, csrf, cookiesB)
+	if code != 200 {
+		t.Fatalf("editor exec: %d %v", code, m)
+	}
+	// shared=true list
+	code, m, _ = e.req("GET", "/api/v1/instances?shared=true", "", nil, cookiesB)
+	if code != 200 || len(m["instances"].([]any)) != 1 {
+		t.Fatalf("shared list: %d %v", code, m)
+	}
+	// B's key never sees the shared instance
+	_, m, _ = e.req("POST", "/api/v1/keys", `{"name":"bk"}`, csrf, cookiesB)
+	bearerB := map[string]string{"Authorization": "Bearer " + m["secret"].(string)}
+	code, _, _ = e.req("GET", "/api/v1/instances/"+inst, "", bearerB, nil)
+	if code != 404 {
+		t.Fatalf("key followed share: %d", code)
+	}
+	code, _, _ = e.req("GET", "/api/v1/instances?shared=true", "", bearerB, nil)
+	if code != 403 {
+		t.Fatalf("key shared list: %d", code)
+	}
+	// B leaves
+	code, m, _ = e.req("GET", "/api/v1/me", "", nil, cookiesB)
+	bID := m["user"].(map[string]any)["id"].(string)
+	code, _, _ = e.req("DELETE", "/api/v1/instances/"+inst+"/shares/"+bID, "", csrf, cookiesB)
+	if code != 200 {
+		t.Fatalf("unshare self: %d", code)
+	}
+	code, _, _ = e.req("GET", "/api/v1/instances/"+inst, "", nil, cookiesB)
+	if code != 404 {
+		t.Fatalf("after unshare: %d", code)
+	}
+}
+
+// View-only keys: create, see instances, cannot exec/create; also not
+// combinable with a restricted spec; MCP stays restricted-only.
+func TestViewOnlyKey(t *testing.T) {
+	e := newEnv(t)
+	cookies := login(e, "a@x.com")
+	csrf := map[string]string{"X-Requested-With": "calcside"}
+	code, m, _ := e.req("POST", "/api/v1/keys", `{"name":"vo","view_only":true}`, csrf, cookies)
+	if code != 201 {
+		t.Fatalf("view_only create: %d %v", code, m)
+	}
+	if !m["key"].(map[string]any)["view_only"].(bool) {
+		t.Fatal("view_only not set on key dto")
+	}
+	bearer := map[string]string{"Authorization": "Bearer " + m["secret"].(string)}
+	code, m, _ = e.req("POST", "/api/v1/instances", `{"capabilities":{"fs":{}}}`, csrf, cookies)
+	inst := m["instance"].(map[string]any)["id"].(string)
+	code, _, _ = e.req("GET", "/api/v1/instances/"+inst, "", bearer, nil)
+	if code != 200 {
+		t.Fatalf("view-only get: %d", code)
+	}
+	code, _, _ = e.req("POST", "/api/v1/instances/"+inst+"/exec", `{"code":"print(1)"}`, bearer, nil)
+	if code != 403 {
+		t.Fatalf("view-only exec: %d", code)
+	}
+	code, _, _ = e.req("POST", "/api/v1/instances", `{"capabilities":{"fs":{}}}`, bearer, nil)
+	if code != 403 {
+		t.Fatalf("view-only create: %d", code)
+	}
+	// view_only + spec → 400
+	code, _, _ = e.req("POST", "/api/v1/keys", `{"name":"bad","view_only":true,"spec":{"capabilities":{"fs":{}}},"max_instances":1}`, csrf, cookies)
+	if code != 400 {
+		t.Fatalf("view_only+spec: %d", code)
+	}
+	// view_only key gets 403 on /mcp (restricted-only)
+	code, _, _ = e.req("POST", "/mcp", `{}`, bearer, nil)
+	if code != 403 && code != 405 && code != 400 {
+		t.Fatalf("view-only mcp: %d", code)
 	}
 }

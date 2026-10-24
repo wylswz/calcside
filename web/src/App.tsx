@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Route, Routes, Link, NavLink, Navigate, useNavigate, useMatch } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api, loadAuthConfig, User, AuthConfig, AuthKind } from './api'
+import WorkspaceSwitcher from './components/WorkspaceSwitcher'
+import WorkspacePage from './pages/Workspace'
 import Login from './pages/Login'
 import Instances from './pages/Instances'
 import InstanceDetail from './pages/InstanceDetail'
@@ -112,6 +114,7 @@ export default function App() {
                 <SignalMark signal="failed" />dev · anonymous
               </span>
             )}
+            <WorkspaceSwitcher />
             <Link to="/profile" className="text-xs text-sec hover:text-ink" title="Profile">{user?.username || user?.email}</Link>
             {!dev && <Button size="sm" onClick={logout}>Logout</Button>}
           </div>
@@ -126,6 +129,7 @@ export default function App() {
           <Route path="/secrets" element={<Secrets />} />
           <Route path="/profile" element={user && <Profile user={user} />} />
           <Route path="/audit" element={<Audit />} />
+          <Route path="/workspaces/:id" element={<WorkspacePage />} />
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

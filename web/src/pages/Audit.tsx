@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { api, AuditEvent, Instance } from '../api'
+import { api, AuditEvent, Instance, wsPath } from '../api'
 import { callOutcome } from '../activity'
 import { Button, Field, PageHeader, inputCls } from '../components/ui'
 import { CallRows } from '../components/CallTable'
@@ -25,11 +25,11 @@ export default function Audit() {
 
   const { data } = useQuery({
     queryKey: ['audit', instFilter, execFilter, before],
-    queryFn: () => api.get<{ events: AuditEvent[] }>(`/api/v1/audit?${q}`),
+    queryFn: () => api.get<{ events: AuditEvent[] }>(wsPath(`/api/v1/audit?${q}`)),
   })
   const { data: instData } = useQuery({
     queryKey: ['instances'],
-    queryFn: () => api.get<{ instances: Instance[] }>('/api/v1/instances'),
+    queryFn: () => api.get<{ instances: Instance[] }>(wsPath('/api/v1/instances')),
   })
   const instances = useMemo(
     () => new Map((instData?.instances ?? []).map((i) => [i.id, i])),

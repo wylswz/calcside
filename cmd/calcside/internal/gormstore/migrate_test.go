@@ -113,7 +113,15 @@ func TestWorkspaceBackfill(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "t.db")
 	dir := "migrations/sqlite"
 	files, _ := filepath.Glob(dir + "/*.sql")
-	storetest.Atlas(t, types.DriverSQLite, dsn, "apply", fmt.Sprintf("%d", len(files)-1))
+	// Apply everything before the workspaces migration, seed rows in
+	// that schema, then apply the rest.
+	before := 0
+	for i, f := range files {
+		if strings.Contains(f, "add_workspaces") {
+			before = i
+		}
+	}
+	storetest.Atlas(t, types.DriverSQLite, dsn, "apply", fmt.Sprintf("%d", before))
 	d := openTest(t, types.DriverSQLite, dsn)
 	ctx := t.Context()
 	uid := "usr_seed001"
@@ -134,7 +142,7 @@ func TestWorkspaceBackfill(t *testing.T) {
 	if err := d.g.Raw(`SELECT workspace_id, role FROM members WHERE user_id = ?`, uid).Row().Scan(&wsID, &role); err != nil {
 		t.Fatal(err)
 	}
-	if wsID != store.PersonalWorkspaceID(uid) || role != store.RoleOwner {
+	if wsID != store.PersonalWorkspaceID(uid) || role != string(store.RoleOwner) {
 		t.Fatalf("membership %s %s", wsID, role)
 	}
 	var inWS string

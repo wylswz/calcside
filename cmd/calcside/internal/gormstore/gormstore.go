@@ -149,6 +149,29 @@ type memberRow struct {
 
 func (memberRow) TableName() string { return "members" }
 
+type shareRow struct {
+	InstanceID string `gorm:"primaryKey"`
+	UserID     string `gorm:"primaryKey;index:idx_shares_user"`
+	Role       string
+	CreatedBy  string
+	CreatedAt  time.Time
+}
+
+func (shareRow) TableName() string { return "shares" }
+
+type changeRow struct {
+	ID          string `gorm:"primaryKey"`
+	WorkspaceID string `gorm:"index:idx_changes_workspace"`
+	ByUserID    string
+	Change      string
+	UserID      string
+	InstanceID  string
+	Role        string
+	CreatedAt   time.Time
+}
+
+func (changeRow) TableName() string { return "workspace_changes" }
+
 type keyRow struct {
 	ID           string `gorm:"primaryKey"`
 	UserID       string
@@ -162,6 +185,7 @@ type keyRow struct {
 	Spec         []byte
 	MaxInstances int
 	WorkspaceID  string
+	ViewOnly     bool
 }
 
 func (keyRow) TableName() string { return "api_keys" }
@@ -172,6 +196,7 @@ func (k keyRow) toStore() *store.APIKey {
 		CreatedAt: k.CreatedAt.UTC(), LastUsedAt: k.LastUsedAt,
 		ExpiresAt: k.ExpiresAt, RevokedAt: k.RevokedAt,
 		Spec: k.Spec, MaxInstances: k.MaxInstances, WorkspaceID: k.WorkspaceID,
+		ViewOnly: k.ViewOnly,
 	}
 	utcPtr := func(t *time.Time) *time.Time {
 		if t == nil {
@@ -469,6 +494,7 @@ func (d *sqlDB) CreateAPIKey(ctx context.Context, k *store.APIKey) error {
 	}
 	row := keyRow{
 		ID: k.ID, UserID: k.UserID, Name: k.Name, Prefix: k.Prefix, Hash: k.Hash,
+		ViewOnly:  k.ViewOnly,
 		CreatedAt: k.CreatedAt.UTC(), LastUsedAt: k.LastUsedAt,
 		ExpiresAt: k.ExpiresAt, RevokedAt: k.RevokedAt,
 		Spec: k.Spec, MaxInstances: k.MaxInstances, WorkspaceID: k.WorkspaceID,
@@ -987,7 +1013,7 @@ func (d *sqlDB) GetWorkspace(ctx context.Context, id string) (*store.Workspace, 
 
 func (d *sqlDB) AddMember(ctx context.Context, m *store.Member) error {
 	return mapWriteErr(gorm.G[memberRow](d.g).Create(ctx, &memberRow{
-		WorkspaceID: m.WorkspaceID, UserID: m.UserID, Role: m.Role,
+		WorkspaceID: m.WorkspaceID, UserID: m.UserID, Role: string(m.Role),
 	}))
 }
 
@@ -997,7 +1023,7 @@ func (d *sqlDB) GetMember(ctx context.Context, workspaceID, userID string) (*sto
 	if err != nil {
 		return nil, mapNotFound(err)
 	}
-	return &store.Member{WorkspaceID: row.WorkspaceID, UserID: row.UserID, Role: row.Role}, nil
+	return &store.Member{WorkspaceID: row.WorkspaceID, UserID: row.UserID, Role: types.Role(row.Role)}, nil
 }
 
 func (d *sqlDB) ListMemberships(ctx context.Context, userID string) ([]*store.Membership, error) {
@@ -1013,7 +1039,7 @@ func (d *sqlDB) ListMemberships(ctx context.Context, userID string) ([]*store.Me
 		}
 		out = append(out, &store.Membership{
 			Workspace: &store.Workspace{ID: w.ID, Name: w.Name, Personal: w.Personal, CreatedAt: w.CreatedAt.UTC()},
-			Role:      r.Role,
+			Role:      types.Role(r.Role),
 		})
 	}
 	return out, nil
@@ -1031,6 +1057,229 @@ func createPersonalWorkspace(ctx context.Context, tx *gorm.DB, u *store.User, no
 		return mapWriteErr(err)
 	}
 	return mapWriteErr(gorm.G[memberRow](tx).Create(ctx, &memberRow{
-		WorkspaceID: ws.ID, UserID: u.ID, Role: store.RoleOwner,
+		WorkspaceID: ws.ID, UserID: u.ID, Role: string(store.RoleOwner),
 	}))
+}
+
+// --- shares ---
+
+func (d *sqlDB) CreateShare(ctx context.Context, sh *store.Share) error {
+	if sh.CreatedAt.IsZero() {
+		sh.CreatedAt = time.Now().UTC()
+	}
+	// Upsert: the share role can be updated by re-adding.
+	err := gorm.G[shareRow](d.g, clause.OnConflict{
+		Columns:   []clause.Column{{Name: "instance_id"}, {Name: "user_id"}},
+		DoUpdates: clause.Set{col("role", sh.Role)},
+	}).Create(ctx, &shareRow{
+		InstanceID: sh.InstanceID, UserID: sh.UserID, Role: string(sh.Role),
+		CreatedBy: sh.CreatedBy, CreatedAt: sh.CreatedAt.UTC(),
+	})
+	return mapWriteErr(err)
+}
+
+func (d *sqlDB) DeleteShare(ctx context.Context, instanceID, userID string) error {
+	n, err := gorm.G[shareRow](d.g).
+		Where("instance_id = ? AND user_id = ?", instanceID, userID).Delete(ctx)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (d *sqlDB) GetShare(ctx context.Context, instanceID, userID string) (*store.Share, error) {
+	row, err := gorm.G[shareRow](d.g).
+		Where("instance_id = ? AND user_id = ?", instanceID, userID).Take(ctx)
+	if err != nil {
+		return nil, mapNotFound(err)
+	}
+	return &store.Share{InstanceID: row.InstanceID, UserID: row.UserID,
+		Role: types.Role(row.Role), CreatedBy: row.CreatedBy, CreatedAt: row.CreatedAt.UTC()}, nil
+}
+
+func (d *sqlDB) ListShares(ctx context.Context, instanceID string) ([]*store.ShareInfo, error) {
+	var rows []struct {
+		InstanceID string
+		UserID     string
+		Role       string
+		CreatedBy  string
+		CreatedAt  time.Time
+		Email      string
+		Name       string
+	}
+	err := d.g.WithContext(ctx).Table("shares").
+		Select("shares.*, users.email AS email, users.name AS name").
+		Joins("LEFT JOIN users ON users.id = shares.user_id").
+		Where("shares.instance_id = ?", instanceID).
+		Order("shares.created_at").Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*store.ShareInfo, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, &store.ShareInfo{
+			Share: store.Share{InstanceID: r.InstanceID, UserID: r.UserID,
+				Role: types.Role(r.Role), CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt.UTC()},
+			Email: r.Email, Name: r.Name,
+		})
+	}
+	return out, nil
+}
+
+func (d *sqlDB) ListSharedInstances(ctx context.Context, userID string) ([]*store.Share, error) {
+	rows, err := gorm.G[shareRow](d.g).Where("user_id = ?", userID).Find(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*store.Share, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, &store.Share{InstanceID: r.InstanceID, UserID: r.UserID,
+			Role: types.Role(r.Role), CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt.UTC()})
+	}
+	return out, nil
+}
+
+// --- workspace changes ---
+
+func (d *sqlDB) InsertChange(ctx context.Context, c *store.WorkspaceChange) error {
+	if c.ID == "" {
+		c.ID = store.NewID("chg_")
+	}
+	if c.CreatedAt.IsZero() {
+		c.CreatedAt = time.Now().UTC()
+	}
+	return mapWriteErr(gorm.G[changeRow](d.g).Create(ctx, &changeRow{
+		ID: c.ID, WorkspaceID: c.WorkspaceID, ByUserID: c.ByUserID, Change: string(c.Change),
+		UserID: c.UserID, InstanceID: c.InstanceID, Role: string(c.Role), CreatedAt: c.CreatedAt.UTC(),
+	}))
+}
+
+func (d *sqlDB) ListChanges(ctx context.Context, workspaceID string, limit int) ([]*store.WorkspaceChange, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 200
+	}
+	rows, err := gorm.G[changeRow](d.g).Where("workspace_id = ?", workspaceID).
+		Order("created_at DESC").Limit(limit).Find(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*store.WorkspaceChange, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, &store.WorkspaceChange{
+			ID: r.ID, WorkspaceID: r.WorkspaceID, ByUserID: r.ByUserID, Change: types.ChangeKind(r.Change),
+			UserID: r.UserID, InstanceID: r.InstanceID, Role: types.Role(r.Role), CreatedAt: r.CreatedAt.UTC(),
+		})
+	}
+	return out, nil
+}
+
+// --- member / workspace management ---
+
+func (d *sqlDB) UpdateWorkspace(ctx context.Context, w *store.Workspace) error {
+	n, err := gorm.G[workspaceRow](d.g).Where("id = ?", w.ID).Set(
+		col("name", w.Name),
+	).Update(ctx)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (d *sqlDB) LockWorkspace(ctx context.Context, id string) error {
+	_, err := gorm.G[workspaceRow](d.g, clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", id).Take(ctx)
+	return mapNotFound(err)
+}
+
+func (d *sqlDB) DeleteWorkspace(ctx context.Context, id string) error {
+	n, err := gorm.G[workspaceRow](d.g).Where("id = ?", id).Delete(ctx)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (d *sqlDB) ListMembers(ctx context.Context, workspaceID string) ([]*store.MemberInfo, error) {
+	var rows []struct {
+		UserID string
+		Email  string
+		Name   string
+		Role   string
+	}
+	err := d.g.WithContext(ctx).Table("members").
+		Select("members.user_id, users.email AS email, users.name AS name, members.role").
+		Joins("LEFT JOIN users ON users.id = members.user_id").
+		Where("members.workspace_id = ?", workspaceID).
+		Order("members.user_id").Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*store.MemberInfo, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, &store.MemberInfo{UserID: r.UserID, Email: r.Email, Name: r.Name, Role: types.Role(r.Role)})
+	}
+	return out, nil
+}
+
+func (d *sqlDB) UpdateMember(ctx context.Context, m *store.Member) error {
+	n, err := gorm.G[memberRow](d.g).
+		Where("workspace_id = ? AND user_id = ?", m.WorkspaceID, m.UserID).Set(
+		col("role", m.Role),
+	).Update(ctx)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (d *sqlDB) DeleteMember(ctx context.Context, workspaceID, userID string) error {
+	n, err := gorm.G[memberRow](d.g).
+		Where("workspace_id = ? AND user_id = ?", workspaceID, userID).Delete(ctx)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (d *sqlDB) CountMembers(ctx context.Context, workspaceID string, role types.Role) (int, error) {
+	n, err := gorm.G[memberRow](d.g).
+		Where("workspace_id = ? AND role = ?", workspaceID, string(role)).Count(ctx, "*")
+	return int(n), err
+}
+
+func (d *sqlDB) RevokeUserKeys(ctx context.Context, workspaceID, userID string) error {
+	now := time.Now().UTC()
+	_, err := gorm.G[keyRow](d.g).
+		Where("workspace_id = ? AND user_id = ? AND revoked_at IS NULL", workspaceID, userID).
+		Set(col("revoked_at", now)).Update(ctx)
+	return err
+}
+
+func (d *sqlDB) GetUserByEmail(ctx context.Context, email string) (*store.User, error) {
+	row, err := gorm.G[userRow](d.g).Where("email = ?", email).Take(ctx)
+	if err != nil {
+		return nil, mapNotFound(err)
+	}
+	return row.toStore(), nil
+}
+
+func (d *sqlDB) Tx(ctx context.Context, fn func(store.Store) error) error {
+	return d.g.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return fn(&sqlDB{g: tx})
+	})
 }

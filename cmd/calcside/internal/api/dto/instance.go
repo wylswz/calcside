@@ -16,6 +16,7 @@ import (
 type Instance struct {
 	ID           string               `json:"id"`
 	UserID       string               `json:"user_id"`
+	WorkspaceID  string               `json:"workspace_id"`
 	Spec         json.RawMessage      `json:"spec"`
 	Labels       map[string]string    `json:"labels"`
 	Status       types.InstanceStatus `json:"status"`
@@ -27,7 +28,7 @@ type Instance struct {
 
 func NewInstance(in *store.Instance) Instance {
 	return Instance{
-		ID: in.ID, UserID: in.UserID, Spec: in.Spec, Labels: in.Labels,
+		ID: in.ID, UserID: in.UserID, WorkspaceID: in.WorkspaceID, Spec: in.Spec, Labels: in.Labels,
 		Status: in.Status, CreatedAt: in.CreatedAt, LastActiveAt: in.LastActiveAt,
 		ExpiresAt: in.ExpiresAt, EndedAt: in.EndedAt,
 	}
@@ -40,6 +41,18 @@ func NewInstances(lst []*store.Instance) []Instance {
 		out[i] = NewInstance(in)
 	}
 	return out
+}
+
+// SharedInstance is an instance reached via a share, with the share
+// role and owning workspace name.
+type SharedInstance struct {
+	Instance      `json:",inline"`
+	Role          string `json:"role"`
+	WorkspaceName string `json:"workspace_name"`
+}
+
+type SharedInstancesEnvelope struct {
+	Instances []SharedInstance `json:"instances"`
 }
 
 type InstanceEnvelope struct {

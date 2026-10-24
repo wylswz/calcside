@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
-import { api, Policy } from '../api'
+import { api, Policy, wsPath } from '../api'
 import { Button, EmptyRow, Field, Modal, PageHeader, inputCls, Tag } from '../components/ui'
 import { fmtTime } from '../format'
 import { cmTheme } from '../components/codemirror'
@@ -39,7 +39,7 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
       if (policy) {
         return api.put<{ policy: Policy }>(`/api/v1/policies/${policy.id}`, { name, rego })
       }
-      return api.post<{ policy: Policy }>('/api/v1/policies', { name, rego })
+      return api.post<{ policy: Policy }>(wsPath('/api/v1/policies'), { name, rego })
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['policies'] })
@@ -118,7 +118,7 @@ export default function Policies() {
   const [showNew, setShowNew] = useState(false)
   const { data } = useQuery({
     queryKey: ['policies'],
-    queryFn: () => api.get<{ policies: Policy[] }>('/api/v1/policies'),
+    queryFn: () => api.get<{ policies: Policy[] }>(wsPath('/api/v1/policies')),
   })
   const del = useMutation({
     mutationFn: (id: string) => api.del(`/api/v1/policies/${id}`),

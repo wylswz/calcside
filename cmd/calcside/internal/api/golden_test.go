@@ -30,7 +30,7 @@ var goldenDir = filepath.Join("testdata", "golden")
 // (every instance is "<id:ins>"), so golden cannot catch id-swap bugs —
 // e.g. an endpoint returning a *different* execution's id passes. Golden
 // covers wire format, not business correctness; behavior tests cover ids.
-var idRe = regexp.MustCompile(`\b(usr|key|ins|exe|pol|sec|aud)_[A-Za-z0-9]{10,}`)
+var idRe = regexp.MustCompile(`\b(usr|key|ins|exe|pol|sec|aud|ws|chg)_[A-Za-z0-9]{10,}`)
 
 // numKeys are nondeterministic numeric fields normalized to "<num>".
 // size, output_bytes and code_sha256 are deterministic and stay real.

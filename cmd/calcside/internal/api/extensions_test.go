@@ -20,6 +20,7 @@ import (
 	policysvc "calcside/cmd/calcside/internal/service/policy"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/vault"
+	workspacesvc "calcside/cmd/calcside/internal/service/workspace"
 	"calcside/internal/capability"
 	capext "calcside/internal/capability/ext"
 	capio "calcside/internal/capability/io"
@@ -63,7 +64,7 @@ func TestListExtensions(t *testing.T) {
 	h := Handler(Deps{
 		IAM: iam.New(st, ac, sbx, 10, nil), Vault: vaultSvc,
 		Policy: policysvc.New(st, ac), Audit: auditsvc.New(st, ac),
-		Catalog: catalog.New(reg, extensions.NewCatalog(extOptions)), Sandbox: sbx, Access: ac,
+		Catalog: catalog.New(reg, extensions.NewCatalog(extOptions)), Sandbox: sbx, Access: ac, Workspace: workspacesvc.New(st, ac),
 		Auth: svc,
 	})
 	srv := httptest.NewServer(h)

@@ -29,6 +29,7 @@ import (
 	policysvc "calcside/cmd/calcside/internal/service/policy"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/vault"
+	workspacesvc "calcside/cmd/calcside/internal/service/workspace"
 	"calcside/internal/store"
 	"calcside/internal/types"
 )
@@ -37,14 +38,15 @@ const maxBodyBytes = 1 << 20
 
 // Deps wires the API.
 type Deps struct {
-	IAM      *iam.Service
-	Vault    *vault.Service
-	Policy   *policysvc.Service
-	Audit    *auditsvc.Service
-	Catalog  *catalog.Service
-	Sandbox  *sandbox.Service
-	Access   *access.Checker
-	Previews *ArtifactPreviews
+	IAM       *iam.Service
+	Vault     *vault.Service
+	Policy    *policysvc.Service
+	Audit     *auditsvc.Service
+	Catalog   *catalog.Service
+	Sandbox   *sandbox.Service
+	Workspace *workspacesvc.Service
+	Access    *access.Checker
+	Previews  *ArtifactPreviews
 
 	Auth          *auth.Service
 	Basic         *auth.BasicLogin
@@ -150,6 +152,7 @@ func Handler(d Deps) http.Handler {
 		{"Catalog", d.Catalog != nil},
 		{"Sandbox", d.Sandbox != nil},
 		{"Access", d.Access != nil},
+		{"Workspace", d.Workspace != nil},
 		{"Auth", d.Auth != nil},
 	} {
 		if !dep.ok {

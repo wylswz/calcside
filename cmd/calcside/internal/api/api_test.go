@@ -22,6 +22,7 @@ import (
 	policysvc "calcside/cmd/calcside/internal/service/policy"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/vault"
+	workspacesvc "calcside/cmd/calcside/internal/service/workspace"
 	"calcside/cmd/calcside/internal/vaultcipher"
 	"calcside/internal/capability"
 	capfs "calcside/internal/capability/fs"
@@ -122,7 +123,7 @@ func newArtifactEnv(t *testing.T, cipher *vaultcipher.Cipher, global map[string]
 	h := Handler(Deps{
 		IAM: iam.New(st, ac, e.sbx, 10, nil), Vault: vaultSvc,
 		Policy: policysvc.New(st, ac), Audit: auditsvc.New(st, ac),
-		Catalog: catalog.New(reg, nil), Sandbox: e.sbx, Access: ac,
+		Catalog: catalog.New(reg, nil), Sandbox: e.sbx, Access: ac, Workspace: workspacesvc.New(st, ac),
 		Auth: svc, Previews: previews,
 	})
 	srv := httptest.NewServer(h)

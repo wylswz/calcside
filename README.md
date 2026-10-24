@@ -31,6 +31,20 @@ with Client(base_url="http://127.0.0.1:8787", api_key="") as client:
 
 Outside dev mode, create an API key in the web console and pass it via `CALCSIDE_API_KEY` or the SDK's `api_key` argument. Keys are **restricted** or **full access**: a restricted key carries an instance spec and a live-instance bound — it may only create and use instances from that spec; full-access keys keep the owner's full API power and are for trusted automation only. Manage library policies through the console or `/api/v1/policies`, then select them in the instance spec.
 
+## Workspaces and sharing
+
+Every user gets a personal workspace. `POST /api/v1/workspaces` creates a
+shared workspace; owners manage members (`/api/v1/workspaces/{id}/members`)
+and roles — `viewer` sees instances/runs/files, `editor` can also run code
+and change policies, `owner` also manages members, shares and the
+workspace itself. The console header switches workspaces; every
+list/create call takes `?workspace=`. Single instances can be shared
+outside the workspace with `PUT /api/v1/instances/{id}/shares`
+(`viewer` or `editor`), and `GET /api/v1/instances?shared=true` lists
+instances shared with you. `view_only` API keys see a workspace's
+instances and runs but cannot execute code. All membership/share changes
+are recorded under `GET /api/v1/workspaces/{id}/changes`.
+
 ## Connect an agent over MCP
 
 `POST /mcp` speaks the Model Context Protocol over streamable HTTP to any MCP client (Claude Code, Cursor, VS Code, agent frameworks). It requires a **restricted** API key: create one in the console under API keys with the instance spec the agent needs.

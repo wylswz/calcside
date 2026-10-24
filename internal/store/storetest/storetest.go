@@ -405,6 +405,119 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		}
 	})
 
+	t.Run("workspaces", func(t *testing.T) {
+		s := newStore(t)
+		u, _ := s.UpsertUserByEmail(ctx, "ws1@x.com", "", "")
+		u2, _ := s.UpsertUserByEmail(ctx, "ws2@x.com", "", "")
+		ws := &store.Workspace{ID: "ws_team1", Name: "team"}
+		if err := s.CreateWorkspace(ctx, ws); err != nil {
+			t.Fatal(err)
+		}
+		ws.Name = "renamed"
+		if err := s.UpdateWorkspace(ctx, ws); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.GetWorkspace(ctx, ws.ID)
+		if err != nil || got.Name != "renamed" {
+			t.Fatalf("GetWorkspace: %v %+v", err, got)
+		}
+		if err := s.AddMember(ctx, &store.Member{WorkspaceID: ws.ID, UserID: u.ID, Role: store.RoleOwner}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.AddMember(ctx, &store.Member{WorkspaceID: ws.ID, UserID: u2.ID, Role: store.RoleViewer}); err != nil {
+			t.Fatal(err)
+		}
+		ms, err := s.ListMembers(ctx, ws.ID)
+		if err != nil || len(ms) != 2 || ms[0].Email == "" {
+			t.Fatalf("ListMembers: %v %+v", err, ms)
+		}
+		if err := s.UpdateMember(ctx, &store.Member{WorkspaceID: ws.ID, UserID: u2.ID, Role: store.RoleEditor}); err != nil {
+			t.Fatal(err)
+		}
+		m, _ := s.GetMember(ctx, ws.ID, u2.ID)
+		if m.Role != store.RoleEditor {
+			t.Fatalf("UpdateMember: %v", m.Role)
+		}
+		if n, _ := s.CountMembers(ctx, ws.ID, store.RoleOwner); n != 1 {
+			t.Fatalf("CountMembers owner: %d", n)
+		}
+		// changes
+		if err := s.InsertChange(ctx, &store.WorkspaceChange{WorkspaceID: ws.ID, ByUserID: u.ID,
+			Change: store.ChangeMemberAdded, UserID: u2.ID, Role: store.RoleViewer}); err != nil {
+			t.Fatal(err)
+		}
+		cs, err := s.ListChanges(ctx, ws.ID, 10)
+		if err != nil || len(cs) != 1 || cs[0].Change != store.ChangeMemberAdded {
+			t.Fatalf("ListChanges: %v %+v", err, cs)
+		}
+		// member removal + key revoke in Tx
+		k := &store.APIKey{UserID: u2.ID, WorkspaceID: ws.ID, Name: "k", Prefix: "cs_rev", Hash: "rev"}
+		if err := s.CreateAPIKey(ctx, k); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Tx(ctx, func(tx store.Store) error {
+			if err := tx.RevokeUserKeys(ctx, ws.ID, u2.ID); err != nil {
+				return err
+			}
+			return tx.DeleteMember(ctx, ws.ID, u2.ID)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.GetMember(ctx, ws.ID, u2.ID); err == nil {
+			t.Fatal("member still present")
+		}
+		gotKey, _ := s.GetAPIKey(ctx, k.ID)
+		if gotKey.RevokedAt == nil {
+			t.Fatal("key not revoked")
+		}
+		if err := s.DeleteWorkspace(ctx, ws.ID); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("shares", func(t *testing.T) {
+		s := newStore(t)
+		u, _ := s.UpsertUserByEmail(ctx, "s1@x.com", "", "")
+		u2, _ := s.UpsertUserByEmail(ctx, "s2@x.com", "", "")
+		now := time.Now().UTC()
+		in := &store.Instance{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID), Spec: []byte(`{}`),
+			Status: types.InstanceRunning, CreatedAt: now, LastActiveAt: now, ExpiresAt: now.Add(time.Minute)}
+		if err := s.CreateInstance(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+		sh := &store.Share{InstanceID: in.ID, UserID: u2.ID, Role: store.RoleViewer, CreatedBy: u.ID}
+		if err := s.CreateShare(ctx, sh); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.GetShare(ctx, in.ID, u2.ID)
+		if err != nil || got.Role != store.RoleViewer {
+			t.Fatalf("GetShare: %v %+v", err, got)
+		}
+		lst, err := s.ListShares(ctx, in.ID)
+		if err != nil || len(lst) != 1 || lst[0].Email != u2.Email {
+			t.Fatalf("ListShares: %v %+v", err, lst)
+		}
+		shared, err := s.ListSharedInstances(ctx, u2.ID)
+		if err != nil || len(shared) != 1 || shared[0].InstanceID != in.ID {
+			t.Fatalf("ListSharedInstances: %v %+v", err, shared)
+		}
+		// upsert role
+		sh.Role = store.RoleEditor
+		if err := s.CreateShare(ctx, sh); err != nil {
+			t.Fatal(err)
+		}
+		got, _ = s.GetShare(ctx, in.ID, u2.ID)
+		if got.Role != store.RoleEditor {
+			t.Fatalf("share upsert: %v", got.Role)
+		}
+		if err := s.DeleteShare(ctx, in.ID, u2.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.GetShare(ctx, in.ID, u2.ID); err == nil {
+			t.Fatal("share still present")
+		}
+	})
+
 	t.Run("workspace id required", func(t *testing.T) {
 		s := newStore(t)
 		u, _ := s.UpsertUserByEmail(ctx, "w@x.com", "", "")

@@ -452,7 +452,8 @@ func (s *Service) Exec(ctx context.Context, a service.Actor, id, code string, ti
 	deadline := renewal(in, now)
 	resp, err := s.rt.Exec(ctx, &runtime.ExecRequest{
 		InstanceID:       in.ID,
-		Owner:            owner(a),
+		Owner:            runtime.Owner{UserID: in.UserID},
+		Actor:            actorOwner(a),
 		ExecID:           store.NewID(store.PrefixExecution),
 		Code:             code,
 		TimeoutMs:        timeout.Milliseconds(),

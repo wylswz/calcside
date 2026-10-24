@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, ApiError, Secret } from '../api'
+import { api, ApiError, Secret, wsPath } from '../api'
 import { Button, EmptyRow, Field, Modal, Notice, PageHeader, Tag, inputCls } from '../components/ui'
 import { fmtTime } from '../format'
 
@@ -12,7 +12,7 @@ function SecretForm({ onClose }: { onClose: () => void }) {
   const [err, setErr] = useState('')
   const create = useMutation({
     mutationFn: () =>
-      api.post<{ secret: Secret }>('/api/v1/secrets', {
+      api.post<{ secret: Secret }>(wsPath('/api/v1/secrets'), {
         name, value,
         allowed_domains: domains.split('\n').map((s) => s.trim()).filter(Boolean),
       }),
@@ -82,7 +82,7 @@ export default function Secrets() {
   const [editing, setEditing] = useState<Secret | null>(null)
   const { data, error } = useQuery({
     queryKey: ['secrets'],
-    queryFn: () => api.get<{ secrets: Secret[] }>('/api/v1/secrets'),
+    queryFn: () => api.get<{ secrets: Secret[] }>(wsPath('/api/v1/secrets')),
     retry: false,
   })
   const del = useMutation({

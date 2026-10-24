@@ -64,7 +64,7 @@ func (s *Service) ListKeys(ctx context.Context, a service.Actor) ([]*store.APIKe
 // spec makes a restricted key and requires maxInstances ≥ 1 (bounded by
 // the per-user limit when configured); a nil spec is full access and
 // maxInstances must be absent.
-func (s *Service) CreateKey(ctx context.Context, a service.Actor, name string, expiresInSeconds int64, spec json.RawMessage, maxInstances int) (*store.APIKey, string, error) {
+func (s *Service) CreateKey(ctx context.Context, a service.Actor, name string, expiresInSeconds int64, spec json.RawMessage, maxInstances int, viewOnly bool) (*store.APIKey, string, error) {
 	if err := s.session(ctx, a); err != nil {
 		return nil, "", err
 	}
@@ -85,6 +85,9 @@ func (s *Service) CreateKey(ctx context.Context, a service.Actor, name string, e
 	} else if maxInstances != 0 {
 		return nil, "", service.Errf(types.ErrCodeBadSpec, "max_instances requires a spec")
 	}
+	if viewOnly && len(spec) > 0 {
+		return nil, "", service.Errf(types.ErrCodeBadSpec, "view_only cannot combine with a restricted spec")
+	}
 	var exp *time.Time
 	if expiresInSeconds > 0 {
 		t := s.now().Add(time.Duration(expiresInSeconds) * time.Second)
@@ -94,6 +97,7 @@ func (s *Service) CreateKey(ctx context.Context, a service.Actor, name string, e
 	key.Spec = normalized
 	key.MaxInstances = maxInstances
 	key.WorkspaceID = a.WorkspaceID
+	key.ViewOnly = viewOnly
 	if err := s.st.CreateAPIKey(ctx, key); err != nil {
 		return nil, "", service.Internal(err)
 	}

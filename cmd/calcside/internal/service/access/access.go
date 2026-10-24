@@ -10,6 +10,7 @@ import (
 
 	"calcside/cmd/calcside/internal/service"
 	"calcside/internal/store"
+	"calcside/internal/types"
 )
 
 // Action is one capability over an object, weakest to strongest.
@@ -22,11 +23,15 @@ const (
 	Manage
 )
 
-// keyCeiling is the strongest action any API key may take: keys never
-// configure or manage (rule 5).
-const keyCeiling = Run
+// shareActions maps a share role to the actions it grants on that one
+// instance. Shares never give configure/manage and never reach other
+// workspace objects.
+var shareActions = map[types.Role]map[Action]bool{
+	store.RoleViewer: {View: true},
+	store.RoleEditor: {View: true, Run: true},
+}
 
-var roleActions = map[string]map[Action]bool{
+var roleActions = map[types.Role]map[Action]bool{
 	store.RoleViewer: {View: true},
 	store.RoleEditor: {View: true, Run: true, Configure: true},
 	store.RoleOwner:  {View: true, Run: true, Configure: true, Manage: true},
@@ -44,12 +49,24 @@ func New(st store.Store) *Checker {
 // role returns the actor's membership role in wsID. a.UserID is always
 // the acting user — for keys, the key's creator (auth resolves the
 // principal's user from the key row).
-func (c *Checker) role(ctx context.Context, a service.Actor, wsID string) (string, error) {
+func (c *Checker) role(ctx context.Context, a service.Actor, wsID string) (types.Role, error) {
 	m, err := c.st.GetMember(ctx, wsID, a.UserID)
 	if err != nil {
 		return "", err
 	}
 	return m.Role, nil
+}
+
+// ceiling is the strongest action the actor may take: keys cap at Run
+// (rule 5), view-only keys at View; sessions are uncapped.
+func ceiling(a service.Actor) Action {
+	if a.ViaKey() {
+		if a.KeyViewOnly {
+			return View
+		}
+		return Run
+	}
+	return Manage
 }
 
 // check resolves the actor's role in wsID once and applies the hidden
@@ -66,15 +83,48 @@ func (c *Checker) check(ctx context.Context, a service.Actor, wsID string, act A
 		}
 		return service.Internal(err)
 	}
-	if act <= keyCeiling || !a.ViaKey() {
-		if roleActions[role][act] {
-			return nil
-		}
+	if act <= ceiling(a) && roleActions[role][act] {
+		return nil
 	}
 	if roleActions[role][View] {
 		return service.Forbidden("forbidden")
 	}
 	return hidden
+}
+
+// checkInstance authorizes act on an instance: membership decides for
+// members (a member's role wins over any share); a non-member session
+// actor falls back to their share on that instance; keys never follow
+// shares.
+func (c *Checker) checkInstance(ctx context.Context, a service.Actor, in *store.Instance, act Action) error {
+	hidden := service.NotFound("instance not found")
+	if a.ViaKey() {
+		return c.check(ctx, a, in.WorkspaceID, act, hidden)
+	}
+	role, err := c.role(ctx, a, in.WorkspaceID)
+	if err == nil {
+		if roleActions[role][act] {
+			return nil
+		}
+		if roleActions[role][View] {
+			return service.Forbidden("forbidden")
+		}
+		return hidden
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return service.Internal(err)
+	}
+	sh, serr := c.st.GetShare(ctx, in.ID, a.UserID)
+	if serr != nil {
+		if errors.Is(serr, store.ErrNotFound) {
+			return hidden
+		}
+		return service.Internal(serr)
+	}
+	if shareActions[sh.Role][act] {
+		return nil
+	}
+	return service.Forbidden("forbidden")
 }
 
 // Workspace checks act on a workspace itself.
@@ -98,7 +148,7 @@ func (c *Checker) Instance(ctx context.Context, a service.Actor, id string, act 
 	if a.Restricted() && in.KeyID != a.KeyID {
 		return nil, service.NotFound("instance not found")
 	}
-	if err := c.check(ctx, a, in.WorkspaceID, act, service.NotFound("instance not found")); err != nil {
+	if err := c.checkInstance(ctx, a, in, act); err != nil {
 		return nil, err
 	}
 	return in, nil
@@ -150,6 +200,15 @@ func (c *Checker) Key(ctx context.Context, a service.Actor, id string, act Actio
 		return nil, err
 	}
 	return k, nil
+}
+
+// SharedInstances lists instances shared with the session actor (keys
+// get forbidden — shares are user-only).
+func (c *Checker) SharedInstances(ctx context.Context, a service.Actor) ([]*store.Share, error) {
+	if a.ViaKey() {
+		return nil, service.Forbidden("keys cannot list shared instances")
+	}
+	return c.st.ListSharedInstances(ctx, a.UserID)
 }
 
 // Memberships lists the workspaces the actor can act in: all of a

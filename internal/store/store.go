@@ -60,23 +60,70 @@ type Workspace struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Member roles, weakest to strongest.
+// Member roles, weakest to strongest (typed enum in internal/types).
 const (
-	RoleViewer = "viewer"
-	RoleEditor = "editor"
-	RoleOwner  = "owner"
+	RoleViewer = types.RoleViewer
+	RoleEditor = types.RoleEditor
+	RoleOwner  = types.RoleOwner
 )
 
 type Member struct {
-	WorkspaceID string `json:"workspace_id"`
-	UserID      string `json:"user_id"`
-	Role        string `json:"role"`
+	WorkspaceID string     `json:"workspace_id"`
+	UserID      string     `json:"user_id"`
+	Role        types.Role `json:"role"`
 }
 
 // Membership is one workspace a user belongs to, with their role.
 type Membership struct {
 	Workspace *Workspace `json:"workspace"`
-	Role      string     `json:"role"`
+	Role      types.Role `json:"role"`
+}
+
+// MemberInfo is a member row joined with the user's identity.
+type MemberInfo struct {
+	UserID string     `json:"user_id"`
+	Email  string     `json:"email"`
+	Name   string     `json:"name"`
+	Role   types.Role `json:"role"`
+}
+
+// Share links one instance to one user.
+type Share struct {
+	InstanceID string     `json:"instance_id"`
+	UserID     string     `json:"user_id"`
+	Role       types.Role `json:"role"`
+	CreatedBy  string     `json:"created_by"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+// ShareInfo is a share row joined with the user's identity.
+type ShareInfo struct {
+	Share
+	Email string `json:"email"`
+	Name  string `json:"name"`
+}
+
+// Workspace change kinds written to workspace_changes (typed enum in
+// internal/types).
+const (
+	ChangeMemberAdded   = types.ChangeMemberAdded
+	ChangeRoleChanged   = types.ChangeRoleChanged
+	ChangeMemberRemoved = types.ChangeMemberRemoved
+	ChangeShareAdded    = types.ChangeShareAdded
+	ChangeShareRemoved  = types.ChangeShareRemoved
+	ChangeRenamed       = types.ChangeRenamed
+)
+
+// WorkspaceChange records one membership/share/rename event.
+type WorkspaceChange struct {
+	ID          string           `json:"id"`
+	WorkspaceID string           `json:"workspace_id"`
+	ByUserID    string           `json:"by_user_id"`
+	Change      types.ChangeKind `json:"change"`
+	UserID      string           `json:"user_id,omitempty"`
+	InstanceID  string           `json:"instance_id,omitempty"`
+	Role        types.Role       `json:"role,omitempty"`
+	CreatedAt   time.Time        `json:"created_at"`
 }
 
 type User struct {
@@ -107,6 +154,7 @@ type APIKey struct {
 	Spec         json.RawMessage `json:"-"`
 	MaxInstances int             `json:"-"`
 	WorkspaceID  string          `json:"-"`
+	ViewOnly     bool            `json:"-"`
 }
 
 type Session struct {
@@ -281,9 +329,32 @@ type Store interface {
 
 	CreateWorkspace(ctx context.Context, w *Workspace) error
 	GetWorkspace(ctx context.Context, id string) (*Workspace, error)
+	UpdateWorkspace(ctx context.Context, w *Workspace) error
+	DeleteWorkspace(ctx context.Context, id string) error
+	// LockWorkspace locks the workspace row inside a Tx (SELECT FOR UPDATE).
+	LockWorkspace(ctx context.Context, id string) error
 	AddMember(ctx context.Context, m *Member) error
 	GetMember(ctx context.Context, workspaceID, userID string) (*Member, error)
+	ListMembers(ctx context.Context, workspaceID string) ([]*MemberInfo, error)
 	ListMemberships(ctx context.Context, userID string) ([]*Membership, error)
+	UpdateMember(ctx context.Context, m *Member) error
+	DeleteMember(ctx context.Context, workspaceID, userID string) error
+	CountMembers(ctx context.Context, workspaceID string, role types.Role) (int, error)
+
+	CreateShare(ctx context.Context, sh *Share) error
+	DeleteShare(ctx context.Context, instanceID, userID string) error
+	GetShare(ctx context.Context, instanceID, userID string) (*Share, error)
+	ListShares(ctx context.Context, instanceID string) ([]*ShareInfo, error)
+	ListSharedInstances(ctx context.Context, userID string) ([]*Share, error)
+
+	InsertChange(ctx context.Context, c *WorkspaceChange) error
+	ListChanges(ctx context.Context, workspaceID string, limit int) ([]*WorkspaceChange, error)
+
+	RevokeUserKeys(ctx context.Context, workspaceID, userID string) error
+	GetUserByEmail(ctx context.Context, email string) (*User, error)
+
+	// Tx runs fn against one store connection in a single transaction.
+	Tx(ctx context.Context, fn func(Store) error) error
 
 	Close() error
 }
