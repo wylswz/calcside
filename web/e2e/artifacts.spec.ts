@@ -224,7 +224,7 @@ fs.write("notes.txt", "Review the exception list before closing the reporting pe
   await viewer.getByRole('button', { name: 'Fit to window', exact: true }).click()
   await expect.poll(async () => (await iframe.boundingBox())!.width).toBeGreaterThan(1000)
   await viewer.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' })
-  await expect(viewer.getByRole('button', { name: 'Enable JavaScript', exact: true })).toHaveCSS('color', 'rgb(245, 245, 245)')
+  await expect(viewer.getByRole('button', { name: 'Enable JavaScript', exact: true })).toHaveCSS('color', 'rgb(241, 245, 249)')
   await viewer.screenshot({ path: testInfo.outputPath('preview-dark.png') })
   await viewer.emulateMedia({ colorScheme: 'light' })
   await viewer.setViewportSize({ width: 390, height: 844 })

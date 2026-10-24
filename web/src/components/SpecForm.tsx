@@ -1,12 +1,16 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { api, currentWorkspace, type ExtensionCatalog, type Policy, type Secret } from '../api'
+import { api, currentWorkspace, type ExtensionCatalog, type ExtensionInfo, type Policy, type Secret } from '../api'
 import {
-  buildInstanceSpec, draftFromSpec, validateRawSpec,
-  type InstanceDraft, type InstanceSpec, type DraftError, type BuildResult,
+  buildInstanceSpec, draftFromSpec, uniqueExtensionAlias, validateRawSpec,
+  type BuildResult, type DraftError, type ExtDraft, type InstanceDraft, type InstanceSpec,
 } from '../instanceDraft'
-import { Button, Field, inputCls } from './ui'
+import { fmtBytes } from '../format'
+import { Field, inputCls } from './ui'
 import { InstanceExtensionEditor } from './InstanceExtensionEditor'
+import { ExtensionPicker } from './ExtensionPicker'
+import { ExtensionIcon } from './ExtensionIcon'
+import { InputsSection, RulesSection } from './SpecSections'
 
 export interface SpecFormHandle { buildSpec(): { spec?: InstanceSpec; err?: string } }
 
@@ -15,20 +19,54 @@ interface Props {
   initial?: InstanceSpec
   workspaceId?: string
   onSpecChange?: (draft: InstanceDraft, errors?: DraftError[]) => void
+  footer?: ReactNode
 }
+
+// Item keys order the instance summary: 'fs', 'net' or 'ext:<id>'. The id
+// is UI-only and never serialized.
+type ItemKey = string
+type View = 'capabilities' | 'settings'
+type Removed = { at: number; title: string } & (
+  | { key: 'fs'; data: NonNullable<InstanceDraft['fs']> }
+  | { key: 'net'; data: NonNullable<InstanceDraft['net']> }
+  | { key: ItemKey; data: ExtDraft; id: number }
+)
+// summary describes the item in Settings; brief fits the one-line row.
+interface Item { key: ItemKey; title: string; icon: ReactNode; summary: string; brief: string; issues: string[]; missing: string[]; body: ReactNode }
+
+const FilesIcon = () => <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/></svg>
+const NetworkIcon = () => <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>
+const CheckIcon = () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 5 5L20 7"/></svg>
+
+const capabilityLabel = (name: string) => name === 'net' ? 'Network' : name === 'fs' ? 'Files' : name
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 // The draft is the only editable model. Cards, JSON mode and submission
 // all pass through the same validation; mode switches never rebuild from
 // a partial projection of the spec.
+//
+// Two views share one draft: "Add capabilities" is a fixed palette where
+// adding only changes a card's state in place, and "Settings" is a normal
+// page section for the forms. The instance summary beside them is short
+// (one fixed-height row per capability), so nothing needs its own scroll.
 export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
-  keyMode = false, initial, workspaceId, onSpecChange,
+  keyMode = false, initial, workspaceId, onSpecChange, footer,
 }, ref) {
   const [draft, setDraft] = useState(() => draftFromSpec(initial))
   const [advanced, setAdvanced] = useState(false)
   const [json, setJSON] = useState('')
-  const [picker, setPicker] = useState(false)
-  const [editing, setEditing] = useState<string | null>(null)
-  const [editorError, setEditorError] = useState('')
+  const [view, setView] = useState<View>('capabilities')
+  const extIds = useRef<number[]>(draft.exts.map((_, i) => i))
+  const extNext = useRef(draft.exts.length)
+  const [order, setOrder] = useState<ItemKey[]>(() => [
+    ...(draft.fs ? ['fs'] : []), ...(draft.net ? ['net'] : []), ...extIds.current.map((id) => `ext:${id}`),
+  ])
+  const [removed, setRemoved] = useState<Removed | null>(null)
+  const [flash, setFlash] = useState<ItemKey | null>(null)
+  const [reveal, setReveal] = useState<ItemKey | null>(null)
+  const tabsRef = useRef<HTMLDivElement>(null)
+  const settingsRef = useRef<HTMLDivElement>(null)
+  const [extErrors, setExtErrors] = useState<Map<number, string>>(new Map())
   const [submitted, setSubmitted] = useState(false)
   const ws = workspaceId ?? currentWorkspace() ?? ''
   const scope = (path: string) => ws ? `${path}?workspace=${encodeURIComponent(ws)}` : path
@@ -45,7 +83,6 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
   const catalog = useQuery({
     queryKey: ['extensions', ws],
     queryFn: () => api.get<ExtensionCatalog>(scope('/api/v1/extensions')),
-    enabled: picker || draft.exts.length > 0 || advanced,
     retry: false,
   })
   const set = (patch: Partial<InstanceDraft>) => setDraft((d) => ({ ...d, ...patch }))
@@ -66,9 +103,9 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
     if (activeDraft.draft.exts.length && (catalog.isPending || catalog.isError)) {
       errors.push({ section: 'Extensions', message: catalog.isError ? 'Retry loading the extension catalog before creating.' : 'Wait for the extension catalog.' })
     }
-    if (!advanced && editorError) errors.push({ section: 'Extensions', message: editorError })
+    if (!advanced) extErrors.forEach((m) => errors.push({ section: 'Extensions', message: m }))
     return errors.length ? { ok: false, errors } : built
-  }, [activeDraft, keyMode, extensions, catalog.isPending, catalog.isError, editorError, advanced])
+  }, [activeDraft, keyMode, extensions, catalog.isPending, catalog.isError, extErrors, advanced])
   useEffect(() => {
     onSpecChange?.(activeDraft.draft, result.ok ? [] : result.errors)
   }, [activeDraft.draft, result, onSpecChange])
@@ -78,154 +115,320 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
       return result.ok ? { spec: result.spec } : { err: result.errors.map((e) => `${e.section}: ${e.message}`).join('; ') }
     },
   }), [result])
+  // "Configure" is navigation: the page scrolls to the chosen section.
+  useEffect(() => {
+    if (!reveal) return
+    setReveal(null)
+    settingsRef.current?.querySelector<HTMLElement>(`[data-section="${reveal}"]`)
+      ?.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' })
+  }, [reveal])
+  useEffect(() => {
+    if (!flash) return
+    const t = window.setTimeout(() => setFlash(null), 900)
+    return () => window.clearTimeout(t)
+  }, [flash])
+
   const toggleAdvanced = () => {
     if (!advanced) {
-      if (editorError) { setSubmitted(true); return }
+      if (extErrors.size) { setSubmitted(true); return }
       // A structurally valid but incomplete draft can still be fixed in JSON.
       const built = buildInstanceSpec(draft)
       if (!built.spec) { setSubmitted(true); return }
       setJSON(JSON.stringify(built.spec, null, 2))
       setAdvanced(true)
     } else if (activeDraft.errors.length === 0) {
-      setDraft(activeDraft.draft)
+      const next = activeDraft.draft
+      extIds.current = next.exts.map(() => extNext.current++)
+      setOrder([...(next.fs ? ['fs'] : []), ...(next.net ? ['net'] : []), ...extIds.current.map((id) => `ext:${id}`)])
+      setRemoved(null)
+      setExtErrors(new Map())
+      setDraft(next)
       setAdvanced(false)
     } else setSubmitted(true)
   }
-  const startFiles = () => {
+
+  const switchView = (next: View) => {
+    setView(next)
+    const tabs = tabsRef.current
+    if (tabs && tabs.getBoundingClientRect().top < 0) tabs.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' })
+  }
+  const openSettings = (section: string) => { setView('settings'); setReveal(section) }
+  const append = (key: ItemKey) => {
+    setOrder((o) => [...o.filter((k) => k !== key), key])
+    setRemoved(null)
+    setFlash(key)
+  }
+  // Adding twice never navigates or removes: a second click only points
+  // at the row that is already in the summary.
+  const addFiles = () => {
+    if (draft.fs) return setFlash('fs')
     set({ fs: { quotaBytes: 67108864, extra: {} } })
-    setEditing('fs')
-    setPicker(false)
+    append('fs')
   }
-  const removeExtension = (index: number) => {
+  const addNetwork = () => {
+    if (draft.net) return setFlash('net')
+    set({ net: { allowHosts: [], methods: ['GET', 'POST'], extra: {} } })
+    append('net')
+  }
+  const addExtension = (entry: { name: string; source: string }) => {
+    const id = extNext.current++
+    extIds.current = [...extIds.current, id]
+    const alias = entry.source ? uniqueExtensionAlias(entry.name, new Set(draft.exts.map((e) => e.alias))) : ''
+    set({ exts: [...draft.exts, { alias, source: entry.source, config: {}, extra: {} }] })
+    append(`ext:${id}`)
+    // A custom extension has nothing usable until it has a source.
+    if (!entry.source) openSettings(`ext:${id}`)
+  }
+  const pointAtExtension = (entry: ExtensionInfo) => {
+    const index = draft.exts.findIndex((e) => e.source === entry.source)
+    if (index >= 0) setFlash(`ext:${extIds.current[index]}`)
+  }
+  const setExtError = (id: number, message: string) =>
+    setExtErrors((m) => { const n = new Map(m); if (message) n.set(id, message); else n.delete(id); return n })
+
+  // Removing leaves an undo row of the same height in the same slot, so
+  // the next row does not slide under the pointer.
+  const remove = (key: ItemKey, title: string) => {
+    const at = order.indexOf(key)
+    setOrder((o) => o.filter((k) => k !== key))
+    if (key === 'fs' && draft.fs) { setRemoved({ key, at, title, data: draft.fs }); set({ fs: null }); return }
+    if (key === 'net' && draft.net) { setRemoved({ key, at, title, data: draft.net }); set({ net: null }); return }
+    const id = Number(key.slice(4))
+    const index = extIds.current.indexOf(id)
+    if (index < 0) return
+    setRemoved({ key, at, title, data: draft.exts[index], id })
+    extIds.current = extIds.current.filter((x) => x !== id)
     set({ exts: draft.exts.filter((_, i) => i !== index) })
-    setEditing(null)
-    setEditorError('')
+    setExtErrors((m) => { const n = new Map(m); n.delete(id); return n })
   }
+  const undo = () => {
+    if (!removed) return
+    if (removed.key === 'fs') set({ fs: removed.data as NonNullable<InstanceDraft['fs']> })
+    else if (removed.key === 'net') set({ net: removed.data as NonNullable<InstanceDraft['net']> })
+    else if ('id' in removed) {
+      extIds.current = [...extIds.current, removed.id]
+      set({ exts: [...draft.exts, removed.data] })
+    }
+    setOrder((o) => { const n = o.filter((k) => k !== removed.key); n.splice(Math.min(removed.at, n.length), 0, removed.key); return n })
+    setRemoved(null)
+  }
+
+  const errors = result.ok ? [] : result.errors
+  const has = (cap: string) => cap === 'fs' ? !!draft.fs : cap === 'net' ? !!draft.net : Object.hasOwn(draft.otherCaps, cap)
+  const extKeys = extIds.current.map((id) => `ext:${id}`)
+  const present = new Set([...(draft.fs ? ['fs'] : []), ...(draft.net ? ['net'] : []), ...extKeys])
+  const keys = [...order.filter((k) => present.has(k)), ...[...present].filter((k) => !order.includes(k))]
+  const selectedSources = new Set(draft.exts.map((e) => e.source))
   const defaults = policies.data?.policies.filter((p) => p.default).map((p) => p.name) ?? ['builtin.block_private_network']
   const selectedPolicies = draft.policies ?? defaults
-  const cardClass = 'border border-line-strong bg-paper p-4'
-  const sectionClass = 'border-t-2 border-ink pt-4'
-  const itemHeader = (title: string, summary: string, id: string, remove: () => void) => (
-    <div className="flex flex-wrap items-start gap-3">
-      <div className="min-w-0 flex-1"><h4 className="text-base font-semibold text-ink">{title}</h4><p className="mt-1 break-words text-xs text-sec">{summary}</p></div>
-      <button type="button" className="text-btn" aria-expanded={editing === id} onClick={() => { setEditing(editing === id ? null : id); setEditorError('') }}>Configure {title}</button>
-      <button type="button" className="text-btn" onClick={remove} aria-label={`Remove ${title}`}>Remove</button>
+  const inputCount = draft.env.length + draft.secrets.length + draft.labels.length
+  const limitCount = Object.keys(draft.limits).length
+  const rulesSummary = `${draft.policies === null ? 'Default policies' : `${selectedPolicies.length} ${selectedPolicies.length === 1 ? 'policy' : 'policies'}`}${limitCount ? ` · ${limitCount} ${limitCount === 1 ? 'limit' : 'limits'}` : ''}`
+  const inputsSummary = inputCount ? `${inputCount} ${inputCount === 1 ? 'input' : 'inputs'}` : 'None'
+  const sectionIssues = (sections: string[]) => errors.filter((e) => sections.includes(e.section)).length
+
+  const describe = (key: ItemKey): Item | null => {
+    if (key === 'fs' && draft.fs) {
+      return {
+        key, title: 'Files', icon: <FilesIcon />, missing: [],
+        summary: draft.fs.quotaBytes === '' ? 'Server default quota' : `${fmtBytes(draft.fs.quotaBytes)} virtual storage`,
+        brief: draft.fs.quotaBytes === '' ? 'Default quota' : fmtBytes(draft.fs.quotaBytes),
+        issues: errors.filter((e) => e.section === 'Files').map((e) => e.message),
+        body: <Field label="Files quota (bytes; blank uses server default)"><input className={inputCls} type="number" value={draft.fs.quotaBytes} onChange={(e) => set({ fs: { ...draft.fs!, quotaBytes: e.target.value === '' ? '' : Number(e.target.value) } })} /></Field>,
+      }
+    }
+    if (key === 'net' && draft.net) {
+      const hosts = draft.net.allowHosts.map((h) => h.trim()).filter(Boolean)
+      const summary = `${hosts.length ? hosts.join(', ') : 'Any public host'} · ${draft.net.methods.map((m) => m.trim()).filter(Boolean).join('/') || 'no methods'}`
+      return {
+        key, title: 'Network', icon: <NetworkIcon />, missing: [], summary, brief: summary,
+        issues: errors.filter((e) => e.section === 'Network').map((e) => e.message),
+        body: <div className="space-y-3">
+          <Field label="Allowed hosts (one per line; blank permits any host subject to rules)"><textarea className={inputCls} rows={3} value={draft.net.allowHosts.join('\n')} onChange={(e) => set({ net: { ...draft.net!, allowHosts: e.target.value.split('\n') } })} /></Field>
+          <Field label="HTTP methods (comma separated)"><input className={inputCls} value={draft.net.methods.join(',')} onChange={(e) => set({ net: { ...draft.net!, methods: e.target.value.split(',') } })} /></Field>
+        </div>,
+      }
+    }
+    if (!key.startsWith('ext:')) return null
+    const id = Number(key.slice(4))
+    const index = extIds.current.indexOf(id)
+    const ext = draft.exts[index]
+    if (!ext) return null
+    const entry = extensions.find((e) => e.source === ext.source)
+    const own = (m: string) => ext.alias ? m.startsWith(`${ext.alias}:`) || m === `duplicate alias ${ext.alias}` : m === 'extension alias is required'
+    return {
+      key, title: ext.alias || 'extension',
+      icon: <ExtensionIcon iconUrl={entry?.icon_url} name={entry?.name ?? ext.alias} />,
+      summary: entry?.description || ext.source || 'Choose a source and an alias.',
+      brief: Object.keys(ext.config).length ? 'Configured' : 'Default settings',
+      missing: (entry?.dependencies ?? []).filter((d) => !has(d)),
+      issues: [...errors.filter((e) => e.section === 'Extensions' && own(e.message) && !e.message.includes('— add it explicitly')).map((e) => e.message), ...(extErrors.has(id) ? [extErrors.get(id)!] : [])],
+      body: <InstanceExtensionEditor value={ext} catalog={extensions}
+        secretNames={draft.secrets.map((s) => s.name).filter(Boolean)}
+        vaultNames={(vault.data?.secrets ?? []).map((s) => s.name)}
+        onUseVault={(name) => set({ secrets: draft.secrets.some((s) => s.name === name) ? draft.secrets : [...draft.secrets, { name, kind: 'vault', ref: name, value: '', domains: [], extra: {} }] })}
+        onValidityChange={(m) => setExtError(id, m)} onChange={(value) => set({ exts: draft.exts.map((e, i) => i === index ? value : e) })} />,
+    }
+  }
+  const items = keys.map(describe).filter((x): x is Item => x !== null)
+
+  // One line, fixed height: "Needs Network" becomes the summary in place.
+  const status = (item: Item) => {
+    if (item.missing.length) {
+      return <span className="selected-status is-warn">Needs {item.missing.map(capabilityLabel).join(', ')}
+        {item.missing.filter((d) => d === 'net' || d === 'fs').map((d) => (
+          <button key={d} type="button" className="underline" aria-label={`Add ${capabilityLabel(d)}`} onClick={() => d === 'net' ? addNetwork() : addFiles()}>Add</button>
+        ))}
+      </span>
+    }
+    if (item.issues.length) return <span className="selected-status is-warn">Needs setup</span>
+    return <span className="selected-status" title={item.summary}>{item.brief}</span>
+  }
+  const rows: ReactNode[] = items.map((item) => (
+    <div key={item.key} data-row={item.key} className={'selected-row' + (flash === item.key ? ' is-flash' : '')}>
+      <span className="config-item-icon">{item.icon}</span>
+      <div className="min-w-0 flex-1">
+        <p className="config-item-title">{item.title}</p>
+        {status(item)}
+      </div>
+      <button type="button" className="text-btn" aria-label={`Configure ${item.title}`} onClick={() => openSettings(item.key)}>Configure</button>
+      <button type="button" className="text-btn" aria-label={`Remove ${item.title}`} onClick={() => remove(item.key, item.title)}>Remove</button>
     </div>
+  ))
+  if (removed) {
+    rows.splice(Math.min(removed.at, rows.length), 0, (
+      <div key="removed" className="selected-row is-removed" role="status">
+        <span>{removed.title} removed</span>
+        <button type="button" className="text-btn" onClick={undo}>Undo</button>
+      </div>
+    ))
+  }
+
+  const alert = !result.ok && !footer && (submitted || advanced) && (
+    <div className="rounded-md border-l-4 border-danger bg-danger/5 p-4" role="alert"><h3 className="font-semibold text-danger">Check the configuration</h3><ul className="mt-2 space-y-1 text-sm">{errors.map((e, i) => <li key={i}>{e.section}: {e.message}</li>)}</ul></div>
   )
 
-  return (
-    <div className="min-w-0 space-y-7">
-      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
-        <Field label="Name"><input className={inputCls} value={draft.name} placeholder="e.g. research run" onChange={(e) => set({ name: e.target.value })} disabled={advanced} /></Field>
-        <Field label="Lifetime (seconds)"><input className={inputCls} type="number" min="1" value={draft.ttlSeconds} disabled={advanced} onChange={(e) => set({ ttlSeconds: e.target.value === '' ? '' : Number(e.target.value) })} /></Field>
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-sec">Configure the boundary. Create the instance. Then connect an agent.</p>
-        <button type="button" className="text-btn underline" onClick={toggleAdvanced}>{advanced ? 'Back to editor' : 'Advanced JSON'}</button>
-      </div>
-      {advanced ? (
-        <div className={sectionClass}>
-          <p className="mb-3 text-sm text-sec">Advanced editing includes any inline secret values. Review lists names only. Invalid edits cannot be submitted.</p>
+  if (advanced) {
+    return (
+      <div className="spec-form">
+        <div className="spec-json">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-sec">Advanced editing includes any inline secret values. Invalid edits cannot be submitted.</p>
+            <button type="button" className="text-btn underline" onClick={toggleAdvanced}>Back to editor</button>
+          </div>
           <textarea aria-label="Instance spec JSON" className={inputCls + ' min-h-[420px] font-mono text-xs'} value={json} spellCheck={false} onChange={(e) => setJSON(e.target.value)} />
+          {alert}
+          {footer && <div className="spec-json-footer">{footer}</div>}
         </div>
-      ) : (
-        <>
-          <section className={sectionClass} aria-label="Abilities">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h3 className="text-xl font-semibold text-ink">Abilities</h3>
-              <Button onClick={() => setPicker(!picker)} aria-expanded={picker}>Add ability</Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="spec-form">
+      <div className="spec-builder">
+        <div className="spec-main">
+          <div className="spec-tabs" ref={tabsRef}>
+            <div className="segmented" role="tablist" aria-label="Instance configuration">
+              <button type="button" role="tab" aria-selected={view === 'capabilities'} onClick={() => switchView('capabilities')}>Add capabilities</button>
+              <button type="button" role="tab" aria-selected={view === 'settings'} onClick={() => switchView('settings')}>
+                Settings{errors.length > 0 && <span className="tab-badge" aria-label={`${errors.length} issues`}>{errors.length}</span>}
+              </button>
             </div>
-            {!draft.fs && !draft.net && !draft.exts.length && (
-              <div className="mb-4 bg-surface p-5">
-                <h4 className="text-base font-semibold text-ink">Compute only</h4>
-                <p className="mt-2 text-sm text-sec">Starlark and the standard library. No filesystem or network access.</p>
-                <button type="button" className="mt-3 text-btn underline" onClick={startFiles}>Start with Files</button>
-              </div>
-            )}
-            {picker && (
-              <div className="mb-4 grid gap-3 border border-line-strong bg-surface p-4 sm:grid-cols-2" aria-label="Available abilities">
-                {!draft.fs && <Button className="!h-auto !whitespace-normal p-3" onClick={startFiles}>Add Files - bounded virtual storage</Button>}
-                {!draft.net && <Button className="!h-auto !whitespace-normal p-3" onClick={() => { set({ net: { allowHosts: [], methods: ['GET', 'POST'], extra: {} } }); setEditing('net'); setPicker(false) }}>Add Network - outbound HTTP</Button>}
-                {extensions.map((entry) => <Button key={entry.source} className="!h-auto !whitespace-normal p-3" onClick={() => {
-                  set({ exts: [...draft.exts, { alias: entry.name, source: entry.source, config: {}, extra: {} }] }); setEditing(`ext:${draft.exts.length}`); setPicker(false)
-                }}>Add {entry.name}</Button>)}
-                <Button onClick={() => { set({ exts: [...draft.exts, { alias: '', source: '', config: {}, extra: {} }] }); setEditing(`ext:${draft.exts.length}`); setPicker(false) }}>Custom extension</Button>
-              </div>
-            )}
-            {(picker || draft.exts.length > 0) && catalog.isError && <p className="mb-3 text-sm text-danger">Could not load extensions. <button type="button" className="underline" onClick={() => catalog.refetch()}>Retry catalog</button></p>}
-            <div className="space-y-3">
-              {draft.fs && <div className={cardClass}>
-                {itemHeader('Files', 'Grants a virtual filesystem, not access to the host.', 'fs', () => { set({ fs: null }); setEditing(null) })}
-                {editing === 'fs' && <div className="mt-4"><Field label="Files quota (bytes; blank uses server default)"><input className={inputCls} type="number" value={draft.fs.quotaBytes} onChange={(e) => set({ fs: { ...draft.fs!, quotaBytes: e.target.value === '' ? '' : Number(e.target.value) } })} /></Field></div>}
-              </div>}
-              {draft.net && <div className={cardClass}>
-                {itemHeader('Network', 'Grants outbound HTTP. Host and method rules apply to every call.', 'net', () => { set({ net: null }); setEditing(null) })}
-                {editing === 'net' && <div className="mt-4 space-y-3">
-                  <Field label="Allowed hosts (one per line; blank permits any host subject to rules)"><textarea className={inputCls} rows={3} value={draft.net.allowHosts.join('\n')} onChange={(e) => set({ net: { ...draft.net!, allowHosts: e.target.value.split('\n') } })} /></Field>
-                  <Field label="HTTP methods (comma separated)"><input className={inputCls} value={draft.net.methods.join(',')} onChange={(e) => set({ net: { ...draft.net!, methods: e.target.value.split(',') } })} /></Field>
-                </div>}
-              </div>}
-              {draft.exts.map((ext, index) => <div className={cardClass} key={index}>
-                {itemHeader(ext.alias || 'Extension', ext.source || 'Choose a source and an alias.', `ext:${index}`, () => removeExtension(index))}
-                {editing === `ext:${index}` && <div className="mt-4"><InstanceExtensionEditor value={ext} catalog={extensions} secretNames={draft.secrets.map((s) => s.name).filter(Boolean)}
-                  onValidityChange={setEditorError} onChange={(value) => set({ exts: draft.exts.map((e, i) => i === index ? value : e) })} /></div>}
-              </div>)}
-              {Object.keys(draft.otherCaps).map((name) => <div key={name} className={cardClass}><h4 className="font-semibold text-ink">{name}</h4><p className="text-xs text-sec">Existing configuration preserved. Use Advanced JSON to edit.</p></div>)}
+            <button type="button" className="text-btn underline" onClick={toggleAdvanced}>Advanced JSON</button>
+          </div>
+
+          <section className="spec-palette" role="tabpanel" aria-label="Add capabilities" hidden={view !== 'capabilities'}>
+            <p className="spec-pane-note">Optional. Each capability is added with safe defaults; adjust them under Settings. Settings are fixed after creation.</p>
+            <div className="ability-choices">
+              <button type="button" className="ability-choice" data-selected={!!draft.fs} aria-label={draft.fs ? 'Files added' : 'Add Files'} onClick={addFiles}>
+                <FilesIcon />
+                <span className="min-w-0 flex-1"><strong>Files</strong><small>bounded virtual storage</small></span>
+                <span className="ability-add">{draft.fs ? <><CheckIcon /> Added</> : 'Add'}</span>
+              </button>
+              <button type="button" className="ability-choice" data-selected={!!draft.net} aria-label={draft.net ? 'Network added' : 'Add Network'} onClick={addNetwork}>
+                <NetworkIcon />
+                <span className="min-w-0 flex-1"><strong>Network</strong><small>outbound HTTP</small></span>
+                <span className="ability-add">{draft.net ? <><CheckIcon /> Added</> : 'Add'}</span>
+              </button>
+            </div>
+            <div>
+              <h4 className="mb-3 text-sm font-semibold text-ink">Extensions</h4>
+              <ExtensionPicker entries={extensions} selectedSources={selectedSources} loading={catalog.isPending} error={catalog.isError}
+                onRetry={() => catalog.refetch()} onAdd={addExtension} onShow={pointAtExtension} onCustom={() => addExtension({ name: '', source: '' })} />
             </div>
           </section>
-          <details className={sectionClass}>
-            <summary className="cursor-pointer text-lg font-semibold text-ink">Rules <span className="ml-2 text-sm font-normal text-sec">Policies and run limits</span></summary>
-            <div className="mt-4 space-y-4">
-              <p className="text-sm text-sec">Rules constrain abilities; they do not grant access. Server policies always apply.</p>
-              {policies.isError && <p className="text-sm text-danger">Could not load policies. <button className="underline" onClick={() => policies.refetch()}>Retry policies</button></p>}
-              {(policies.data?.policies ?? []).map((p) => <label key={p.name} className="flex items-start gap-3 text-sm">
-                <input type="checkbox" className="mt-1" checked={selectedPolicies.includes(p.name)} onChange={(e) => set({ policies: e.target.checked ? [...selectedPolicies, p.name] : selectedPolicies.filter((name) => name !== p.name) })} />
-                <span className="break-all text-ink">{p.name}<span className="mt-1 block break-normal text-xs text-sec">{p.description}</span></span>
-              </label>)}
-              {selectedPolicies.filter((name) => !policies.data?.policies.some((p) => p.name === name)).map((name) => <label key={name} className="flex gap-3 text-sm"><input type="checkbox" checked onChange={() => set({ policies: selectedPolicies.filter((p) => p !== name) })} />{name}</label>)}
-              <button type="button" className="text-btn underline" onClick={() => set({ policies: null })}>Use default policies</button>
-              <div className="grid gap-3 sm:grid-cols-3">
-                {(['exec_timeout_ms', 'max_steps', 'max_output_bytes'] as const).map((key) => <Field key={key} label={key}>
-                  <input className={inputCls} type="number" min="1" value={draft.limits[key] ?? ''} placeholder="Server default" onChange={(e) => {
-                    const limits = { ...draft.limits }; if (e.target.value === '') delete limits[key]; else limits[key] = Number(e.target.value); set({ limits })
-                  }} />
-                </Field>)}
-              </div>
-            </div>
-          </details>
-          <details className={sectionClass}>
-            <summary className="cursor-pointer text-lg font-semibold text-ink">Inputs <span className="ml-2 text-sm font-normal text-sec">Variables, secrets and labels</span></summary>
-            <div className="mt-4 space-y-5">
-              {(['env', 'labels'] as const).map((kind) => <div key={kind}>
-                <div className="mb-3 flex justify-between"><h4 className="font-semibold text-ink">{kind === 'env' ? 'Variables' : 'Labels'}</h4><button type="button" className="text-btn" onClick={() => set({ [kind]: [...draft[kind], { k: '', v: '' }] })}>Add {kind === 'env' ? 'variable' : 'label'}</button></div>
-                {draft[kind].map((row, i) => <div key={i} className="mb-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-                  <input aria-label={`${kind} name ${i + 1}`} className={inputCls} value={row.k} onChange={(e) => set({ [kind]: draft[kind].map((r, j) => j === i ? { ...r, k: e.target.value } : r) })} />
-                  <input aria-label={`${kind} value ${i + 1}`} className={inputCls} value={row.v} onChange={(e) => set({ [kind]: draft[kind].map((r, j) => j === i ? { ...r, v: e.target.value } : r) })} />
-                  <button type="button" className="text-btn" aria-label={`Remove ${kind} ${i + 1}`} onClick={() => set({ [kind]: draft[kind].filter((_, j) => j !== i) })}>Remove</button>
-                </div>)}
-              </div>)}
-              <div className="flex justify-between"><h4 className="font-semibold text-ink">Secrets</h4><button type="button" className="text-btn" onClick={() => set({ secrets: [...draft.secrets, { name: '', kind: 'vault', ref: '', value: '', domains: [], extra: {} }] })}>Add secret</button></div>
-              {keyMode && <p className="text-xs text-sec">Restricted keys store vault references only. Inline values are not allowed.</p>}
-              {vault.isError && <p className="text-xs text-sec">Vault unavailable. Existing references are preserved; enter a reference by name or retry. <button className="underline" onClick={() => vault.refetch()}>Retry vault</button></p>}
-              <datalist id={`vault-names-${ws}`} >{vault.data?.secrets.map((s) => <option key={s.id} value={s.name} />)}</datalist>
-              {draft.secrets.map((secret, index) => {
-                const patch = (value: Partial<typeof secret>) => set({ secrets: draft.secrets.map((s, i) => i === index ? { ...s, ...value } : s) })
-                return <div key={index} className={cardClass + ' space-y-3'}>
-                  <div className="flex justify-between gap-3"><h5 className="font-semibold text-ink">{secret.name || 'New secret'}</h5><button type="button" className="text-btn" aria-label={`Remove secret ${index + 1}`} onClick={() => set({ secrets: draft.secrets.filter((_, i) => i !== index) })}>Remove</button></div>
-                  <Field label={`Secret name ${index + 1}`}><input className={inputCls} value={secret.name} onChange={(e) => patch({ name: e.target.value })} /></Field>
-                  <Field label={`Secret source ${index + 1}`}><select className={inputCls} value={secret.kind} onChange={(e) => patch({ kind: e.target.value === 'vault' ? 'vault' : 'inline', value: '', needsReplacement: false })}><option value="vault">Vault reference</option>{!keyMode && <option value="inline">Inline value</option>}</select></Field>
-                  {secret.kind === 'vault'
-                    ? <Field label={`Vault reference ${index + 1}`}><input className={inputCls} list={`vault-names-${ws}`} value={secret.ref} onChange={(e) => patch({ ref: e.target.value })} /></Field>
-                    : <Field label={`Secret value ${index + 1}`}><input type="password" className={inputCls} autoComplete="new-password" value={secret.value} onChange={(e) => patch({ value: e.target.value, needsReplacement: false })} /></Field>}
-                  {secret.needsReplacement && <p className="text-xs text-warn-text">The original inline value is not stored. Replace or remove this secret.</p>}
-                  <Field label={`Allowed secret domains ${index + 1}`}><input className={inputCls} value={secret.domains.join(',')} onChange={(e) => patch({ domains: e.target.value.split(',') })} /></Field>
+
+          <div className="spec-settings" role="tabpanel" aria-label="Settings" hidden={view !== 'settings'} ref={settingsRef}>
+            <section className="settings-group" data-section="capabilities">
+              <h3 className="spec-pane-title">Capabilities</h3>
+              {items.length === 0 && (
+                <p className="text-sm text-sec">Compute only — nothing to configure. <button type="button" className="link" onClick={() => switchView('capabilities')}>Add capabilities</button></p>
+              )}
+              {items.map((item) => (
+                <div key={item.key} data-section={item.key} className="settings-card">
+                  <div className="config-item-head">
+                    <span className="config-item-icon">{item.icon}</span>
+                    <div className="min-w-0 flex-1">
+                      <h4 className="config-item-title">{item.title}</h4>
+                      <p className="config-item-summary">{item.summary}</p>
+                    </div>
+                  </div>
+                  {item.missing.length > 0 && (
+                    <p className="settings-note is-warn">Needs {item.missing.map(capabilityLabel).join(', ')}.{' '}
+                      {item.missing.filter((d) => d === 'net' || d === 'fs').map((d) => (
+                        <button key={d} type="button" className="underline" onClick={() => d === 'net' ? addNetwork() : addFiles()}>Add {capabilityLabel(d)}</button>
+                      ))}
+                    </p>
+                  )}
+                  <div className="config-item-body">{item.body}</div>
                 </div>
-              })}
+              ))}
+              {Object.keys(draft.otherCaps).map((name) => <div key={name} className="settings-card"><h4 className="config-item-title">{name}</h4><p className="config-item-summary">Existing configuration preserved. Use Advanced JSON to edit.</p></div>)}
+            </section>
+            <section className="settings-group" data-section="rules">
+              <h3 className="spec-pane-title">Rules <span className="spec-pane-meta">{rulesSummary}</span></h3>
+              <RulesSection draft={draft} set={set} policies={policies.data?.policies ?? []} policiesError={policies.isError} onRetry={() => policies.refetch()} selected={selectedPolicies} />
+            </section>
+            <section className="settings-group" data-section="inputs">
+              <h3 className="spec-pane-title">Inputs <span className="spec-pane-meta">{inputsSummary}</span></h3>
+              <InputsSection draft={draft} set={set} keyMode={keyMode} vault={vault.data?.secrets ?? []} vaultError={vault.isError} onRetryVault={() => vault.refetch()} listId={`vault-names-${ws}`} />
+            </section>
+          </div>
+        </div>
+
+        <aside className="spec-selection" aria-label="This instance">
+          <h3 className="spec-pane-title">This instance</h3>
+          <div className="spec-identity">
+            <Field label="Name"><input className={inputCls} value={draft.name} placeholder="e.g. research run" onChange={(e) => set({ name: e.target.value })} /></Field>
+            <Field label="Lifetime (seconds)"><input className={inputCls} type="number" min="1" value={draft.ttlSeconds} onChange={(e) => set({ ttlSeconds: e.target.value === '' ? '' : Number(e.target.value) })} /></Field>
+          </div>
+          <div>
+            <p className="sidebar-label">Capabilities</p>
+            <div className="selected-list">
+              {rows.length === 0 && (
+                <div className="selected-row is-empty">
+                  <div className="min-w-0 flex-1">
+                    <h4 className="config-item-title">Compute only</h4>
+                    <span className="selected-status">Starlark and the standard library</span>
+                  </div>
+                </div>
+              )}
+              {rows}
             </div>
-          </details>
-        </>
-      )}
-      {!result.ok && (submitted || advanced) && <div className="border-l-4 border-danger bg-danger/5 p-4" role="alert"><h3 className="font-semibold text-danger">Check the configuration</h3><ul className="mt-2 space-y-1 text-sm">{result.errors.map((e, i) => <li key={i}>{e.section}: {e.message}</li>)}</ul></div>}
+          </div>
+          <div className="sidebar-links">
+            <button type="button" onClick={() => openSettings('rules')}>
+              Rules <span className={sectionIssues(['Limits']) ? 'is-warn' : ''}>{rulesSummary}</span>
+            </button>
+            <button type="button" onClick={() => openSettings('inputs')}>
+              Inputs <span className={sectionIssues(['Variables', 'Secrets', 'Labels']) ? 'is-warn' : ''}>{inputsSummary}</span>
+            </button>
+          </div>
+          {alert}
+          {footer}
+        </aside>
+      </div>
     </div>
   )
 })

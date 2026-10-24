@@ -108,7 +108,7 @@ export default function Keys({ bare }: { bare?: boolean }) {
               <Field label="Access">
                 <div className="flex gap-3">
                   {(['restricted', 'full', 'view'] as const).map((a) => (
-                    <label key={a} className={`flex flex-1 items-start gap-2 border px-3 py-2 text-xs ${access === a ? 'border-ink' : 'border-line'}`}>
+                    <label key={a} className={`flex flex-1 items-start gap-2 rounded-md border px-3 py-2 text-xs ${access === a ? 'border-accent bg-accent/5' : 'border-line'}`}>
                       <input type="radio" className="mt-0.5" checked={access === a} onChange={() => setAccess(a)} />
                       <span>
                         <span className="block font-medium text-ink">

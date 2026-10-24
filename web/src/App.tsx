@@ -84,7 +84,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen">
-      <header className="console-header sticky top-0 z-40 border-b border-ink bg-paper/95 backdrop-blur">
+      <header className="console-header sticky top-0 z-40 border-b border-line bg-paper/95 backdrop-blur">
         <div className="console-header-inner mx-auto flex min-h-14 max-w-7xl flex-wrap items-center gap-x-6 gap-y-1 px-6 py-1">
           <Link to="/" className="flex items-center">
             <span className="text-[15px] font-semibold tracking-tight text-ink">calcside</span>
@@ -98,7 +98,7 @@ export default function App() {
           </nav>
           <div className="ml-auto flex items-center gap-3 sm:gap-4">
             {dev && (
-              <span className="console-dev inline-flex items-center gap-1.5 border border-warn px-2 py-0.5 text-[11px] font-medium uppercase tracking-label text-warn-text">
+              <span className="console-dev inline-flex items-center gap-1.5 rounded-md bg-warn/10 px-2 py-1 text-xs font-medium text-warn-text">
                 <SignalMark signal="failed" />dev · anonymous
               </span>
             )}
@@ -108,7 +108,7 @@ export default function App() {
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-7xl px-6 py-10">
+      <main className="console-main mx-auto max-w-7xl px-6 py-10">
         <Routes>
           <Route path="/" element={<Instances />} />
           <Route path="/instances/new" element={<NewInstance />} />

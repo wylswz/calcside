@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { draftFromSpec, buildInstanceSpec, validateRawSpec } from './instanceDraft.ts'
+import { draftFromSpec, buildInstanceSpec, validateRawSpec, uniqueExtensionAlias } from './instanceDraft.ts'
 import type { ExtensionInfo } from './api'
 
 const errs = (r: any): string[] => r.ok ? [] : r.errors.map((e: any) => `${e.section}: ${e.message}`)
@@ -188,4 +188,15 @@ test('object prototype property names remain data, not mutations or false duplic
   assert.equal(r.spec.labels?.__proto__, 'kept')
   assert.equal(r.spec.labels?.toString, 'kept')
   assert.equal(({} as Record<string, string>).kept, undefined)
+})
+
+test('uniqueExtensionAlias generates safe unique aliases', () => {
+  const taken = new Set<string>()
+  assert.equal(uniqueExtensionAlias('tavily', taken), 'tavily')
+  assert.equal(uniqueExtensionAlias('fancy-name', taken), 'fancy_name')
+  assert.equal(uniqueExtensionAlias('1foo', taken), '_1foo')
+  assert.equal(uniqueExtensionAlias('net', taken), 'extension_net')
+  assert.equal(uniqueExtensionAlias('', taken), 'extension')
+  assert.equal(uniqueExtensionAlias('name', new Set(['name', 'name_2'])), 'name_3')
+  assert.equal(uniqueExtensionAlias('net', new Set(['extension_net'])), 'extension_net_2')
 })

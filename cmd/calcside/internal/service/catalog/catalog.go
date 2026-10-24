@@ -19,7 +19,6 @@ type Service struct {
 	extCatalog ext.CatalogProvider
 	mu         sync.Mutex
 	icons      map[string][]byte
-	iconOrder  []string
 }
 
 func New(reg *capability.Registry, extCatalog ext.CatalogProvider) *Service {
@@ -61,18 +60,31 @@ type ExtensionsView struct {
 // Extensions reports the extension catalog for this server.
 func (s *Service) Extensions() ExtensionsView {
 	out := ExtensionsView{Extensions: []ext.Info{}}
-	if s.extCatalog != nil {
-		c := s.extCatalog.Available()
-		out.Extensions = c.Extensions
-		for i := range out.Extensions {
-			if icon := out.Extensions[i].Icon; len(icon) > 0 {
-				out.Extensions[i].IconURL = s.rememberIcon(icon)
-				out.Extensions[i].Icon = nil
-			}
-		}
-		out.RemoteEnabled = c.RemoteEnabled
-		out.LocalEnabled = c.LocalEnabled
+	if s.extCatalog == nil {
+		return out
 	}
+	c := s.extCatalog.Available()
+	// Copy the provider's slice: fill IconURL and nil Icon only on our
+	// DTO copies — the provider-owned Info values are never mutated.
+	out.Extensions = append(out.Extensions, c.Extensions...)
+	out.RemoteEnabled = c.RemoteEnabled
+	out.LocalEnabled = c.LocalEnabled
+	// Build one complete snapshot for every icon in this catalog, then
+	// swap the whole map under the lock — concurrent readers always see
+	// a coherent full map, and retiring the map replaces any stale
+	// entries wholesale (no per-request growth, no FIFO cap).
+	next := make(map[string][]byte, len(out.Extensions))
+	for i := range out.Extensions {
+		if icon := out.Extensions[i].Icon; len(icon) > 0 {
+			id := fmt.Sprintf("%x", sha256.Sum256(icon))
+			next[id] = icon
+			out.Extensions[i].IconURL = "/api/v1/extensions/icons/" + id
+			out.Extensions[i].Icon = nil
+		}
+	}
+	s.mu.Lock()
+	s.icons = next
+	s.mu.Unlock()
 	return out
 }
 
@@ -96,21 +108,6 @@ func (s *Service) Editor() EditorMetadata {
 		}
 	}
 	return EditorMetadata{Rego: EditorSymbols(), Capabilities: caps, Utilities: stdlib.Symbols()}
-}
-
-func (s *Service) rememberIcon(data []byte) string {
-	id := fmt.Sprintf("%x", sha256.Sum256(data))
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.icons[id]; !ok {
-		if len(s.iconOrder) >= 512 {
-			delete(s.icons, s.iconOrder[0])
-			s.iconOrder = s.iconOrder[1:]
-		}
-		s.icons[id] = data
-		s.iconOrder = append(s.iconOrder, id)
-	}
-	return "/api/v1/extensions/icons/" + id
 }
 
 func (s *Service) Icon(id string) []byte {

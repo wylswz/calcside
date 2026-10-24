@@ -113,8 +113,8 @@ export function Button(
   const sz = size === 'sm' ? 'h-7 px-2.5 text-xs ' : 'h-8 px-3.5 text-sm '
   const v =
     variant === 'primary'
-      ? 'border-accent bg-accent text-white hover:border-ink hover:bg-ink hover:text-paper'
-      : 'border-ink/80 text-ink hover:bg-ink hover:text-paper'
+      ? 'border-accent bg-accent text-white'
+      : 'border-line bg-paper text-ink'
   return <button data-ui="button" data-variant={variant === 'primary' ? 'primary' : 'default'} className={base + sz + v + (className ? ' ' + className : '')} {...rest} />
 }
 
@@ -147,11 +147,11 @@ export function PageHeader({ title, children, actions }: {
   )
 }
 
-// SectionTitle is a small heading sitting on a heavy rule.
+// SectionTitle groups related controls without adding another surface edge.
 export function SectionTitle({ children, aside, className = '' }: { children: React.ReactNode; aside?: React.ReactNode; className?: string }) {
   return (
-    <div data-ui="section-title" className={`mb-3 flex items-center gap-3 border-b-2 border-ink pb-2 ${className}`}>
-      <h3 className="text-[13px] font-semibold tracking-tight text-ink">{children}</h3>
+    <div data-ui="section-title" className={`mb-3 flex items-center gap-3 ${className}`}>
+      <h3 className="text-sm font-semibold text-ink">{children}</h3>
       {aside && <div className="ml-auto flex items-center gap-3 text-xs">{aside}</div>}
     </div>
   )
@@ -194,7 +194,8 @@ export function Modal({ title, onClose, children, footer, wide }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div
-        className={`flex max-h-[90vh] w-full flex-col border border-ink bg-paper shadow-lg ${wide ? 'max-w-5xl' : 'max-w-xl'}`}
+        className={`flex max-h-[90vh] w-full flex-col border border-line bg-paper ${wide ? 'max-w-5xl' : 'max-w-xl'}`}
+        data-ui="dialog-surface"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label={title}

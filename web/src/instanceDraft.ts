@@ -311,3 +311,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function stringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((v) => typeof v === 'string')
 }
+
+// uniqueExtensionAlias derives a collision-free alias for a new catalog
+// extension: identifier-safe, never reserved, never equal to an existing
+// draft alias.
+export function uniqueExtensionAlias(name: string, existing: ReadonlySet<string>): string {
+  let base = name.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^_+|_+$/g, '')
+  if (!base) base = 'extension'
+  if (/^\d/.test(base)) base = '_' + base
+  if (RESERVED.has(base)) base = 'extension_' + base
+  let candidate = base
+  for (let i = 2; existing.has(candidate) || RESERVED.has(candidate); i++) candidate = base + '_' + i
+  return candidate
+}

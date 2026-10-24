@@ -92,10 +92,11 @@ test('instance flow guides connect then clears', async ({ page }) => {
   await expect(page.getByText('Connect an agent')).toHaveCount(0)
 })
 
-// The builder is a page: /instances/new with add-on cards and review.
+// The builder is a page: /instances/new with a capability palette and
+// the instance being built.
 test('new instance: compute-only default, name persists', async ({ page }) => {
   await page.goto(`${consoleURL}/instances/new`)
-  await expect(page.getByText('Review')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'This instance' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Compute only' })).toBeVisible()
   await page.getByPlaceholder('e.g. research run').fill('my-run')
   const [created] = await Promise.all([
@@ -111,15 +112,24 @@ test('new instance: compute-only default, name persists', async ({ page }) => {
 
 test('new instance: add/configure/remove Files and Network, review reflects', async ({ page }) => {
   await page.goto(`${consoleURL}/instances/new`)
-  await page.getByRole('button', { name: 'Add ability' }).click()
-  await page.getByRole('button', { name: 'Add Files - bounded virtual storage' }).click()
+  // one click each; adding never opens a form or leaves the palette
+  await expect(page.getByRole('button', { name: 'Add ability' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Add Files' }).click()
+  await page.getByRole('button', { name: 'Add Network' }).click()
+  await expect(page.locator('[data-row="fs"]')).toBeVisible()
+  await expect(page.locator('[data-row="net"]')).toBeVisible()
+  await expect(page.getByLabel(/Files quota/)).toBeHidden()
+  // Configure is the explicit step to the settings view
+  await page.getByRole('button', { name: 'Configure Files' }).click()
+  await expect(page.getByRole('tabpanel', { name: 'Add capabilities', includeHidden: true })).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Add Network' })).toBeHidden()
   await page.getByLabel(/Files quota/).fill('2048')
-  await page.getByRole('button', { name: 'Add ability' }).click()
-  await page.getByRole('button', { name: 'Add Network - outbound HTTP' }).click()
   await page.getByLabel(/Allowed hosts/).fill('api.example.com\nother.com')
   await page.getByLabel(/HTTP methods/).fill('GET')
-  await expect(page.getByText('Network api.example.com,other.com')).toBeVisible()
-  await page.getByRole('button', { name: 'Remove' }).first().click() // remove Files
+  await expect(page.locator('[data-row="net"] .selected-status')).toHaveText('api.example.com, other.com · GET')
+  await expect(page.locator('[data-row="fs"] .selected-status')).toHaveText('2.00 KiB')
+  await page.getByRole('button', { name: 'Remove Files' }).click()
+  await expect(page.getByText('Files removed')).toBeVisible()
   const [created] = await Promise.all([
     page.waitForResponse((r) => r.url().endsWith('/api/v1/instances') && r.request().method() === 'POST'),
     page.getByRole('button', { name: 'Create instance' }).click(),
@@ -141,7 +151,8 @@ test('new instance: advanced JSON survives, invalid blocks the editor', async ({
   await page.getByText('Advanced JSON').click()
   await page.getByLabel('Instance spec JSON').fill('{ not json')
   await page.getByText('Back to editor').click()
-  await expect(page.getByRole('alert')).toContainText(/Fix invalid JSON/i)
+  await expect(page.locator('.create-bar-issues')).toContainText(/Fix invalid JSON/i)
+  await expect(page.getByRole('button', { name: 'Create instance' })).toBeDisabled()
 })
 
 test('new instance: 390px does not overflow', async ({ page }) => {
@@ -180,9 +191,8 @@ test('clone prefill: exact TTL, vault ref ≠ name, typed ext config, limits pre
   await page.goto(`${consoleURL}/instances/new?from=ins_src`)
   await expect(page.getByLabel('Lifetime (seconds)')).toHaveValue('90')
   // sanitized inline clone must be replaced or removed — replace it
-  const inputs = page.locator('details').filter({ has: page.locator('summary', { hasText: 'Inputs' }) })
-  await inputs.locator('summary').click()
-  await expect(inputs).toHaveAttribute('open', '')
+  await page.getByRole('button', { name: /^Inputs/ }).click()
+  await expect(page.locator('[data-section="inputs"]')).toBeVisible()
   await page.getByLabel('Secret value 2').fill('replaced-value')
   const btn = page.getByRole('button', { name: 'Create similar' })
   await expect(btn).toBeEnabled()
@@ -436,3 +446,202 @@ for (const role of ['editor', 'viewer'] as const) {
     }
   })
 }
+
+// 1000-entry catalog: library stays a 12-card bounded surface, search +
+// paging work, selected extensions survive page turns, icons are same-origin.
+test('new instance: extension library stays bounded at 1000 entries', async ({ page }) => {
+  const hex = (n: number) => n.toString(16).padStart(64, '0')
+  const entries = Array.from({ length: 1000 }, (_, i) => ({
+    source: `contrib/ext${i}`, name: `ext-${String(i).padStart(4, '0')}`,
+    description: `Fixture extension ${i}`, dependencies: [] as string[], ops: [], config: [],
+    icon_url: i === 0 ? `/api/v1/extensions/icons/${hex(0)}` : undefined,
+  }))
+  entries[999].dependencies = ['net']
+  // broad catalog route FIRST so the specific icon route takes priority
+  await page.route('**/api/v1/extensions**', (r) => r.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ extensions: entries, local_enabled: true, remote_enabled: false }),
+  }))
+  await page.route(`**/api/v1/extensions/icons/${hex(0)}`, (r) => r.fulfill({
+    status: 200, contentType: 'image/png',
+    body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'),
+  }))
+  let captured: any = null
+  await page.route('**/api/v1/instances**', async (r) => {
+    if (r.request().method() !== 'POST') return r.continue()
+    captured = r.request().postDataJSON()
+    await r.fulfill({ json: { instance: { id: 'ins_mock1000', status: 'running', workspace_id: '', spec: captured } } })
+  })
+  const external: string[] = []
+  page.on('request', (r) => { if (r.url().startsWith('http') && !r.url().startsWith(consoleURL)) external.push(r.url()) })
+
+  await page.goto(`${consoleURL}/instances/new`)
+  await expect(page.locator('.ext-card')).toHaveCount(12)
+  await expect(page.getByText('1–12 of 1,000')).toBeVisible()
+  const realIcon = page.locator('.ext-card img').first()
+  await expect(realIcon).toBeVisible()
+  await expect.poll(async () => realIcon.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true)
+
+  // search hits the tail entry; one click adds it to the summary
+  await page.getByLabel('Search extensions').fill('ext-0999')
+  await expect(page.getByText('1–1 of 1')).toBeVisible()
+  await page.getByRole('button', { name: 'Add ext-0999' }).click()
+  const row = page.locator('[data-row^="ext:"]')
+  await expect(row.locator('.config-item-title')).toHaveText('ext_0999')
+  // missing dependency is shown, and granting it is the user's click
+  await expect(row.locator('.selected-status')).toContainText('Needs Network')
+  await row.getByRole('button', { name: 'Add Network' }).click()
+  await expect(page.locator('[data-row="net"]')).toBeVisible()
+  await expect(row.locator('.selected-status')).not.toContainText('Needs')
+
+  // clearing the query resets paging; page turns don't drop the selection
+  await page.getByLabel('Search extensions').fill('')
+  await expect(page.getByText('1–12 of 1,000')).toBeVisible()
+  await page.getByRole('button', { name: 'Next extensions page' }).click()
+  await expect(page.getByText('13–24 of 1,000')).toBeVisible()
+  await expect(page.locator('.ext-card')).toHaveCount(12)
+  await expect(row).toHaveCount(1)
+  expect(external).toHaveLength(0)
+
+  // settings for the catalog entry: source and alias sit under Advanced
+  await page.getByRole('button', { name: 'Configure ext_0999' }).click()
+  await page.getByText('Advanced extension settings').click()
+  await expect(page.getByLabel('Extension source')).toHaveValue('contrib/ext999')
+  await expect(page.getByLabel('Alias')).toHaveValue('ext_0999')
+  await page.getByRole('button', { name: 'Create instance' }).click()
+  await expect.poll(() => captured).not.toBeNull()
+  expect(captured.capabilities.ext.ext_0999.source).toBe('contrib/ext999')
+  expect(captured.capabilities.net).toBeDefined()
+  expect(Object.keys(captured.capabilities.ext)).toEqual(['ext_0999'])
+})
+
+// per-editor JSON state survives view switches and removals — invalid
+// text doesn't silently clear and only that entry's error blocks
+test('new instance: extension editor keeps invalid JSON through view switches and removes', async ({ page }) => {
+  await page.goto(`${consoleURL}/instances/new`)
+  const palette = page.getByRole('tab', { name: 'Add capabilities' })
+  const card = (alias: string) => page.locator('.settings-card').filter({ has: page.getByRole('heading', { name: alias }) })
+  // custom extensions open their settings, since they need a source
+  await page.getByRole('button', { name: 'Configure a custom extension' }).click()
+  await page.getByLabel('Alias').fill('alpha')
+  await page.getByLabel('Extension source').fill('contrib/alpha')
+  await palette.click()
+  await page.getByRole('button', { name: 'Configure a custom extension' }).click()
+  const beta = page.locator('.settings-card').last()
+  await beta.getByLabel('Alias').fill('beta')
+  await beta.getByLabel('Extension source').fill('contrib/beta')
+  await card('beta').getByLabel('Custom configuration JSON').fill('{ broken')
+  await expect(card('beta').getByRole('alert')).toContainText(/JSON object/i)
+  const create = page.getByRole('button', { name: 'Create instance' })
+  await expect(create).toBeDisabled()
+  // leave and come back: the typed text and its error are still there
+  await palette.click()
+  await page.getByRole('button', { name: 'Configure beta' }).click()
+  await expect(card('beta').getByLabel('Custom configuration JSON')).toHaveValue('{ broken')
+  // removing the other entry keeps beta's text and error
+  await page.getByRole('button', { name: 'Remove alpha' }).click()
+  await expect(card('beta').getByLabel('Custom configuration JSON')).toHaveValue('{ broken')
+  await expect(create).toBeDisabled()
+  await card('beta').getByLabel('Custom configuration JSON').fill('{}')
+  await expect(create).toBeEnabled()
+})
+
+// catalog unavailable → fs/net still one-click, retry recovers
+test('new instance: catalog failure does not hide Files or Network', async ({ page }) => {
+  let calls = 0
+  await page.route('**/api/v1/extensions**', (r) => r.fulfill(++calls === 1 ? { status: 500 } : { status: 200, contentType: 'application/json', body: JSON.stringify({ extensions: [], local_enabled: true, remote_enabled: false }) }))
+  await page.goto(`${consoleURL}/instances/new`)
+  await expect(page.getByText(/Could not load extensions/i)).toBeVisible()
+  await page.getByRole('button', { name: 'Add Files' }).click()
+  await page.getByRole('button', { name: 'Add Network' }).click()
+  await expect(page.locator('[data-row="fs"]')).toBeVisible()
+  await expect(page.locator('[data-row="net"]')).toBeVisible()
+  await page.getByText('Retry catalog').click()
+  await expect(page.getByText(/Could not load extensions/i)).not.toBeVisible()
+  await expect(page.locator('[data-row="fs"]')).toBeVisible()
+})
+
+// Adding or removing must not move what the user is pointing at: palette
+// controls keep their position, and removal leaves an undo row in place.
+test('new instance: palette controls stay put while adding and removing', async ({ page }) => {
+  const entries = Array.from({ length: 30 }, (_, i) => ({
+    source: `contrib/stable${i}`, name: `stable-${String(i).padStart(2, '0')}`,
+    description: `Stable fixture ${i}`, dependencies: i === 2 ? ['net'] : [], ops: [], config: [],
+  }))
+  await page.route('**/api/v1/extensions**', (r) => r.fulfill({ json: { extensions: entries, local_enabled: true, remote_enabled: false } }))
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport)
+    await page.goto(`${consoleURL}/instances/new`)
+    await expect(page.locator('.ext-card')).toHaveCount(12)
+    const targets = {
+      files: page.locator('.ability-choice').nth(0),
+      network: page.locator('.ability-choice').nth(1),
+      search: page.getByLabel('Search extensions'),
+      next: page.getByRole('button', { name: 'Next extensions page' }),
+      ext2: page.locator('.ext-card').nth(2).locator('.ext-card-action'),
+      ext3: page.locator('.ext-card').nth(3).locator('.ext-card-action'),
+      custom: page.getByRole('button', { name: 'Configure a custom extension' }),
+    }
+    // Document coordinates: Playwright may scroll a target into view to
+    // click it, which is the user's own scrolling, not layout movement.
+    const box = (l: ReturnType<typeof page.locator>) => l.evaluate((el) => {
+      const b = el.getBoundingClientRect()
+      return { x: Math.round(b.x + window.scrollX), y: Math.round(b.y + window.scrollY), w: Math.round(b.width), h: Math.round(b.height) }
+    })
+    const snapshot = async () => {
+      const out: Record<string, { x: number; y: number; w: number; h: number }> = {}
+      for (const [k, l] of Object.entries(targets)) out[k] = await box(l)
+      return out
+    }
+    const before = await snapshot()
+    await targets.files.click()
+    await expect(page.locator('[data-row="fs"]')).toBeVisible()
+    expect(await snapshot()).toEqual(before)
+    await targets.network.click()
+    await expect(page.locator('[data-row="net"]')).toBeVisible()
+    expect(await snapshot()).toEqual(before)
+    await targets.ext2.click()
+    await expect(targets.ext2).toHaveText('Added')
+    expect(await snapshot()).toEqual(before)
+    await targets.ext3.click()
+    expect(await snapshot()).toEqual(before)
+    // a second click on an added card neither removes it nor navigates
+    await targets.files.click()
+    await expect(page.locator('[data-row="fs"]')).toHaveCount(1)
+    await expect(page.getByRole('tab', { name: 'Add capabilities' })).toHaveAttribute('aria-selected', 'true')
+    expect(await snapshot()).toEqual(before)
+
+    // removal keeps the next row in place behind an undo row
+    const network = page.locator('[data-row="net"]')
+    const top = (await box(network)).y
+    await page.getByRole('button', { name: 'Remove Files' }).click()
+    await expect(page.getByText('Files removed')).toBeVisible()
+    expect((await box(network)).y).toBe(top)
+    await page.getByRole('button', { name: 'Undo' }).click()
+    await expect(page.locator('[data-row="fs"]')).toHaveCount(1)
+    expect((await box(network)).y).toBe(top)
+  }
+})
+
+// No nested scroll: the summary column grows with the page, and the
+// settings view scrolls with the page too.
+test('new instance: no nested scrolling and nothing overflows', async ({ page }) => {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport)
+    await page.goto(`${consoleURL}/instances/new`)
+    await page.getByRole('button', { name: 'Add Files' }).click()
+    await page.getByRole('button', { name: 'Add Network' }).click()
+    await page.getByRole('button', { name: 'Configure Network' }).click()
+    await page.getByLabel(/Allowed hosts/).fill('a-very-long-hostname-that-would-otherwise-stretch-the-column.example.com')
+    const layout = await page.evaluate(() => {
+      const scrolls = Array.from(document.querySelectorAll('.spec-form *')).filter((el) => {
+        const s = getComputedStyle(el)
+        return el.tagName !== 'TEXTAREA' && /(auto|scroll)/.test(s.overflowY) && el.scrollHeight > el.clientHeight
+      }).map((el) => el.className)
+      const within = (sel: string, inner: string) => Array.from(document.querySelectorAll(`${sel} ${inner}`)).every((c) =>
+        c.getBoundingClientRect().right <= document.querySelector(sel)!.getBoundingClientRect().right + 0.5)
+      return { scrolls, rows: within('.spec-selection', '.selected-row'), cards: within('.spec-settings', '.settings-card'), page: document.documentElement.scrollWidth <= window.innerWidth }
+    })
+    expect(layout).toEqual({ scrolls: [], rows: true, cards: true, page: true })
+  }
+})

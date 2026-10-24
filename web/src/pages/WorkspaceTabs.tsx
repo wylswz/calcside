@@ -28,10 +28,9 @@ export default function WorkspaceTabs() {
       <PageHeader title={ws.name}>
         Workspace settings for <code className="font-mono text-ink">{ws.id}</code>.
       </PageHeader>
-      <nav className="mb-8 flex gap-6 border-b border-line">
+      <nav className="workspace-tabs" aria-label="Workspace settings">
         {tabs.map((t) => (
-          <NavLink key={t.to} to={`/workspace/${t.to}`} className={({ isActive }) =>
-            `pb-2 text-sm ${isActive ? 'border-b-2 border-ink font-medium text-ink' : 'text-sec hover:text-ink'}`}>
+          <NavLink key={t.to} to={`/workspace/${t.to}`}>
             {t.label}
           </NavLink>
         ))}

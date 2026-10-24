@@ -45,18 +45,18 @@ export default function Instances() {
     <div>
       <PageHeader title="Instances"
         actions={role != null && role !== 'viewer' ? <Button variant="primary" onClick={() => nav('/instances/new')}>New instance</Button> : undefined}>
-        Each instance is a Starlark session with its own globals, VFS and policy snapshot.
+        Set the boundary, connect an agent, and follow its work.
       </PageHeader>
       {isLoading && <Loading />}
       {data && all.length === 0 && (
-        <div className="border border-line bg-surface px-6 py-10 text-center">
+        <div className="rounded-xl border border-line bg-surface px-6 py-10 text-center">
           <p className="mb-4 text-sm text-sec">1 Decide what an agent may do · 2 Connect the agent · 3 Review its runs</p>
           {role != null && role !== 'viewer' && <Button variant="primary" onClick={() => nav('/instances/new')}>New instance</Button>}
         </div>
       )}
       {all.length > 0 && groups.filter(([, g]) => g.length).map(([label, g]) => (
         <div key={label} className="mb-8">
-          <h2 className="mb-3 text-xs font-medium uppercase tracking-label text-mute">{label}</h2>
+          <h2 className="mb-3 text-base font-semibold text-ink">{label}</h2>
           <div className="tbl-wrap">
             <table className="tbl">
               <thead>
@@ -87,7 +87,7 @@ export default function Instances() {
       ))}
             {(shared?.instances.length ?? 0) > 0 && (
         <div className="mt-8">
-          <h2 className="mb-3 text-xs font-medium uppercase tracking-label text-mute">Shared with you</h2>
+          <h2 className="mb-3 text-base font-semibold text-ink">Shared with you</h2>
           <div className="tbl-wrap">
             <table className="tbl">
               <thead><tr><th>Name</th><th>Workspace</th><th>Role</th><th>Status</th></tr></thead>

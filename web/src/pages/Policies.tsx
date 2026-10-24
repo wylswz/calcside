@@ -69,9 +69,9 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
             <input className={inputCls + ' font-mono'} value={name} onChange={(e) => setName(e.target.value)} placeholder="deny_net_hosts" />
           </Field>
           {name && !nameRe.test(name) && <p className="text-xs text-warn-text">letters, digits, _ . - (max 64), starting with a letter or digit; builtin. is reserved</p>}
-          <div className="border border-ink">
-            <div className="flex items-center gap-3 border-b border-ink px-3 py-1.5">
-              <span className="text-[11px] font-medium uppercase tracking-label text-mute">Rego</span>
+          <div className="overflow-hidden rounded-md border border-line">
+            <div className="flex items-center gap-3 border-b border-line px-3 py-2">
+              <span className="text-xs font-medium text-sec">Rego</span>
               {validation && (
                 <span className={`ml-auto truncate text-xs ${validation.valid ? 'text-ink' : 'text-warn-text'}`}>
                   {validation.valid ? '● valid' : validation.error}
@@ -87,7 +87,7 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
           {err && <p className="text-xs text-warn-text">{err}</p>}
         </div>
         <div className="min-w-0">
-          <div className="mb-2 text-[11px] font-medium uppercase tracking-label text-mute">Completion context</div>
+          <div className="mb-2 text-xs font-medium text-sec">Completion context</div>
           <div className="mb-2 grid grid-cols-2 gap-2">
             <Field label="Capability">
               <select className={inputCls} value={capability} onChange={(e) => { setCapability(e.target.value); setOp('') }}>
@@ -103,7 +103,7 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
             </Field>
           </div>
           <p className="mb-4 text-xs text-mute">Select an operation for args / result field suggestions. This only changes completion hints; Validate compiles the policy, it does not execute it.</p>
-          <div className="mb-2 text-[11px] font-medium uppercase tracking-label text-mute">Input schema</div>
+          <div className="mb-2 text-xs font-medium text-sec">Input schema</div>
           <pre className="pre mb-4 max-h-64 text-sec">{editor.fields.length ? editor.fields.map((s) => `${s.name}  ${s.detail ?? ''}`).join('\n') : editor.error ? 'Schema unavailable' : 'Loading schema…'}</pre>
           <pre className="pre max-h-64 text-sec">{POLICY_DOC}</pre>
         </div>
