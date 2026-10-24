@@ -29,7 +29,18 @@ with Client(base_url="http://127.0.0.1:8787", api_key="") as client:
         client.delete_instance(instance["id"])
 ```
 
-Outside dev mode, create an API key in the web console and pass it via `CALCSIDE_API_KEY` or the SDK's `api_key` argument. Manage library policies through the console or `/api/v1/policies`, then select them in the instance spec.
+Outside dev mode, create an API key in the web console and pass it via `CALCSIDE_API_KEY` or the SDK's `api_key` argument. Keys are **restricted** or **full access**: a restricted key carries an instance spec and a live-instance bound — it may only create and use instances from that spec; full-access keys keep the owner's full API power and are for trusted automation only. Manage library policies through the console or `/api/v1/policies`, then select them in the instance spec.
+
+## Connect an agent over MCP
+
+`POST /mcp` speaks the Model Context Protocol over streamable HTTP to any MCP client (Claude Code, Cursor, VS Code, agent frameworks). It requires a **restricted** API key: create one in the console under API keys with the instance spec the agent needs.
+
+```sh
+claude mcp add --transport http calcside http://localhost:8787/mcp \
+  --header "Authorization: Bearer cs_your_key"
+```
+
+The server is stateless: `create_instance` returns an `instance_id` (plus `expires_at` and the agent prompt), and `exec`, `list_files`, `read_file` (fs-granted keys only), and `delete_instance` all name the instance. Inside the instance, `print(help())` lists the utility modules and `print(help("stats"))` their signatures.
 
 Instance spec (`POST /api/v1/instances`):
 
@@ -120,7 +131,7 @@ arrival-rate test; run the load generator on a separate machine for capacity res
 Every instance and extension has `json`, `math`, `url`, `csv`, `base64`, `hashlib`,
 `regex`, `datetime`, `stats`, `linalg`, `dist`, `series`, and `decimal`. These are bounded pure functions, not capability grants:
 no implicit I/O, secrets, current clock, randomness, or host timezone. The server
-prompt and editor completion describe their signatures and limits.
+prompt lists each module's one-liner; `help()` / `help("module")` / `help("module.function")` inside an instance return the full signatures, and editor completion shows the same text.
 
 ```python
 rows = csv.parse_dicts("id,amount_minor\nA,1200\nB,300\n")

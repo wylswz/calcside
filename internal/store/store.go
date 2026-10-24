@@ -67,6 +67,11 @@ type APIKey struct {
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
+
+	// Spec is the normalized InstanceSpec this key may create; nil = full
+	// access. MaxInstances bounds live instances for a restricted key.
+	Spec         json.RawMessage `json:"-"`
+	MaxInstances int             `json:"-"`
 }
 
 type Session struct {
@@ -92,6 +97,17 @@ type Instance struct {
 	// to API clients (dto.NewInstance maps fields explicitly).
 	NodeID     string `json:"-"`
 	LeaseEpoch int64  `json:"-"`
+
+	// KeyID is the restricted API key that created the instance; empty
+	// for console sessions and full-access keys.
+	KeyID string `json:"-"`
+}
+
+// InstanceFilter selects instances by owner, status and creating key.
+type InstanceFilter struct {
+	UserID string
+	Status types.InstanceStatus
+	KeyID  string
 }
 
 type Execution struct {
@@ -181,7 +197,7 @@ type Store interface {
 
 	CreateInstance(ctx context.Context, in *Instance) error
 	GetInstance(ctx context.Context, id string) (*Instance, error)
-	ListInstances(ctx context.Context, userID string, status types.InstanceStatus) ([]*Instance, error)
+	ListInstances(ctx context.Context, f InstanceFilter) ([]*Instance, error)
 	UpdateInstance(ctx context.Context, in *Instance) error
 	// ListExpiredInstances returns running instances whose sliding TTL
 	// elapsed before the given time. The API tier owns expiry as a

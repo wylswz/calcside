@@ -75,6 +75,9 @@ func writeErr(err error) error {
 }
 
 func (s *Service) Create(ctx context.Context, a service.Actor, name, src string) (*Policy, error) {
+	if a.Restricted() {
+		return nil, service.Forbidden("restricted keys cannot manage policies")
+	}
 	if name == "" || src == "" {
 		return nil, service.BadRequest("name and rego required")
 	}
@@ -112,6 +115,9 @@ func (s *Service) Get(ctx context.Context, a service.Actor, id string) (*Policy,
 }
 
 func (s *Service) Update(ctx context.Context, a service.Actor, id string, name, src *string) (*Policy, error) {
+	if a.Restricted() {
+		return nil, service.Forbidden("restricted keys cannot manage policies")
+	}
 	pol, err := s.Get(ctx, a, id)
 	if err != nil {
 		return nil, err
@@ -138,6 +144,9 @@ func (s *Service) Update(ctx context.Context, a service.Actor, id string, name, 
 }
 
 func (s *Service) Delete(ctx context.Context, a service.Actor, id string) error {
+	if a.Restricted() {
+		return service.Forbidden("restricted keys cannot manage policies")
+	}
 	pol, err := s.Get(ctx, a, id)
 	if err != nil {
 		return err

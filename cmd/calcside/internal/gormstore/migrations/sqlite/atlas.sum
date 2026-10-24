@@ -1,5 +1,6 @@
-h1:XLiaFMH1Igx+ISFTzu/zYGfl05RQCLQdRnluDOAREYM=
+h1:b5qPvoqjyEIfAThxzsyC7eM4f5MzkXbl8DJMCzJiLEE=
 20261004092922_baseline.sql h1:QDhAHa2GVDFzaveDiH7Kz38SL2x88NXEh/cLHr+VGz4=
 20261005010219_add_user_is_admin.sql h1:jyUuealeiyKX0p6bRiG7iUgYvrFrOGcpckoxzfZ9Yxc=
 20261005010732_add_local_user_credentials.sql h1:/TH9yrs2GK6AWcxGJ5F88jP7+6lkh4NuuvDG8eLwN58=
 20261024043012_add_execution_output.sql h1:XhHPZtw1W0qpDLLTg53mSLqfqCovIrvzVbfVI144q4g=
+20261024054906_add_key_spec.sql h1:WtOH33pn9g24BYraSS1R+kbWvER96VAFn5ZyLDCaKcI=

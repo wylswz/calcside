@@ -11,6 +11,7 @@
 package sandbox
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -133,7 +134,17 @@ func (s *Service) owned(ctx context.Context, a service.Actor, id string) (*store
 	if err != nil || in.UserID != a.UserID {
 		return nil, service.NotFound("instance not found")
 	}
+	if a.Restricted() && in.KeyID != a.KeyID {
+		return nil, service.NotFound("instance not found")
+	}
 	return in, nil
+}
+
+// CheckInstanceAccess enforces the instance ownership rule for callers
+// outside this package (audit scoping for restricted keys).
+func (s *Service) CheckInstanceAccess(ctx context.Context, a service.Actor, id string) error {
+	_, err := s.owned(ctx, a, id)
+	return err
 }
 
 // running fetches an owned instance and requires it to be live.
@@ -164,7 +175,11 @@ func renewal(in *store.Instance, now time.Time) time.Time {
 }
 
 func (s *Service) List(ctx context.Context, a service.Actor, status types.InstanceStatus) ([]*store.Instance, error) {
-	lst, err := s.st.ListInstances(ctx, a.UserID, status)
+	f := store.InstanceFilter{UserID: a.UserID, Status: status}
+	if a.Restricted() {
+		f.KeyID = a.KeyID
+	}
+	lst, err := s.st.ListInstances(ctx, f)
 	if err != nil {
 		return nil, service.Internal(err)
 	}
@@ -204,44 +219,66 @@ func (s *Service) selectedPolicies(ctx context.Context, userID string, names []s
 	return out, nil
 }
 
-func (s *Service) Create(ctx context.Context, a service.Actor, rawSpec []byte) (*store.Instance, error) {
-	// Validate here as well as on the node: a bad spec should be a 400
-	// before a placement is spent on it.
+// ValidateSpec normalizes a raw spec and checks policy selection and
+// secret resolution without placing an instance. Returns the sanitized
+// spec bytes. Key specs (keySpec=true) additionally reject inline secret
+// values — a stored key may only hold vault references.
+func (s *Service) ValidateSpec(ctx context.Context, a service.Actor, rawSpec []byte, keySpec bool) (json.RawMessage, error) {
+	spec, _, secs, err := s.validateSpec(ctx, a, rawSpec, keySpec)
+	if err != nil {
+		return nil, err
+	}
+	return spec.Sanitized(secs), nil
+}
+
+// validateSpec runs normalization, secret resolution and policy
+// selection for a raw spec; no placement happens.
+func (s *Service) validateSpec(ctx context.Context, a service.Actor, rawSpec []byte, keySpec bool) (*runtime.Spec, []runtime.Secret, map[string]runtime.SecretSpec, error) {
 	spec, _, err := capability.NormalizeSpec(rawSpec, s.reg, s.limits)
 	if err != nil {
-		return nil, fail(err)
+		return nil, nil, nil, fail(err)
 	}
-	if s.maxPerUser > 0 {
-		live, err := s.st.ListInstances(ctx, a.UserID, types.InstanceRunning)
-		if err != nil {
-			return nil, service.Internal(err)
-		}
-		if len(live) >= s.maxPerUser {
-			return nil, service.Errf(types.ErrCodeTooMany, "per-user instance limit reached")
+	if keySpec {
+		for name, sec := range spec.Secrets {
+			if sec.Value != "" {
+				return nil, nil, nil, service.Errf(types.ErrCodeBadSpec, "secrets.%s: key specs hold vault references only, not inline values", name)
+			}
 		}
 	}
 	resolved, sanitized, err := s.secrets.Resolve(ctx, a.UserID, spec.Secrets)
 	if err != nil {
-		return nil, service.Errf(types.ErrCodeBadSpec, "%s", err.Error())
+		return nil, nil, nil, service.Errf(types.ErrCodeBadSpec, "%s", err.Error())
 	}
+	if _, err := s.selectedPolicies(ctx, a.UserID, spec.Policies); err != nil {
+		return nil, nil, nil, err
+	}
+	return spec, resolved, sanitized, nil
+}
+
+// place builds the instance row, places it on the runtime and persists
+// the binding — rolling the placement back if the store write fails.
+// ttl is the effective TTL: it is written into the stored spec so
+// renewal slides by the same amount the instance was created with.
+func (s *Service) place(ctx context.Context, a service.Actor, spec *runtime.Spec, resolved []runtime.Secret, secs map[string]runtime.SecretSpec, labels map[string]string, ttl int64, keyID string) (*store.Instance, error) {
 	userPols, err := s.selectedPolicies(ctx, a.UserID, spec.Policies)
 	if err != nil {
 		return nil, err
 	}
-
+	spec.TTLSeconds = ttl
+	if labels == nil {
+		labels = map[string]string{}
+	}
 	now := s.now().UTC()
 	meta := &store.Instance{
 		ID:           store.NewID(store.PrefixInstance),
 		UserID:       a.UserID,
-		Spec:         spec.Sanitized(sanitized),
-		Labels:       spec.Labels,
+		Spec:         spec.Sanitized(secs),
+		Labels:       labels,
 		Status:       types.InstanceRunning,
 		CreatedAt:    now,
 		LastActiveAt: now,
-		ExpiresAt:    now.Add(time.Duration(spec.TTLSeconds) * time.Second),
-	}
-	if meta.Labels == nil {
-		meta.Labels = map[string]string{}
+		ExpiresAt:    now.Add(time.Duration(ttl) * time.Second),
+		KeyID:        keyID,
 	}
 
 	// Place first, persist second. A row marked running that no node
@@ -272,6 +309,83 @@ func (s *Service) Create(ctx context.Context, a service.Actor, rawSpec []byte) (
 		return nil, service.Internal(err)
 	}
 	return meta, nil
+}
+
+func (s *Service) Create(ctx context.Context, a service.Actor, rawSpec []byte) (*store.Instance, error) {
+	// Restricted keys create from their stored spec; the request body may
+	// only carry labels and ttl_seconds (capped at the spec's TTL).
+	if a.Restricted() {
+		return s.createRestricted(ctx, a, rawSpec)
+	}
+	spec, resolved, secs, err := s.validateSpec(ctx, a, rawSpec, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.checkUserLimit(ctx, a); err != nil {
+		return nil, err
+	}
+	return s.place(ctx, a, spec, resolved, secs, spec.Labels, spec.TTLSeconds, "")
+}
+
+// checkUserLimit enforces the cluster-wide live-instance quota.
+func (s *Service) checkUserLimit(ctx context.Context, a service.Actor) error {
+	if s.maxPerUser <= 0 {
+		return nil
+	}
+	live, err := s.st.ListInstances(ctx, store.InstanceFilter{UserID: a.UserID, Status: types.InstanceRunning})
+	if err != nil {
+		return service.Internal(err)
+	}
+	if len(live) >= s.maxPerUser {
+		return service.Errf(types.ErrCodeTooMany, "per-user instance limit reached")
+	}
+	return nil
+}
+
+// createRestricted builds an instance from the key's stored spec; the
+// request body may only carry labels (merged under the spec's — spec
+// wins) and ttl_seconds (≤ the spec's TTL).
+func (s *Service) createRestricted(ctx context.Context, a service.Actor, rawSpec []byte) (*store.Instance, error) {
+	var req struct {
+		Labels     map[string]string `json:"labels"`
+		TTLSeconds *int64            `json:"ttl_seconds"`
+	}
+	if len(rawSpec) > 0 {
+		dec := json.NewDecoder(bytes.NewReader(rawSpec))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil {
+			return nil, service.Forbidden("a restricted key's create accepts only labels and ttl_seconds")
+		}
+	}
+	spec, resolved, secs, err := s.validateSpec(ctx, a, a.KeySpec, false)
+	if err != nil {
+		return nil, err
+	}
+	ttl := spec.TTLSeconds
+	if req.TTLSeconds != nil {
+		if *req.TTLSeconds <= 0 || *req.TTLSeconds > int64(spec.TTLSeconds) {
+			return nil, service.Errf(types.ErrCodeBadSpec, "ttl_seconds must be 1..%d", spec.TTLSeconds)
+		}
+		ttl = *req.TTLSeconds
+	}
+	if err := s.checkUserLimit(ctx, a); err != nil {
+		return nil, err
+	}
+	live, err := s.st.ListInstances(ctx, store.InstanceFilter{UserID: a.UserID, Status: types.InstanceRunning, KeyID: a.KeyID})
+	if err != nil {
+		return nil, service.Internal(err)
+	}
+	if a.KeyMaxInstances > 0 && len(live) >= a.KeyMaxInstances {
+		return nil, service.Errf(types.ErrCodeTooMany, "restricted key instance limit reached")
+	}
+	labels := map[string]string{}
+	for k, v := range req.Labels {
+		labels[k] = v
+	}
+	for k, v := range spec.Labels {
+		labels[k] = v
+	}
+	return s.place(ctx, a, spec, resolved, secs, labels, ttl, a.KeyID)
 }
 
 func (s *Service) Get(ctx context.Context, a service.Actor, id string) (*store.Instance, error) {
@@ -420,6 +534,10 @@ func (s *Service) ListExecutions(ctx context.Context, a service.Actor, instanceI
 func (s *Service) GetExecution(ctx context.Context, a service.Actor, id string) (*store.Execution, error) {
 	ex, err := s.st.GetExecution(ctx, id)
 	if err != nil || ex.UserID != a.UserID {
+		return nil, service.NotFound("execution not found")
+	}
+	// Restricted keys may only read executions of their own instances.
+	if _, err := s.owned(ctx, a, ex.InstanceID); err != nil {
 		return nil, service.NotFound("execution not found")
 	}
 	return ex, nil

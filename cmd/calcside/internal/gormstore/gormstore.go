@@ -133,15 +133,17 @@ func (u userRow) toStore() *store.User {
 }
 
 type keyRow struct {
-	ID         string `gorm:"primaryKey"`
-	UserID     string
-	Name       string
-	Prefix     string
-	Hash       string `gorm:"uniqueIndex"`
-	CreatedAt  time.Time
-	LastUsedAt *time.Time
-	ExpiresAt  *time.Time
-	RevokedAt  *time.Time
+	ID           string `gorm:"primaryKey"`
+	UserID       string
+	Name         string
+	Prefix       string
+	Hash         string `gorm:"uniqueIndex"`
+	CreatedAt    time.Time
+	LastUsedAt   *time.Time
+	ExpiresAt    *time.Time
+	RevokedAt    *time.Time
+	Spec         []byte
+	MaxInstances int
 }
 
 func (keyRow) TableName() string { return "api_keys" }
@@ -151,6 +153,7 @@ func (k keyRow) toStore() *store.APIKey {
 		ID: k.ID, UserID: k.UserID, Name: k.Name, Prefix: k.Prefix, Hash: k.Hash,
 		CreatedAt: k.CreatedAt.UTC(), LastUsedAt: k.LastUsedAt,
 		ExpiresAt: k.ExpiresAt, RevokedAt: k.RevokedAt,
+		Spec: k.Spec, MaxInstances: k.MaxInstances,
 	}
 	utcPtr := func(t *time.Time) *time.Time {
 		if t == nil {
@@ -185,6 +188,7 @@ type instanceRow struct {
 	EndedAt      *time.Time
 	NodeID       string `gorm:"index:idx_instances_node"`
 	LeaseEpoch   int64
+	KeyID        string `gorm:"index"`
 }
 
 func (instanceRow) TableName() string { return "instances" }
@@ -198,6 +202,7 @@ func (r instanceRow) toStore() *store.Instance {
 		ExpiresAt:    r.ExpiresAt.UTC(),
 		NodeID:       r.NodeID,
 		LeaseEpoch:   r.LeaseEpoch,
+		KeyID:        r.KeyID,
 	}
 	if in.Labels == nil {
 		in.Labels = map[string]string{}
@@ -427,6 +432,7 @@ func (d *sqlDB) CreateAPIKey(ctx context.Context, k *store.APIKey) error {
 		ID: k.ID, UserID: k.UserID, Name: k.Name, Prefix: k.Prefix, Hash: k.Hash,
 		CreatedAt: k.CreatedAt.UTC(), LastUsedAt: k.LastUsedAt,
 		ExpiresAt: k.ExpiresAt, RevokedAt: k.RevokedAt,
+		Spec: k.Spec, MaxInstances: k.MaxInstances,
 	}
 	return mapWriteErr(gorm.G[keyRow](d.g).Create(ctx, &row))
 }
@@ -532,7 +538,7 @@ func (d *sqlDB) CreateInstance(ctx context.Context, in *store.Instance) error {
 		Status:    string(in.Status),
 		CreatedAt: in.CreatedAt.UTC(), LastActiveAt: in.LastActiveAt.UTC(),
 		ExpiresAt: in.ExpiresAt.UTC(), EndedAt: in.EndedAt,
-		NodeID: in.NodeID, LeaseEpoch: in.LeaseEpoch,
+		NodeID: in.NodeID, LeaseEpoch: in.LeaseEpoch, KeyID: in.KeyID,
 	})
 }
 
@@ -544,10 +550,13 @@ func (d *sqlDB) GetInstance(ctx context.Context, id string) (*store.Instance, er
 	return row.toStore(), nil
 }
 
-func (d *sqlDB) ListInstances(ctx context.Context, userID string, status types.InstanceStatus) ([]*store.Instance, error) {
-	q := gorm.G[instanceRow](d.g).Where("user_id = ?", userID).Order("created_at DESC")
-	if status != "" {
-		q = q.Where("status = ?", string(status))
+func (d *sqlDB) ListInstances(ctx context.Context, f store.InstanceFilter) ([]*store.Instance, error) {
+	q := gorm.G[instanceRow](d.g).Where("user_id = ?", f.UserID).Order("created_at DESC")
+	if f.Status != "" {
+		q = q.Where("status = ?", string(f.Status))
+	}
+	if f.KeyID != "" {
+		q = q.Where("key_id = ?", f.KeyID)
 	}
 	rows, err := q.Find(ctx)
 	if err != nil {

@@ -169,13 +169,17 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 	t.Run("api_keys", func(t *testing.T) {
 		s := newStore(t)
 		u, _ := s.UpsertUserByEmail(ctx, "k@x.com", "", "")
-		k := &store.APIKey{UserID: u.ID, Name: "n", Prefix: "cs_abcdefg", Hash: "h1"}
+		k := &store.APIKey{UserID: u.ID, Name: "n", Prefix: "cs_abcdefg", Hash: "h1",
+			Spec: []byte(`{"capabilities":{"fs":{}}}`), MaxInstances: 2}
 		if err := s.CreateAPIKey(ctx, k); err != nil {
 			t.Fatal(err)
 		}
 		got, err := s.GetAPIKeyByHash(ctx, "h1")
 		if err != nil || got.ID != k.ID {
 			t.Fatalf("GetAPIKeyByHash: %v %+v", err, got)
+		}
+		if string(got.Spec) != `{"capabilities":{"fs":{}}}` || got.MaxInstances != 2 {
+			t.Fatalf("key spec round-trip: %+v", got)
 		}
 		keys, err := s.ListAPIKeys(ctx, u.ID)
 		if err != nil || len(keys) != 1 {
@@ -239,7 +243,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		if err != nil || got.Labels["team"] != "x" {
 			t.Fatalf("GetInstance: %v %+v", err, got)
 		}
-		lst, err := s.ListInstances(ctx, u.ID, types.InstanceRunning)
+		lst, err := s.ListInstances(ctx, store.InstanceFilter{UserID: u.ID, Status: types.InstanceRunning})
 		if err != nil || len(lst) != 1 {
 			t.Fatalf("ListInstances: %v %d", err, len(lst))
 		}
@@ -249,13 +253,30 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		if err := s.UpdateInstance(ctx, in); err != nil {
 			t.Fatal(err)
 		}
-		lst, _ = s.ListInstances(ctx, u.ID, types.InstanceRunning)
+		lst, _ = s.ListInstances(ctx, store.InstanceFilter{UserID: u.ID, Status: types.InstanceRunning})
 		if len(lst) != 0 {
 			t.Fatalf("expected 0 running, got %d", len(lst))
 		}
-		lst, _ = s.ListInstances(ctx, u.ID, "")
+		lst, _ = s.ListInstances(ctx, store.InstanceFilter{UserID: u.ID})
 		if len(lst) != 1 {
 			t.Fatalf("expected 1 total, got %d", len(lst))
+		}
+		keyed := &store.Instance{UserID: u.ID, Spec: []byte(`{}`), Status: types.InstanceExpired,
+			KeyID: "key_abc", CreatedAt: now, LastActiveAt: now, ExpiresAt: now.Add(time.Minute)}
+		if err := s.CreateInstance(ctx, keyed); err != nil {
+			t.Fatal(err)
+		}
+		kg, _ := s.GetInstance(ctx, keyed.ID)
+		if kg.KeyID != "key_abc" {
+			t.Fatalf("KeyID round-trip: %+v", kg)
+		}
+		lst, _ = s.ListInstances(ctx, store.InstanceFilter{UserID: u.ID, KeyID: "key_abc"})
+		if len(lst) != 1 || lst[0].ID != keyed.ID {
+			t.Fatalf("ListInstances KeyID: %+v", lst)
+		}
+		lst, _ = s.ListInstances(ctx, store.InstanceFilter{UserID: u.ID, KeyID: "key_other"})
+		if len(lst) != 0 {
+			t.Fatalf("ListInstances other KeyID: %+v", lst)
 		}
 		in2 := &store.Instance{UserID: u.ID, Spec: []byte(`{}`), Status: types.InstanceRunning,
 			CreatedAt: now, LastActiveAt: now, ExpiresAt: now.Add(time.Minute)}

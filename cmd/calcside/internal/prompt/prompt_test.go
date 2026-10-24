@@ -88,9 +88,18 @@ func TestUtilityPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"url.parse", "csv.parse_dicts", "base64.encode", "hashlib.sha256", "regex.search", "datetime.parse_date", "stats.ols", "linalg.solve", "dist.ppf", "series.pct_change", "decimal.round"} {
+	for _, name := range []string{"`url`", "`csv`", "`base64`", "`hashlib`", "`regex`", "`datetime`", "`stats`", "`linalg`", "`dist`", "`series`", "`decimal`"} {
 		if !strings.Contains(out, name) {
-			t.Errorf("missing utility %s", name)
+			t.Errorf("missing utility module %s", name)
 		}
+	}
+	for _, want := range []string{`help("module")`, `help("module.function")`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing help hint %q", want)
+		}
+	}
+	// Function docs are fetched via help(), not inlined.
+	if strings.Contains(out, "stats.ols(") {
+		t.Error("prompt still lists per-function utility signatures")
 	}
 }

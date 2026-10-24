@@ -67,7 +67,7 @@ func needAuth(ctx context.Context) (*auth.Principal, *rawJSON) {
 
 // actorOf maps the transport principal onto the service-layer actor.
 func actorOf(p *auth.Principal) service.Actor {
-	return service.Actor{UserID: p.User.ID, Email: p.User.Email, Kind: p.Kind}
+	return p.Actor()
 }
 
 // Per-operation response wrappers (generated files are never edited).
@@ -322,13 +322,23 @@ func (s *strictImpl) CreateKey(ctx context.Context, req gen.CreateKeyRequestObje
 	}
 	var name string
 	var expiresIn int64
+	var spec json.RawMessage
+	var maxInstances int
 	if req.Body != nil {
 		name = req.Body.Name
 		if req.Body.ExpiresInSeconds != nil {
 			expiresIn = *req.Body.ExpiresInSeconds
 		}
+		if req.Body.Spec != nil {
+			if b, err := json.Marshal(req.Body.Spec); err == nil {
+				spec = b
+			}
+		}
+		if req.Body.MaxInstances != nil {
+			maxInstances = *req.Body.MaxInstances
+		}
 	}
-	key, secret, err := s.d.IAM.CreateKey(ctx, actorOf(p), name, expiresIn)
+	key, secret, err := s.d.IAM.CreateKey(ctx, actorOf(p), name, expiresIn, spec, maxInstances)
 	if err != nil {
 		return createKeyResp{fail(err)}, nil
 	}

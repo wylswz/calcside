@@ -30,30 +30,26 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	if err != nil {
 		return nil, nil, err
 	}
-	v := _wireValue
-	service := iam.New(store, v)
-	cipher, err := provideCipher(cfg)
-	if err != nil {
-		cleanup()
-		return nil, nil, err
-	}
-	vaultService := vault.New(store, cipher)
-	policyService := policy.New(store)
-	auditService := audit.New(store)
 	serverLimits := provideLimits(cfg)
 	nodeConfig := provideNodeConfig(cfg, serverLimits)
 	node, cleanup2 := provideNode(nodeConfig)
-	registry := node.Registry
-	catalogProvider := provideExtCatalog(cfg)
-	catalogService := catalog.New(registry, catalogProvider)
 	runtime, cleanup3, err := provideRuntime(cfg, store, nodeConfig, node)
 	if err != nil {
 		cleanup2()
 		cleanup()
 		return nil, nil, err
 	}
+	cipher, err := provideCipher(cfg)
+	if err != nil {
+		cleanup3()
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
+	service := vault.New(store, cipher)
 	recorder, cleanup4 := provideRecorder(store)
-	v2, err := provideGlobalPolicies(cfg)
+	registry := node.Registry
+	v, err := provideGlobalPolicies(cfg)
 	if err != nil {
 		cleanup4()
 		cleanup3()
@@ -61,7 +57,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		cleanup()
 		return nil, nil, err
 	}
-	options, err := provideSandboxOptions(ctx, cfg, store, runtime, vaultService, recorder, registry, serverLimits, v2)
+	options, err := provideSandboxOptions(ctx, cfg, store, runtime, service, recorder, registry, serverLimits, v)
 	if err != nil {
 		cleanup4()
 		cleanup3()
@@ -70,6 +66,13 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		return nil, nil, err
 	}
 	sandboxService := sandbox.New(options)
+	int2 := cfg.MaxInstancesPerUser
+	v2 := _wireValue
+	iamService := iam.New(store, sandboxService, int2, v2)
+	policyService := policy.New(store)
+	auditService := audit.New(store, sandboxService)
+	catalogProvider := provideExtCatalog(cfg)
+	catalogService := catalog.New(registry, catalogProvider)
 	authService := provideAuth(cfg, store)
 	basicLogin, err := provideBasic(ctx, cfg, authService)
 	if err != nil {
@@ -97,8 +100,8 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		return nil, nil, err
 	}
 	deps := api.Deps{
-		IAM:       service,
-		Vault:     vaultService,
+		IAM:       iamService,
+		Vault:     service,
 		Policy:    policyService,
 		Audit:     auditService,
 		Catalog:   catalogService,

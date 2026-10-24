@@ -13,9 +13,10 @@ Large values (API responses, file contents, intermediate results) stay in instan
 
 ### Pure utilities
 These modules are available without capability grants, including inside extensions. They never fetch URLs, read files, expand secrets, or access the current clock. Inputs and outputs are bounded; limit failures do not silently return partial data. URL and CSV require UTF-8 strings, not arbitrary bytes. Optional arguments and their defaults are described below.
-{{range .Utilities}}{{if eq .Kind "function"}}
-- `{{.Name}}({{join .Params ", "}})` — {{.Doc}}
+{{range .Utilities}}{{if eq .Kind "namespace"}}
+- `{{.Name}}` — {{.Doc}}
 {{- end}}{{end}}
+Call `print(help("module"))` for signatures before first use; `print(help("module.function"))` for details.
 
 ### Tools
 - `{{.Prefix}}exec(code)` — run Starlark code; returns printed output (or an error).

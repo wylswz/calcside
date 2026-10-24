@@ -10,6 +10,7 @@ export default defineConfig({
     host: '127.0.0.1',
     proxy: {
       '/api': apiTarget,
+      '/mcp': apiTarget,
       '/auth': apiTarget,
     },
   },

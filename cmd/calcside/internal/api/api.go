@@ -21,6 +21,7 @@ import (
 	"calcside/cmd/calcside/internal/api/gen"
 	"calcside/cmd/calcside/internal/artifact"
 	"calcside/cmd/calcside/internal/auth"
+	mcpapi "calcside/cmd/calcside/internal/mcp"
 	auditsvc "calcside/cmd/calcside/internal/service/audit"
 	"calcside/cmd/calcside/internal/service/catalog"
 	"calcside/cmd/calcside/internal/service/iam"
@@ -192,6 +193,13 @@ func Handler(d Deps) http.Handler {
 	if d.Basic != nil {
 		raw.POST("/basic/login", gin.WrapH(d.Basic))
 	}
+
+	// MCP: resolve the principal without rejecting (the handler maps
+	// 401/403); no session middleware means no CSRF surface.
+	mcpGroup := r.Group("/mcp")
+	mcpGroup.Use(d.resolveOnly())
+	mcpGroup.Any("", gin.WrapH(mcpapi.Handler(d.Sandbox)))
+	mcpGroup.Any("/*path", gin.WrapH(mcpapi.Handler(d.Sandbox)))
 
 	r.NoRoute(d.noRoute())
 	return d.Previews.Wrap(r)

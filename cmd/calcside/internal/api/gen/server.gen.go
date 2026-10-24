@@ -379,10 +379,17 @@ type APIKey struct {
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	Id         string     `json:"id"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-	Name       string     `json:"name"`
-	Prefix     string     `json:"prefix"`
-	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
-	UserId     string     `json:"user_id"`
+
+	// MaxInstances live-instance bound for a restricted key
+	MaxInstances *int   `json:"max_instances,omitempty"`
+	Name         string `json:"name"`
+	Prefix       string `json:"prefix"`
+
+	// Restricted true when the key carries an instance spec
+	Restricted *bool         `json:"restricted,omitempty"`
+	RevokedAt  *time.Time    `json:"revoked_at,omitempty"`
+	Spec       *InstanceSpec `json:"spec,omitempty"`
+	UserId     string        `json:"user_id"`
 }
 
 // ArtifactConfig defines model for ArtifactConfig.
@@ -493,7 +500,11 @@ type CompletionSymbol struct {
 // CreateKeyRequest defines model for CreateKeyRequest.
 type CreateKeyRequest struct {
 	ExpiresInSeconds *int64 `json:"expires_in_seconds,omitempty"`
-	Name             string `json:"name"`
+
+	// MaxInstances required 1..maxPerUser when spec is set; must be absent for full access
+	MaxInstances *int          `json:"max_instances,omitempty"`
+	Name         string        `json:"name"`
+	Spec         *InstanceSpec `json:"spec,omitempty"`
 }
 
 // CreateSecretRequest defines model for CreateSecretRequest.

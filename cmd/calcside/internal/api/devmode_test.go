@@ -66,8 +66,8 @@ func newDevEnv(t *testing.T, cipher *vaultcipher.Cipher) *env {
 		t.Fatal(err)
 	}
 	h := Handler(Deps{
-		IAM: iam.New(st, nil), Vault: vaultSvc,
-		Policy: policysvc.New(st), Audit: auditsvc.New(st),
+		IAM: iam.New(st, e.sbx, 10, nil), Vault: vaultSvc,
+		Policy: policysvc.New(st), Audit: auditsvc.New(st, e.sbx),
 		Catalog: catalog.New(reg, nil), Sandbox: e.sbx,
 		Auth: svc, Dev: true, Anonymous: anon,
 	})

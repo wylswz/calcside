@@ -401,3 +401,49 @@ func FuzzCSV(f *testing.F) {
 		}
 	})
 }
+
+func TestHelp(t *testing.T) {
+	mods := Modules()
+	h := mods["help"]
+	if h == nil {
+		t.Fatal("help builtin missing")
+	}
+	call := func(args ...string) (string, error) {
+		var a starlark.Tuple
+		for _, s := range args {
+			a = append(a, starlark.String(s))
+		}
+		v, err := starlark.Call(&starlark.Thread{}, h, a, nil)
+		if err != nil {
+			return "", err
+		}
+		return string(v.(starlark.String)), nil
+	}
+	out, err := call()
+	if err != nil || !strings.Contains(out, "stats —") || !strings.Contains(out, "csv —") {
+		t.Fatalf("help(): %v %q", err, out)
+	}
+	out, err = call("stats")
+	if err != nil || !strings.Contains(out, "stats.ols(x, y, intercept)") {
+		t.Fatalf("help(stats): %v %q", err, out)
+	}
+	out, err = call("stats.ols")
+	if err != nil || !strings.Contains(out, "Multiple OLS") {
+		t.Fatalf("help(stats.ols): %v %q", err, out)
+	}
+	if _, err = call("sttats"); err == nil || !strings.Contains(err.Error(), "stats") {
+		t.Fatalf("help(sttats) should suggest stats: %v", err)
+	}
+	if _, err = call("fs"); err == nil {
+		t.Fatal("help(fs) should fail — capabilities are not utility modules")
+	}
+}
+
+func TestEveryModuleDocumented(t *testing.T) {
+	for _, f := range functions {
+		m, _, _ := strings.Cut(f.name, ".")
+		if moduleDocs[m] == "" {
+			t.Fatalf("module %q has no moduleDocs entry", m)
+		}
+	}
+}

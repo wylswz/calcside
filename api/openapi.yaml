@@ -1024,12 +1024,23 @@ components:
         last_used_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
         revoked_at: { type: string, format: date-time }
+        restricted: { type: boolean, description: true when the key carries an instance spec }
+        spec:
+          $ref: '#/components/schemas/InstanceSpec'
+          description: the instance spec a restricted key may create (absent = full access)
+        max_instances: { type: integer, description: live-instance bound for a restricted key }
     CreateKeyRequest:
       type: object
       required: [name]
       properties:
         name: { type: string }
         expires_in_seconds: { type: integer, format: int64 }
+        spec:
+          $ref: '#/components/schemas/InstanceSpec'
+          description: present = restricted key; absent = full access
+        max_instances:
+          type: integer
+          description: required 1..maxPerUser when spec is set; must be absent for full access
     CreatedKey:
       type: object
       properties:

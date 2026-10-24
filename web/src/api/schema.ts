@@ -733,11 +733,21 @@ export interface components {
             expires_at?: string;
             /** Format: date-time */
             revoked_at?: string;
+            /** @description true when the key carries an instance spec */
+            restricted?: boolean;
+            /** @description the instance spec a restricted key may create (absent = full access) */
+            spec?: components["schemas"]["InstanceSpec"];
+            /** @description live-instance bound for a restricted key */
+            max_instances?: number;
         };
         CreateKeyRequest: {
             name: string;
             /** Format: int64 */
             expires_in_seconds?: number;
+            /** @description present = restricted key; absent = full access */
+            spec?: components["schemas"]["InstanceSpec"];
+            /** @description required 1..maxPerUser when spec is set; must be absent for full access */
+            max_instances?: number;
         };
         CreatedKey: {
             key?: components["schemas"]["APIKey"];

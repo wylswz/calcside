@@ -4,6 +4,7 @@ package iam
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -15,17 +16,26 @@ import (
 	"calcside/internal/types"
 )
 
+// SpecValidator validates a would-be instance spec the same way
+// instance creation does (normalization, policy selection, secret
+// resolution); implemented by the sandbox service.
+type SpecValidator interface {
+	ValidateSpec(ctx context.Context, a service.Actor, rawSpec []byte, keySpec bool) (json.RawMessage, error)
+}
+
 type Service struct {
-	st  store.Store
-	now func() time.Time
+	st        store.Store
+	specs     SpecValidator
+	maxPerKey int // upper bound for a restricted key's max_instances
+	now       func() time.Time
 }
 
 // New builds the service; a nil now uses time.Now.
-func New(st store.Store, now func() time.Time) *Service {
+func New(st store.Store, specs SpecValidator, maxPerUser int, now func() time.Time) *Service {
 	if now == nil {
 		now = time.Now
 	}
-	return &Service{st: st, now: now}
+	return &Service{st: st, specs: specs, maxPerKey: maxPerUser, now: now}
 }
 
 func session(a service.Actor) error {
@@ -49,10 +59,30 @@ func (s *Service) ListKeys(ctx context.Context, a service.Actor) ([]*store.APIKe
 	return keys, nil
 }
 
-// CreateKey returns the stored key and its plaintext secret.
-func (s *Service) CreateKey(ctx context.Context, a service.Actor, name string, expiresInSeconds int64) (*store.APIKey, string, error) {
+// CreateKey returns the stored key and its plaintext secret. A non-nil
+// spec makes a restricted key and requires maxInstances ≥ 1 (bounded by
+// the per-user limit when configured); a nil spec is full access and
+// maxInstances must be absent.
+func (s *Service) CreateKey(ctx context.Context, a service.Actor, name string, expiresInSeconds int64, spec json.RawMessage, maxInstances int) (*store.APIKey, string, error) {
 	if err := session(a); err != nil {
 		return nil, "", err
+	}
+	var normalized json.RawMessage
+	if len(spec) > 0 {
+		var err error
+		normalized, err = s.specs.ValidateSpec(ctx, a, spec, true)
+		if err != nil {
+			return nil, "", err
+		}
+		bound := s.maxPerKey
+		if bound <= 0 {
+			bound = 1 << 30 // no configured cap; any positive number is valid
+		}
+		if maxInstances < 1 || maxInstances > bound {
+			return nil, "", service.Errf(types.ErrCodeBadSpec, "max_instances is required for a restricted key (1..%d)", bound)
+		}
+	} else if maxInstances != 0 {
+		return nil, "", service.Errf(types.ErrCodeBadSpec, "max_instances requires a spec")
 	}
 	var exp *time.Time
 	if expiresInSeconds > 0 {
@@ -60,6 +90,8 @@ func (s *Service) CreateKey(ctx context.Context, a service.Actor, name string, e
 		exp = &t
 	}
 	secret, key := auth.NewAPIKey(a.UserID, name, exp)
+	key.Spec = normalized
+	key.MaxInstances = maxInstances
 	if err := s.st.CreateAPIKey(ctx, key); err != nil {
 		return nil, "", service.Internal(err)
 	}

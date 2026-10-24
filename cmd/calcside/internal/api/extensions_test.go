@@ -54,13 +54,14 @@ func TestListExtensions(t *testing.T) {
 	})
 	vaultSvc := vault.New(st, nil)
 	svc := auth.NewService(st, false)
+	sbx := sandbox.New(sandbox.Options{
+		Store: st, Runtime: mgr, Secrets: vaultSvc,
+		Registry: reg, Limits: limits, MaxInstancesPerUser: 10,
+	})
 	h := Handler(Deps{
-		IAM: iam.New(st, nil), Vault: vaultSvc,
-		Policy: policysvc.New(st), Audit: auditsvc.New(st),
-		Catalog: catalog.New(reg, extensions.NewCatalog(extOptions)), Sandbox: sandbox.New(sandbox.Options{
-			Store: st, Runtime: mgr, Secrets: vaultSvc,
-			Registry: reg, Limits: limits, MaxInstancesPerUser: 10,
-		}),
+		IAM: iam.New(st, sbx, 10, nil), Vault: vaultSvc,
+		Policy: policysvc.New(st), Audit: auditsvc.New(st, sbx),
+		Catalog: catalog.New(reg, extensions.NewCatalog(extOptions)), Sandbox: sbx,
 		Auth: svc,
 	})
 	srv := httptest.NewServer(h)
