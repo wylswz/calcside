@@ -14,7 +14,7 @@ type Access = 'restricted' | 'full' | 'view'
 
 // SecretBlock shows the one-time secret with a copy button.
 
-export default function Keys() {
+export default function Keys({ bare }: { bare?: boolean }) {
   const qc = useQueryClient()
   const form = useRef<SpecFormHandle>(null)
   const [showNew, setShowNew] = useState(false)
@@ -25,6 +25,7 @@ export default function Keys() {
   const [secret, setSecret] = useState('')
   const [secretRestricted, setSecretRestricted] = useState(false)
   const [err, setErr] = useState('')
+  const startNew = () => { setShowNew(true); setSecret(''); setName(''); setErr(''); setAccess('restricted') }
 
   const { data } = useQuery({
     queryKey: ['keys'],
@@ -59,10 +60,11 @@ export default function Keys() {
 
   return (
     <div>
-      <PageHeader title="API keys"
-        actions={<Button variant="primary" onClick={() => { setShowNew(true); setSecret(''); setName(''); setErr(''); setAccess('restricted') }}>New key</Button>}>
+      {bare && <div className="mb-4 flex items-center justify-between"><p className="text-xs text-sec" /><Button variant="primary" onClick={startNew}>New key</Button></div>}
+{!bare && <PageHeader title="API keys"
+        actions={<Button variant="primary" onClick={startNew}>New key</Button>}>
         Bearer tokens (<code className="font-mono text-ink">cs_…</code>) for the SDK and agents. A restricted key may only create and use instances from its instance spec; the secret is shown once at creation.
-      </PageHeader>
+      </PageHeader>}
       <div className="tbl-wrap">
         <table className="tbl">
           <thead>

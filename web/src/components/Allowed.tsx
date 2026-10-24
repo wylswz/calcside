@@ -1,14 +1,22 @@
 import type { Instance } from '../api'
-import { SectionTitle, Tag } from './ui'
 import { fmtBytes } from '../format'
 
 interface SpecSecret { ref?: string; source?: string; allowed_domains?: string[] }
 
+// policyLabel renders builtin policies as their plain-English name;
+// the raw id stays in the title attribute. Unknown names pass through.
+function policyLabel(name: string): string {
+  const known: Record<string, string> = {
+    'builtin.block_private_network': 'Block private networks',
+  }
+  return known[name] ?? name
+}
+
 function Row({ name, children }: { name: string; children: React.ReactNode }) {
   return (
-    <div className="grid grid-cols-[90px_minmax(0,1fr)] gap-x-4 gap-y-0.5 py-1">
-      <dt className="font-mono text-xs text-sec">{name}</dt>
-      <dd className="min-w-0 text-xs text-ink">{children}</dd>
+    <div className="side-field">
+      <dt>{name}</dt>
+      <dd>{children}</dd>
     </div>
   )
 }
@@ -20,7 +28,7 @@ export function Allowed({ inst }: { inst: Instance }) {
   const caps = Object.entries(inst.spec?.capabilities ?? {}) as [string, any][]
   const policies = inst.spec?.policies ?? []
   const secrets = Object.entries(inst.spec?.secrets ?? {}) as [string, SpecSecret][]
-  const env = Object.entries(inst.spec?.env ?? {}) as [string, string][]
+  const env = Object.keys(inst.spec?.env ?? {})
   const limits = inst.spec?.limits ?? {}
 
   const capSettings = (name: string, cfg: any): string => {
@@ -41,75 +49,94 @@ export function Allowed({ inst }: { inst: Instance }) {
       }
       case 'ext': {
         return Object.entries(cfg)
-          .map(([alias, e]: [string, any]) => `${alias} → ${e?.source ?? '?'}${e?.sum ? ` (${e.sum})` : ''}`)
+          .map(([alias, e]: [string, any]) => `${alias} → ${e?.source ?? '?'}`)
           .join(' · ')
       }
       default:
-        return JSON.stringify(cfg)
+        return 'configured'
     }
   }
 
   const limitParts = Object.entries({
-    exec_timeout_ms: 'exec timeout',
-    max_steps: 'max steps',
-    max_output_bytes: 'max output',
+    exec_timeout_ms: 'Run timeout',
+    max_steps: 'Step limit',
+    max_output_bytes: 'Output limit',
   }).flatMap(([k, label]) => {
     const v = (limits as Record<string, number | undefined>)[k]
     if (v === undefined) return []
     const shown = k === 'exec_timeout_ms' ? `${v / 1000} s`
       : k === 'max_output_bytes' ? fmtBytes(v)
       : v.toLocaleString('en-US')
-    return [`${label} ${shown}`]
+    return [{ k, label, v: shown }]
   })
+
+  const capLabel = { fs: 'Files', net: 'Network', ext: 'Extensions' } as Record<string, string>
 
   return (
     <section aria-label="Allowed">
-      <SectionTitle>Allowed</SectionTitle>
-      {caps.length === 0 ? (
-        <p className="text-xs text-mute">No capabilities granted — this instance can only compute and print.</p>
-      ) : (
-        <dl className="divide-y divide-line">
-          {caps.map(([name, cfg]) => (
-            <Row key={name} name={name}>{capSettings(name, cfg) || <span className="text-mute">defaults</span>}</Row>
+      <div className="side-group">
+        <h3 className="side-label">Abilities</h3>
+        {caps.length === 0 ? (
+          <p className="side-text">compute + print only</p>
+        ) : (
+          <dl>
+            {caps.map(([name, cfg]) => (
+              <div key={name} className="side-field"><dt>{capLabel[name] ?? name}</dt>
+                <dd className="side-text">{capSettings(name, cfg) || 'defaults'}</dd></div>
+            ))}
+          </dl>
+        )}
+      </div>
+      <div className="side-group">
+        <h3 className="side-label">Rules</h3>
+        <dl>
+          <Row name="Policies">
+            {policies.length === 0 ? (
+              <span className="side-text">server policies only</span>
+            ) : (
+              <span className="block space-y-1">
+                {policies.map((n) => (
+                  <span key={n} className="side-text block" title={n}>{policyLabel(n)}</span>
+                ))}
+              </span>
+            )}
+          </Row>
+          {limitParts.length > 0 && limitParts.map((l) => (
+            <div key={l.k} className="side-limit"><dt className="side-text">{l.label}</dt><dd className="side-value">{l.v}</dd></div>
           ))}
         </dl>
-      )}
-      <dl className="mt-3 divide-y divide-line border-t border-line">
-        <Row name="policies">
-          {policies.length === 0 ? (
-            <span className="text-mute">server policies only</span>
-          ) : (
-            <span className="flex flex-wrap gap-x-3 gap-y-1">
-              {policies.map((n) => (
-                <span key={n} className="font-mono">{n} <Tag>{n.startsWith('builtin.') ? 'built-in' : 'library'}</Tag></span>
-              ))}
-            </span>
-          )}
-        </Row>
-        {secrets.length > 0 && (
-          <Row name="secrets">
-            <span className="flex flex-wrap gap-x-4 gap-y-1">
-              {secrets.map(([k, v]) => (
-                <span key={k} className="font-mono">
-                  {k}
-                  <span className="text-mute">
-                    {' '}{v.source === 'vault' ? `vault:${v.ref ?? k}` : 'inline'}
-                    {' · '}{(v.allowed_domains ?? []).join(' ') || 'any host'}
-                  </span>
+      </div>
+      {secrets.length === 0 && env.length === 0 ? (
+        <p className="side-text">No additional inputs.</p>
+      ) : (
+        <div className="side-group">
+          <h3 className="side-label">Inputs</h3>
+          <dl>
+            {secrets.length > 0 && (
+              <Row name="secrets">
+                <span className="flex flex-wrap gap-x-4 gap-y-1">
+                  {secrets.map(([k, v]) => (
+                    <span key={k} className="side-name">
+                      {k}
+                      <span className="side-text">
+                        {' '}{v.source === 'vault' ? `vault:${v.ref ?? k}` : 'inline'}
+                        {' · '}{(v.allowed_domains ?? []).join(' ') || 'any host'}
+                      </span>
+                    </span>
+                  ))}
                 </span>
-              ))}
-            </span>
-          </Row>
-        )}
-        {env.length > 0 && (
-          <Row name="env">
-            <span className="flex flex-wrap gap-x-4 gap-y-1 font-mono">
-              {env.map(([k, v]) => <span key={k}>{k}={v}</span>)}
-            </span>
-          </Row>
-        )}
-        {limitParts.length > 0 && <Row name="limits">{limitParts.join(' · ')}</Row>}
-      </dl>
+              </Row>
+            )}
+            {env.length > 0 && (
+              <Row name="env">
+                <span className="flex flex-wrap gap-x-4 gap-y-1">
+                  {env.map((k) => <span key={k} className="side-name">{k}</span>)}
+                </span>
+              </Row>
+            )}
+          </dl>
+        </div>
+      )}
     </section>
   )
 }

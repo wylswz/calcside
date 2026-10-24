@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react'
+import { useEffect, Fragment, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
@@ -34,13 +34,10 @@ function RunDetail({ execId }: { execId: string }) {
   if (detail.error) return <Notice tone="warning">{(detail.error as Error).message}</Notice>
   const d = detail.data!
   const denied = runOutcome(d.execution) === 'denied'
-  const errCls = denied
-    ? 'border-danger !bg-danger/5 text-danger'
-    : 'border-warn !bg-warn/5 text-warn-text'
   return (
-    <div className="space-y-4">
+    <div className="run-detail space-y-4">
       {d.code && (
-        <div className="border border-line">
+        <div className="detail-code-shell">
           <CodeMirror
             value={d.code}
             readOnly
@@ -54,23 +51,26 @@ function RunDetail({ execId }: { execId: string }) {
       )}
       <div>
         <div className="mb-1 text-xs font-medium text-sec">
-          output{d.output_truncated && <span className="ml-2 text-warn-text">truncated at 64 KiB</span>}
+          Output{d.output_truncated && <span className="ml-2 text-warn-text">truncated at 64 KiB</span>}
         </div>
         {d.output
           ? <pre className="pre max-h-64">{d.output}</pre>
-          : <p className="text-xs text-mute">(no output)</p>}
+          : <p className="text-sm text-sec">No output.</p>}
       </div>
       {d.error && (
         <div>
-          <div className={`mb-1 text-xs font-medium ${denied ? 'text-danger' : 'text-warn-text'}`}>error · {d.error.type}</div>
-          <pre className={`pre border-l-4 ${errCls}`}>
-            {d.error.message}
-            {d.error.backtrace ? '\n' + d.error.backtrace : ''}
-          </pre>
+          <div className={`error-head mb-1 text-xs font-medium ${denied ? 'text-danger' : 'text-warn-text'}`}>Error · {d.error.type}</div>
+          <pre className="pre">{d.error.message}</pre>
+          {d.error.backtrace && (
+            <details className="run-backtrace mt-3 text-xs text-sec">
+              <summary className="cursor-pointer">Stack trace</summary>
+              <pre className="pre mt-2">{d.error.backtrace}</pre>
+            </details>
+          )}
         </div>
       )}
       <div>
-        <div className="mb-2 text-xs font-medium text-sec">calls</div>
+        <div className="mb-2 text-xs font-medium text-sec">Calls</div>
         {calls.isLoading && <Loading />}
         {calls.error && <Notice tone="warning">{(calls.error as Error).message}</Notice>}
         {calls.data && <CallRows events={calls.data.events} />}
@@ -81,9 +81,12 @@ function RunDetail({ execId }: { execId: string }) {
 
 // Activity lists runs newest first with their outcomes and the calls
 // each made; console (file-browsing) calls sit in their own muted group.
-export function Activity({ id }: { id: string }) {
-  const [open, setOpen] = useState<string | null>(null)
+export function Activity({ id, aside, focusId }: { id: string; aside?: React.ReactNode; focusId?: string }) {
+  const [open, setOpen] = useState<string | null>(focusId ?? null)
   const [attentionOnly, setAttentionOnly] = useState(false)
+  useEffect(() => {
+    if (focusId) { setOpen(focusId); document.getElementById(`run-${focusId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }
+  }, [focusId])
   const [showConsole, setShowConsole] = useState(false)
 
   const { data: execs } = useQuery({
@@ -116,8 +119,8 @@ export function Activity({ id }: { id: string }) {
 
   return (
     <section aria-label="Activity">
-      <SectionTitle aside={
-        <div className="flex gap-1 text-xs">
+      <SectionTitle className="activity-heading" aside={
+        <>{aside}<div className="seg-filters flex gap-1 text-xs">
           {(['all', 'needs attention'] as const).map((f) => {
             const on = (f === 'needs attention') === attentionOnly
             return (
@@ -127,7 +130,7 @@ export function Activity({ id }: { id: string }) {
               </button>
             )
           })}
-        </div>
+        </div></>
       }>Activity</SectionTitle>
 
       <div className="tbl-wrap">
@@ -145,7 +148,7 @@ export function Activity({ id }: { id: string }) {
           <tbody className="font-mono">
             {shown.map(({ x, denied, failed, outcome }) => (
               <Fragment key={x.id}>
-                <tr className={`row-click ${open === x.id ? 'row-open' : ''}`} onClick={() => setOpen(open === x.id ? null : x.id)}>
+                <tr id={`run-${x.id}`} className={`row-click ${open === x.id ? 'row-open' : ''}`} onClick={() => setOpen(open === x.id ? null : x.id)}>
                   <td className="whitespace-nowrap font-sans">
                     <span className="mr-1.5 inline-block w-2 text-mute">{open === x.id ? '▾' : '▸'}</span>
                     <RunByBadge runBy={runBy(x)} />
@@ -154,13 +157,13 @@ export function Activity({ id }: { id: string }) {
                   <td>
                     <OutcomeBadge outcome={outcome} label={outcome === 'ok' ? 'ok' : outcome === 'denied' ? 'denied' : x.error_type || 'failed'} />
                   </td>
-                  <td className="max-w-[260px] truncate text-sec" title={x.code_snippet}>{firstCodeLine(x.code_snippet)}</td>
-                  <td className="whitespace-nowrap text-right font-sans">
+                  <td className="max-w-[260px] truncate text-sec" title={x.code_snippet}><code className="detail-code">{firstCodeLine(x.code_snippet)}</code></td>
+                  <td className="num whitespace-nowrap text-right font-sans">
                     {denied > 0 && <OutcomeBadge outcome="denied" label={`${denied} denied`} />}
                     {failed > 0 && <span className={denied > 0 ? 'ml-2' : ''}><OutcomeBadge outcome="failed" label={`${failed} failed`} /></span>}
                     {denied === 0 && failed === 0 && <span className="text-xs text-mute">—</span>}
                   </td>
-                  <td className="text-right text-sec">{fmtMs(x.duration_ms)}</td>
+                  <td className="num text-right text-sec">{fmtMs(x.duration_ms)}</td>
                 </tr>
                 {open === x.id && (
                   <tr className="bg-surface">

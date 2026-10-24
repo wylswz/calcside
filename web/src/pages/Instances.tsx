@@ -1,51 +1,27 @@
-import { useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+
+import { Link, useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { api, SharedInstance, Instance, wsPath } from '../api'
 import { useRole } from '../workspace'
-import { Button, EmptyRow, Loading, Modal, PageHeader, StatusText, TimeLeft } from '../components/ui'
-import { SpecForm, type SpecFormHandle } from '../components/SpecForm'
-import { fmtTime } from '../format'
+import { Button, Loading, PageHeader, InstanceStatus } from '../components/ui'
+import { attentionText, expiringSoon } from '../nextStep'
 import { allowedSummary, instanceName } from '../activity'
-import { relTime } from '../format'
+import { fmtTime, relTime } from '../format'
 
-function NewInstanceDialog({ onClose }: { onClose: () => void }) {
-  const qc = useQueryClient()
-  const form = useRef<SpecFormHandle>(null)
-  const [err, setErr] = useState('')
-  const create = useMutation({
-    mutationFn: (spec: any) => api.post<{ instance: Instance }>(wsPath('/api/v1/instances'), spec),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['instances'] })
-      onClose()
-    },
-    onError: (e: any) => setErr(e.message),
-  })
-  const submit = () => {
-    setErr('')
-    const { spec, err: e } = form.current?.buildSpec() ?? {}
-    if (e) { setErr(e); return }
-    create.mutate(spec)
-  }
-  return (
-    <Modal title="New instance" onClose={onClose} wide footer={
-      <>
-        {err && <p className="text-xs text-warn-text">{err}</p>}
-        <div className="ml-auto flex gap-2">
-          <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" disabled={create.isPending} onClick={submit}>
-            Create instance
-          </Button>
-        </div>
-      </>
-    }>
-      <SpecForm ref={form} />
-    </Modal>
-  )
+
+const toneCls = { danger: 'text-danger', warn: 'text-warn-text', mute: 'text-mute', sec: 'text-sec' } as const
+function attention(i: Instance) {
+  const a = attentionText(i)
+  return <span className={`text-xs ${toneCls[a.tone]}`}>{a.text}{a.link ? <> · <Link className="link" to={`/instances/${i.id}`}>connect agent →</Link></> : null}</span>
+}
+
+function rank(i: Instance): number {
+  if (i.status !== 'running') return 2
+  return expiringSoon(i, Date.now()) ? 0 : 1
 }
 
 export default function Instances() {
-  const [showNew, setShowNew] = useState(false)
+  const nav = useNavigate()
   const role = useRole()
   const { data, isLoading } = useQuery({
     queryKey: ['instances'],
@@ -56,56 +32,62 @@ export default function Instances() {
     queryKey: ['shared'],
     queryFn: () => api.get<{ instances: SharedInstance[] }>('/api/v1/instances?shared=true'),
   })
+  const all = [...(data?.instances ?? [])].sort((a, b) =>
+    new Date(b.last_active_at).getTime() - new Date(a.last_active_at).getTime())
+  const attn = (i: Instance) => i.status === 'running' && (
+    (i.activity?.denied_runs ?? 0) > 0 || (i.activity?.failed_runs ?? 0) > 0 || rank(i) === 0)
+  const needsAttention = all.filter(attn)
+  const live = all.filter((i) => i.status === 'running' && !attn(i))
+  const ended = all.filter((i) => i.status !== 'running')
+  const groups: [string, Instance[]][] = [['Needs attention', needsAttention], ['Live', live], ['Ended', ended]]
 
   return (
     <div>
       <PageHeader title="Instances"
-        actions={role !== 'viewer' ? <Button variant="primary" onClick={() => setShowNew(true)}>New instance</Button> : undefined}>
-        Each instance is a Starlark session with its own globals, VFS and policy snapshot. Only the capabilities granted in its spec exist.
+        actions={role != null && role !== 'viewer' ? <Button variant="primary" onClick={() => nav('/instances/new')}>New instance</Button> : undefined}>
+        Each instance is a Starlark session with its own globals, VFS and policy snapshot.
       </PageHeader>
       {isLoading && <Loading />}
-      <div className="tbl-wrap">
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Status</th>
-              <th>Allowed</th>
-              <th>Last active</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(data?.instances ?? []).map((i) => {
-              const name = instanceName(i)
-              return (
-                <tr key={i.id} className="row-hover">
-                  <td>
-                    <Link to={`/instances/${i.id}`} className="link font-medium">{name}</Link>
-                    {name !== i.id && <div className="mt-0.5 font-mono text-[11px] text-mute">{i.id}</div>}
-                  </td>
-                  <td>
-                    <div className="flex flex-col gap-1">
-                      <StatusText status={i.status} />
-                      {i.status === 'running' && <TimeLeft expiresAt={i.expires_at} />}
-                    </div>
-                  </td>
-                  <td className="max-w-[320px]">
-                    <span className="block truncate font-mono text-xs text-sec" title={allowedSummary(i.spec)}>{allowedSummary(i.spec)}</span>
-                  </td>
-                  <td className="whitespace-nowrap text-xs text-sec" title={fmtTime(i.last_active_at)}>{relTime(i.last_active_at)}</td>
-                  <td className="whitespace-nowrap text-xs text-sec">{fmtTime(i.created_at)}</td>
-                </tr>
-              )
-            })}
-            {data && data.instances.length === 0 && <EmptyRow cols={5}>no instances</EmptyRow>}
-          </tbody>
-        </table>
-      </div>
-      {showNew && <NewInstanceDialog onClose={() => setShowNew(false)} />}
-      {(shared?.instances.length ?? 0) > 0 && (
+      {data && all.length === 0 && (
+        <div className="border border-line bg-surface px-6 py-10 text-center">
+          <p className="mb-4 text-sm text-sec">1 Decide what an agent may do · 2 Connect the agent · 3 Review its runs</p>
+          {role != null && role !== 'viewer' && <Button variant="primary" onClick={() => nav('/instances/new')}>New instance</Button>}
+        </div>
+      )}
+      {all.length > 0 && groups.filter(([, g]) => g.length).map(([label, g]) => (
+        <div key={label} className="mb-8">
+          <h2 className="mb-3 text-xs font-medium uppercase tracking-label text-mute">{label}</h2>
+          <div className="tbl-wrap">
+            <table className="tbl">
+              <thead>
+                <tr><th>Name</th><th>Status</th><th>Needs attention</th><th>Allowed</th><th>Last active</th></tr>
+              </thead>
+              <tbody>
+                {g.map((i) => {
+                const name = instanceName(i)
+                return (
+                  <tr key={i.id} className="row-hover" title={`created ${fmtTime(i.created_at)}`}>
+                    <td>
+                      <Link to={`/instances/${i.id}`} className="link font-medium">{name}</Link>
+                      {name !== i.id && <div className="mt-0.5 font-mono text-[11px] text-mute">{i.id}</div>}
+                    </td>
+                    <td><InstanceStatus inst={i} /></td>
+                    <td>{attention(i)}</td>
+                    <td className="max-w-[280px]">
+                      <span className="block truncate font-mono text-xs text-sec" title={allowedSummary(i.spec)}>{allowedSummary(i.spec)}</span>
+                    </td>
+                    <td className="whitespace-nowrap text-xs text-sec" title={fmtTime(i.last_active_at)}>{relTime(i.last_active_at)}</td>
+                  </tr>
+                )
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+            {(shared?.instances.length ?? 0) > 0 && (
         <div className="mt-8">
-          <h2 className="mb-3 text-xs font-medium uppercase tracking-label text-faint">Shared with you</h2>
+          <h2 className="mb-3 text-xs font-medium uppercase tracking-label text-mute">Shared with you</h2>
           <div className="tbl-wrap">
             <table className="tbl">
               <thead><tr><th>Name</th><th>Workspace</th><th>Role</th><th>Status</th></tr></thead>
@@ -115,7 +97,7 @@ export default function Instances() {
                     <td><Link to={`/instances/${si.instance.id}`} className="link font-medium">{instanceName(si.instance)}</Link></td>
                     <td className="text-xs text-sec">{si.workspace_name}</td>
                     <td className="text-xs text-sec">{si.role}</td>
-                    <td><StatusText status={si.instance.status} /></td>
+                    <td><InstanceStatus inst={si.instance} /></td>
                   </tr>
                 ))}
               </tbody>

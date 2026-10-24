@@ -21,10 +21,10 @@ function MemorySparkline({ samples, max }: { samples: number[]; max: number }) {
 function MemoryBlock({ resources, history }: { resources?: ResourceUsages; history: number[] }) {
   if (!resources) {
     return (
-      <p className="text-xs text-mute">
-        memory unavailable — this instance has no cgroup of its own (inproc isolation, or process
-        isolation without <span className="font-mono">--instance-memory-max</span>)
-      </p>
+      <details className="state-resource-note">
+        <summary>Memory reporting unavailable</summary>
+        <p className="mt-1 text-xs text-mute">Memory reporting requires process isolation with a configured memory limit.</p>
+      </details>
     )
   }
   const { memory_usage: usage, memory_peak: peak, memory_max: max } = resources
@@ -32,15 +32,15 @@ function MemoryBlock({ resources, history }: { resources?: ResourceUsages; histo
   const peakPct = max > 0 ? Math.min(100, (peak / max) * 100) : 0
   const stat = (label: string, value: string) => (
     <div>
-      <div className="text-[11px] font-medium uppercase tracking-label text-mute">{label}</div>
-      <div className="mt-1 font-mono text-sm text-ink">{value}</div>
+      <div className="text-xs font-medium text-sec">{label}</div>
+      <div className="mt-1 text-sm tabular-nums text-ink">{value}</div>
     </div>
   )
   return (
     <div className="space-y-3 text-xs">
       <div className="flex items-center justify-between">
-        <span className="font-medium text-ink">memory</span>
-        {max > 0 && <span className="font-mono text-sm text-ink">{pct.toFixed(1)}%</span>}
+        <span className="font-medium text-ink">Memory</span>
+        {max > 0 && <span className="text-sm tabular-nums text-ink">{pct.toFixed(1)}%</span>}
       </div>
       {max > 0 && (
         <div className="relative h-3 bg-surface">
@@ -51,9 +51,9 @@ function MemoryBlock({ resources, history }: { resources?: ResourceUsages; histo
         </div>
       )}
       <div className="grid grid-cols-3 gap-px border border-line bg-line [&>div]:bg-paper [&>div]:px-3 [&>div]:py-2">
-        {stat('current', fmtBytes(usage))}
-        {stat('peak', peak > 0 ? fmtBytes(peak) : '—')}
-        {stat('limit', max > 0 ? fmtBytes(max) : 'unlimited')}
+        {stat('Current', fmtBytes(usage))}
+        {stat('Peak', peak > 0 ? fmtBytes(peak) : '—')}
+        {stat('Limit', max > 0 ? fmtBytes(max) : 'unlimited')}
       </div>
       <MemorySparkline samples={history} max={max} />
     </div>
@@ -106,24 +106,24 @@ export function StatePanel({ id, running, busy, capNames = [] }: { id: string; r
         <>
           <MemoryBlock resources={data.resources} history={history} />
           <div>
-            <div className="mb-2 flex items-center gap-3">
-              <span className="text-xs font-medium text-ink">variables</span>
-              <span className="text-[11px] text-mute">{names.length} · reprs, secrets scrubbed</span>
+            <div className="state-variable-tools mb-2 flex items-center gap-3">
+              <span className="text-sm font-medium text-ink">Variables</span>
+              <span className="text-xs tabular-nums text-sec" title="Values are representations with known secrets redacted.">{names.length}</span>
               {builtinCount > 0 && (
                 <button className="text-btn" onClick={() => setShowBuiltins(!showBuiltins)}>
-                  {showBuiltins ? 'hide' : 'show'} built-ins ({builtinCount})
+                  {showBuiltins ? 'Hide' : 'Show'} built-ins ({builtinCount})
                 </button>
               )}
-              <input className="input !w-40 !py-1 font-mono !text-xs ml-auto" placeholder="filter" value={filter} onChange={(e) => setFilter(e.target.value)} />
+              <input className="input w-40 ml-auto" placeholder="Filter variables" aria-label="Filter variables" value={filter} onChange={(e) => setFilter(e.target.value)} />
             </div>
-            <div className="overflow-x-auto">
+            <div className="tbl-wrap">
               <table className="tbl tbl-compact">
                 <tbody className="font-mono">
                   {names.map((name) => (
                     <tr key={name} className="row-hover">
-                      <td className="w-px whitespace-nowrap align-top font-medium text-ink">{name}</td>
+                      <td className="w-px whitespace-nowrap align-top text-ink"><code>{name}</code></td>
                       <td>
-                        <div className="max-h-32 overflow-auto whitespace-pre-wrap break-all text-sec">{data.variables[name]}</div>
+                        <pre className="m-0 max-h-32 overflow-auto whitespace-pre-wrap break-all text-sec">{data.variables[name]}</pre>
                       </td>
                     </tr>
                   ))}

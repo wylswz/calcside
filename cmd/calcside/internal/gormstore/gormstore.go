@@ -823,13 +823,55 @@ func (d *sqlDB) InsertAuditEvents(ctx context.Context, evs []store.AuditEvent) e
 	})
 }
 
+func (d *sqlDB) ExecutionActivity(ctx context.Context, ids []string) (map[string]*store.ExecActivity, error) {
+	out := map[string]*store.ExecActivity{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		InstanceID string
+		Status     string
+		ErrorType  string
+		CreatedAt  time.Time
+	}
+	err := d.g.WithContext(ctx).Table("executions").
+		Select("instance_id, status, error_type, created_at").
+		Where("instance_id IN ?", ids).
+		Order("created_at DESC").Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		a := out[r.InstanceID]
+		if a == nil {
+			a = &store.ExecActivity{InstanceID: r.InstanceID}
+			out[r.InstanceID] = a
+		}
+		a.Runs++
+		if a.LastRunAt == nil {
+			t := r.CreatedAt.UTC()
+			a.LastRunAt = &t
+			a.LastStatus = r.Status
+		}
+		if r.Status == string(types.ExecError) {
+			if r.ErrorType == string(types.ErrPolicyDenied) {
+				a.DeniedRuns++
+			} else {
+				a.FailedRuns++
+			}
+		}
+	}
+	return out, nil
+}
+
 func (d *sqlDB) ListAuditEvents(ctx context.Context, f store.AuditFilter) ([]*store.AuditEvent, error) {
 	q := gorm.G[auditRow](d.g).Order("ts DESC")
-	if f.WorkspaceID != "" {
-		q = q.Where("workspace_id = ?", f.WorkspaceID)
-	}
 	if f.InstanceID != "" {
+		// The instance's access was already checked; the composite index
+		// walks (instance_id, ts) directly.
 		q = q.Where("instance_id = ?", f.InstanceID)
+	} else if f.WorkspaceID != "" {
+		q = q.Where("workspace_id = ?", f.WorkspaceID)
 	}
 	if f.ExecID != "" {
 		q = q.Where("exec_id = ?", f.ExecID)

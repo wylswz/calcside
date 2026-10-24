@@ -46,3 +46,6 @@ export function fmtMs(ms: number): string {
   if (ms < 1000) return `${ms} ms`
   return `${(ms / 1000).toFixed(1)} s`
 }
+export function plural(n: number, w: string): string {
+  return `${n} ${w}${n === 1 ? '' : 's'}`
+}

@@ -61,15 +61,15 @@ export function RunCode({ inst, running, setRunning, onRan }: {
   return (
     <section aria-label="Run code">
       <SectionTitle aside={<span className="text-mute">⌘/Ctrl + Enter — runs as you</span>}>Run code</SectionTitle>
-      <div className="border border-ink">
-        <div className="flex items-center gap-3 border-b border-ink px-3 py-2">
-          <span className="text-[11px] font-medium uppercase tracking-label text-mute">Starlark</span>
+      <div className="detail-editor-chrome border border-ink">
+        <div className="editor-toolbar flex items-center gap-3 px-3 py-2">
+          <span className="text-xs font-medium text-sec">Starlark</span>
           <Button variant="primary" size="sm" className="ml-auto min-w-20" disabled={running || inst.status !== 'running'} onClick={run}>
             {running ? 'Running…' : 'Run ▸'}
           </Button>
         </div>
         <CodeMirror value={code} height="300px" extensions={editor.extensions} onChange={setCode} theme={cmTheme} />
-        <div className="flex flex-wrap gap-x-4 border-t border-line px-3 py-1.5 text-[11px] text-mute">
+        <div className="editor-footer flex flex-wrap gap-x-4 border-t border-line px-3 py-2 text-xs text-sec">
           <span>Ctrl+Space to complete</span>
           {editor.error ? <span className="text-warn-text">Live completions unavailable</span> :
             <span>{running ? 'Using cached symbols while code runs' : editor.isFetching ? 'Refreshing symbols…' : inst.status !== 'running' ? 'Instance is not running' : 'Suggestions use this instance’s runtime'}</span>}
@@ -77,10 +77,10 @@ export function RunCode({ inst, running, setRunning, onRan }: {
           <button className="text-btn ml-auto" onClick={() => editor.refetch()} disabled={running || inst.status !== 'running' || editor.isFetching}>refresh symbols</button>
         </div>
         {result && (
-          <div className="border-t border-ink">
+          <div className="border-t border-line">
             <div className="flex items-center gap-4 border-b border-line bg-surface px-3 py-1.5 text-xs">
-              <span className="text-[11px] font-medium uppercase tracking-label text-mute">Output</span>
-              <span className="font-mono text-sec">{fmtMs(result.duration_ms)} · {result.steps} steps</span>
+              <span className="text-xs font-medium text-sec">Output</span>
+              <span className="tabular-nums text-sec">{fmtMs(result.duration_ms)} · {result.steps} steps</span>
               {result.error
                 ? <OutcomeBadge outcome="failed" label={result.error.type} />
                 : <OutcomeBadge outcome="ok" />}

@@ -18,6 +18,7 @@ export default {
         accent: token('accent'),
         danger: token('danger'),
         warn: token('warn'),
+        live: token('live'),
         'warn-text': token('warn-text'),
       },
       borderColor: {

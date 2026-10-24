@@ -975,10 +975,20 @@ export interface components {
             /** @description Policy names to attach (at most 32), including built-in policies. Omitted or null selects builtin.block_private_network by default. An explicit list replaces the defaults; [] selects none. Library Rego is snapshotted at creation; server policies (--policy-dir) always apply in addition. */
             policies?: components["schemas"]["PolicyName"][] | null;
         };
+        ExecActivity: {
+            runs?: number;
+            denied_runs?: number;
+            failed_runs?: number;
+            /** Format: date-time */
+            last_run_at?: string;
+            last_status?: string;
+        };
         Instance: {
             id: string;
             user_id: string;
             workspace_id?: string;
+            /** @description run summary — populated on list responses */
+            activity?: components["schemas"]["ExecActivity"];
             spec: components["schemas"]["InstanceSpec"];
             labels: {
                 [key: string]: string;

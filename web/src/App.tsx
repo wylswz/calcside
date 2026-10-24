@@ -3,15 +3,13 @@ import { Route, Routes, Link, NavLink, Navigate, useNavigate, useMatch } from 'r
 import { useQuery } from '@tanstack/react-query'
 import { api, loadAuthConfig, User, AuthConfig, AuthKind } from './api'
 import WorkspaceSwitcher from './components/WorkspaceSwitcher'
-import WorkspacePage from './pages/Workspace'
+import WorkspaceTabs, { WorkspaceRedirect } from './pages/WorkspaceTabs'
 import Login from './pages/Login'
 import Instances from './pages/Instances'
+import NewInstance from './pages/NewInstance'
 import InstanceDetail from './pages/InstanceDetail'
 import ArtifactPreviewPage from './pages/ArtifactPreview'
-import Keys from './pages/Keys'
-import Policies from './pages/Policies'
 import Audit from './pages/Audit'
-import Secrets from './pages/Secrets'
 import Profile from './pages/Profile'
 import { Button, Loading, Notice, SignalMark } from './components/ui'
 
@@ -32,11 +30,7 @@ function useMe(onBackendRetrying: (retrying: boolean) => void) {
 const navWork = [
   { to: '/', label: 'Instances', end: true },
   { to: '/audit', label: 'Audit' },
-]
-const navSetup = [
-  { to: '/policies', label: 'Policies' },
-  { to: '/secrets', label: 'Secrets' },
-  { to: '/keys', label: 'API keys' },
+  { to: '/workspace', label: 'Workspace' },
 ]
 
 const navCls = ({ isActive }: { isActive: boolean }) =>
@@ -90,32 +84,26 @@ export default function App() {
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-40 border-b border-ink bg-paper/95 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-7xl items-stretch gap-10 px-6">
+      <header className="console-header sticky top-0 z-40 border-b border-ink bg-paper/95 backdrop-blur">
+        <div className="console-header-inner mx-auto flex min-h-14 max-w-7xl flex-wrap items-center gap-x-6 gap-y-1 px-6 py-1">
           <Link to="/" className="flex items-center">
             <span className="text-[15px] font-semibold tracking-tight text-ink">calcside</span>
           </Link>
-          <nav className="flex flex-1 items-stretch gap-7 overflow-x-auto">
+          <nav className="console-nav flex flex-1 items-stretch gap-5 overflow-x-auto sm:gap-7">
             {navWork.map((n) => (
               <NavLink key={n.to} to={n.to} end={n.end} className={navCls}>
                 {n.label}
               </NavLink>
             ))}
-            <span className="mx-1 self-center border-l border-line-strong" aria-hidden />
-            {navSetup.map((n) => (
-              <NavLink key={n.to} to={n.to} className={navCls}>
-                {n.label}
-              </NavLink>
-            ))}
           </nav>
-          <div className="flex items-center gap-4">
+          <div className="ml-auto flex items-center gap-3 sm:gap-4">
             {dev && (
-              <span className="inline-flex items-center gap-1.5 border border-warn px-2 py-0.5 text-[11px] font-medium uppercase tracking-label text-warn-text">
+              <span className="console-dev inline-flex items-center gap-1.5 border border-warn px-2 py-0.5 text-[11px] font-medium uppercase tracking-label text-warn-text">
                 <SignalMark signal="failed" />dev · anonymous
               </span>
             )}
             <WorkspaceSwitcher />
-            <Link to="/profile" className="text-xs text-sec hover:text-ink" title="Profile">{user?.username || user?.email}</Link>
+            <Link to="/profile" className="console-profile text-xs text-sec hover:text-ink" title="Profile">{user?.username || user?.email}</Link>
             {!dev && <Button size="sm" onClick={logout}>Logout</Button>}
           </div>
         </div>
@@ -123,13 +111,16 @@ export default function App() {
       <main className="mx-auto max-w-7xl px-6 py-10">
         <Routes>
           <Route path="/" element={<Instances />} />
+          <Route path="/instances/new" element={<NewInstance />} />
           <Route path="/instances/:id" element={<InstanceDetail />} />
-          <Route path="/keys" element={<Keys />} />
-          <Route path="/policies" element={<Policies />} />
-          <Route path="/secrets" element={<Secrets />} />
+          <Route path="/workspace" element={<WorkspaceTabs />} />
+          <Route path="/workspace/:tab" element={<WorkspaceTabs />} />
+          <Route path="/keys" element={<Navigate to="/workspace/keys" replace />} />
+          <Route path="/policies" element={<Navigate to="/workspace/policies" replace />} />
+          <Route path="/secrets" element={<Navigate to="/workspace/secrets" replace />} />
           <Route path="/profile" element={user && <Profile user={user} />} />
           <Route path="/audit" element={<Audit />} />
-          <Route path="/workspaces/:id" element={<WorkspacePage />} />
+          <Route path="/workspaces/:id" element={<WorkspaceRedirect />} />
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

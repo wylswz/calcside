@@ -1476,6 +1476,14 @@ components:
           uniqueItems: true
           maxItems: 32
           items: { $ref: '#/components/schemas/PolicyName' }
+    ExecActivity:
+      type: object
+      properties:
+        runs: { type: integer }
+        denied_runs: { type: integer }
+        failed_runs: { type: integer }
+        last_run_at: { type: string, format: date-time }
+        last_status: { type: string }
     Instance:
       type: object
       required: [id, user_id, spec, labels, status, created_at, last_active_at, expires_at]
@@ -1483,6 +1491,9 @@ components:
         id: { type: string }
         user_id: { type: string }
         workspace_id: { type: string }
+        activity:
+          $ref: '#/components/schemas/ExecActivity'
+          description: run summary — populated on list responses
         spec: { $ref: '#/components/schemas/InstanceSpec' }
         labels:
           type: object

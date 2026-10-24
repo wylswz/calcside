@@ -91,6 +91,14 @@ func TestInitializeApp(t *testing.T) {
 			}
 			created := request(t, h, "POST", "/api/v1/instances", `{"capabilities":{}}`, http.StatusCreated)
 			id := created["instance"].(map[string]any)["id"].(string)
+			lst := request(t, h, "GET", "/api/v1/instances", "", http.StatusOK)
+			if _, ok := lst["instances"]; !ok {
+				t.Fatalf("instances list: %v", lst)
+			}
+			wss := request(t, h, "GET", "/api/v1/workspaces", "", http.StatusOK)
+			if _, ok := wss["workspaces"]; !ok {
+				t.Fatalf("workspaces list: %v", wss)
+			}
 			out := request(t, h, "POST", "/api/v1/instances/"+id+"/exec", `{"code":"x = 41\nprint(x + 1)"}`, http.StatusOK)
 			if out["output"] != "42\n" {
 				t.Fatalf("exec: %v", out)

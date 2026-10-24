@@ -1,29 +1,33 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../api'
 import { Button, Field, Modal, inputCls } from './ui'
 import { CopyBlock, MCPGuide } from './MCP'
 
 // ConnectAgent creates an instance-bound API key and shows the MCP
 // endpoint for this instance only.
-export default function ConnectAgent({ id, onClose }: { id: string; onClose: () => void }) {
+export default function ConnectAgent({ id, workspaceId, onClose }: { id: string; workspaceId?: string; onClose: () => void }) {
   const [name, setName] = useState(`agent · ${id.slice(0, 8)}`)
   const [days, setDays] = useState(90)
+  const qc = useQueryClient()
   const [secret, setSecret] = useState('')
   const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
   const url = `${window.location.origin}/mcp/instances/${id}`
   const create = async () => {
-    setErr('')
+    setErr(''); setBusy(true)
     try {
-      const r = await api.post<{ secret: string }>('/api/v1/keys', {
+      const r = await api.post<{ secret: string }>(`/api/v1/keys${workspaceId ? `?workspace=${workspaceId}` : ''}`, {
         name, instance_id: id, expires_in_seconds: days * 86400,
       })
       setSecret(r.secret)
-    } catch (e: any) { setErr(e.message) }
+      qc.invalidateQueries({ queryKey: ['keys'] })
+    } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
   return (
     <Modal title="Connect agent" onClose={onClose} footer={
       secret ? <Button variant="primary" onClick={onClose}>Done</Button>
-        : <><Button onClick={onClose}>Cancel</Button><Button variant="primary" onClick={create} disabled={!name.trim()}>Create key</Button></>
+        : <><Button onClick={onClose}>Cancel</Button><Button variant="primary" onClick={create} disabled={!name.trim() || busy}>{busy ? 'Creating…' : 'Create key'}</Button></>
     }>
       {!secret ? (
         <div className="space-y-3 text-sm">

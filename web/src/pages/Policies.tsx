@@ -112,7 +112,7 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
   )
 }
 
-export default function Policies() {
+export default function Policies({ bare }: { bare?: boolean }) {
   const qc = useQueryClient()
   const [editing, setEditing] = useState<Policy | null>(null)
   const [showNew, setShowNew] = useState(false)
@@ -127,10 +127,11 @@ export default function Policies() {
 
   return (
     <div>
-      <PageHeader title="Policies"
+      {bare && <div className="mb-4 flex items-center justify-between"><p className="text-xs text-sec" /><Button variant="primary" onClick={() => setShowNew(true)}>New policy</Button></div>}
+{!bare && <PageHeader title="Policies"
         actions={<Button variant="primary" onClick={() => setShowNew(true)}>New policy</Button>}>
         Built-in and Rego policies share one selection list at instance creation (spec.policies). Built-in policies run native runtime checks and are read-only; default policies are preselected, not mandatory. Rego policies are snapshotted at creation. Server policies (--policy-dir) always apply.
-      </PageHeader>
+      </PageHeader>}
       <div className="tbl-wrap">
         <table className="tbl">
           <thead>

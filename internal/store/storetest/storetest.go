@@ -365,6 +365,48 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		if err != nil || len(lst) != 1 || lst[0].Steps != 10 {
 			t.Fatalf("ListExecutions: %v %+v", err, lst)
 		}
+
+		// ExecutionActivity: one grouped query per listed instance set.
+		in2 := &store.Instance{UserID: u.ID, WorkspaceID: in.WorkspaceID,
+			Spec: []byte(`{}`), Status: types.InstanceRunning,
+			CreatedAt: time.Now(), LastActiveAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)}
+		if err := s.CreateInstance(ctx, in2); err != nil {
+			t.Fatal(err)
+		}
+		// The fixture exec above already sits at time.Now(); keep the
+		// error exec newest.
+		t1 := time.Now().UTC().Add(3 * time.Minute)
+		t2 := t1.Add(time.Minute)
+		t3 := t1.Add(2 * time.Minute)
+		for i, e := range []*store.Execution{
+			{InstanceID: in.ID, UserID: u.ID, Status: types.ExecOK, CreatedAt: t1},
+			{InstanceID: in.ID, UserID: u.ID, Status: types.ExecError, ErrorType: types.ErrPolicyDenied, CreatedAt: t2},
+			{InstanceID: in.ID, UserID: u.ID, Status: types.ExecError, ErrorType: types.ErrRuntime, CreatedAt: t3},
+			{InstanceID: in2.ID, UserID: u.ID, Status: types.ExecOK, CreatedAt: t1},
+		} {
+			e.ID = "exe_act" + string(rune(0x30+i))
+			e.CodeSHA256, e.Code = "s", "print(1)"
+			if err := s.CreateExecution(ctx, e); err != nil {
+				t.Fatalf("exec %d: %v", i, err)
+			}
+		}
+		if got, err := s.ExecutionActivity(ctx, nil); err != nil || len(got) != 0 {
+			t.Fatalf("empty ids: %v %v", got, err)
+		}
+		act, err := s.ExecutionActivity(ctx, []string{in.ID, in2.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := act[in.ID]
+		if a == nil || a.Runs != 4 || a.DeniedRuns != 1 || a.FailedRuns != 1 {
+			t.Fatalf("activity: %+v", a)
+		}
+		if a.LastStatus != string(types.ExecError) || a.LastRunAt == nil || !a.LastRunAt.Equal(t3) {
+			t.Fatalf("last: %+v", a)
+		}
+		if act[in2.ID].Runs != 1 || act["ins_absent"] != nil {
+			t.Fatalf("selectivity: %+v", act)
+		}
 	})
 
 	t.Run("audit", func(t *testing.T) {

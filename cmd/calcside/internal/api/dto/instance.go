@@ -17,6 +17,7 @@ type Instance struct {
 	ID           string               `json:"id"`
 	UserID       string               `json:"user_id"`
 	WorkspaceID  string               `json:"workspace_id"`
+	Activity     *ExecActivity        `json:"activity,omitempty"`
 	Spec         json.RawMessage      `json:"spec"`
 	Labels       map[string]string    `json:"labels"`
 	Status       types.InstanceStatus `json:"status"`
@@ -41,6 +42,15 @@ func NewInstances(lst []*store.Instance) []Instance {
 		out[i] = NewInstance(in)
 	}
 	return out
+}
+
+// ExecActivity is the per-instance run summary on list responses.
+type ExecActivity struct {
+	Runs       int        `json:"runs"`
+	DeniedRuns int        `json:"denied_runs"`
+	FailedRuns int        `json:"failed_runs"`
+	LastRunAt  *time.Time `json:"last_run_at,omitempty"`
+	LastStatus string     `json:"last_status,omitempty"`
 }
 
 // SharedInstance is an instance reached via a share, with the share

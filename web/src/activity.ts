@@ -16,7 +16,7 @@ export function callOutcome(e: AuditEvent): Outcome {
 
 // runOutcome maps a run onto the same three outcomes: a policy_denied
 // error means the boundary refused the run — denied, not failed.
-export function runOutcome(x: Execution): Outcome {
+export function runOutcome(x: Pick<Execution, 'status' | 'error_type'>): Outcome {
   if (x.status === 'ok') return 'ok'
   if (x.error_type === 'policy_denied') return 'denied'
   return 'failed'

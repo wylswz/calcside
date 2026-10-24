@@ -3,15 +3,16 @@ import type { InstanceStatus } from '../api'
 import type { Outcome, RunBy } from '../activity'
 import { fmtCountdown } from '../format'
 
+import { expiringSoon } from '../nextStep'
 // Three signals, each with one meaning and a redundant shape:
 //   denied  — red square:   the boundary refused something
 //   failed  — yellow triangle: a run or call errored, or time runs out
 //   you     — blue circle:  things you did, things you can act on
 // Normal outcomes (ok, running, allow) are never coloured.
-export type Signal = 'denied' | 'failed' | 'you'
+export type Signal = 'denied' | 'failed' | 'you' | 'live'
 
-const signalFill: Record<Signal, string> = { denied: 'fill-danger', failed: 'fill-warn', you: 'fill-accent' }
-const signalText: Record<Signal, string> = { denied: 'text-danger', failed: 'text-warn-text', you: 'text-accent' }
+const signalFill: Record<Signal, string> = { denied: 'fill-danger', failed: 'fill-warn', you: 'fill-accent', live: 'fill-live' }
+const signalText: Record<Signal, string> = { denied: 'text-danger', failed: 'text-warn-text', you: 'text-accent', live: 'text-live' }
 
 export function SignalMark({ signal, className = '' }: { signal: Signal; className?: string }) {
   return (
@@ -19,6 +20,7 @@ export function SignalMark({ signal, className = '' }: { signal: Signal; classNa
       {signal === 'you' && <circle cx="5" cy="5" r="5" className={signalFill[signal]} />}
       {signal === 'denied' && <rect x="0.75" y="0.75" width="8.5" height="8.5" className={signalFill[signal]} />}
       {signal === 'failed' && <polygon points="5,0 10,10 0,10" className={signalFill[signal]} />}
+      {signal === 'live' && <circle cx="5" cy="5" r="4" className={signalFill[signal]} />}
     </svg>
   )
 }
@@ -113,7 +115,7 @@ export function Button(
     variant === 'primary'
       ? 'border-accent bg-accent text-white hover:border-ink hover:bg-ink hover:text-paper'
       : 'border-ink/80 text-ink hover:bg-ink hover:text-paper'
-  return <button className={base + sz + v + (className ? ' ' + className : '')} {...rest} />
+  return <button data-ui="button" data-variant={variant === 'primary' ? 'primary' : 'default'} className={base + sz + v + (className ? ' ' + className : '')} {...rest} />
 }
 
 export function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -148,7 +150,7 @@ export function PageHeader({ title, children, actions }: {
 // SectionTitle is a small heading sitting on a heavy rule.
 export function SectionTitle({ children, aside, className = '' }: { children: React.ReactNode; aside?: React.ReactNode; className?: string }) {
   return (
-    <div className={`mb-3 flex items-center gap-3 border-b-2 border-ink pb-2 ${className}`}>
+    <div data-ui="section-title" className={`mb-3 flex items-center gap-3 border-b-2 border-ink pb-2 ${className}`}>
       <h3 className="text-[13px] font-semibold tracking-tight text-ink">{children}</h3>
       {aside && <div className="ml-auto flex items-center gap-3 text-xs">{aside}</div>}
     </div>
@@ -206,4 +208,32 @@ export function Modal({ title, onClose, children, footer, wide }: {
       </div>
     </div>
   )
+}
+
+// InstanceStatus is the one status display: dot + label. Live (green)
+// for comfortably-running, expiring (yellow) near the TTL end, hollow
+// grey for ended.
+export function InstanceStatus({ inst, now }: { inst: { status: string; created_at: string; expires_at: string }; now?: number }) {
+  const t = now ?? Date.now()
+  let dot: React.ReactNode
+  let label: string
+  if (inst.status === 'running') {
+    const left = new Date(inst.expires_at).getTime() - t
+    if (expiringSoon(inst, t)) {
+      const m = Math.max(0, Math.floor(left / 60000))
+      const sec = Math.max(0, Math.floor((left % 60000) / 1000))
+      dot = <span className="inline-block h-2 w-2 rounded-full bg-warn" />
+      label = `expiring · ${m}:${String(sec).padStart(2, '0')}`
+    } else {
+      const mins = Math.floor(left / 60000)
+      dot = <span className="inline-block h-2 w-2 rounded-full bg-live" />
+      label = mins >= 60 ? `live · ${Math.floor(mins / 60)}h ${mins % 60}m left`
+        : mins >= 1 ? `live · ${mins}m left`
+          : `live · ${Math.max(0, Math.floor(left / 1000))}s left`
+    }
+  } else {
+    dot = <span className="inline-block h-2 w-2 rounded-full border border-mute bg-transparent" />
+    label = inst.status === 'lost' ? 'ended · lost' : 'ended'
+  }
+  return <span className="inline-flex items-center gap-1.5 text-xs text-sec">{dot}{label}</span>
 }

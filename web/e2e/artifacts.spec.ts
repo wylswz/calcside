@@ -197,7 +197,7 @@ fs.write("notes.txt", "Review the exception list before closing the reporting pe
   await expect(previewLink).toBeVisible()
   await expect(previewLink).toHaveAttribute('target', '_blank')
   // the editor lives behind the Run code panel in the redesigned page
-  await page.getByRole('button', { name: 'Run code', exact: true }).click()
+  await page.getByRole('button', { name: 'Run code yourself' }).click()
   const originalCode = await page.locator('.cm-content').innerText()
   const opened = page.waitForEvent('popup')
   await previewLink.focus()

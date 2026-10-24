@@ -31,7 +31,7 @@ function prettyArgs(args: string): string {
 
 function CallDetail({ e }: { e: AuditEvent }) {
   return (
-    <div className="space-y-3 text-xs">
+    <div className="call-detail space-y-3 text-xs">
       <dl className="grid grid-cols-2 gap-px border border-line bg-line md:grid-cols-4 [&>div]:bg-paper [&>div]:px-3 [&>div]:py-2">
         {([['id', e.id], ['exec', e.exec_id || '—'], ['phase', e.phase || '—'], ['duration', fmtMs(e.duration_ms)]] as const).map(([k, v]) => (
           <div key={k} className="min-w-0">
@@ -59,7 +59,7 @@ export function CallRows({ events, instances, showInstance }: {
   const cols = showInstance ? 6 : 5
   return (
     <div className="tbl-wrap">
-      <table className="tbl tbl-compact">
+      <table className="tbl tbl-compact detail-meta">
         <thead>
           <tr>
             <th>When</th>

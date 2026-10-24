@@ -88,6 +88,13 @@ type Service struct {
 	now        func() time.Time
 }
 
+// Activity aggregates run stats per instance for the list view; the
+// sandbox service owns instance-adjacent reads so the api layer does
+// not need the store.
+func (s *Service) Activity(ctx context.Context, ids []string) (map[string]*store.ExecActivity, error) {
+	return s.st.ExecutionActivity(ctx, ids)
+}
+
 func New(o Options) *Service {
 	if o.Now == nil {
 		o.Now = time.Now

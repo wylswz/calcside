@@ -201,6 +201,16 @@ type InstanceFilter struct {
 	KeyInstanceID string
 }
 
+// ExecActivity is the per-instance run summary for the list view.
+type ExecActivity struct {
+	InstanceID string     `json:"instance_id"`
+	Runs       int        `json:"runs"`
+	DeniedRuns int        `json:"denied_runs"`
+	FailedRuns int        `json:"failed_runs"`
+	LastRunAt  *time.Time `json:"last_run_at,omitempty"`
+	LastStatus string     `json:"last_status,omitempty"`
+}
+
 type Execution struct {
 	ID          string              `json:"id"`
 	InstanceID  string              `json:"instance_id"`
@@ -318,6 +328,8 @@ type Store interface {
 
 	InsertAuditEvents(ctx context.Context, evs []AuditEvent) error
 	ListAuditEvents(ctx context.Context, f AuditFilter) ([]*AuditEvent, error)
+	// ExecutionActivity aggregates run stats per instance id in one query.
+	ExecutionActivity(ctx context.Context, ids []string) (map[string]*ExecActivity, error)
 
 	CreatePolicy(ctx context.Context, p *Policy) error
 	GetPolicy(ctx context.Context, id string) (*Policy, error)

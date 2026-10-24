@@ -704,7 +704,24 @@ func (s *strictImpl) ListInstances(ctx context.Context, req gen.ListInstancesReq
 	if err != nil {
 		return listInstancesResp{fail(err)}, nil
 	}
-	return listInstancesResp{rawJSON{200, dto.InstancesEnvelope{Instances: dto.NewInstances(lst)}}}, nil
+	ids := make([]string, 0, len(lst))
+	for _, in := range lst {
+		ids = append(ids, in.ID)
+	}
+	acts, err := s.d.Sandbox.Activity(ctx, ids)
+	if err != nil {
+		return listInstancesResp{fail(err)}, nil
+	}
+	out := dto.NewInstances(lst)
+	for i := range out {
+		if a := acts[out[i].ID]; a != nil {
+			out[i].Activity = &dto.ExecActivity{
+				Runs: a.Runs, DeniedRuns: a.DeniedRuns, FailedRuns: a.FailedRuns,
+				LastRunAt: a.LastRunAt, LastStatus: a.LastStatus,
+			}
+		}
+	}
+	return listInstancesResp{rawJSON{200, dto.InstancesEnvelope{Instances: out}}}, nil
 }
 
 func (s *strictImpl) CreateInstance(ctx context.Context, req gen.CreateInstanceRequestObject) (gen.CreateInstanceResponseObject, error) {

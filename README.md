@@ -370,13 +370,7 @@ make test-postgres
 
 The files live in `cmd/calcside/internal/gormstore/migrations/{sqlite,postgres}` and share a version and name. Keep GORM row structs in sync, but do not generate SQL from them. Never modify an applied migration; add a new one instead. `migrate-validate` checks both directories' checksums. Go database tests apply the migrations to fresh SQLite databases; `make test-postgres` applies them and runs the same store conformance suite on disposable PostgreSQL databases (Docker required).
 
-For an existing **unversioned SQLite database**, back it up and confirm its schema already matches `20261004092922_baseline.sql` before marking the baseline:
-
-```bash
-atlas migrate apply --env sqlite --baseline 20261004092922
-```
-
-This uses `ATLAS_DB_URL`, records the baseline without executing its CREATE statements, and applies later migrations. It does **not** upgrade an older schema; in particular, a database still carrying `policies.enabled` needs a separately reviewed upgrade first. Do not pass `--baseline` for an empty database.
+Migration history was consolidated before the first release: `20261024133846_baseline.sql` is the only migration in each dialect and creates the full schema on a fresh, empty database. Existing dev databases created before the consolidation are **not** upgraded by this baseline — reset them intentionally (remove the dev DB file or recreate the dev database) and let the fresh baseline apply; never auto-baseline an arbitrary nonempty DB.
 
 ## Run with Docker
 
@@ -385,7 +379,7 @@ make docker-env                    # first run: generates docker/.env with a ran
 docker compose -f docker/docker-compose.yml up --build
 ```
 
-Compose first runs the pinned Atlas image as a one-shot `migrate` service and starts the API only after it succeeds. The migration service and API share `docker/data`; existing unversioned databases need the explicit baseline step above. For PostgreSQL, set `CALCSIDE_STORE=postgres`, `CALCSIDE_DSN`, and `ATLAS_DB_URL` to the same database/schema.
+Compose first runs the pinned Atlas image as a one-shot `migrate` service and starts the API only after it succeeds; the service initializes a fresh `docker/data` database from the baseline automatically. A pre-consolidation dev database must be reset intentionally instead. For PostgreSQL, set `CALCSIDE_STORE=postgres`, `CALCSIDE_DSN`, and `ATLAS_DB_URL` to the same database/schema.
 
 Compose starts the API (`:8080`) plus one execution worker; the API forwards instance execution to it over an HMAC-authenticated internal protocol. Drop local extensions into `docker/data/ext/` (bind-mounted) — workers resolve them through the API. See `docker/.env.example` for the remaining env knobs.
 

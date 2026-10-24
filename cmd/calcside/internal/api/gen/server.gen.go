@@ -581,6 +581,15 @@ type ErrorEnvelope struct {
 	} `json:"error"`
 }
 
+// ExecActivity defines model for ExecActivity.
+type ExecActivity struct {
+	DeniedRuns *int       `json:"denied_runs,omitempty"`
+	FailedRuns *int       `json:"failed_runs,omitempty"`
+	LastRunAt  *time.Time `json:"last_run_at,omitempty"`
+	LastStatus *string    `json:"last_status,omitempty"`
+	Runs       *int       `json:"runs,omitempty"`
+}
+
 // ExecError defines model for ExecError.
 type ExecError struct {
 	Backtrace *string       `json:"backtrace,omitempty"`
@@ -708,6 +717,7 @@ type FilesResult struct {
 
 // Instance defines model for Instance.
 type Instance struct {
+	Activity     *ExecActivity     `json:"activity,omitempty"`
 	CreatedAt    time.Time         `json:"created_at"`
 	EndedAt      *time.Time        `json:"ended_at,omitempty"`
 	ExpiresAt    time.Time         `json:"expires_at"`

@@ -1,8 +1,6 @@
 package gormstore
 
 import (
-	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -35,6 +33,9 @@ func TestMigrationDirsInLockstep(t *testing.T) {
 		}
 		for i := range files {
 			files[i] = filepath.Base(files[i])
+		}
+		if len(files) != 1 || files[0] != "20261024133846_baseline.sql" {
+			t.Fatalf("%s migrations = %v, want exactly 20261024133846_baseline.sql", driver, files)
 		}
 		if want == nil {
 			want = files
@@ -70,32 +71,6 @@ func TestMigrateFresh(t *testing.T) {
 	}
 }
 
-func TestMigrateLegacyBaseline(t *testing.T) {
-	dsn := filepath.Join(t.TempDir(), "legacy.db")
-	d := openTest(t, types.DriverSQLite, dsn)
-	baseline, err := os.ReadFile("migrations/sqlite/20261004092922_baseline.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	db, err := d.g.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(t.Context(), string(baseline)); err != nil {
-		t.Fatal(err)
-	}
-	u := store.User{ID: "usr_legacy", Email: "legacy@example.com", Name: "legacy"}
-	if _, err := db.ExecContext(t.Context(), "INSERT INTO users (id, email, name) VALUES (?, ?, ?)", u.ID, u.Email, u.Name); err != nil {
-		t.Fatal(err)
-	}
-	_ = d.Close()
-	storetest.Atlas(t, types.DriverSQLite, dsn, "apply", "--baseline", "20261004092922")
-	d = openTest(t, types.DriverSQLite, dsn)
-	if got, err := d.GetUser(t.Context(), u.ID); err != nil || got.Email != u.Email || got.IsAdmin {
-		t.Fatalf("existing user changed identity or became admin during migration: %v, %+v", err, got)
-	}
-}
-
 func TestOpenDoesNotMigrate(t *testing.T) {
 	d := openTest(t, types.DriverSQLite, filepath.Join(t.TempDir(), "empty.db"))
 	var n int
@@ -107,50 +82,55 @@ func TestOpenDoesNotMigrate(t *testing.T) {
 	}
 }
 
-// The workspaces migration backfills personal workspaces, memberships,
-// and workspace_id on every workspace-owned table.
-func TestWorkspaceBackfill(t *testing.T) {
-	dsn := filepath.Join(t.TempDir(), "t.db")
-	dir := "migrations/sqlite"
-	files, _ := filepath.Glob(dir + "/*.sql")
-	// Apply everything before the workspaces migration, seed rows in
-	// that schema, then apply the rest.
-	before := 0
-	for i, f := range files {
-		if strings.Contains(f, "add_workspaces") {
-			before = i
-		}
-	}
-	storetest.Atlas(t, types.DriverSQLite, dsn, "apply", fmt.Sprintf("%d", before))
+// The consolidated baseline creates every workspace artifact end to end on a
+// fresh SQLite database.
+func TestBaselineWorkspaceSQLite(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "baseline.db")
+	storetest.Atlas(t, types.DriverSQLite, dsn, "apply")
 	d := openTest(t, types.DriverSQLite, dsn)
 	ctx := t.Context()
-	uid := "usr_seed001"
-	if tx := d.g.WithContext(ctx).Exec(
-		`INSERT INTO users (id, email, name, google_sub, is_admin, created_at, last_login_at) VALUES (?,?,?,?,?,?,?)`,
-		uid, "seed@x.com", "Seed", "", false, time.Now(), time.Now()); tx.Error != nil {
-		t.Fatal(tx.Error)
-	}
-	if tx := d.g.WithContext(ctx).Exec(
-		`INSERT INTO instances (id, user_id, spec, status, node_id, lease_epoch, created_at, last_active_at, expires_at) VALUES (?,?,?,?,?,?,?,?,?)`,
-		"ins_seed01", uid, "{}", "stopped", "n1", 1, time.Now(), time.Now(), time.Now()); tx.Error != nil {
-		t.Fatal(tx.Error)
-	}
-	_ = d.Close()
-	storetest.Atlas(t, types.DriverSQLite, dsn, "apply")
-	d = openTest(t, types.DriverSQLite, dsn)
-	var wsID, role string
-	if err := d.g.Raw(`SELECT workspace_id, role FROM members WHERE user_id = ?`, uid).Row().Scan(&wsID, &role); err != nil {
+
+	u, err := d.UpsertUserByEmail(ctx, "base@example.com", "base", "")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if wsID != store.PersonalWorkspaceID(uid) || role != string(store.RoleOwner) {
-		t.Fatalf("membership %s %s", wsID, role)
+	w, err := d.GetWorkspace(ctx, store.PersonalWorkspaceID(u.ID))
+	if err != nil {
+		t.Fatalf("personal workspace: %v", err)
 	}
-	var inWS string
-	if err := d.g.Raw(`SELECT workspace_id FROM instances WHERE id = ?`, "ins_seed01").Row().Scan(&inWS); err != nil {
+	if !w.Personal || w.CreatedAt.IsZero() || w.CreatedAt.Location() != time.UTC {
+		t.Fatalf("personal workspace row %+v", w)
+	}
+	ms, err := d.ListMemberships(ctx, u.ID)
+	if err != nil || len(ms) != 1 || ms[0].Role != types.RoleOwner {
+		t.Fatalf("memberships %v %+v", err, ms)
+	}
+
+	team := &store.Workspace{Name: "team"}
+	if err := d.CreateWorkspace(ctx, team); err != nil {
 		t.Fatal(err)
 	}
-	if inWS != store.PersonalWorkspaceID(uid) {
-		t.Fatalf("instance workspace %s", inWS)
+	if err := d.AddMember(ctx, &store.Member{WorkspaceID: team.ID, UserID: u.ID, Role: types.RoleEditor}); err != nil {
+		t.Fatal(err)
 	}
-	_ = d.Close()
+	ms, err = d.ListMemberships(ctx, u.ID)
+	if err != nil || len(ms) != 2 {
+		t.Fatalf("memberships after team add %v %+v", err, ms)
+	}
+
+	// workspaces.created_at must declare a plain datetime, not the legacy
+	// TIMESTAMPTZ the old migration used.
+	rows, err := d.g.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := rows.QueryContext(ctx, `SELECT type FROM pragma_table_info('workspaces') WHERE name = 'created_at'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	var typ string
+	if !r.Next() || r.Scan(&typ) != nil || !strings.EqualFold(typ, "datetime") {
+		t.Fatalf("created_at type %q, want datetime", typ)
+	}
 }

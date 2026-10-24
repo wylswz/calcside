@@ -76,7 +76,7 @@ function EditDomains({ s, onClose }: { s: Secret; onClose: () => void }) {
   )
 }
 
-export default function Secrets() {
+export default function Secrets({ bare }: { bare?: boolean }) {
   const qc = useQueryClient()
   const [showNew, setShowNew] = useState(false)
   const [editing, setEditing] = useState<Secret | null>(null)
@@ -94,10 +94,11 @@ export default function Secrets() {
 
   return (
     <div>
-      <PageHeader title="Secrets"
+      {bare && <div className="mb-4 flex items-center justify-between"><p className="text-xs text-sec" /><Button variant="primary" onClick={() => setShowNew(true)}>New secret</Button></div>}
+{!bare && <PageHeader title="Secrets"
         actions={!disabled && <Button variant="primary" onClick={() => setShowNew(true)}>New secret</Button>}>
         Values are write-only. Use <code className="font-mono text-ink">{'{{secrets.NAME}}'}</code> in net.get/post URL, headers or body — the server injects the value at send time and scrubs it from responses.
-      </PageHeader>
+      </PageHeader>}
       {disabled && (
         <Notice tone="warning">
           Secrets vault is disabled on this server (no <code>--secret-key</code>). Inline per-instance secrets still work.
