@@ -210,18 +210,23 @@ func (r instanceRow) toStore() *store.Instance {
 }
 
 type execRow struct {
-	ID          string `gorm:"primaryKey"`
-	InstanceID  string `gorm:"index:idx_executions_instance_created"`
-	UserID      string
-	CodeSHA256  string
-	CodeSnippet string
-	Code        string
-	Status      string
-	ErrorType   string
-	DurationMs  int64
-	Steps       int64
-	OutputBytes int64
-	CreatedAt   time.Time `gorm:"index:idx_executions_instance_created"`
+	ID              string `gorm:"primaryKey"`
+	InstanceID      string `gorm:"index:idx_executions_instance_created"`
+	UserID          string
+	CodeSHA256      string
+	CodeSnippet     string
+	Code            string
+	Status          string
+	ErrorType       string
+	DurationMs      int64
+	Steps           int64
+	OutputBytes     int64
+	Via             string
+	Output          string
+	OutputTruncated bool
+	ErrorMessage    string
+	ErrorBacktrace  string
+	CreatedAt       time.Time `gorm:"index:idx_executions_instance_created"`
 }
 
 func (execRow) TableName() string { return "executions" }
@@ -230,12 +235,17 @@ func (r execRow) toStore() *store.Execution {
 	return &store.Execution{
 		ID: r.ID, InstanceID: r.InstanceID, UserID: r.UserID,
 		CodeSHA256: r.CodeSHA256, CodeSnippet: r.CodeSnippet, Code: r.Code,
-		Status:      types.ExecStatus(r.Status),
-		ErrorType:   types.ExecErrorType(r.ErrorType),
-		DurationMs:  r.DurationMs,
-		Steps:       uint64(r.Steps),
-		OutputBytes: r.OutputBytes,
-		CreatedAt:   r.CreatedAt.UTC(),
+		Status:          types.ExecStatus(r.Status),
+		ErrorType:       types.ExecErrorType(r.ErrorType),
+		DurationMs:      r.DurationMs,
+		Steps:           uint64(r.Steps),
+		OutputBytes:     r.OutputBytes,
+		Via:             types.AuthKind(r.Via),
+		Output:          r.Output,
+		OutputTruncated: r.OutputTruncated,
+		ErrorMessage:    r.ErrorMessage,
+		ErrorBacktrace:  r.ErrorBacktrace,
+		CreatedAt:       r.CreatedAt.UTC(),
 	}
 }
 
@@ -646,7 +656,10 @@ func (d *sqlDB) CreateExecution(ctx context.Context, e *store.Execution) error {
 		CodeSHA256: e.CodeSHA256, CodeSnippet: e.CodeSnippet, Code: e.Code,
 		Status: string(e.Status), ErrorType: string(e.ErrorType),
 		DurationMs: e.DurationMs, Steps: int64(e.Steps),
-		OutputBytes: e.OutputBytes, CreatedAt: e.CreatedAt.UTC(),
+		OutputBytes: e.OutputBytes, Via: string(e.Via),
+		Output: e.Output, OutputTruncated: e.OutputTruncated,
+		ErrorMessage: e.ErrorMessage, ErrorBacktrace: e.ErrorBacktrace,
+		CreatedAt: e.CreatedAt.UTC(),
 	})
 }
 

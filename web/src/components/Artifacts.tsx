@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api, saveArtifact, type ArtifactConfig, type FileEntry } from '../api'
-import { Button, Icon, Loading, Notice, fmtBytes } from './ui'
+import { Button, Icon, Loading, Notice } from './ui'
+import { fmtBytes } from '../format'
 
 export function ArtifactBrowser({ id, running, busy }: { id: string; running: boolean; busy: boolean }) {
   const [dir, setDir] = useState('/work')
@@ -48,8 +49,8 @@ export function ArtifactBrowser({ id, running, busy }: { id: string; running: bo
       <button className="artifact-action" title="Refresh files" aria-label="Refresh files" disabled={disabled || isFetching} onClick={() => void refetch()}><Icon name="refresh" className={isFetching ? 'motion-safe:animate-spin' : ''} /></button>
     </div>
     {!running && <Notice>Instance is not running. Files are only available while its filesystem is live.</Notice>}
-    {listingError && <Notice tone="red">{(listingError as Error).message}</Notice>}
-    {error && <div role="alert"><Notice tone="red">{error}</Notice></div>}
+    {listingError && <Notice tone="warning">{(listingError as Error).message}</Notice>}
+    {error && <div role="alert"><Notice tone="warning">{error}</Notice></div>}
     <ul aria-label="Artifact files" className="max-h-96 overflow-y-auto border-y border-line">
       {entries.map((entry) => {
         const href = `/instances/${encodeURIComponent(id)}/preview?path=${encodeURIComponent(entry.path)}`

@@ -26,14 +26,14 @@ export const cmTheme = [
   }),
   syntaxHighlighting(
     HighlightStyle.define([
-      { tag: [t.keyword, t.controlKeyword, t.definitionKeyword, t.operatorKeyword, t.moduleKeyword], color: c('accent'), fontWeight: '500' },
-      { tag: [t.string, t.special(t.string), t.regexp], color: c('danger') },
-      { tag: [t.number, t.bool, t.null, t.atom], color: c('warn-text') },
+      { tag: [t.keyword, t.controlKeyword, t.definitionKeyword, t.operatorKeyword, t.moduleKeyword], color: c('ink'), fontWeight: '600' },
+      { tag: [t.string, t.special(t.string), t.regexp], color: c('sec') },
+      { tag: [t.number, t.bool, t.null, t.atom], color: c('body') },
       { tag: [t.comment, t.lineComment, t.blockComment], color: c('mute'), fontStyle: 'italic' },
       { tag: [t.function(t.variableName), t.function(t.propertyName), t.definition(t.variableName)], color: c('ink'), fontWeight: '600' },
       { tag: [t.propertyName, t.attributeName], color: c('body') },
       { tag: [t.operator, t.punctuation, t.bracket], color: c('sec') },
-      { tag: t.invalid, color: c('danger'), textDecoration: 'underline' },
+      { tag: t.invalid, color: c('warn-text'), textDecoration: 'underline' },
     ]),
   ),
 ]

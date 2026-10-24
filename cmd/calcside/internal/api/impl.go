@@ -537,7 +537,7 @@ func (s *strictImpl) GetExecution(ctx context.Context, req gen.GetExecutionReque
 	if err != nil {
 		return getExecutionResp{fail(err)}, nil
 	}
-	return getExecutionResp{rawJSON{200, dto.ExecutionDetail{Execution: dto.NewExecution(ex), Code: ex.Code}}}, nil
+	return getExecutionResp{rawJSON{200, dto.NewExecutionDetail(ex)}}, nil
 }
 
 // --- audit ---

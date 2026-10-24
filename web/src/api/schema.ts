@@ -891,6 +891,8 @@ export interface components {
             steps: number;
             /** Format: int64 */
             output_bytes: number;
+            /** @description how the run was authenticated (absent for executions recorded before this field existed) */
+            via?: components["schemas"]["AuthKind"];
             /** Format: date-time */
             created_at: string;
         };
@@ -901,6 +903,12 @@ export interface components {
             execution: components["schemas"]["Execution"];
             /** @description full submitted code (empty for executions recorded before this field existed) */
             code: string;
+            /** @description secret-scrubbed run output */
+            output: string;
+            /** @description true when output was capped */
+            output_truncated: boolean;
+            /** @description structured failure; null when the run completed without error */
+            error: components["schemas"]["ExecError"];
         };
         AuditEvent: {
             id: string;

@@ -106,7 +106,13 @@ type Execution struct {
 	DurationMs  int64               `json:"duration_ms"`
 	Steps       uint64              `json:"steps"`
 	OutputBytes int64               `json:"output_bytes"`
-	CreatedAt   time.Time           `json:"created_at"`
+	Via         types.AuthKind      `json:"via,omitempty"` // "" = recorded before this field existed
+	// Detail-only fields; served only by the execution detail endpoint.
+	Output          string    `json:"-"`
+	OutputTruncated bool      `json:"-"`
+	ErrorMessage    string    `json:"-"`
+	ErrorBacktrace  string    `json:"-"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 type AuditEvent struct {

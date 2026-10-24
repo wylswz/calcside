@@ -3,7 +3,10 @@ import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Instance, Policy, Secret } from '../api'
 import type { SecretSource, ExtensionCatalog, ExtensionInfo, ExtConfigField } from '../api'
-import { Button, EmptyRow, Field, Loading, Mark, Modal, PageHeader, SectionTitle, StatusBadge, Tag, fmtCountdown, fmtTime, inputCls } from '../components/ui'
+import { Button, EmptyRow, Field, Loading, Modal, PageHeader, SectionTitle, StatusText, Tag, TimeLeft, inputCls } from '../components/ui'
+import { fmtTime } from '../format'
+import { allowedSummary, instanceName } from '../activity'
+import { relTime } from '../format'
 
 interface SpecDraft {
   ttl_seconds: number
@@ -30,9 +33,6 @@ interface ExtRow {
   alias: string
   config: Record<string, string>  // only keys the user set; '' = default
 }
-
-const capBar = { blue: 'border-accent', red: 'border-danger', yellow: 'border-warn' }
-const capShape = { blue: 'circle', red: 'square', yellow: 'triangle' } as const
 
 const aliasRe = /^[A-Za-z_][A-Za-z0-9_]*$/
 const secretRefRe = /\{\{\s*secrets\.([A-Z_][A-Z0-9_]{0,63})\s*\}\}/
@@ -100,10 +100,10 @@ function ExtRowEditor({ row, catalog, specNames, vaultNames, netOn, fsOn, onChan
         </select>
         <input className={inputCls + ' !w-28 font-mono text-xs'} placeholder="alias" value={row.alias}
           onChange={(e) => set({ alias: e.target.value })} />
-        <button className="ml-auto px-1 text-base leading-none text-mute transition-colors hover:text-danger" aria-label="Remove" onClick={onRemove}>×</button>
+        <button className="ml-auto px-1 text-base leading-none text-mute transition-colors hover:text-ink" aria-label="Remove" onClick={onRemove}>×</button>
       </div>
       {row.alias && !aliasRe.test(row.alias) && (
-        <p className="text-xs text-danger">alias must be a starlark identifier</p>
+        <p className="text-xs text-warn-text">alias must be a starlark identifier</p>
       )}
       {row.custom && (
         <>
@@ -232,7 +232,7 @@ function SecretCfgInput({ f, label, value, specNames, vaultNames, onChange, onEn
           <input className={inputCls + ' font-mono text-xs'} placeholder="NAME" value={draft.name}
             onChange={(e) => { const d = { ...draft, name: e.target.value }; setDraft(d); applyDraft(d) }} />
           {draft.name && !secretNameRe.test(draft.name) && (
-            <p className="text-xs text-danger">NAME must match [A-Z_][A-Z0-9_]*</p>
+            <p className="text-xs text-warn-text">NAME must match [A-Z_][A-Z0-9_]*</p>
           )}
           <input type="password" className={inputCls + ' font-mono text-xs'} placeholder="value (never persisted)"
             value={draft.value} autoComplete="new-password"
@@ -396,22 +396,23 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
     create.mutate(spec)
   }
 
-  const capTile = (name: string, desc: string, tone: 'blue' | 'red' | 'yellow', on: boolean, set: (v: boolean) => void) => (
-    <button type="button" aria-pressed={on} onClick={() => { setJsonDirty(false); set(!on) }}
-      className={`flex flex-col items-start gap-3 border-t-[3px] bg-paper px-4 py-3 text-left transition-colors hover:bg-surface ${on ? capBar[tone] : 'border-transparent'}`}>
-      <Mark tone={on ? tone : 'gray'} className="!h-3 !w-3" shape={capShape[tone]} />
+  // Capabilities are plain toggles — deciding what the instance may do;
+  // never colour-coded.
+  const capToggle = (name: string, desc: string, on: boolean, set: (v: boolean) => void) => (
+    <label className="flex items-start gap-3 border border-line bg-paper px-4 py-3 transition-colors hover:bg-surface">
+      <input type="checkbox" className="mt-1 h-4 w-4 shrink-0" checked={on} onChange={(e) => { setJsonDirty(false); set(e.target.checked) }} />
       <span>
-        <span className={`block font-mono text-sm font-medium ${on ? 'text-ink' : 'text-sec'}`}>{name}</span>
+        <span className="block font-mono text-sm font-medium text-ink">{name}</span>
         <span className="block text-xs text-mute">{desc}</span>
       </span>
-    </button>
+    </label>
   )
-  const removeBtn = 'ml-auto px-1 text-base leading-none text-mute transition-colors hover:text-danger'
+  const removeBtn = 'ml-auto px-1 text-base leading-none text-mute transition-colors hover:text-ink'
 
   return (
     <Modal title="New instance" onClose={onClose} wide footer={
       <>
-        {err && <p className="text-xs text-danger">{err}</p>}
+        {err && <p className="text-xs text-warn-text">{err}</p>}
         <div className="ml-auto flex gap-2">
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="primary" disabled={create.isPending} onClick={submit}>
@@ -434,20 +435,20 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
           <div>
             <SectionTitle>Capabilities</SectionTitle>
             <div className="grid grid-cols-3 gap-px border border-line bg-line">
-              {capTile('fs', 'virtual filesystem', 'blue', fsOn, setFsOn)}
-              {capTile('net', 'outbound HTTP', 'red', netOn, setNetOn)}
-              {capTile('ext', 'Starlark extensions', 'yellow', extOn, setExtOn)}
+              {capToggle('fs', 'virtual filesystem', fsOn, setFsOn)}
+              {capToggle('net', 'outbound HTTP', netOn, setNetOn)}
+              {capToggle('ext', 'Starlark extensions', extOn, setExtOn)}
             </div>
             <div className="mt-4 space-y-4">
               {fsOn && (
-                <div className="space-y-3 border-l-2 border-accent pl-4">
+                <div className="space-y-3 border-l-2 border-line-strong pl-4">
                   <Field label="fs quota (bytes)">
                     <input className={inputCls + ' font-mono'} value={fsQuota} onChange={(e) => { setJsonDirty(false); setFsQuota(e.target.value) }} />
                   </Field>
                 </div>
               )}
               {netOn && (
-                <div className="space-y-3 border-l-2 border-danger pl-4">
+                <div className="space-y-3 border-l-2 border-line-strong pl-4">
                   <Field label="allow_hosts (one per line; *.suffix or host:port; empty = any host, subject to selected policies)">
                     <textarea className={inputCls + ' font-mono text-xs'} rows={3} value={netHosts} onChange={(e) => { setJsonDirty(false); setNetHosts(e.target.value) }} />
                   </Field>
@@ -457,7 +458,7 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
                 </div>
               )}
               {extOn && (
-                <div className="space-y-2 border-l-2 border-warn pl-4">
+                <div className="space-y-2 border-l-2 border-line-strong pl-4">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-medium text-sec">extensions</span>
                     <button type="button" className="text-btn"
@@ -515,7 +516,7 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
                       <option value="vault">vault</option>
                       <option value="inline">inline</option>
                     </select>
-                    {r.auto && <span className="eyebrow whitespace-nowrap">via ext</span>}
+                    {r.auto && <span className="whitespace-nowrap text-[11px] text-mute">via ext</span>}
                     {r.kind === 'vault' ? (
                       <select className={inputCls + ' font-mono text-xs'} value={r.name} onChange={(e) => set({ name: e.target.value })}>
                         <option value="">pick…</option>
@@ -579,21 +580,16 @@ function NewInstanceDialog({ onClose }: { onClose: () => void }) {
 }
 
 export default function Instances() {
-  const qc = useQueryClient()
   const [showNew, setShowNew] = useState(false)
   const { data, isLoading } = useQuery({
     queryKey: ['instances'],
     queryFn: () => api.get<{ instances: Instance[] }>('/api/v1/instances'),
     refetchInterval: 15000,
   })
-  const del = useMutation({
-    mutationFn: (id: string) => api.del(`/api/v1/instances/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['instances'] }),
-  })
 
   return (
     <div>
-      <PageHeader index="01" section="Runtime" title="Instances"
+      <PageHeader title="Instances"
         actions={<Button variant="primary" onClick={() => setShowNew(true)}>New instance</Button>}>
         Each instance is a Starlark session with its own globals, VFS and policy snapshot. Only the capabilities granted in its spec exist.
       </PageHeader>
@@ -602,47 +598,37 @@ export default function Instances() {
         <table className="tbl">
           <thead>
             <tr>
-              <th>ID</th>
+              <th>Name</th>
               <th>Status</th>
-              <th>Capabilities</th>
-              <th>Labels</th>
+              <th>Allowed</th>
+              <th>Last active</th>
               <th>Created</th>
-              <th>Expires</th>
-              <th />
             </tr>
           </thead>
           <tbody>
-            {(data?.instances ?? []).map((i) => (
-              <tr key={i.id} className="row-hover">
-                <td className="font-mono text-xs">
-                  <Link to={`/instances/${i.id}`} className="link font-medium">{i.id}</Link>
-                </td>
-                <td><StatusBadge status={i.status} /></td>
-                <td>
-                  <span className="flex flex-wrap gap-1">
-                    {Object.entries(i.spec?.capabilities ?? {}).map(([k, v]) => (
-                      <Tag key={k}>{k === 'ext' ? `ext(${Object.keys(v ?? {}).join(', ')})` : k}</Tag>
-                    ))}
-                    {Object.keys(i.spec?.capabilities ?? {}).length === 0 && <span className="text-mute">—</span>}
-                  </span>
-                </td>
-                <td>
-                  <span className="flex flex-wrap gap-1">
-                    {Object.entries(i.labels ?? {}).map(([k, v]) => (
-                      <Tag key={k}>{k}={v}</Tag>
-                    ))}
-                  </span>
-                </td>
-                <td className="whitespace-nowrap text-xs text-sec">{fmtTime(i.created_at)}</td>
-                <td className="font-mono text-xs">{i.status === 'running' ? fmtCountdown(i.expires_at) : <span className="text-mute">—</span>}</td>
-                <td className="text-right">
-                  {i.status === 'running' && (
-                    <Button variant="danger" size="sm" onClick={() => del.mutate(i.id)}>Delete</Button>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {data && data.instances.length === 0 && <EmptyRow cols={7}>no instances</EmptyRow>}
+            {(data?.instances ?? []).map((i) => {
+              const name = instanceName(i)
+              return (
+                <tr key={i.id} className="row-hover">
+                  <td>
+                    <Link to={`/instances/${i.id}`} className="link font-medium">{name}</Link>
+                    {name !== i.id && <div className="mt-0.5 font-mono text-[11px] text-mute">{i.id}</div>}
+                  </td>
+                  <td>
+                    <div className="flex flex-col gap-1">
+                      <StatusText status={i.status} />
+                      {i.status === 'running' && <TimeLeft expiresAt={i.expires_at} />}
+                    </div>
+                  </td>
+                  <td className="max-w-[320px]">
+                    <span className="block truncate font-mono text-xs text-sec" title={allowedSummary(i.spec)}>{allowedSummary(i.spec)}</span>
+                  </td>
+                  <td className="whitespace-nowrap text-xs text-sec" title={fmtTime(i.last_active_at)}>{relTime(i.last_active_at)}</td>
+                  <td className="whitespace-nowrap text-xs text-sec">{fmtTime(i.created_at)}</td>
+                </tr>
+              )
+            })}
+            {data && data.instances.length === 0 && <EmptyRow cols={5}>no instances</EmptyRow>}
           </tbody>
         </table>
       </div>

@@ -1,33 +1,83 @@
 import React from 'react'
-import type { Decision, InstanceStatus } from '../api'
+import type { InstanceStatus } from '../api'
+import type { Outcome, RunBy } from '../activity'
+import { fmtCountdown } from '../format'
 
-type Tone = 'blue' | 'red' | 'yellow' | 'gray'
-type Shape = 'circle' | 'square' | 'triangle'
+// Three signals, each with one meaning and a redundant shape:
+//   denied  — red square:   the boundary refused something
+//   failed  — yellow triangle: a run or call errored, or time runs out
+//   you     — blue circle:  things you did, things you can act on
+// Normal outcomes (ok, running, allow) are never coloured.
+export type Signal = 'denied' | 'failed' | 'you'
 
-const toneShape: Record<Tone, Shape> = { blue: 'circle', red: 'square', yellow: 'triangle', gray: 'square' }
-const toneFill: Record<Tone, string> = { blue: 'fill-accent', red: 'fill-danger', yellow: 'fill-warn', gray: 'fill-none stroke-mute' }
+const signalFill: Record<Signal, string> = { denied: 'fill-danger', failed: 'fill-warn', you: 'fill-accent' }
+const signalText: Record<Signal, string> = { denied: 'text-danger', failed: 'text-warn-text', you: 'text-accent' }
 
-// Mark is the Bauhaus primitive used as a status glyph: circle, square or
-// triangle in one of the three signal colors.
-export function Mark({ tone, shape = toneShape[tone], className = '' }: { tone: Tone; shape?: Shape; className?: string }) {
-  const cls = toneFill[tone]
+export function SignalMark({ signal, className = '' }: { signal: Signal; className?: string }) {
   return (
     <svg viewBox="0 0 10 10" className={`h-2 w-2 shrink-0 ${className}`} aria-hidden>
-      {shape === 'circle' && <circle cx="5" cy="5" r="5" className={cls} />}
-      {shape === 'square' && <rect x="0.75" y="0.75" width="8.5" height="8.5" strokeWidth="1.5" className={cls} />}
-      {shape === 'triangle' && <polygon points="5,0 10,10 0,10" className={cls} />}
+      {signal === 'you' && <circle cx="5" cy="5" r="5" className={signalFill[signal]} />}
+      {signal === 'denied' && <rect x="0.75" y="0.75" width="8.5" height="8.5" className={signalFill[signal]} />}
+      {signal === 'failed' && <polygon points="5,0 10,10 0,10" className={signalFill[signal]} />}
     </svg>
   )
 }
 
-export function Logo({ className = '' }: { className?: string }) {
+// OutcomeBadge renders a call or run outcome; ok is neutral text, the
+// others carry their signal.
+export function OutcomeBadge({ outcome, label }: { outcome: Outcome; label?: string }) {
+  if (outcome === 'ok') {
+    return <span className="whitespace-nowrap text-xs text-sec">{label ?? 'ok'}</span>
+  }
   return (
-    <svg viewBox="0 0 34 10" className={`h-2.5 w-auto ${className}`} aria-hidden>
-      <circle cx="5" cy="5" r="5" className="fill-accent" />
-      <rect x="12" y="0" width="10" height="10" className="fill-danger" />
-      <polygon points="29,0 34,10 24,10" className="fill-warn" />
-    </svg>
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium ${signalText[outcome]}`}>
+      <SignalMark signal={outcome} />
+      {label ?? outcome}
+    </span>
   )
+}
+
+// RunByBadge marks who started a run; only "you" is a signal.
+export function RunByBadge({ runBy }: { runBy: RunBy }) {
+  if (runBy === 'you') {
+    return (
+      <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-accent">
+        <SignalMark signal="you" />
+        you
+      </span>
+    )
+  }
+  return <span className="whitespace-nowrap text-xs text-sec">{runBy === 'agent' ? 'agent' : '—'}</span>
+}
+
+const statusText: Record<InstanceStatus, string> = {
+  running: 'running',
+  expired: 'expired',
+  lost: 'lost',
+  deleted: 'deleted',
+}
+
+// StatusText renders the instance status plainly — running is the
+// common case and stays uncoloured.
+export function StatusText({ status }: { status: InstanceStatus }) {
+  return <span className="whitespace-nowrap text-xs text-sec">{statusText[status]}</span>
+}
+
+// TimeLeft renders the countdown to expiry; under two minutes it becomes
+// a failed/expiring signal.
+export function TimeLeft({ expiresAt }: { expiresAt: string }) {
+  const ms = new Date(expiresAt).getTime() - Date.now()
+  if (ms <= 0) return <span className="whitespace-nowrap text-xs text-mute">expired</span>
+  const text = fmtCountdown(expiresAt)
+  if (ms < 2 * 60 * 1000) {
+    return (
+      <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-warn-text">
+        <SignalMark signal="failed" />
+        {text} left
+      </span>
+    )
+  }
+  return <span className="whitespace-nowrap text-xs text-sec">{text} left</span>
 }
 
 export function Icon({ name, className = '' }: { name: 'preview' | 'download' | 'refresh' | 'back' | 'folder' | 'file' | 'code' | 'play' | 'stop' | 'desktop' | 'mobile' | 'chevron'; className?: string }) {
@@ -48,39 +98,12 @@ export function Icon({ name, className = '' }: { name: 'preview' | 'download' | 
   return <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" className={`h-4 w-4 shrink-0 ${className}`} aria-hidden="true">{paths[name]}</svg>
 }
 
-export function Badge({ tone, children }: { tone: Tone; children: React.ReactNode }) {
-  const text = { blue: 'text-ink', red: 'text-danger', yellow: 'text-warn-text', gray: 'text-mute' }[tone]
-  return (
-    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium ${text}`}>
-      <Mark tone={tone} />
-      {children}
-    </span>
-  )
-}
-
 export function Tag({ children }: { children: React.ReactNode }) {
   return <span className="inline-block border border-line px-1.5 py-px font-mono text-[11px] text-sec">{children}</span>
 }
 
-const statusTones: Record<InstanceStatus, Tone> = {
-  running: 'blue',
-  expired: 'yellow',
-  lost: 'red',
-  deleted: 'gray',
-}
-
-export function StatusBadge({ status }: { status: InstanceStatus }) {
-  return <Badge tone={statusTones[status]}>{status}</Badge>
-}
-
-const decisionTones: Record<Decision, Tone> = { allow: 'blue', deny: 'red' }
-
-export function DecisionBadge({ decision }: { decision: Decision }) {
-  return <Badge tone={decisionTones[decision]}>{decision}</Badge>
-}
-
 export function Button(
-  props: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'danger'; size?: 'sm' },
+  props: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary'; size?: 'sm' },
 ) {
   const { variant, size, className, ...rest } = props
   const base =
@@ -89,9 +112,7 @@ export function Button(
   const v =
     variant === 'primary'
       ? 'border-accent bg-accent text-white hover:border-ink hover:bg-ink hover:text-paper'
-      : variant === 'danger'
-        ? 'border-danger/60 text-danger hover:border-danger hover:bg-danger hover:text-white'
-        : 'border-ink/80 text-ink hover:bg-ink hover:text-paper'
+      : 'border-ink/80 text-ink hover:bg-ink hover:text-paper'
   return <button className={base + sz + v + (className ? ' ' + className : '')} {...rest} />
 }
 
@@ -106,11 +127,9 @@ export function Field({ label, children }: { label: string; children: React.Reac
 
 export const inputCls = 'input'
 
-// PageHeader mirrors the deck's slide header: a numbered eyebrow, a
-// strong title, an optional lede, and actions aligned to the baseline.
-export function PageHeader({ index, section, title, children, actions }: {
-  index: string
-  section: string
+// PageHeader: a strong title, an optional lede, actions at the baseline.
+// No numbers, no eyebrows — hierarchy comes from the content.
+export function PageHeader({ title, children, actions }: {
   title: React.ReactNode
   children?: React.ReactNode
   actions?: React.ReactNode
@@ -118,8 +137,7 @@ export function PageHeader({ index, section, title, children, actions }: {
   return (
     <div className="mb-8 flex flex-wrap items-end gap-x-8 gap-y-4">
       <div className="min-w-0 flex-1">
-        <div className="eyebrow"><span className="text-accent">{index}</span> · {section}</div>
-        <h1 className="mt-3 text-[32px] font-semibold leading-[1.1] tracking-tight text-ink">{title}</h1>
+        <h1 className="text-[32px] font-semibold leading-[1.1] tracking-tight text-ink">{title}</h1>
         {children && <p className="mt-3 max-w-3xl text-[15px] leading-relaxed text-sec">{children}</p>}
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
@@ -137,9 +155,11 @@ export function SectionTitle({ children, aside, className = '' }: { children: Re
   )
 }
 
-export function Notice({ tone = 'gray', children }: { tone?: Tone; children: React.ReactNode }) {
-  const bar = { blue: 'border-accent', red: 'border-danger', yellow: 'border-warn', gray: 'border-line-strong' }[tone]
-  const text = tone === 'red' ? 'text-danger' : 'text-body'
+// Notice tones follow the signals: 'warning' is yellow (failed),
+// everything else a plain ruled box. Red is reserved for denials.
+export function Notice({ tone = 'neutral', children }: { tone?: 'warning' | 'neutral'; children: React.ReactNode }) {
+  const bar = { warning: 'border-warn', neutral: 'border-line-strong' }[tone]
+  const text = tone === 'warning' ? 'text-warn-text' : 'text-body'
   return <div className={`border-l-4 bg-surface px-4 py-3 text-sm ${bar} ${text}`}>{children}</div>
 }
 
@@ -147,7 +167,7 @@ export function EmptyRow({ cols, children }: { cols: number; children: React.Rea
   return (
     <tr>
       <td colSpan={cols} className="!py-10 text-center text-sm text-mute">
-        <span className="inline-flex items-center gap-2"><Mark tone="gray" />{children}</span>
+        {children}
       </td>
     </tr>
   )
@@ -156,11 +176,7 @@ export function EmptyRow({ cols, children }: { cols: number; children: React.Rea
 export function Loading({ label = 'loading' }: { label?: string }) {
   return (
     <div className="flex items-center gap-3 text-sm text-mute">
-      <span className="flex gap-1">
-        <Mark tone="blue" className="animate-pulse" />
-        <Mark tone="red" className="animate-pulse [animation-delay:150ms]" />
-        <Mark tone="yellow" className="animate-pulse [animation-delay:300ms]" />
-      </span>
+      <span className="inline-block h-3 w-3 animate-spin border-2 border-mute border-t-transparent rounded-full" aria-hidden />
       {label}
     </div>
   )
@@ -176,8 +192,10 @@ export function Modal({ title, onClose, children, footer, wide }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div
-        className={`flex max-h-[90vh] w-full flex-col border border-ink bg-paper shadow-[8px_8px_0_0_rgb(var(--accent))] ${wide ? 'max-w-5xl' : 'max-w-xl'}`}
+        className={`flex max-h-[90vh] w-full flex-col border border-ink bg-paper shadow-lg ${wide ? 'max-w-5xl' : 'max-w-xl'}`}
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label={title}
       >
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
           <h2 className="text-lg font-semibold tracking-tight text-ink">{title}</h2>
@@ -188,30 +206,4 @@ export function Modal({ title, onClose, children, footer, wide }: {
       </div>
     </div>
   )
-}
-
-export function fmtTime(iso: string) {
-  return new Date(iso).toLocaleString()
-}
-
-export function fmtCountdown(iso: string) {
-  const ms = new Date(iso).getTime() - Date.now()
-  if (ms <= 0) return 'expired'
-  const m = Math.floor(ms / 60000)
-  if (m < 60) return `${m}m`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h${m % 60}m`
-  return `${Math.floor(h / 24)}d${h % 24}h`
-}
-
-export function fmtBytes(n: number) {
-  if (n < 1024) return `${n} B`
-  const units = ['KiB', 'MiB', 'GiB', 'TiB']
-  let v = n / 1024
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i++
-  }
-  return `${v.toFixed(v < 10 ? 2 : 1)} ${units[i]}`
 }

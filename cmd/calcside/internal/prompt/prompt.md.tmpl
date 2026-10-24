@@ -43,7 +43,7 @@ Read env vars in Starlark via `env.get("NAME")`; available keys: {{join .EnvKeys
 {{- end}}
 
 ### Errors and limits
-- `policy_denied` — a security policy blocked the action. Do NOT retry the same action; explain to the user what was blocked.
+- `policy_denied` — the instance's settings (e.g. a host not in `allow_hosts`) or a security policy blocked the action. Do NOT retry the same action; explain to the user what was blocked.
 - `step_limit` / `timeout` — simplify the code or split the work.
 - `syntax` / `runtime` / `out_of_scope` / `memory_limit` — fix the code or reduce memory and try again.
 {{- if .LimitBits}}

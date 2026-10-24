@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, APIKey } from '../api'
-import { Badge, Button, EmptyRow, Field, Modal, Notice, PageHeader, fmtTime, inputCls } from '../components/ui'
+import { Button, EmptyRow, Field, Modal, Notice, PageHeader, inputCls } from '../components/ui'
+import { fmtTime } from '../format'
 
 export default function Keys() {
   const qc = useQueryClient()
@@ -35,7 +36,7 @@ export default function Keys() {
 
   return (
     <div>
-      <PageHeader index="03" section="Access" title="API Keys"
+      <PageHeader title="API keys"
         actions={<Button variant="primary" onClick={() => { setShowNew(true); setSecret(''); setName('') }}>New key</Button>}>
         Bearer tokens (<code className="font-mono text-ink">cs_…</code>) for the SDK and agents. The secret is shown once at creation.
       </PageHeader>
@@ -51,9 +52,9 @@ export default function Keys() {
                 <td className="font-mono text-xs">{k.prefix}…</td>
                 <td className="whitespace-nowrap text-xs text-sec">{fmtTime(k.created_at)}</td>
                 <td className="whitespace-nowrap text-xs text-sec">{k.expires_at ? fmtTime(k.expires_at) : 'never'}</td>
-                <td>{k.revoked_at ? <Badge tone="gray">revoked</Badge> : <Badge tone="blue">active</Badge>}</td>
+                <td className="text-xs">{k.revoked_at ? <span className="text-mute">revoked</span> : <span className="text-sec">active</span>}</td>
                 <td className="text-right">
-                  {!k.revoked_at && <Button variant="danger" size="sm" onClick={() => revoke.mutate(k.id)}>Revoke</Button>}
+                  {!k.revoked_at && <Button size="sm" onClick={() => revoke.mutate(k.id)}>Revoke</Button>}
                 </td>
               </tr>
             ))}
@@ -75,7 +76,7 @@ export default function Keys() {
             </div>
           ) : (
             <div className="space-y-4">
-              <Notice tone="yellow">
+              <Notice tone="warning">
                 <span className="font-medium text-ink">Copy this secret now — it will never be shown again.</span>
               </Notice>
               <div className="flex gap-2">

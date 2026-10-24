@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError, Secret } from '../api'
-import { Button, EmptyRow, Field, Modal, Notice, PageHeader, Tag, fmtTime, inputCls } from '../components/ui'
+import { Button, EmptyRow, Field, Modal, Notice, PageHeader, Tag, inputCls } from '../components/ui'
+import { fmtTime } from '../format'
 
 function SecretForm({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient()
@@ -32,7 +33,7 @@ function SecretForm({ onClose }: { onClose: () => void }) {
           <textarea className={inputCls + ' font-mono text-xs'} rows={3} value={domains}
             onChange={(e) => setDomains(e.target.value)} placeholder="api.github.com" />
         </Field>
-        {err && <p className="text-xs text-danger">{err}</p>}
+        {err && <p className="text-xs text-warn-text">{err}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="primary" disabled={!name || !value || create.isPending} onClick={() => create.mutate()}>Create</Button>
@@ -65,7 +66,7 @@ function EditDomains({ s, onClose }: { s: Secret; onClose: () => void }) {
         <Field label="Rotate value (optional — write-only)">
           <input type="password" className={inputCls + ' font-mono'} value={rotate} onChange={(e) => setRotate(e.target.value)} placeholder="leave blank to keep current value" autoComplete="new-password" />
         </Field>
-        {err && <p className="text-xs text-danger">{err}</p>}
+        {err && <p className="text-xs text-warn-text">{err}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>Save</Button>
@@ -93,12 +94,12 @@ export default function Secrets() {
 
   return (
     <div>
-      <PageHeader index="04" section="Vault" title="Secrets"
+      <PageHeader title="Secrets"
         actions={!disabled && <Button variant="primary" onClick={() => setShowNew(true)}>New secret</Button>}>
         Values are write-only. Use <code className="font-mono text-ink">{'{{secrets.NAME}}'}</code> in net.get/post URL, headers or body — the server injects the value at send time and scrubs it from responses.
       </PageHeader>
       {disabled && (
-        <Notice tone="yellow">
+        <Notice tone="warning">
           Secrets vault is disabled on this server (no <code>--secret-key</code>). Inline per-instance secrets still work.
         </Notice>
       )}
@@ -120,7 +121,7 @@ export default function Secrets() {
                   <td className="whitespace-nowrap text-xs text-sec">{fmtTime(s.updated_at)}</td>
                   <td className="space-x-2 whitespace-nowrap text-right">
                     <Button size="sm" onClick={() => setEditing(s)}>Edit</Button>
-                    <Button variant="danger" size="sm" onClick={() => del.mutate(s.id)}>Delete</Button>
+                    <Button size="sm" onClick={() => del.mutate(s.id)}>Delete</Button>
                   </td>
                 </tr>
               ))}

@@ -307,6 +307,34 @@ func TestGetExecution(t *testing.T) {
 	if m["execution"].(map[string]any)["code"] != nil {
 		t.Fatal("execution object should not embed code")
 	}
+	if m["output"] != "hi\n" || m["output_truncated"] != false || m["error"] != nil {
+		t.Fatalf("execution detail fields: %v", m)
+	}
+	if m["execution"].(map[string]any)["via"] != "api_key" {
+		t.Fatalf("via: %v", m["execution"])
+	}
+
+	// a run by the console session reports via=session
+	code, m, _ = e.req("POST", "/api/v1/instances/"+instID+"/exec", `{"code":"print('sess')"}`, csrf, cookies)
+	if code != 200 {
+		t.Fatalf("session exec: %d %v", code, m)
+	}
+	code, m, _ = e.req("GET", "/api/v1/executions/"+m["exec_id"].(string), "", bearer, nil)
+	if code != 200 || m["execution"].(map[string]any)["via"] != "session" {
+		t.Fatalf("session via: %d %v", code, m)
+	}
+
+	// a failed run reports the structured error
+	code, m, _ = e.req("POST", "/api/v1/instances/"+instID+"/exec", `{"code":"fail('boom')"}`, bearer, nil)
+	if code != 200 {
+		t.Fatalf("failing exec: %d %v", code, m)
+	}
+	code, m, _ = e.req("GET", "/api/v1/executions/"+m["exec_id"].(string), "", bearer, nil)
+	errObj, _ := m["error"].(map[string]any)
+	if code != 200 || errObj == nil || errObj["type"] != "runtime" ||
+		!strings.Contains(errObj["message"].(string), "boom") {
+		t.Fatalf("error detail: %d %v", code, m)
+	}
 
 	cookiesB := login(e, "b@x.com")
 	_, m, _ = e.req("POST", "/api/v1/keys", `{"name":"k"}`, csrf, cookiesB)

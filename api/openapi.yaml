@@ -1201,6 +1201,9 @@ components:
         duration_ms: { type: integer, format: int64 }
         steps: { type: integer, format: int64 }
         output_bytes: { type: integer, format: int64 }
+        via:
+          $ref: '#/components/schemas/AuthKind'
+          description: how the run was authenticated (absent for executions recorded before this field existed)
         created_at: { type: string, format: date-time }
     ExecutionsResponse:
       type: object
@@ -1210,10 +1213,16 @@ components:
           items: { $ref: '#/components/schemas/Execution' }
     ExecutionDetail:
       type: object
-      required: [execution, code]
+      required: [execution, code, output, output_truncated, error]
       properties:
         execution: { $ref: '#/components/schemas/Execution' }
         code: { type: string, description: full submitted code (empty for executions recorded before this field existed) }
+        output: { type: string, description: secret-scrubbed run output, capped at 64 KiB }
+        output_truncated: { type: boolean, description: true when output was capped }
+        error:
+          $ref: '#/components/schemas/ExecError'
+          nullable: true
+          description: structured failure; null when the run completed without error
     AuditEvent:
       type: object
       required: [id, ts, user_id, instance_id, exec_id, capability, op, args, phase, decision, reason, error, duration_ms]

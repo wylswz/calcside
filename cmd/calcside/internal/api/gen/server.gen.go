@@ -573,13 +573,21 @@ type Execution struct {
 	Status      ExecStatus     `json:"status"`
 	Steps       int64          `json:"steps"`
 	UserId      string         `json:"user_id"`
+	Via         *AuthKind      `json:"via,omitempty"`
 }
 
 // ExecutionDetail defines model for ExecutionDetail.
 type ExecutionDetail struct {
 	// Code full submitted code (empty for executions recorded before this field existed)
 	Code      string    `json:"code"`
+	Error     ExecError `json:"error"`
 	Execution Execution `json:"execution"`
+
+	// Output secret-scrubbed run output
+	Output string `json:"output"`
+
+	// OutputTruncated true when output was capped
+	OutputTruncated bool `json:"output_truncated"`
 }
 
 // ExecutionsResponse defines model for ExecutionsResponse.

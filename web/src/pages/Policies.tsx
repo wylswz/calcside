@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { api, Policy } from '../api'
-import { Button, EmptyRow, Field, Modal, PageHeader, fmtTime, inputCls, Tag } from '../components/ui'
+import { Button, EmptyRow, Field, Modal, PageHeader, inputCls, Tag } from '../components/ui'
+import { fmtTime } from '../format'
 import { cmTheme } from '../components/codemirror'
 import { useRegoEditor } from '../components/editor'
 
@@ -67,12 +68,12 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
           <Field label="Name (referenced by spec.policies)">
             <input className={inputCls + ' font-mono'} value={name} onChange={(e) => setName(e.target.value)} placeholder="deny_net_hosts" />
           </Field>
-          {name && !nameRe.test(name) && <p className="text-xs text-danger">letters, digits, _ . - (max 64), starting with a letter or digit; builtin. is reserved</p>}
+          {name && !nameRe.test(name) && <p className="text-xs text-warn-text">letters, digits, _ . - (max 64), starting with a letter or digit; builtin. is reserved</p>}
           <div className="border border-ink">
             <div className="flex items-center gap-3 border-b border-ink px-3 py-1.5">
-              <span className="eyebrow">Rego</span>
+              <span className="text-[11px] font-medium uppercase tracking-label text-mute">Rego</span>
               {validation && (
-                <span className={`ml-auto truncate text-xs ${validation.valid ? 'text-accent' : 'text-danger'}`}>
+                <span className={`ml-auto truncate text-xs ${validation.valid ? 'text-ink' : 'text-warn-text'}`}>
                   {validation.valid ? '● valid' : validation.error}
                 </span>
               )}
@@ -83,10 +84,10 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
               {editor.error && <span className="ml-3 text-warn-text">Completion metadata unavailable</span>}
             </div>
           </div>
-          {err && <p className="text-xs text-danger">{err}</p>}
+          {err && <p className="text-xs text-warn-text">{err}</p>}
         </div>
         <div className="min-w-0">
-          <div className="eyebrow mb-2">Completion context</div>
+          <div className="mb-2 text-[11px] font-medium uppercase tracking-label text-mute">Completion context</div>
           <div className="mb-2 grid grid-cols-2 gap-2">
             <Field label="Capability">
               <select className={inputCls} value={capability} onChange={(e) => { setCapability(e.target.value); setOp('') }}>
@@ -102,7 +103,7 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
             </Field>
           </div>
           <p className="mb-4 text-xs text-mute">Select an operation for args / result field suggestions. This only changes completion hints; Validate compiles the policy, it does not execute it.</p>
-          <div className="eyebrow mb-2">Input schema</div>
+          <div className="mb-2 text-[11px] font-medium uppercase tracking-label text-mute">Input schema</div>
           <pre className="pre mb-4 max-h-64 text-sec">{editor.fields.length ? editor.fields.map((s) => `${s.name}  ${s.detail ?? ''}`).join('\n') : editor.error ? 'Schema unavailable' : 'Loading schema…'}</pre>
           <pre className="pre max-h-64 text-sec">{POLICY_DOC}</pre>
         </div>
@@ -126,7 +127,7 @@ export default function Policies() {
 
   return (
     <div>
-      <PageHeader index="02" section="Governance" title="Policies"
+      <PageHeader title="Policies"
         actions={<Button variant="primary" onClick={() => setShowNew(true)}>New policy</Button>}>
         Built-in and Rego policies share one selection list at instance creation (spec.policies). Built-in policies run native runtime checks and are read-only; default policies are preselected, not mandatory. Rego policies are snapshotted at creation. Server policies (--policy-dir) always apply.
       </PageHeader>
@@ -148,7 +149,7 @@ export default function Policies() {
                 <td className="space-x-2 whitespace-nowrap text-right">
                   {p.kind === 'builtin' ? <span className="text-xs text-mute">Read-only</span> : <>
                     <Button size="sm" onClick={() => setEditing(p)}>Edit</Button>
-                    <Button variant="danger" size="sm" onClick={() => del.mutate(p.id)}>Delete</Button>
+                    <Button size="sm" onClick={() => del.mutate(p.id)}>Delete</Button>
                   </>}
                 </td>
               </tr>

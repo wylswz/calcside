@@ -16,6 +16,8 @@ import (
 	"calcside/internal/hostmatch"
 	"calcside/internal/runtime"
 	"calcside/internal/types"
+
+	"go.starlark.net/starlark"
 )
 
 func newClient(t *testing.T, cfg Config) *client {
@@ -97,6 +99,41 @@ func TestHostNotInAllowlistDenied(t *testing.T) {
 	_, err := c.do(context.Background(), "GET", "http://other.com/", "", nil, "")
 	if err == nil || !strings.Contains(err.Error(), "allow_hosts") {
 		t.Fatalf("expected allowlist denial, got %v", err)
+	}
+	var denied *capability.DeniedError
+	if !errors.As(err, &denied) || denied.Phase != types.PhaseBefore {
+		t.Fatalf("expected DeniedError/before, got %v", err)
+	}
+}
+
+type recObserver struct{ recs []capability.Record }
+
+func (o *recObserver) Observe(r capability.Record) { o.recs = append(o.recs, r) }
+
+// An allow_hosts miss is a refusal by the instance's own settings: the
+// gate must record it as a denial (decision=deny, phase=before), not an
+// allowed call that happened to error.
+func TestAllowHostsMissRecordsDeny(t *testing.T) {
+	c := newClient(t, Config{AllowHosts: []string{"example.com"}})
+	obs := &recObserver{}
+	g := capability.NewGate(capability.GateOwner{InstanceID: "i1"}, nil, obs)
+	g.Arm(capability.ExecContext{ExecID: "e1", InstanceID: "i1"})
+	_, err := g.Invoke(context.Background(), types.CapNet, OpGet,
+		map[string]any{"url": "http://other.com/"},
+		func(ctx context.Context, _ map[string]any) (starlark.Value, map[string]any, error) {
+			_, err := c.do(ctx, "GET", "http://other.com/", "", nil, "")
+			return nil, nil, err
+		})
+	if err == nil || !strings.Contains(err.Error(), "not in allow_hosts") {
+		t.Fatalf("expected allow_hosts denial, got %v", err)
+	}
+	if len(obs.recs) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(obs.recs))
+	}
+	rec := obs.recs[0]
+	if rec.Decision != types.DecisionDeny || rec.Phase != types.PhaseBefore ||
+		!strings.Contains(rec.Reason, "not in allow_hosts") {
+		t.Fatalf("bad record: %+v", rec)
 	}
 }
 

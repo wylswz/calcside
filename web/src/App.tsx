@@ -11,7 +11,7 @@ import Policies from './pages/Policies'
 import Audit from './pages/Audit'
 import Secrets from './pages/Secrets'
 import Profile from './pages/Profile'
-import { Button, Loading, Logo, Mark, Notice } from './components/ui'
+import { Button, Loading, Notice, SignalMark } from './components/ui'
 
 function useMe(onBackendRetrying: (retrying: boolean) => void) {
   return useQuery({
@@ -25,12 +25,16 @@ function useMe(onBackendRetrying: (retrying: boolean) => void) {
   })
 }
 
-const nav = [
+// Work pages first; setup pages visually separated — you supervise in
+// the first group, you configure in the second.
+const navWork = [
   { to: '/', label: 'Instances', end: true },
-  { to: '/policies', label: 'Policies' },
-  { to: '/keys', label: 'API Keys' },
-  { to: '/secrets', label: 'Secrets' },
   { to: '/audit', label: 'Audit' },
+]
+const navSetup = [
+  { to: '/policies', label: 'Policies' },
+  { to: '/secrets', label: 'Secrets' },
+  { to: '/keys', label: 'API keys' },
 ]
 
 const navCls = ({ isActive }: { isActive: boolean }) =>
@@ -57,7 +61,7 @@ export default function App() {
     return (
       <div className="flex min-h-screen items-center justify-center p-8">
         <div className="w-full max-w-md">
-          <Notice tone="red">
+          <Notice tone="warning">
             <div className="mb-1 font-semibold">dev mode — failed to load anonymous session</div>
             {error instanceof Error ? error.message : 'unknown error'}
           </Notice>
@@ -86,14 +90,18 @@ export default function App() {
     <div className="min-h-screen">
       <header className="sticky top-0 z-40 border-b border-ink bg-paper/95 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-7xl items-stretch gap-10 px-6">
-          <Link to="/" className="flex items-center gap-2.5">
-            <Logo />
+          <Link to="/" className="flex items-center">
             <span className="text-[15px] font-semibold tracking-tight text-ink">calcside</span>
           </Link>
           <nav className="flex flex-1 items-stretch gap-7 overflow-x-auto">
-            {nav.map((n, i) => (
+            {navWork.map((n) => (
               <NavLink key={n.to} to={n.to} end={n.end} className={navCls}>
-                <span className="font-mono text-[10px] text-mute">{String(i + 1).padStart(2, '0')}</span>
+                {n.label}
+              </NavLink>
+            ))}
+            <span className="mx-1 self-center border-l border-line-strong" aria-hidden />
+            {navSetup.map((n) => (
+              <NavLink key={n.to} to={n.to} className={navCls}>
                 {n.label}
               </NavLink>
             ))}
@@ -101,7 +109,7 @@ export default function App() {
           <div className="flex items-center gap-4">
             {dev && (
               <span className="inline-flex items-center gap-1.5 border border-warn px-2 py-0.5 text-[11px] font-medium uppercase tracking-label text-warn-text">
-                <Mark tone="yellow" />dev · anonymous
+                <SignalMark signal="failed" />dev · anonymous
               </span>
             )}
             <Link to="/profile" className="text-xs text-sec hover:text-ink" title="Profile">{user?.username || user?.email}</Link>

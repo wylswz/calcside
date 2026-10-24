@@ -63,6 +63,7 @@ type Execution struct {
 	DurationMs  int64               `json:"duration_ms"`
 	Steps       uint64              `json:"steps"`
 	OutputBytes int64               `json:"output_bytes"`
+	Via         types.AuthKind      `json:"via,omitempty"`
 	CreatedAt   time.Time           `json:"created_at"`
 }
 
@@ -71,7 +72,7 @@ func NewExecution(e *store.Execution) Execution {
 		ID: e.ID, InstanceID: e.InstanceID, UserID: e.UserID,
 		CodeSHA256: e.CodeSHA256, CodeSnippet: e.CodeSnippet,
 		Status: e.Status, ErrorType: e.ErrorType, DurationMs: e.DurationMs,
-		Steps: e.Steps, OutputBytes: e.OutputBytes, CreatedAt: e.CreatedAt,
+		Steps: e.Steps, OutputBytes: e.OutputBytes, Via: e.Via, CreatedAt: e.CreatedAt,
 	}
 }
 
@@ -88,10 +89,26 @@ type ExecutionsEnvelope struct {
 }
 
 // ExecutionDetail is the GET /executions/{id} body: the record plus the
-// full code.
+// detail-only fields (full code, output, error).
 type ExecutionDetail struct {
-	Execution Execution `json:"execution"`
-	Code      string    `json:"code"`
+	Execution       Execution  `json:"execution"`
+	Code            string     `json:"code"`
+	Output          string     `json:"output"`
+	OutputTruncated bool       `json:"output_truncated"`
+	Error           *ExecError `json:"error"`
+}
+
+// NewExecutionDetail builds the detail body; Error is null for runs that
+// completed without an error (status ok).
+func NewExecutionDetail(e *store.Execution) ExecutionDetail {
+	d := ExecutionDetail{
+		Execution: NewExecution(e), Code: e.Code,
+		Output: e.Output, OutputTruncated: e.OutputTruncated,
+	}
+	if e.Status != types.ExecOK {
+		d.Error = &ExecError{Type: e.ErrorType, Message: e.ErrorMessage, Backtrace: e.ErrorBacktrace}
+	}
+	return d
 }
 
 // ExecResult is the exec response body; Error is a pointer without

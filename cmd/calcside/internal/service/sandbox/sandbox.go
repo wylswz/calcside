@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+	"unicode/utf8"
 
 	"calcside/cmd/calcside/internal/service"
 	"calcside/internal/capability"
@@ -33,6 +34,9 @@ type ExecView = runtime.ExecResult
 const MaxCodeBytes = 256 << 10
 
 const snippetBytes = 2 << 10
+
+// storedOutputBytes bounds output/error detail kept per execution.
+const storedOutputBytes = 64 << 10
 
 // SecretResolver turns a spec's secret entries into the plaintext set
 // shipped to the execution tier plus the descriptors persisted with the
@@ -365,16 +369,35 @@ func (s *Service) recordExecution(ctx context.Context, in *store.Instance, a ser
 	}
 	status := types.ExecOK
 	var errType types.ExecErrorType
+	var errMsg, errTrace string
 	if res.Error != nil {
 		status = types.ExecError
 		errType = res.Error.Type
+		errMsg, _ = capStored(res.Error.Message)
+		errTrace, _ = capStored(res.Error.Backtrace)
 	}
+	output, outputTruncated := capStored(res.Output)
 	_ = s.st.CreateExecution(ctx, &store.Execution{
 		ID: res.ExecID, InstanceID: in.ID, UserID: a.UserID,
 		CodeSHA256: hex.EncodeToString(sum[:]), CodeSnippet: snippet, Code: code,
 		Status: status, ErrorType: errType, DurationMs: res.DurationMs,
 		Steps: res.Steps, OutputBytes: int64(len(res.Output)),
+		Via: a.Kind, Output: output, OutputTruncated: outputTruncated,
+		ErrorMessage: errMsg, ErrorBacktrace: errTrace,
 	})
+}
+
+// capStored bounds stored detail text at storedOutputBytes, cutting at a
+// UTF-8 rune boundary so the kept prefix is always valid text.
+func capStored(s string) (string, bool) {
+	if len(s) <= storedOutputBytes {
+		return s, false
+	}
+	cut := storedOutputBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut], true
 }
 
 func (s *Service) ListExecutions(ctx context.Context, a service.Actor, instanceID string, limit int) ([]*store.Execution, error) {
