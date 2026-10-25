@@ -15,6 +15,7 @@ import (
 	auditsvc "calcside/cmd/calcside/internal/service/audit"
 	"calcside/cmd/calcside/internal/service/catalog"
 	"calcside/cmd/calcside/internal/service/iam"
+	llmprovidersvc "calcside/cmd/calcside/internal/service/llmprovider"
 	policysvc "calcside/cmd/calcside/internal/service/policy"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/vault"
@@ -35,9 +36,10 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		access.New,
 		wire.Value(time.Now), iam.New,
 		policysvc.New,
+		provideExtOptions, llmprovidersvc.New,
 		workspacesvc.New, auditsvc.New, provideExtCatalog, catalog.New,
 		provideAuth, provideBasic, provideAnonymous, provideGoogle, provideWeb, provideArtifacts,
-		wire.Struct(new(api.Deps), "IAM", "Vault", "Policy", "Audit", "Catalog", "Sandbox", "Workspace", "Access", "Auth", "Basic", "Web", "Anonymous", "Previews"),
+		wire.Struct(new(api.Deps), "IAM", "Vault", "Policy", "Audit", "Catalog", "Sandbox", "Workspace", "Access", "LLMProvider", "Auth", "Basic", "Web", "Anonymous", "Previews"),
 		provideServer, wire.Struct(new(application), "*"),
 	)
 	return nil, nil, nil

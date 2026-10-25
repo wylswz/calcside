@@ -9,6 +9,7 @@ import (
 	"time"
 
 	capext "calcside/internal/capability/ext"
+	"calcside/internal/types"
 )
 
 type Catalog struct{ opts *capext.Options }
@@ -61,15 +62,35 @@ func (f *Catalog) Available() capext.Catalog {
 				slog.Warn("ext: skipping catalog entry", "dir", dir, "err", err)
 				continue
 			}
+			// The wire shape promises arrays; a manifest may omit a
+			// section (e.g. the llm capability ext has no config).
+			models := m.Manifest.Models
+			if models == nil {
+				models = []string{}
+			}
+			deps := m.Manifest.Dependencies
+			if deps == nil {
+				deps = []types.CapabilityName{}
+			}
+			ops := m.Manifest.Ops
+			if ops == nil {
+				ops = []capext.OpSpec{}
+			}
+			cfg := m.Manifest.Config
+			if cfg == nil {
+				cfg = []capext.ConfigField{}
+			}
 			c.Extensions = append(c.Extensions, capext.Info{
 				Source:       source,
 				Name:         m.Manifest.Name,
 				Version:      m.Manifest.Version,
 				Description:  m.Manifest.Description,
 				Icon:         packagedIcon(m),
-				Dependencies: m.Manifest.Dependencies,
-				Ops:          m.Manifest.Ops,
-				Config:       m.Manifest.Config,
+				Interface:    m.Manifest.Interface,
+				Models:       models,
+				Dependencies: deps,
+				Ops:          ops,
+				Config:       cfg,
 			})
 		}
 	}

@@ -1,0 +1,23 @@
+name: llm_gemini
+version: 0.1.0
+description: Gemini provider — generateContent with responseSchema structured output.
+interface: llm
+models: [gemini-4-argon, gemini-3.8-flash, gemini-3.7-flash, gemini-3.5-flash, gemini-3.5-flash-lite]
+icon: icon.png
+dependencies: [net]
+ops:
+  - name: respond
+    doc: Completion; returns {text, finish_reason, usage:{input_tokens,output_tokens}}
+    params: [messages, model, options]
+  - name: structured
+    doc: Completion parsed as JSON conforming to schema; returns the parsed value
+    params: [messages, schema, model]
+config:
+  - name: base_url
+    type: string
+    doc: Gemini API base URL
+    default: https://generativelanguage.googleapis.com
+  - name: api_key
+    type: secret
+    doc: Gemini API key (secret reference)
+    default: "{{secrets.GEMINI_API_KEY}}"

@@ -257,6 +257,10 @@ func provideArtifacts(cfg config.Config, sbx *sandbox.Service) (*api.ArtifactPre
 	return previews, previews.Close, nil
 }
 
-func provideExtCatalog(cfg config.Config) capext.CatalogProvider {
-	return extensions.NewCatalog(capext.Options{LocalRoots: cfg.ExtLocalRoots, AllowSources: cfg.ExtAllowSources, CacheDir: cfg.ExtCacheDir, FetchTimeout: cfg.ExtFetchTimeout})
+func provideExtOptions(cfg config.Config) *capext.Options {
+	return &capext.Options{LocalRoots: cfg.ExtLocalRoots, AllowSources: cfg.ExtAllowSources, CacheDir: cfg.ExtCacheDir, FetchTimeout: cfg.ExtFetchTimeout}
+}
+
+func provideExtCatalog(opts *capext.Options) capext.CatalogProvider {
+	return extensions.NewCatalog(*opts)
 }

@@ -1,0 +1,21 @@
+name: upstash_redis
+version: 0.1.0
+description: Redis over the Upstash REST API — arbitrary commands and pipelines.
+icon: icon.png
+dependencies: [net]
+ops:
+  - name: command
+    doc: Run one Redis command as an argument list, e.g. ["SET","k","v"]; returns the result field
+    params: [args]
+  - name: pipeline
+    doc: Run commands atomically as a list of argument lists; returns list of results
+    params: [commands]
+config:
+  - name: host
+    type: string
+    doc: Upstash Redis REST host, e.g. example-12345.upstash.io (required)
+    default: ""
+  - name: token
+    type: secret
+    doc: Upstash Redis REST token (secret reference)
+    default: "{{secrets.UPSTASH_REDIS_TOKEN}}"

@@ -13,6 +13,7 @@ import (
 	"calcside/cmd/calcside/internal/service/audit"
 	"calcside/cmd/calcside/internal/service/catalog"
 	"calcside/cmd/calcside/internal/service/iam"
+	"calcside/cmd/calcside/internal/service/llmprovider"
 	"calcside/cmd/calcside/internal/service/policy"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/vault"
@@ -74,9 +75,11 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	iamService := iam.New(store, checker, sandboxService, int2, v2)
 	policyService := policy.New(store, checker)
 	auditService := audit.New(store, checker)
-	catalogProvider := provideExtCatalog(cfg)
+	extOptions := provideExtOptions(cfg)
+	catalogProvider := provideExtCatalog(extOptions)
 	catalogService := catalog.New(registry, catalogProvider)
 	workspaceService := workspace.New(store, checker)
+	llmproviderService := llmprovider.New(store, checker, extOptions)
 	authService := provideAuth(cfg, store)
 	basicLogin, err := provideBasic(ctx, cfg, authService)
 	if err != nil {
@@ -104,19 +107,20 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		return nil, nil, err
 	}
 	deps := api.Deps{
-		IAM:       iamService,
-		Vault:     service,
-		Policy:    policyService,
-		Audit:     auditService,
-		Catalog:   catalogService,
-		Sandbox:   sandboxService,
-		Workspace: workspaceService,
-		Access:    checker,
-		Auth:      authService,
-		Basic:     basicLogin,
-		Web:       fs,
-		Anonymous: user,
-		Previews:  artifactPreviews,
+		IAM:         iamService,
+		Vault:       service,
+		Policy:      policyService,
+		Audit:       auditService,
+		Catalog:     catalogService,
+		Sandbox:     sandboxService,
+		Workspace:   workspaceService,
+		Access:      checker,
+		LLMProvider: llmproviderService,
+		Auth:        authService,
+		Basic:       basicLogin,
+		Web:         fs,
+		Anonymous:   user,
+		Previews:    artifactPreviews,
 	}
 	googleFlow, err := provideGoogle(ctx, cfg)
 	if err != nil {

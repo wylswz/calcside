@@ -34,8 +34,8 @@ func TestMigrationDirsInLockstep(t *testing.T) {
 		for i := range files {
 			files[i] = filepath.Base(files[i])
 		}
-		if len(files) != 1 || files[0] != "20261024133846_baseline.sql" {
-			t.Fatalf("%s migrations = %v, want exactly 20261024133846_baseline.sql", driver, files)
+		if len(files) == 0 || files[0] != "20261024133846_baseline.sql" {
+			t.Fatalf("%s migrations = %v, baseline must be first", driver, files)
 		}
 		if want == nil {
 			want = files

@@ -678,8 +678,14 @@ type ExtensionInfo struct {
 
 	// IconUrl Authenticated same-origin packaged PNG endpoint
 	IconUrl *string `json:"icon_url,omitempty"`
-	Name    string  `json:"name"`
-	Ops     []OpDoc `json:"ops"`
+
+	// Interface Special contract, e.g. llm for provider extensions.
+	Interface *string `json:"interface,omitempty"`
+
+	// Models Default model catalogue declared by a provider extension.
+	Models *[]string `json:"models,omitempty"`
+	Name   string    `json:"name"`
+	Ops    []OpDoc   `json:"ops"`
 
 	// Source Server-local root-name/extension identifier; never a host filesystem path.
 	//
@@ -782,6 +788,61 @@ type InstancesResponse struct {
 // KeysResponse defines model for KeysResponse.
 type KeysResponse struct {
 	Keys *[]APIKey `json:"keys,omitempty"`
+}
+
+// LLMProvider A named provider extension owned by a workspace. The `llm` capability extension receives all workspace providers as a snapshot at instance creation; scripts choose provider/model per call.
+type LLMProvider struct {
+	// Config effective backend config with defaults applied; api_key stays as a {{secrets.NAME}} reference.
+	Config    *map[string]interface{} `json:"config,omitempty"`
+	CreatedAt *time.Time              `json:"created_at,omitempty"`
+	Id        string                  `json:"id"`
+
+	// Models Model ids this provider makes available to the llm extension.
+	Models []string `json:"models"`
+
+	// Name Unique per user; the builtin. prefix is reserved for read-only built-in policies.
+	Name PolicyName `json:"name"`
+
+	// Source provider extension source, e.g. contrib/llm-openai
+	Source string `json:"source"`
+
+	// Sum h1: integrity sum (remote sources only)
+	Sum       *string    `json:"sum,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	UserId    *string    `json:"user_id,omitempty"`
+}
+
+// LLMProviderRequest defines model for LLMProviderRequest.
+type LLMProviderRequest struct {
+	Config *map[string]interface{} `json:"config,omitempty"`
+	Models *[]string               `json:"models,omitempty"`
+
+	// Name Unique per user; the builtin. prefix is reserved for read-only built-in policies.
+	Name   PolicyName `json:"name"`
+	Source string     `json:"source"`
+	Sum    *string    `json:"sum,omitempty"`
+}
+
+// LLMProviderResponse defines model for LLMProviderResponse.
+type LLMProviderResponse struct {
+	// Provider A named provider extension owned by a workspace. The `llm` capability extension receives all workspace providers as a snapshot at instance creation; scripts choose provider/model per call.
+	Provider *LLMProvider `json:"provider,omitempty"`
+}
+
+// LLMProviderUpdateRequest defines model for LLMProviderUpdateRequest.
+type LLMProviderUpdateRequest struct {
+	Config *map[string]interface{} `json:"config,omitempty"`
+	Models *[]string               `json:"models,omitempty"`
+
+	// Name Unique per user; the builtin. prefix is reserved for read-only built-in policies.
+	Name   *PolicyName `json:"name,omitempty"`
+	Source *string     `json:"source,omitempty"`
+	Sum    *string     `json:"sum,omitempty"`
+}
+
+// LLMProvidersResponse defines model for LLMProvidersResponse.
+type LLMProvidersResponse struct {
+	Providers *[]LLMProvider `json:"providers,omitempty"`
 }
 
 // Limits defines model for Limits.
@@ -1101,6 +1162,16 @@ type CreateKeyParams struct {
 	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
 }
 
+// ListLLMProvidersParams defines parameters for ListLLMProviders.
+type ListLLMProvidersParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
+// CreateLLMProviderParams defines parameters for CreateLLMProvider.
+type CreateLLMProviderParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
 // ChangePasswordJSONBody defines parameters for ChangePassword.
 type ChangePasswordJSONBody struct {
 	CurrentPassword *string `json:"current_password,omitempty"`
@@ -1167,6 +1238,12 @@ type PutShareJSONRequestBody PutShareJSONBody
 
 // CreateKeyJSONRequestBody defines body for CreateKey for application/json ContentType.
 type CreateKeyJSONRequestBody = CreateKeyRequest
+
+// CreateLLMProviderJSONRequestBody defines body for CreateLLMProvider for application/json ContentType.
+type CreateLLMProviderJSONRequestBody = LLMProviderRequest
+
+// UpdateLLMProviderJSONRequestBody defines body for UpdateLLMProvider for application/json ContentType.
+type UpdateLLMProviderJSONRequestBody = LLMProviderUpdateRequest
 
 // ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
 type ChangePasswordJSONRequestBody ChangePasswordJSONBody
@@ -1281,6 +1358,21 @@ type ServerInterface interface {
 
 	// (DELETE /api/v1/keys/{id})
 	DeleteKey(c *gin.Context, id IdPath)
+
+	// (GET /api/v1/llm-providers)
+	ListLLMProviders(c *gin.Context, params ListLLMProvidersParams)
+
+	// (POST /api/v1/llm-providers)
+	CreateLLMProvider(c *gin.Context, params CreateLLMProviderParams)
+
+	// (DELETE /api/v1/llm-providers/{id})
+	DeleteLLMProvider(c *gin.Context, id IdPath)
+
+	// (GET /api/v1/llm-providers/{id})
+	GetLLMProvider(c *gin.Context, id IdPath)
+
+	// (PUT /api/v1/llm-providers/{id})
+	UpdateLLMProvider(c *gin.Context, id IdPath)
 
 	// (GET /api/v1/me)
 	Me(c *gin.Context)
@@ -2081,6 +2173,135 @@ func (siw *ServerInterfaceWrapper) DeleteKey(c *gin.Context) {
 	siw.Handler.DeleteKey(c, id)
 }
 
+// ListLLMProviders operation middleware
+func (siw *ServerInterfaceWrapper) ListLLMProviders(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListLLMProvidersParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListLLMProviders(c, params)
+}
+
+// CreateLLMProvider operation middleware
+func (siw *ServerInterfaceWrapper) CreateLLMProvider(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateLLMProviderParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CreateLLMProvider(c, params)
+}
+
+// DeleteLLMProvider operation middleware
+func (siw *ServerInterfaceWrapper) DeleteLLMProvider(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteLLMProvider(c, id)
+}
+
+// GetLLMProvider operation middleware
+func (siw *ServerInterfaceWrapper) GetLLMProvider(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetLLMProvider(c, id)
+}
+
+// UpdateLLMProvider operation middleware
+func (siw *ServerInterfaceWrapper) UpdateLLMProvider(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.UpdateLLMProvider(c, id)
+}
+
 // Me operation middleware
 func (siw *ServerInterfaceWrapper) Me(c *gin.Context) {
 
@@ -2657,6 +2878,11 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.DELETE(options.BaseURL+"/api/v1/policies/:id", wrapper.DeletePolicy)
 	router.GET(options.BaseURL+"/api/v1/policies/:id", wrapper.GetPolicy)
 	router.PUT(options.BaseURL+"/api/v1/policies/:id", wrapper.UpdatePolicy)
+	router.GET(options.BaseURL+"/api/v1/llm-providers", wrapper.ListLLMProviders)
+	router.POST(options.BaseURL+"/api/v1/llm-providers", wrapper.CreateLLMProvider)
+	router.DELETE(options.BaseURL+"/api/v1/llm-providers/:id", wrapper.DeleteLLMProvider)
+	router.GET(options.BaseURL+"/api/v1/llm-providers/:id", wrapper.GetLLMProvider)
+	router.PUT(options.BaseURL+"/api/v1/llm-providers/:id", wrapper.UpdateLLMProvider)
 	router.GET(options.BaseURL+"/api/v1/secrets", wrapper.ListSecrets)
 	router.POST(options.BaseURL+"/api/v1/secrets", wrapper.CreateSecret)
 	router.DELETE(options.BaseURL+"/api/v1/secrets/:id", wrapper.DeleteSecret)
@@ -4358,6 +4584,314 @@ func (response DeleteKey404JSONResponse) VisitDeleteKeyResponse(w http.ResponseW
 	return err
 }
 
+type ListLLMProvidersRequestObject struct {
+	Params ListLLMProvidersParams
+}
+
+type ListLLMProvidersResponseObject interface {
+	VisitListLLMProvidersResponse(w http.ResponseWriter) error
+}
+
+type ListLLMProviders200JSONResponse LLMProvidersResponse
+
+func (response ListLLMProviders200JSONResponse) VisitListLLMProvidersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLLMProviders401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListLLMProviders401JSONResponse) VisitListLLMProvidersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLLMProviderRequestObject struct {
+	Params CreateLLMProviderParams
+	Body   *CreateLLMProviderJSONRequestBody
+}
+
+type CreateLLMProviderResponseObject interface {
+	VisitCreateLLMProviderResponse(w http.ResponseWriter) error
+}
+
+type CreateLLMProvider201JSONResponse LLMProviderResponse
+
+func (response CreateLLMProvider201JSONResponse) VisitCreateLLMProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLLMProvider400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateLLMProvider400JSONResponse) VisitCreateLLMProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLLMProvider401JSONResponse ErrorEnvelope
+
+func (response CreateLLMProvider401JSONResponse) VisitCreateLLMProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLLMProvider409JSONResponse ErrorEnvelope
+
+func (response CreateLLMProvider409JSONResponse) VisitCreateLLMProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteLLMProviderRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type DeleteLLMProviderResponseObject interface {
+	VisitDeleteLLMProviderResponse(w http.ResponseWriter) error
+}
+
+type DeleteLLMProvider200JSONResponse OkResponse
+
+func (response DeleteLLMProvider200JSONResponse) VisitDeleteLLMProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteLLMProvider401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteLLMProvider401JSONResponse) VisitDeleteLLMProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteLLMProvider403JSONResponse ErrorEnvelope
+
+func (response DeleteLLMProvider403JSONResponse) VisitDeleteLLMProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteLLMProvider404JSONResponse ErrorEnvelope
+
+func (response DeleteLLMProvider404JSONResponse) VisitDeleteLLMProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLLMProviderRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type GetLLMProviderResponseObject interface {
+	VisitGetLLMProviderResponse(w http.ResponseWriter) error
+}
+
+type GetLLMProvider200JSONResponse LLMProviderResponse
+
+func (response GetLLMProvider200JSONResponse) VisitGetLLMProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLLMProvider401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetLLMProvider401JSONResponse) VisitGetLLMProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetLLMProvider404JSONResponse ErrorEnvelope
+
+func (response GetLLMProvider404JSONResponse) VisitGetLLMProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateLLMProviderRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *UpdateLLMProviderJSONRequestBody
+}
+
+type UpdateLLMProviderResponseObject interface {
+	VisitUpdateLLMProviderResponse(w http.ResponseWriter) error
+}
+
+type UpdateLLMProvider200JSONResponse LLMProviderResponse
+
+func (response UpdateLLMProvider200JSONResponse) VisitUpdateLLMProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateLLMProvider400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateLLMProvider400JSONResponse) VisitUpdateLLMProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateLLMProvider401JSONResponse ErrorEnvelope
+
+func (response UpdateLLMProvider401JSONResponse) VisitUpdateLLMProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateLLMProvider403JSONResponse ErrorEnvelope
+
+func (response UpdateLLMProvider403JSONResponse) VisitUpdateLLMProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateLLMProvider404JSONResponse ErrorEnvelope
+
+func (response UpdateLLMProvider404JSONResponse) VisitUpdateLLMProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateLLMProvider409JSONResponse ErrorEnvelope
+
+func (response UpdateLLMProvider409JSONResponse) VisitUpdateLLMProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type MeRequestObject struct {
 }
 
@@ -5936,6 +6470,21 @@ type StrictServerInterface interface {
 	// (DELETE /api/v1/keys/{id})
 	DeleteKey(ctx context.Context, request DeleteKeyRequestObject) (DeleteKeyResponseObject, error)
 
+	// (GET /api/v1/llm-providers)
+	ListLLMProviders(ctx context.Context, request ListLLMProvidersRequestObject) (ListLLMProvidersResponseObject, error)
+
+	// (POST /api/v1/llm-providers)
+	CreateLLMProvider(ctx context.Context, request CreateLLMProviderRequestObject) (CreateLLMProviderResponseObject, error)
+
+	// (DELETE /api/v1/llm-providers/{id})
+	DeleteLLMProvider(ctx context.Context, request DeleteLLMProviderRequestObject) (DeleteLLMProviderResponseObject, error)
+
+	// (GET /api/v1/llm-providers/{id})
+	GetLLMProvider(ctx context.Context, request GetLLMProviderRequestObject) (GetLLMProviderResponseObject, error)
+
+	// (PUT /api/v1/llm-providers/{id})
+	UpdateLLMProvider(ctx context.Context, request UpdateLLMProviderRequestObject) (UpdateLLMProviderResponseObject, error)
+
 	// (GET /api/v1/me)
 	Me(ctx context.Context, request MeRequestObject) (MeResponseObject, error)
 	// ChangePassword Change the current user's local password and revoke their sessions
@@ -6791,6 +7340,150 @@ func (sh *strictHandler) DeleteKey(ctx *gin.Context, id IdPath) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(DeleteKeyResponseObject); ok {
 		if err := validResponse.VisitDeleteKeyResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListLLMProviders operation middleware
+func (sh *strictHandler) ListLLMProviders(ctx *gin.Context, params ListLLMProvidersParams) {
+	var request ListLLMProvidersRequestObject
+
+	request.Params = params
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListLLMProviders(ctx, request.(ListLLMProvidersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListLLMProviders")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ListLLMProvidersResponseObject); ok {
+		if err := validResponse.VisitListLLMProvidersResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateLLMProvider operation middleware
+func (sh *strictHandler) CreateLLMProvider(ctx *gin.Context, params CreateLLMProviderParams) {
+	var request CreateLLMProviderRequestObject
+
+	request.Params = params
+
+	var body CreateLLMProviderJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateLLMProvider(ctx, request.(CreateLLMProviderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateLLMProvider")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(CreateLLMProviderResponseObject); ok {
+		if err := validResponse.VisitCreateLLMProviderResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteLLMProvider operation middleware
+func (sh *strictHandler) DeleteLLMProvider(ctx *gin.Context, id IdPath) {
+	var request DeleteLLMProviderRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteLLMProvider(ctx, request.(DeleteLLMProviderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteLLMProvider")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(DeleteLLMProviderResponseObject); ok {
+		if err := validResponse.VisitDeleteLLMProviderResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetLLMProvider operation middleware
+func (sh *strictHandler) GetLLMProvider(ctx *gin.Context, id IdPath) {
+	var request GetLLMProviderRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetLLMProvider(ctx, request.(GetLLMProviderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetLLMProvider")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(GetLLMProviderResponseObject); ok {
+		if err := validResponse.VisitGetLLMProviderResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateLLMProvider operation middleware
+func (sh *strictHandler) UpdateLLMProvider(ctx *gin.Context, id IdPath) {
+	var request UpdateLLMProviderRequestObject
+
+	request.Id = id
+
+	var body UpdateLLMProviderJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateLLMProvider(ctx, request.(UpdateLLMProviderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateLLMProvider")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(UpdateLLMProviderResponseObject); ok {
+		if err := validResponse.VisitUpdateLLMProviderResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

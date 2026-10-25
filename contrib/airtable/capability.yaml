@@ -1,0 +1,24 @@
+name: airtable
+version: 0.1.0
+description: Airtable — list, create, and update records in a base table.
+icon: icon.png
+dependencies: [net]
+ops:
+  - name: list_records
+    doc: List records; returns list of {id, fields}. view/filter_by_formula narrow the result.
+    params: [base_id, table, max_records, view, filter_by_formula]
+  - name: create_records
+    doc: Create records from a list of field dicts; returns list of {id, fields}
+    params: [base_id, table, records]
+  - name: update_records
+    doc: "Patch records given as a list of {id, fields}; requires PATCH in net methods"
+    params: [base_id, table, records]
+config:
+  - name: base_url
+    type: string
+    doc: Airtable API base URL
+    default: https://api.airtable.com
+  - name: api_key
+    type: secret
+    doc: Airtable personal access token, pat... (secret reference)
+    default: "{{secrets.AIRTABLE_API_KEY}}"

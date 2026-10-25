@@ -244,6 +244,36 @@ func (r deletePolicyResp) VisitDeletePolicyResponse(w http.ResponseWriter) error
 	return r.write(w)
 }
 
+type listLLMProvidersResp struct{ rawJSON }
+
+func (r listLLMProvidersResp) VisitListLLMProvidersResponse(w http.ResponseWriter) error {
+	return r.write(w)
+}
+
+type createLLMProviderResp struct{ rawJSON }
+
+func (r createLLMProviderResp) VisitCreateLLMProviderResponse(w http.ResponseWriter) error {
+	return r.write(w)
+}
+
+type getLLMProviderResp struct{ rawJSON }
+
+func (r getLLMProviderResp) VisitGetLLMProviderResponse(w http.ResponseWriter) error {
+	return r.write(w)
+}
+
+type updateLLMProviderResp struct{ rawJSON }
+
+func (r updateLLMProviderResp) VisitUpdateLLMProviderResponse(w http.ResponseWriter) error {
+	return r.write(w)
+}
+
+type deleteLLMProviderResp struct{ rawJSON }
+
+func (r deleteLLMProviderResp) VisitDeleteLLMProviderResponse(w http.ResponseWriter) error {
+	return r.write(w)
+}
+
 type listSecretsResp struct{ rawJSON }
 
 func (r listSecretsResp) VisitListSecretsResponse(w http.ResponseWriter) error {
@@ -1027,6 +1057,109 @@ func (s *strictImpl) DeletePolicy(ctx context.Context, req gen.DeletePolicyReque
 		return deletePolicyResp{fail(err)}, nil
 	}
 	return deletePolicyResp{rawJSON{200, dto.OK{OK: true}}}, nil
+}
+
+func (s *strictImpl) ListLLMProviders(ctx context.Context, req gen.ListLLMProvidersRequestObject) (gen.ListLLMProvidersResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return listLLMProvidersResp{*e}, nil
+	}
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return listLLMProvidersResp{fail(err)}, nil
+	}
+	lst, err := s.d.LLMProvider.List(ctx, a)
+	if err != nil {
+		return listLLMProvidersResp{fail(err)}, nil
+	}
+	return listLLMProvidersResp{rawJSON{200, dto.LLMProvidersEnvelope{Providers: dto.NewLLMProviders(lst)}}}, nil
+}
+
+func (s *strictImpl) CreateLLMProvider(ctx context.Context, req gen.CreateLLMProviderRequestObject) (gen.CreateLLMProviderResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return createLLMProviderResp{*e}, nil
+	}
+	var name, source, sum string
+	var models []string
+	var cfg json.RawMessage
+	if req.Body != nil {
+		name, source = string(req.Body.Name), req.Body.Source
+		if req.Body.Sum != nil {
+			sum = *req.Body.Sum
+		}
+		if req.Body.Models != nil {
+			models = *req.Body.Models
+		}
+		if req.Body.Config != nil {
+			cfg, _ = json.Marshal(*req.Body.Config)
+		}
+	}
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return createLLMProviderResp{fail(err)}, nil
+	}
+	prov, err := s.d.LLMProvider.Create(ctx, a, name, source, sum, models, cfg)
+	if err != nil {
+		return createLLMProviderResp{fail(err)}, nil
+	}
+	return createLLMProviderResp{rawJSON{201, dto.LLMProviderEnvelope{Provider: dto.NewLLMProvider(prov)}}}, nil
+}
+
+func (s *strictImpl) GetLLMProvider(ctx context.Context, req gen.GetLLMProviderRequestObject) (gen.GetLLMProviderResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return getLLMProviderResp{*e}, nil
+	}
+	prov, err := s.d.LLMProvider.Get(ctx, actorOf(p), req.Id)
+	if err != nil {
+		return getLLMProviderResp{fail(err)}, nil
+	}
+	return getLLMProviderResp{rawJSON{200, dto.LLMProviderEnvelope{Provider: dto.NewLLMProvider(prov)}}}, nil
+}
+
+func (s *strictImpl) UpdateLLMProvider(ctx context.Context, req gen.UpdateLLMProviderRequestObject) (gen.UpdateLLMProviderResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return updateLLMProviderResp{*e}, nil
+	}
+	var name, source, sum *string
+	var models *[]string
+	var cfg json.RawMessage
+	if req.Body != nil {
+		if req.Body.Name != nil {
+			n := string(*req.Body.Name)
+			name = &n
+		}
+		source, sum = req.Body.Source, req.Body.Sum
+		if req.Body.Models != nil {
+			models = req.Body.Models
+		}
+		if req.Body.Config != nil {
+			cfg, _ = json.Marshal(*req.Body.Config)
+		}
+	}
+	prov, err := s.d.LLMProvider.Update(ctx, actorOf(p), req.Id, name, source, sum, models, cfg)
+	if err != nil {
+		return updateLLMProviderResp{fail(err)}, nil
+	}
+	return updateLLMProviderResp{rawJSON{200, dto.LLMProviderEnvelope{Provider: dto.NewLLMProvider(prov)}}}, nil
+}
+
+func (s *strictImpl) DeleteLLMProvider(ctx context.Context, req gen.DeleteLLMProviderRequestObject) (gen.DeleteLLMProviderResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return deleteLLMProviderResp{*e}, nil
+	}
+	if err := s.d.LLMProvider.Delete(ctx, actorOf(p), req.Id); err != nil {
+		return deleteLLMProviderResp{fail(err)}, nil
+	}
+	return deleteLLMProviderResp{rawJSON{200, dto.OK{OK: true}}}, nil
 }
 
 // --- secrets vault (session only) ---

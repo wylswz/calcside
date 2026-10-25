@@ -176,3 +176,138 @@ curl -fsS -X DELETE "http://127.0.0.1:8787/api/v1/instances/$instance_id" \
 ```
 
 Local sources are re-read on each instance create, so iterate by editing files and recreating the instance — no server restart needed.
+
+## LLM (`contrib/llm`)
+
+LLM access has two extension layers:
+
+- **Provider extension**: a vendor adapter declaring `interface: llm`,
+  a default `models` catalogue in `capability.yaml`, and `respond` /
+  `structured` ops. Bundled providers are `contrib/llm-openai` (OpenAI
+  Responses API), `contrib/llm-anthropic`, `contrib/llm-gemini` and
+  `contrib/llm-openai-compat` (Chat Completions for
+  vLLM/Ollama/LiteLLM). HTTP errors include a bounded, secret-redacted
+  response body to make provider 400s diagnosable.
+- **Capability extension**: `contrib/llm` consumes every workspace
+  provider and exposes one script surface. Provider and model are call
+  parameters, so code can route tasks by complexity or cost:
+
+```python
+ext.llm.providers()                                      # -> [provider names]
+ext.llm.models(provider)                                 # -> [model ids]
+ext.llm.respond(provider, messages, model=None, options=None)
+#   -> {text, finish_reason, usage: {input_tokens, output_tokens}}
+ext.llm.structured(provider, messages, schema, model=None)
+#   -> parsed value conforming to a JSON Schema dict
+ext.llm.score(provider, content, criteria, scale=1.0, model=None)   # -> {score, rationale}
+ext.llm.choose(provider, instruction, options, model=None)          # -> {index, option, rationale}
+ext.llm.rank(provider, instruction, items, model=None)              # -> {order, rationale}
+```
+
+Each configured provider also exposes typed model constants, so call
+sites can avoid stringly-typed model ids:
+
+```python
+ext.llm.openai.models.GPT_6_LUNA        # == "gpt-6-luna"
+ext.llm.anthropic.models.CLAUDE_OPUS_5_5 # == "claude-opus-5-5"
+
+ext.llm.respond("openai", messages,
+                model=ext.llm.openai.models.GPT_6_LUNA)
+```
+
+Constants uppercase the model id, replace non-alphanumerics with `_`, and
+prefix `M_` when the id starts with a digit. `ext.llm.<provider>.name`
+is the provider name and `.models` is a frozen constant namespace.
+Dot access requires an identifier-safe provider name; use
+`getattr(ext.llm, "<name>")` otherwise. Provider names must not collide
+with the llm ops (`respond`, `structured`, `score`, `choose`, `rank`,
+`providers`, `models`).
+
+Provider extensions are not shown in the instance extension picker;
+instances only add the `llm` capability ext.
+
+### Provider protocol
+
+A provider extension must declare:
+
+```yaml
+interface: llm
+models: [model-a, model-b]   # default catalogue; may be empty for custom endpoints
+ops:
+  - {name: respond, params: [messages, model, options]}
+  - {name: structured, params: [messages, schema, model]}
+```
+
+`contrib/llm` receives a registry of provider protocol objects:
+
+```python
+provider.list_models()                  # -> [model ids from provider metadata]
+provider.respond(messages, model, options)
+provider.structured(messages, schema, model)
+```
+
+`list_models` is synthesized from the provider manifest; no model ids
+are hardcoded in the server or console. Provider `config` fields
+(`base_url`, secret-referenced `api_key`, ...) are declared by the
+provider extension and validated on every provider-registry write.
+
+### Workspace provider registry
+
+`POST /api/v1/llm-providers` stores a named provider per workspace:
+
+```json
+{
+  "name": "my-openai",
+  "source": "contrib/llm-openai",
+  "models": ["gpt-6.1-sol", "gpt-6-luna"],
+  "config": {"api_key": "{{secrets.OPENAI_API_KEY}}"}
+}
+```
+
+- `source` must load and declare `interface: llm`.
+- `models` defaults to the provider extension's metadata catalogue; it
+  can be edited. `openai_compatible` has no default models, so its list
+  must be supplied explicitly.
+- `config` is validated against the provider manifest; secret fields
+  must reference existing workspace vault secrets. The console lists
+  provider extensions and their model defaults under **Workspace → LLM
+  providers**.
+
+### Using providers in code
+
+The API tier snapshots the workspace registry into each `llm` ext alias;
+scripts select a provider and model per call:
+
+```json
+{
+  "capabilities": {
+    "ext": {
+      "llm": {"source": "contrib/llm"}
+    }
+  }
+}
+```
+
+```python
+# cheap path
+summary = ext.llm.respond("fast", [{"role": "user", "content": text}],
+                          model="gpt-6-luna")
+
+# hard reasoning task on a different provider
+verdict = ext.llm.choose("reasoning", "Which plan is safest?", plans,
+                         model="claude-opus-5-5")
+```
+
+- `provider` must be a configured workspace provider. `model` must be
+  in that provider's catalogue; omitted uses the first model.
+- The model catalogue is validation only — it never chooses a model for
+  you.
+- LLM ops are gated: audit records `ext.llm.<op>` with the provider and
+  model arguments, nested provider `net` calls, and no prompt or
+  completion text.
+- Provider secret fields are injected by `net`. The API automatically
+  installs each referenced workspace vault secret into the instance spec
+  when the `llm` ext is added, so callers do not repeat them under
+  `spec.secrets`.
+- Unknown providers and models fail at call time. Provider-registry
+  writes fail earlier on a bad source, config or model list.

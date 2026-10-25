@@ -1,6 +1,7 @@
+import type { CSSProperties } from 'react'
 import type { Policy, Secret } from '../api'
 import type { InstanceDraft } from '../instanceDraft'
-import { Field, inputCls } from './ui'
+import { Button, Field, inputCls } from './ui'
 
 type Patch = (patch: Partial<InstanceDraft>) => void
 
@@ -16,14 +17,43 @@ export function RulesSection({ draft, set, policies, policiesError, onRetry, sel
 }) {
   return (
     <div className="space-y-4">
-      <p className="text-sm text-sec">Rules constrain capabilities; they do not grant access. Server policies always apply.</p>
+      <p className="text-sm text-sec">Policies constrain capabilities; they do not grant access. Server policies always apply.</p>
       {policiesError && <p className="text-sm text-danger">Could not load policies. <button className="underline" onClick={onRetry}>Retry policies</button></p>}
-      {policies.map((p) => <label key={p.name} className="flex items-start gap-3 text-sm">
-        <input type="checkbox" className="mt-1" checked={selected.includes(p.name)} onChange={(e) => set({ policies: e.target.checked ? [...selected, p.name] : selected.filter((name) => name !== p.name) })} />
-        <span className="break-all text-ink">{p.name}<span className="mt-1 block break-normal text-xs text-sec">{p.description}</span></span>
-      </label>)}
-      {selected.filter((name) => !policies.some((p) => p.name === name)).map((name) => <label key={name} className="flex gap-3 text-sm"><input type="checkbox" checked onChange={() => set({ policies: selected.filter((p) => p !== name) })} />{name}</label>)}
-      <button type="button" className="text-btn underline" onClick={() => set({ policies: null })}>Use default policies</button>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="text-xs text-sec">{draft.policies === null ? 'Default selection' : 'Custom selection'}</p>
+        {draft.policies !== null && <button type="button" className="text-btn underline" onClick={() => set({ policies: null })}>Use default policies</button>}
+      </div>
+      <div className="ext-results" style={{ '--ext-rows': Math.max(1, Math.ceil(policies.length / 2)) } as CSSProperties}>
+        <ul className="ext-grid">
+          {policies.map((p) => {
+            const added = selected.includes(p.name)
+            return (
+              <li key={p.name} className={'ext-card' + (added ? ' ext-card-added' : '')}>
+                <div className="min-w-0 flex-1">
+                  <p className="ext-card-name">{p.name}</p>
+                  <p className="ext-card-desc" title={p.description}>{p.description || 'No description'}</p>
+                  <p className="ext-card-source">{p.kind === 'builtin' ? 'built-in' : 'workspace policy'}{p.default ? ' · default' : ''}</p>
+                </div>
+                <Button className="ext-card-action" aria-pressed={added}
+                  onClick={() => set({ policies: added ? selected.filter((name) => name !== p.name) : [...selected, p.name] })}>
+                  {added ? 'Added' : 'Add'}
+                </Button>
+              </li>
+            )
+          })}
+          {selected.filter((name) => !policies.some((p) => p.name === name)).map((name) => (
+            <li key={name} className="ext-card ext-card-added">
+              <div className="min-w-0 flex-1">
+                <p className="ext-card-name">{name}</p>
+                <p className="ext-card-desc">Not in the current policy catalog.</p>
+                <p className="ext-card-source">unknown</p>
+              </div>
+              <Button className="ext-card-action" onClick={() => set({ policies: selected.filter((p) => p !== name) })}>Remove</Button>
+            </li>
+          ))}
+        </ul>
+      </div>
+      {policies.length === 0 && !policiesError && <p className="text-xs text-sec">No policies are available in this workspace.</p>}
       <div className="grid gap-3 sm:grid-cols-3">
         {(['exec_timeout_ms', 'max_steps', 'max_output_bytes'] as const).map((key) => <Field key={key} label={key}>
           <input className={inputCls} type="number" min="1" value={draft.limits[key] ?? ''} placeholder="Server default" onChange={(e) => {

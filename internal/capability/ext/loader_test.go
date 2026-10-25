@@ -151,10 +151,10 @@ func TestLoadEscape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.init(context.Background(), nil, nil, 0); err == nil || !strings.Contains(err.Error(), "escapes") {
+	if _, err := m.init(context.Background(), nil, nil, 0, nil); err == nil || !strings.Contains(err.Error(), "escapes") {
 		t.Fatalf("want escape error, got %v", err)
 	}
-	if _, err := m.init(context.Background(), nil, nil, 0); err == nil {
+	if _, err := m.init(context.Background(), nil, nil, 0, nil); err == nil {
 		t.Fatal("expected load error")
 	}
 	// Absolute path load also rejected.
@@ -166,7 +166,7 @@ func TestLoadEscape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m2.init(context.Background(), nil, nil, 0); err == nil || !strings.Contains(err.Error(), "absolute") {
+	if _, err := m2.init(context.Background(), nil, nil, 0, nil); err == nil || !strings.Contains(err.Error(), "absolute") {
 		t.Fatalf("want absolute error, got %v", err)
 	}
 }
@@ -185,7 +185,7 @@ config:
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := m.init(context.Background(), nil, map[string]any{"n": int64(5)}, 0)
+	g, err := m.init(context.Background(), nil, map[string]any{"n": int64(5)}, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ def run():
 	if err != nil {
 		t.Fatal(err)
 	}
-	globals, err := m.init(context.Background(), nil, nil, 100000)
+	globals, err := m.init(context.Background(), nil, nil, 100000, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +227,7 @@ def run():
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := m.init(ctx, nil, nil, 100000); err == nil {
+	if _, err := m.init(ctx, nil, nil, 100000, nil); err == nil {
 		t.Fatal("ignored initialization cancellation")
 	}
 }
@@ -241,7 +241,7 @@ func TestLocalDiagnosticsUseSourceIdentifier(t *testing.T) {
 			dir := writeExt(t, map[string]string{"capability.yaml": "name: t\nops: [{name: search}]\n", "main.star": source})
 			mod, err := loadLocal(t, dir, "")
 			if err == nil {
-				_, err = mod.init(context.Background(), nil, nil, 0)
+				_, err = mod.init(context.Background(), nil, nil, 0, nil)
 			}
 			if err == nil || !strings.Contains(err.Error(), localID(dir)+"/main.star") || strings.Contains(err.Error(), dir) {
 				t.Fatalf("diagnostic should use source identifier: %v", err)

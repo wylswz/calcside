@@ -54,7 +54,7 @@ export function InstanceExtensionEditor({ value, catalog, secretNames, vaultName
     <div className="space-y-4">
       {entry && (
         <>
-          {entry.config.map((field) => {
+          {(entry.config ?? []).map((field) => {
             const v = value.config[field.name]
             const fallback = field.default == null ? '' : `Default: ${JSON.stringify(field.default)}`
             return (
@@ -89,14 +89,14 @@ export function InstanceExtensionEditor({ value, catalog, secretNames, vaultName
               </Field>
             )
           })}
-          {entry.config.some((f) => f.type === 'secret') && <p className="text-xs text-sec">Choose an existing vault reference, or add a secret under Inputs. Values are never shown here.</p>}
+          {(entry.config ?? []).some((f) => f.type === 'secret') && <p className="text-xs text-sec">Choose an existing vault reference, or add a secret under Inputs. Values are never shown here.</p>}
         </>
       )}
       {entry && (
         <details className="ext-advanced">
           <summary>Advanced extension settings</summary>
           <div className="mt-3 space-y-4">{sourceFields}
-            {entry.ops.length > 0 && <p className="break-words font-mono text-xs text-sec">{entry.ops.map((op) => `ext.${value.alias || '?'}.${op.name}()`).join(' · ')}</p>}
+            {(entry.ops ?? []).length > 0 && <p className="break-words font-mono text-xs text-sec">{(entry.ops ?? []).map((op) => `ext.${value.alias || '?'}.${op.name}()`).join(' · ')}</p>}
           </div>
         </details>
       )}

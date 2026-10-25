@@ -1,0 +1,27 @@
+name: llm_anthropic
+version: 0.1.0
+description: Anthropic provider — Messages API with tool-based structured output.
+interface: llm
+models: [claude-sonnet-5-5, claude-opus-5-5, claude-haiku-5-5, claude-fable-5-1]
+icon: icon.png
+dependencies: [net]
+ops:
+  - name: respond
+    doc: Message completion; returns {text, finish_reason, usage:{input_tokens,output_tokens}}
+    params: [messages, model, options]
+  - name: structured
+    doc: Forced tool call parsed as JSON conforming to schema; returns the parsed value
+    params: [messages, schema, model]
+config:
+  - name: base_url
+    type: string
+    doc: Anthropic API base URL
+    default: https://api.anthropic.com
+  - name: api_key
+    type: secret
+    doc: Anthropic API key (secret reference)
+    default: "{{secrets.ANTHROPIC_API_KEY}}"
+  - name: max_tokens
+    type: int
+    doc: max_tokens sent on every request (the API requires it)
+    default: 4096

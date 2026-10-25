@@ -1,0 +1,30 @@
+name: stripe
+version: 0.1.0
+description: Stripe — balances, charges, customers, and payment links.
+icon: icon.png
+dependencies: [net]
+ops:
+  - name: get_balance
+    doc: Current account balance; returns {available, pending} lists of {amount, currency}
+    params: []
+  - name: list_charges
+    doc: Recent charges; returns list of {id, amount, currency, status, paid, description}
+    params: [limit]
+  - name: get_charge
+    doc: One charge by id; returns {id, amount, currency, status, paid, receipt_url}
+    params: [charge_id]
+  - name: list_customers
+    doc: Customers; returns list of {id, email, name, created}
+    params: [limit]
+  - name: create_payment_link
+    doc: Create a payment link for a price id; returns {id, url}
+    params: [price_id, quantity]
+config:
+  - name: base_url
+    type: string
+    doc: Stripe API base URL
+    default: https://api.stripe.com
+  - name: secret_key
+    type: secret
+    doc: Stripe secret key, sk_live_... or sk_test_... (secret reference)
+    default: "{{secrets.STRIPE_SECRET_KEY}}"

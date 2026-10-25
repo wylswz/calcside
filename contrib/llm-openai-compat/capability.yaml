@@ -1,0 +1,26 @@
+name: llm_openai_compat
+version: 0.1.0
+description: OpenAI-compatible provider (vLLM, Ollama, LiteLLM, gateways).
+interface: llm
+icon: icon.png
+dependencies: [net]
+ops:
+  - name: respond
+    doc: Chat completion; returns {text, finish_reason, usage:{input_tokens,output_tokens}}
+    params: [messages, model, options]
+  - name: structured
+    doc: Completion parsed as JSON; schema enforced by prompt, verified locally
+    params: [messages, schema, model]
+config:
+  - name: base_url
+    type: string
+    doc: OpenAI-compatible API base URL, e.g. https://llm.internal/v1 (required)
+    default: ""
+  - name: api_key
+    type: secret
+    doc: API key for the endpoint (optional; empty disables auth)
+    default: ""
+  - name: json_schema
+    type: bool
+    doc: Send response_format json_schema; false uses prompt-and-parse
+    default: false

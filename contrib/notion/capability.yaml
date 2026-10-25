@@ -1,0 +1,31 @@
+name: notion
+version: 0.1.0
+description: Notion — search pages, query databases, read and create pages.
+icon: icon.png
+dependencies: [net]
+ops:
+  - name: search
+    doc: Search pages and databases; returns list of {id, object, title, url}
+    params: [query, limit]
+  - name: get_page
+    doc: Get page metadata and plain-text title; returns {id, url, title}
+    params: [page_id]
+  - name: query_database
+    doc: Query a database; returns list of row dicts flattened to {id, url, props}
+    params: [database_id, filter, limit]
+  - name: create_page
+    doc: Create a page inside a parent page; returns {id, url}
+    params: [parent_id, title, content]
+config:
+  - name: base_url
+    type: string
+    doc: Notion API base URL
+    default: https://api.notion.com
+  - name: api_token
+    type: secret
+    doc: Notion internal integration token, ntn_... or secret_... (secret reference)
+    default: "{{secrets.NOTION_API_TOKEN}}"
+  - name: notion_version
+    type: string
+    doc: Notion-Version header
+    default: "2022-06-28"

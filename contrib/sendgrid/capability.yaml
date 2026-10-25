@@ -1,0 +1,18 @@
+name: sendgrid
+version: 0.1.0
+description: Twilio SendGrid — send transactional email.
+icon: icon.png
+dependencies: [net]
+ops:
+  - name: send_email
+    doc: Send an email; returns True on acceptance. to/cc take an address or list of addresses.
+    params: [sender, to, subject, text, html, cc]
+config:
+  - name: base_url
+    type: string
+    doc: SendGrid API base URL
+    default: https://api.sendgrid.com
+  - name: api_key
+    type: secret
+    doc: SendGrid API key, SG.... (secret reference)
+    default: "{{secrets.SENDGRID_API_KEY}}"

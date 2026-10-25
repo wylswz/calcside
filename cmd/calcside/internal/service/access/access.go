@@ -202,6 +202,18 @@ func (c *Checker) Policy(ctx context.Context, a service.Actor, id string, act Ac
 	return pol, nil
 }
 
+// LLMProvider loads the provider and checks act in its workspace.
+func (c *Checker) LLMProvider(ctx context.Context, a service.Actor, id string, act Action) (*store.LLMProvider, error) {
+	p, err := c.st.GetLLMProvider(ctx, id)
+	if err != nil {
+		return nil, service.NotFound("llm provider not found")
+	}
+	if err := c.check(ctx, a, p.WorkspaceID, act, service.NotFound("llm provider not found")); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
 // Secret loads the secret and checks act in its workspace.
 func (c *Checker) Secret(ctx context.Context, a service.Actor, id string, act Action) (*store.Secret, error) {
 	sec, err := c.st.GetSecret(ctx, id)

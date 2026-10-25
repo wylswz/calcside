@@ -17,6 +17,7 @@ import (
 	auditsvc "calcside/cmd/calcside/internal/service/audit"
 	"calcside/cmd/calcside/internal/service/catalog"
 	"calcside/cmd/calcside/internal/service/iam"
+	llmprovidersvc "calcside/cmd/calcside/internal/service/llmprovider"
 	policysvc "calcside/cmd/calcside/internal/service/policy"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/vault"
@@ -63,7 +64,8 @@ func TestListExtensions(t *testing.T) {
 	})
 	h := Handler(Deps{
 		IAM: iam.New(st, ac, sbx, 10, nil), Vault: vaultSvc,
-		Policy: policysvc.New(st, ac), Audit: auditsvc.New(st, ac),
+		Policy: policysvc.New(st, ac), LLMProvider: llmprovidersvc.New(st, ac, &extOptions),
+		Audit:   auditsvc.New(st, ac),
 		Catalog: catalog.New(reg, extensions.NewCatalog(extOptions)), Sandbox: sbx, Access: ac, Workspace: workspacesvc.New(st, ac),
 		Auth: svc,
 	})
@@ -84,10 +86,15 @@ func TestListExtensions(t *testing.T) {
 		t.Fatalf("flags: %v", m)
 	}
 	exts, _ := m["extensions"].([]any)
-	if len(exts) != 1 {
-		t.Fatalf("extensions: %v", m["extensions"])
+	var ex map[string]any
+	for _, e := range exts {
+		if m, ok := e.(map[string]any); ok && m["source"] == "contrib/tavily" {
+			ex = m
+		}
 	}
-	ex := exts[0].(map[string]any)
+	if ex == nil {
+		t.Fatalf("contrib/tavily not in catalog: %v", m["extensions"])
+	}
 	if ex["source"] != "contrib/tavily" || ex["name"] != "tavily" || ex["version"] != "0.1.0" {
 		t.Fatalf("entry: %v", ex)
 	}

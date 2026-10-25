@@ -29,7 +29,9 @@ func TestRouteCoverage(t *testing.T) {
 		"Files": true, "ListExecutions": true, "GetExecution": true,
 		"DeleteKey": true, "GetPolicy": true, "UpdatePolicy": true,
 		"DeletePolicy": true, "UpdateSecret": true, "DeleteSecret": true,
-		"UpdateWorkspace": true, "DeleteWorkspace": true, "ListMembers": true,
+		"GetLLMProvider": true, "UpdateLLMProvider": true,
+		"DeleteLLMProvider": true,
+		"UpdateWorkspace":   true, "DeleteWorkspace": true, "ListMembers": true,
 		"AddMember": true, "SetMemberRole": true, "RemoveMember": true,
 		"ListChanges": true, "ListShares": true, "PutShare": true,
 		"DeleteShare": true,
@@ -41,6 +43,7 @@ func TestRouteCoverage(t *testing.T) {
 		"ListInstances": true, "CreateInstance": true, "ListAudit": true,
 		"ListWorkspaces": true, "CreateWorkspace": true, "ListPolicies": true,
 		"CreatePolicy": true, "ValidatePolicy": true, "ListSecrets": true,
+		"ListLLMProviders": true, "CreateLLMProvider": true,
 		"CreateSecret": true, "ArtifactConfig": true, "PreviewArtifact": true,
 		"ExportArtifacts": true, "InstanceCompletions": true,
 	}

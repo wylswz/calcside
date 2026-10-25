@@ -1,0 +1,24 @@
+name: upstash_qstash
+version: 0.1.0
+description: Upstash QStash — publish messages and manage scheduled deliveries.
+icon: icon.png
+dependencies: [net]
+ops:
+  - name: publish
+    doc: Publish a message to a destination URL; returns {message_id}. delay_seconds defers delivery.
+    params: [destination, body, delay_seconds, headers]
+  - name: create_schedule
+    doc: Create a cron schedule posting body to destination; returns {schedule_id}
+    params: [destination, cron, body, headers]
+  - name: list_schedules
+    doc: List schedules; returns list of {schedule_id, cron, destination}
+    params: []
+config:
+  - name: base_url
+    type: string
+    doc: QStash API base URL
+    default: https://qstash.upstash.io
+  - name: token
+    type: secret
+    doc: QStash token (secret reference)
+    default: "{{secrets.UPSTASH_QSTASH_TOKEN}}"

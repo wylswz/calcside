@@ -562,6 +562,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm-providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listLLMProviders"];
+        put?: never;
+        post: operations["createLLMProvider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm-providers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getLLMProvider"];
+        put: operations["updateLLMProvider"];
+        post?: never;
+        delete: operations["deleteLLMProvider"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/secrets": {
         parameters: {
             query?: never;
@@ -824,6 +856,10 @@ export interface components {
             description?: string;
             /** @description Authenticated same-origin packaged PNG endpoint */
             icon_url?: string;
+            /** @description Special contract, e.g. llm for provider extensions. */
+            interface?: string;
+            /** @description Default model catalogue declared by a provider extension. */
+            models?: string[];
             dependencies: components["schemas"]["CapabilityName"][];
             ops: components["schemas"]["OpDoc"][];
             config: components["schemas"]["ExtConfigField"][];
@@ -1165,6 +1201,50 @@ export interface components {
         };
         PoliciesResponse: {
             policies?: components["schemas"]["Policy"][];
+        };
+        /** @description A named provider extension owned by a workspace. The `llm` capability extension receives all workspace providers as a snapshot at instance creation; scripts choose provider/model per call. */
+        LLMProvider: {
+            id: string;
+            user_id?: string;
+            name: components["schemas"]["PolicyName"];
+            /** @description provider extension source, e.g. contrib/llm-openai */
+            source: string;
+            /** @description h1: integrity sum (remote sources only) */
+            sum?: string;
+            /** @description Model ids this provider makes available to the llm extension. */
+            models: string[];
+            /** @description effective backend config with defaults applied; api_key stays as a {{secrets.NAME}} reference. */
+            config?: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
+        };
+        LLMProviderRequest: {
+            name: components["schemas"]["PolicyName"];
+            source: string;
+            sum?: string;
+            models?: string[];
+            config?: {
+                [key: string]: unknown;
+            };
+        };
+        LLMProviderUpdateRequest: {
+            name?: components["schemas"]["PolicyName"];
+            source?: string;
+            sum?: string;
+            models?: string[];
+            config?: {
+                [key: string]: unknown;
+            };
+        };
+        LLMProviderResponse: {
+            provider?: components["schemas"]["LLMProvider"];
+        };
+        LLMProvidersResponse: {
+            providers?: components["schemas"]["LLMProvider"][];
         };
         ValidatePolicyRequest: {
             rego: string;
@@ -2401,6 +2481,138 @@ export interface operations {
         };
     };
     deletePolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listLLMProviders: {
+        parameters: {
+            query?: {
+                workspace?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description workspace LLM providers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMProvidersResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    createLLMProvider: {
+        parameters: {
+            query?: {
+                workspace?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LLMProviderRequest"];
+            };
+        };
+        responses: {
+            /** @description created provider */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMProviderResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getLLMProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description provider */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMProviderResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateLLMProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LLMProviderUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description updated provider */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMProviderResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    deleteLLMProvider: {
         parameters: {
             query?: never;
             header?: never;
