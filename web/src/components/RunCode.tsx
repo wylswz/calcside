@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { useStarlarkEditor } from './editor'
 import { api, ExecResult, Instance } from '../api'
-import { Button, OutcomeBadge, SectionTitle } from './ui'
+import { Button, OutcomeBadge, SwapLabel } from './ui'
 import { cmTheme } from './codemirror'
 import { fmtMs } from '../format'
 
@@ -16,11 +16,12 @@ print("hello from calcside")
 // RunCode is the intervention tool: an editor with live completions and
 // the run's result. Runs made here are recorded with via=session and
 // show up in Activity as "you".
-export function RunCode({ inst, running, setRunning, onRan }: {
+export function RunCode({ inst, running, setRunning, onRan, onClose }: {
   inst: Instance
   running: boolean
   setRunning: (v: boolean) => void
   onRan?: () => void
+  onClose?: () => void
 }) {
   const id = inst.id
   const qc = useQueryClient()
@@ -60,13 +61,16 @@ export function RunCode({ inst, running, setRunning, onRan }: {
 
   return (
     <section aria-label="Run code">
-      <SectionTitle aside={<span className="text-mute">⌘/Ctrl + Enter — runs as you</span>}>Run code</SectionTitle>
-      <div className="detail-editor-chrome border border-ink">
+      <div className="detail-editor-chrome">
         <div className="editor-toolbar flex items-center gap-3 px-3 py-2">
-          <span className="text-xs font-medium text-sec">Starlark</span>
-          <Button variant="primary" size="sm" className="ml-auto min-w-20" disabled={running || inst.status !== 'running'} onClick={run}>
-            {running ? 'Running…' : 'Run ▸'}
-          </Button>
+          <span className="text-xs font-medium text-ink">Run code as you</span>
+          <span className="text-xs text-sec">Starlark · ⌘/Ctrl + Enter</span>
+          <div className="ml-auto flex items-center gap-2">
+            {onClose && <Button size="sm" onClick={onClose}>Close</Button>}
+            <Button variant="primary" size="sm" disabled={running || inst.status !== 'running'} onClick={run}>
+              <SwapLabel show={running ? 'Running…' : 'Run ▸'} options={['Run ▸', 'Running…']} />
+            </Button>
+          </div>
         </div>
         <CodeMirror value={code} height="300px" extensions={editor.extensions} onChange={setCode} theme={cmTheme} />
         <div className="editor-footer flex flex-wrap gap-x-4 border-t border-line px-3 py-2 text-xs text-sec">

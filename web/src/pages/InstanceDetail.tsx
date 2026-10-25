@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Instance, Execution, APIKey, SharedInstance, workspaces } from '../api'
 import { instanceName } from '../activity'
 import { nextStep } from '../nextStep'
 import { useRole } from '../workspace'
-import { Button, Loading, SectionTitle, InstanceStatus, Modal, Notice } from '../components/ui'
+import { Button, Loading, Menu, MenuItem, SectionTitle, InstanceStatus, Modal, Notice, SwapLabel } from '../components/ui'
 import ShareDialog from '../components/ShareDialog'
 import ConnectAgent from '../components/ConnectAgent'
 import { Allowed } from '../components/Allowed'
@@ -39,12 +39,10 @@ export default function InstanceDetail() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const moreRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { setMore(false); setCode(false) } }
-    const down = (e: MouseEvent) => { if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMore(false) }
-    window.addEventListener('keydown', key); window.addEventListener('mousedown', down)
-    return () => { window.removeEventListener('keydown', key); window.removeEventListener('mousedown', down) }
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setCode(false) }
+    window.addEventListener('keydown', key)
+    return () => window.removeEventListener('keydown', key)
   }, [])
   const role = useRole() // current workspace — destination for create-similar
   const canCreate = role === 'owner' || role === 'editor'
@@ -53,8 +51,17 @@ export default function InstanceDetail() {
   const [agent, setAgent] = useState(false)
   const [prompt, setPrompt] = useState(false)
 
-  const [more, setMore] = useState(false)
   const [code, setCode] = useState(false)
+  const [revealEditor, setRevealEditor] = useState(false)
+  // "Run code yourself" from the next-step card opens the editor and
+  // brings it into view; the Activity toggle opens it in place.
+  useEffect(() => {
+    if (!revealEditor || !code) return
+    setRevealEditor(false)
+    const el = document.getElementById('run-code')
+    el?.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    el?.querySelector<HTMLElement>('.cm-content')?.focus({ preventScroll: true })
+  }, [revealEditor, code])
   const [focusId, setFocusId] = useState<string | undefined>()
 
   const { data: inst, isError: instErr } = useQuery({
@@ -130,21 +137,16 @@ export default function InstanceDetail() {
           {name !== inst.id && <div className="mt-1 font-mono text-xs text-mute">{inst.id}</div>}
           <div className="mt-3 flex items-center gap-3">
             <InstanceStatus inst={inst} />
-            {live && effRun && <button className="text-xs text-accent hover:underline disabled:opacity-50" onClick={keepalive} disabled={pending === 'extend'}>{pending === 'extend' ? 'extending…' : 'extend'}</button>}
+            {live && effRun && <button className="text-xs text-accent hover:underline disabled:opacity-50" onClick={keepalive} disabled={pending === 'extend'}><SwapLabel show={pending === 'extend' ? 'extending…' : 'extend'} options={['extend', 'extending…']} /></button>}
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
           {canCreate && <Button variant="primary" onClick={() => navigate('/instances/new')}>New instance</Button>}
-          <div className="relative" ref={moreRef}>
-            <Button onClick={() => setMore(!more)} aria-expanded={more} aria-controls="inst-more">More ▾</Button>
-            {more && (
-              <div id="inst-more" className="more-menu absolute right-0 top-full z-50 mt-1 w-48 bg-paper">
-                {isOwner && <button className="block w-full px-3 py-2 text-left text-xs text-ink hover:bg-surface" onClick={() => { setMore(false); setShare(true) }}>Share…</button>}
-                <button className="block w-full px-3 py-2 text-left text-xs text-ink hover:bg-surface" onClick={() => { setMore(false); setPrompt(true) }}>Copy agent prompt</button>
-                {effRun && inst.status !== 'deleted' && <button className="block w-full px-3 py-2 text-left text-xs text-ink hover:bg-surface" onClick={() => { setMore(false); end() }} disabled={pending === 'end'}>End instance</button>}
-              </div>
-            )}
-          </div>
+          <Menu trigger={<Button>More ▾</Button>}>
+            {isOwner && <MenuItem onSelect={() => setShare(true)}>Share…</MenuItem>}
+            <MenuItem onSelect={() => setPrompt(true)}>Copy agent prompt</MenuItem>
+            {effRun && inst.status !== 'deleted' && <MenuItem tone="danger" disabled={pending === 'end'} onSelect={end}>End instance</MenuItem>}
+          </Menu>
         </div>
       </div>
 
@@ -186,7 +188,7 @@ export default function InstanceDetail() {
             <p className="next-text">Give an agent access to exactly this instance — nothing else.</p>
             <div className="next-links">
               <button className="hover:text-ink" onClick={() => setPrompt(true)}>Copy agent prompt</button>
-              {canManage && <button className="hover:text-ink" onClick={() => setCode(true)}>Run code yourself</button>}
+              {canManage && <button className="hover:text-ink" onClick={() => { setCode(true); setRevealEditor(true) }}>Run code yourself</button>}
             </div>
           </div>
           {canManage && <div className="next-actions"><Button variant="primary" onClick={() => setAgent(true)}>Connect agent</Button></div>}
@@ -220,10 +222,9 @@ export default function InstanceDetail() {
         <div className="work-surface min-w-0">
           <section aria-label="Work">
             <h2 className="sr-only">Work</h2>
-            {code && <div className="mb-6"><RunCode inst={inst} running={running} setRunning={setRunning} /></div>}
-            <Activity id={id} focusId={focusId} aside={
-              effRun && live ? <button className="text-xs text-sec hover:text-ink" onClick={() => setCode(!code)}>Run code yourself</button> : undefined
-            } />
+            <Activity id={id} focusId={focusId}
+              aside={effRun && live ? <Button size="sm" aria-expanded={code} aria-controls="run-code" onClick={() => setCode(!code)}>Run code</Button> : undefined}
+              editor={code && effRun && live ? <div id="run-code" className="mb-6"><RunCode inst={inst} running={running} setRunning={setRunning} onClose={() => setCode(false)} /></div> : undefined} />
           </section>
           <section aria-label="Results" className="results-block">
             <h2 className="mb-4 text-lg font-semibold text-ink">Results</h2>

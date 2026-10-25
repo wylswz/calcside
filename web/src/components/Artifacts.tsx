@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api, saveArtifact, type ArtifactConfig, type FileEntry } from '../api'
-import { Button, Icon, Loading, Notice } from './ui'
+import { Button, Icon, Loading, Notice, SwapLabel } from './ui'
 import { fmtBytes } from '../format'
 
 export function ArtifactBrowser({ id, running, busy }: { id: string; running: boolean; busy: boolean }) {
@@ -76,7 +76,7 @@ export function ArtifactBrowser({ id, running, busy }: { id: string; running: bo
       <span className="text-xs text-sec">{selected.size ? `${selected.size} selected` : `${entries.length} item${entries.length === 1 ? '' : 's'}`}</span>
       <div className="flex items-center gap-2">
         {selected.size > 0 && <button className="text-btn" disabled={disabled} onClick={() => setSelected(new Set())}>Clear</button>}
-        <Button size="sm" disabled={disabled || isLoading || !entries.length && !selected.size} aria-label={selected.size ? `Download selected ZIP (${selected.size})` : 'Download folder ZIP'} onClick={() => void download(selected.size ? [...selected] : [dir], 'zip')}><Icon name="download" className="!h-3.5 !w-3.5" />{downloading ? 'Preparing…' : 'Export ZIP'}</Button>
+        <Button size="sm" disabled={disabled || isLoading || !entries.length && !selected.size} aria-label={selected.size ? `Download selected ZIP (${selected.size})` : 'Download folder ZIP'} onClick={() => void download(selected.size ? [...selected] : [dir], 'zip')}><Icon name="download" className="!h-3.5 !w-3.5" /><SwapLabel show={downloading ? 'Preparing…' : 'Export ZIP'} options={['Export ZIP', 'Preparing…']} /></Button>
       </div>
     </div>
     {notice && <p role="status" className="text-xs text-sec">{notice}</p>}

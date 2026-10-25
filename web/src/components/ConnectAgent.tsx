@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../api'
-import { Button, Field, Modal, inputCls } from './ui'
+import { Button, Field, Modal, SwapLabel, inputCls } from './ui'
 import { CopyBlock, MCPGuide } from './MCP'
 
 // ConnectAgent creates an instance-bound API key and shows the MCP
@@ -27,7 +27,7 @@ export default function ConnectAgent({ id, workspaceId, onClose }: { id: string;
   return (
     <Modal title="Connect agent" onClose={onClose} footer={
       secret ? <Button variant="primary" onClick={onClose}>Done</Button>
-        : <><Button onClick={onClose}>Cancel</Button><Button variant="primary" onClick={create} disabled={!name.trim() || busy}>{busy ? 'Creating…' : 'Create key'}</Button></>
+        : <><Button onClick={onClose}>Cancel</Button><Button variant="primary" onClick={create} disabled={!name.trim() || busy}><SwapLabel show={busy ? 'Creating…' : 'Create key'} options={['Create key', 'Creating…']} /></Button></>
     }>
       {!secret ? (
         <div className="space-y-3 text-sm">

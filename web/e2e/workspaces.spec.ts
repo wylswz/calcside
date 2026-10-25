@@ -308,7 +308,8 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
     header: getComputedStyle(document.querySelector('.console-header')!).backgroundColor,
   }))
   expect(base.body).toBe('rgb(255, 255, 255)')
-  expect(base.header).toBe('rgb(255, 255, 255)')
+  // frosted white header over a white page
+  expect(base.header).toMatch(/^rgba\(255, 255, 255, 0\.\d+\)$/)
   // no page overflow on desktop
   const dw = await page.evaluate(() => ({ s: document.documentElement.scrollWidth, i: window.innerWidth }))
   expect(dw.s).toBeLessThanOrEqual(dw.i)
@@ -338,24 +339,60 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
     }))
   expect(tblWrap.length).toBeGreaterThan(0)
   for (const w of tblWrap) {
-    expect(w.r).toBe('7px')
+    expect(w.r).toBe('10px')
     expect(w.ox).toBe('auto')
     expect(w.oy).toBe('hidden')
   }
   await page.screenshot({ path: testInfo.outputPath('detail-expanded.png'), fullPage: true })
 
-  // More menu: Escape then outside-click dismissal
-  await page.getByRole('button', { name: 'More ▾' }).click()
-  await expect(page.locator('#inst-more')).toBeVisible()
+  // More menu: arrow keys move through items, Escape closes and returns
+  // focus to the trigger, an outside click closes it
+  const more = page.getByRole('button', { name: 'More ▾' })
+  await more.click()
+  const menu = page.getByRole('menu', { name: 'More ▾' })
+  await expect(menu).toBeVisible()
+  await page.keyboard.press('ArrowDown')
+  await expect(page.getByRole('menuitem').first()).toBeFocused()
   await page.keyboard.press('Escape')
-  await expect(page.locator('#inst-more')).toHaveCount(0)
-  await page.getByRole('button', { name: 'More ▾' }).click()
+  await expect(menu).toHaveCount(0)
+  await expect(more).toBeFocused()
+  await more.click()
   await page.locator('body').click({ position: { x: 10, y: 10 } })
-  await expect(page.locator('#inst-more')).toHaveCount(0)
+  await expect(menu).toHaveCount(0)
+  // an item that opens a dialog keeps it open; closing it returns to More
+  await more.click()
+  await page.getByRole('menuitem', { name: 'Copy agent prompt' }).click()
+  const promptDialog = page.getByRole('dialog', { name: 'Agent prompt' })
+  await expect(promptDialog).toBeVisible()
+  await page.waitForTimeout(300)
+  await expect(promptDialog).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(promptDialog).toHaveCount(0)
+  await expect(more).toBeFocused()
 
-  // Run code yourself opens the editor
-  await page.getByText('Run code yourself').first().click()
+  // Run code opens the editor under the Activity heading: the toggle and
+  // the filter do not move, and the toggle reads as held while open
+  const runToggle = page.getByRole('button', { name: 'Run code', exact: true })
+  const filterAll = page.locator('.seg-filters button').first()
+  const at = async () => ({
+    toggle: await runToggle.evaluate((el) => { const b = el.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y + scrollY), Math.round(b.width)] }),
+    filter: await filterAll.evaluate((el) => { const b = el.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y + scrollY), Math.round(b.width)] }),
+  })
+  await page.mouse.move(1, 1)
+  await page.waitForTimeout(400)
+  const closedAt = await at()
+  await runToggle.click()
   await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 8000 })
+  await expect(runToggle).toHaveAttribute('aria-expanded', 'true')
+  await page.mouse.move(1, 1)
+  await page.waitForTimeout(400)
+  expect(await at()).toEqual(closedAt)
+  // switching the filter keeps both segments in place
+  await page.locator('.seg-filters button').nth(1).click()
+  await page.mouse.move(1, 1)
+  await page.waitForTimeout(400)
+  expect(await at()).toEqual(closedAt)
+  await filterAll.click()
 
   // mobile: Work precedes Boundary; ≥44px primary; no overflow
   await stateDisclosure.locator(':scope > summary').click()
@@ -588,7 +625,10 @@ test('new instance: palette controls stay put while adding and removing', async 
       const b = el.getBoundingClientRect()
       return { x: Math.round(b.x + window.scrollX), y: Math.round(b.y + window.scrollY), w: Math.round(b.width), h: Math.round(b.height) }
     })
+    // Hover lift is intentional motion, not layout: measure at rest.
     const snapshot = async () => {
+      await page.mouse.move(1, 1)
+      await page.waitForTimeout(400)
       const out: Record<string, { x: number; y: number; w: number; h: number }> = {}
       for (const [k, l] of Object.entries(targets)) out[k] = await box(l)
       return out
@@ -644,4 +684,64 @@ test('new instance: no nested scrolling and nothing overflows', async ({ page })
     })
     expect(layout).toEqual({ scrolls: [], rows: true, cards: true, page: true })
   }
+})
+
+
+// Behaviour from the headless primitives: tabs follow arrow keys, dialogs
+// trap focus, close on Escape and hand focus back.
+test('console primitives: keyboard tabs and dialog focus', async ({ page }) => {
+  await page.goto(`${consoleURL}/instances/new`)
+  const caps = page.getByRole('tab', { name: 'Add capabilities' })
+  await caps.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByRole('tab', { name: /^Settings/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('tabpanel', { name: /^Settings/ })).toBeVisible()
+  await page.keyboard.press('ArrowLeft')
+  await expect(caps).toHaveAttribute('aria-selected', 'true')
+
+  await page.goto(`${consoleURL}/workspace/secrets`)
+  const open = page.getByRole('button', { name: 'New secret' })
+  await open.click()
+  const dialog = page.getByRole('dialog', { name: 'New secret' })
+  await expect(dialog).toBeVisible()
+  // focus starts inside and Tab cannot leave the dialog
+  for (let i = 0; i < 8; i++) {
+    await page.keyboard.press('Tab')
+    expect(await dialog.evaluate((d) => d.contains(document.activeElement))).toBe(true)
+  }
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(open).toBeFocused()
+})
+
+// The material is real CSS, not a screenshot impression: raised faces are
+// lit by a soft radial gradient (no bevels), fields are flat wells, and
+// pressing changes the face while it is held.
+test('console material: raised controls, inset wells, pressed state', async ({ page }) => {
+  await page.goto(`${consoleURL}/instances/new`)
+  const style = (sel: string) => page.locator(sel).first().evaluate((el) => {
+    const s = getComputedStyle(el)
+    return { image: s.backgroundImage, shadow: s.boxShadow, radius: s.borderTopLeftRadius }
+  })
+  const create = await style('[data-ui="button"][data-variant="primary"]')
+  expect(create.image).toContain('radial-gradient')
+  expect(create.shadow).toContain('inset')
+  expect(create.radius).toBe('10px')
+  const input = await style('.input')
+  expect(input.image).toBe('none')
+  expect(input.shadow).toMatch(/inset/)
+  expect(input.radius).toBe('10px')
+  const panel = await style('.builder-work-panel')
+  expect(panel.image).toContain('radial-gradient')
+  expect(panel.radius).toBe('16px')
+  const tray = await style('.spec-selection')
+  expect(tray.shadow).toMatch(/inset/)
+  // pressed: gradient and shadow change while held
+  const files = page.locator('.ability-choice').first()
+  const box = (await files.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  const hover = await files.evaluate((el) => getComputedStyle(el).backgroundImage)
+  await page.mouse.down()
+  await expect.poll(() => files.evaluate((el) => getComputedStyle(el).backgroundImage)).not.toBe(hover)
+  await page.mouse.up()
 })

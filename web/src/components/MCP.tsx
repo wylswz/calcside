@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button } from './ui'
+import { Button, SwapLabel } from './ui'
 import { claudeCodeSnippet, cursorSnippet, headerSnippet, mcpURL } from '../mcpSnippets'
 
 // CopyBlock renders copyable text (secret or client snippet) with a
@@ -9,7 +9,7 @@ export function CopyBlock({ text, mono }: { text: string; mono?: boolean }) {
   return (
     <div className="flex gap-2">
       <pre className={`pre flex-1 overflow-auto break-all ${mono ? 'border-ink' : ''}`}>{text}</pre>
-      <Button onClick={async () => { await navigator.clipboard.writeText(text); setCopied(true) }}>{copied ? 'Copied' : 'Copy'}</Button>
+      <Button onClick={async () => { await navigator.clipboard.writeText(text); setCopied(true) }}><SwapLabel show={copied ? 'Copied' : 'Copy'} options={['Copy', 'Copied']} /></Button>
     </div>
   )
 }
@@ -33,7 +33,7 @@ export function MCPGuide({ secret, url }: { secret: string; url?: string }) {
       <div className="flex gap-1 border-b border-line">
         {tabs.map(([label], i) => (
           <button key={label}
-            className={`px-3 py-1.5 text-xs ${i === tab ? 'border-b-2 border-ink font-medium text-ink' : 'text-mute'}`}
+            className={`-mb-px border-b-2 px-3 py-1.5 text-xs font-medium ${i === tab ? 'border-accent text-ink' : 'border-transparent text-mute hover:text-ink'}`}
             onClick={() => setTab(i)}>{label}</button>
         ))}
       </div>

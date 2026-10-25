@@ -34,7 +34,7 @@ const navWork = [
 ]
 
 const navCls = ({ isActive }: { isActive: boolean }) =>
-  `relative flex items-center gap-1.5 whitespace-nowrap text-sm transition-colors ${isActive ? 'font-medium text-ink after:absolute after:inset-x-0 after:-bottom-px after:h-[3px] after:bg-accent' : 'text-sec hover:text-ink'}`
+  `relative flex items-center gap-1.5 whitespace-nowrap text-sm transition-colors ${isActive ? 'text-ink after:absolute after:inset-x-0 after:-bottom-px after:h-[3px] after:bg-accent' : 'text-sec hover:text-ink'}`
 
 export default function App() {
   const [backendRetrying, setBackendRetrying] = useState(false)

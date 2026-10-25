@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, InstanceInspect, ResourceUsages } from '../api'
-import { EmptyRow, Notice, SectionTitle } from './ui'
+import { EmptyRow, Notice, SectionTitle, SwapLabel } from './ui'
 import { fmtBytes } from '../format'
 import { isBuiltinGlobal } from '../activity'
 
@@ -95,7 +95,7 @@ export function StatePanel({ id, running, busy, capNames = [] }: { id: string; r
             auto-refresh
           </label>
           <button className="text-btn" onClick={() => refetch()} disabled={!running}>
-            {isFetching ? 'refreshing…' : 'refresh'}
+            <SwapLabel show={isFetching ? 'refreshing…' : 'refresh'} options={['refresh', 'refreshing…']} />
           </button>
         </>
       }>State</SectionTitle>

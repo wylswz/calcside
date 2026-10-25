@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import * as Tabs from '@radix-ui/react-tabs'
 import { api, currentWorkspace, type ExtensionCatalog, type ExtensionInfo, type Policy, type Secret } from '../api'
 import {
   buildInstanceSpec, draftFromSpec, uniqueExtensionAlias, validateRawSpec,
@@ -327,18 +328,19 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
   return (
     <div className="spec-form">
       <div className="spec-builder">
-        <div className="spec-main">
+        <Tabs.Root className="spec-main" value={view} onValueChange={(v) => switchView(v as View)}>
           <div className="spec-tabs" ref={tabsRef}>
-            <div className="segmented" role="tablist" aria-label="Instance configuration">
-              <button type="button" role="tab" aria-selected={view === 'capabilities'} onClick={() => switchView('capabilities')}>Add capabilities</button>
-              <button type="button" role="tab" aria-selected={view === 'settings'} onClick={() => switchView('settings')}>
+            <Tabs.List className="segmented" aria-label="Instance configuration">
+              <Tabs.Trigger value="capabilities">Add capabilities</Tabs.Trigger>
+              <Tabs.Trigger value="settings">
                 Settings{errors.length > 0 && <span className="tab-badge" aria-label={`${errors.length} issues`}>{errors.length}</span>}
-              </button>
-            </div>
+              </Tabs.Trigger>
+            </Tabs.List>
             <button type="button" className="text-btn underline" onClick={toggleAdvanced}>Advanced JSON</button>
           </div>
 
-          <section className="spec-palette" role="tabpanel" aria-label="Add capabilities" hidden={view !== 'capabilities'}>
+          {/* forceMount keeps both views mounted so editor state survives switching */}
+          <Tabs.Content value="capabilities" forceMount className="spec-palette">
             <p className="spec-pane-note">Optional. Each capability is added with safe defaults; adjust them under Settings. Settings are fixed after creation.</p>
             <div className="ability-choices">
               <button type="button" className="ability-choice" data-selected={!!draft.fs} aria-label={draft.fs ? 'Files added' : 'Add Files'} onClick={addFiles}>
@@ -357,9 +359,9 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
               <ExtensionPicker entries={extensions} selectedSources={selectedSources} loading={catalog.isPending} error={catalog.isError}
                 onRetry={() => catalog.refetch()} onAdd={addExtension} onShow={pointAtExtension} onCustom={() => addExtension({ name: '', source: '' })} />
             </div>
-          </section>
+          </Tabs.Content>
 
-          <div className="spec-settings" role="tabpanel" aria-label="Settings" hidden={view !== 'settings'} ref={settingsRef}>
+          <Tabs.Content value="settings" forceMount className="spec-settings" ref={settingsRef}>
             <section className="settings-group" data-section="capabilities">
               <h3 className="spec-pane-title">Capabilities</h3>
               {items.length === 0 && (
@@ -394,8 +396,8 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
               <h3 className="spec-pane-title">Inputs <span className="spec-pane-meta">{inputsSummary}</span></h3>
               <InputsSection draft={draft} set={set} keyMode={keyMode} vault={vault.data?.secrets ?? []} vaultError={vault.isError} onRetryVault={() => vault.refetch()} listId={`vault-names-${ws}`} />
             </section>
-          </div>
-        </div>
+          </Tabs.Content>
+        </Tabs.Root>
 
         <aside className="spec-selection" aria-label="This instance">
           <h3 className="spec-pane-title">This instance</h3>

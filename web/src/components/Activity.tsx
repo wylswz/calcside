@@ -81,7 +81,9 @@ function RunDetail({ execId }: { execId: string }) {
 
 // Activity lists runs newest first with their outcomes and the calls
 // each made; console (file-browsing) calls sit in their own muted group.
-export function Activity({ id, aside, focusId }: { id: string; aside?: React.ReactNode; focusId?: string }) {
+// editor renders directly under the heading, so the control that opens it
+// stays where it was clicked.
+export function Activity({ id, aside, editor, focusId }: { id: string; aside?: React.ReactNode; editor?: React.ReactNode; focusId?: string }) {
   const [open, setOpen] = useState<string | null>(focusId ?? null)
   const [attentionOnly, setAttentionOnly] = useState(false)
   useEffect(() => {
@@ -125,13 +127,14 @@ export function Activity({ id, aside, focusId }: { id: string; aside?: React.Rea
             const on = (f === 'needs attention') === attentionOnly
             return (
               <button key={f} aria-pressed={on} onClick={() => setAttentionOnly(f === 'needs attention')}
-                className={`border px-2 py-0.5 transition-colors ${on ? 'border-ink font-medium text-ink' : 'border-transparent text-sec hover:text-ink'}`}>
+                className={`font-medium ${on ? 'text-ink' : 'text-sec hover:text-ink'}`}>
                 {f}
               </button>
             )
           })}
         </div></>
       }>Activity</SectionTitle>
+      {editor}
 
       <div className="tbl-wrap">
         <table className="tbl tbl-compact">

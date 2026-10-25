@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api, saveArtifact, type ArtifactConfig, type ArtifactPreview } from '../api'
-import { Button, Icon, Loading, Notice, SignalMark } from '../components/ui'
+import { Button, Icon, Loading, Notice, SignalMark, SwapLabel } from '../components/ui'
 import { fmtBytes, fmtTime } from '../format'
 
 export default function ArtifactPreviewPage({ dev }: { dev: boolean }) {
@@ -84,7 +84,7 @@ function Preview({ id, path, dev }: { id: string; path: string; dev: boolean }) 
         <h1 title={filename} className="truncate font-mono text-base font-medium tracking-tight text-ink sm:text-xl">{filename}</h1>
       </div>
       <button className="artifact-action" aria-label="Refresh preview" title="Refresh preview" disabled={preparing || !path} onClick={refresh}><Icon name="refresh" className={preparing ? 'motion-safe:animate-spin' : ''} /></button>
-      <Button variant="primary" disabled={!path || downloading} onClick={() => void download()} aria-label="Download file"><Icon name="download" /><span>{downloading ? 'Preparing…' : 'Download'}</span></Button>
+      <Button variant="primary" disabled={!path || downloading} onClick={() => void download()} aria-label="Download file"><Icon name="download" /><SwapLabel show={downloading ? 'Preparing…' : 'Download'} options={['Download', 'Preparing…']} /></Button>
     </header>
 
     <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 border-b border-line px-4 sm:px-6">

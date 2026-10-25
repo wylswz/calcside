@@ -1,4 +1,6 @@
 import React from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type { InstanceStatus } from '../api'
 import type { Outcome, RunBy } from '../activity'
 import { fmtCountdown } from '../format'
@@ -104,19 +106,23 @@ export function Tag({ children }: { children: React.ReactNode }) {
   return <span className="inline-block border border-line px-1.5 py-px font-mono text-[11px] text-sec">{children}</span>
 }
 
-export function Button(
-  props: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary'; size?: 'sm' },
-) {
-  const { variant, size, className, ...rest } = props
-  const base =
-    'inline-flex items-center justify-center gap-2 whitespace-nowrap border font-medium transition-colors disabled:pointer-events-none disabled:opacity-40 '
-  const sz = size === 'sm' ? 'h-7 px-2.5 text-xs ' : 'h-8 px-3.5 text-sm '
-  const v =
-    variant === 'primary'
-      ? 'border-accent bg-accent text-white'
-      : 'border-line bg-paper text-ink'
-  return <button data-ui="button" data-variant={variant === 'primary' ? 'primary' : 'default'} className={base + sz + v + (className ? ' ' + className : '')} {...rest} />
+// SwapLabel keeps a control the same width while its label changes
+// (Copy/Copied, Run/Running…): every option occupies the same grid cell
+// and only the current one is visible.
+export function SwapLabel({ show, options }: { show: string; options: readonly string[] }) {
+  return <span className="swap-label">{options.map((o) => <span key={o} data-on={o === show}>{o}</span>)}</span>
 }
+
+// Button forwards its ref so headless primitives (menu triggers) can
+// position against it and return focus to it.
+export const Button = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary'; size?: 'sm' }>(
+  function Button({ variant, size, className, ...rest }, ref) {
+    // Material (fill, edge, shadow, motion) comes from material.css.
+    const base = 'inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium disabled:pointer-events-none '
+    const sz = size === 'sm' ? 'h-7 px-2.5 text-xs' : 'h-8 px-3.5 text-sm'
+    return <button ref={ref} data-ui="button" data-variant={variant === 'primary' ? 'primary' : 'default'} className={base + sz + (className ? ' ' + className : '')} {...rest} />
+  },
+)
 
 export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -184,6 +190,10 @@ export function Loading({ label = 'loading' }: { label?: string }) {
   )
 }
 
+// Modal is a Radix dialog: focus is trapped and restored, Escape and an
+// outside click close it, and the title labels it. Callers mount it
+// conditionally rather than through a Dialog.Trigger, so the element that
+// opened it is remembered here and focused again on close.
 export function Modal({ title, onClose, children, footer, wide }: {
   title: string
   onClose: () => void
@@ -191,24 +201,55 @@ export function Modal({ title, onClose, children, footer, wide }: {
   footer?: React.ReactNode
   wide?: boolean
 }) {
+  const [opener] = React.useState(() => document.activeElement as HTMLElement | null)
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div
-        className={`flex max-h-[90vh] w-full flex-col border border-line bg-paper ${wide ? 'max-w-5xl' : 'max-w-xl'}`}
-        data-ui="dialog-surface"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label={title}
-      >
-        <div className="flex items-center justify-between border-b border-line px-6 py-4">
-          <h2 className="text-lg font-semibold tracking-tight text-ink">{title}</h2>
-          <button onClick={onClose} aria-label="Close" className="-mr-2 flex h-8 w-8 items-center justify-center text-xl leading-none text-mute transition-colors hover:bg-ink hover:text-paper">&times;</button>
-        </div>
-        <div className="overflow-y-auto px-6 py-5">{children}</div>
-        {footer && <div className="flex items-center gap-2 border-t border-line px-6 py-4">{footer}</div>}
-      </div>
-    </div>
+    <Dialog.Root open onOpenChange={(open) => { if (!open) onClose() }}>
+      <Dialog.Portal>
+        <Dialog.Overlay data-ui="dialog-overlay" />
+        <Dialog.Content data-ui="dialog-surface" aria-describedby={undefined} className={wide ? 'max-w-5xl' : 'max-w-xl'}
+          onCloseAutoFocus={(e) => { e.preventDefault(); if (opener?.isConnected) opener.focus() }}>
+          <div className="flex items-center justify-between border-b border-line px-6 py-4">
+            <Dialog.Title className="text-lg font-semibold tracking-tight text-ink">{title}</Dialog.Title>
+            <Dialog.Close data-ui="dialog-close" aria-label="Close">&times;</Dialog.Close>
+          </div>
+          <div className="overflow-y-auto px-6 py-5">{children}</div>
+          {footer && <div className="flex items-center gap-2 border-t border-line px-6 py-4">{footer}</div>}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
+}
+
+// Menu is a Radix dropdown: arrow keys move between items, Escape and an
+// outside click close it, and focus returns to the trigger. An item's
+// action runs only after the menu has closed and focus is back on the
+// trigger, so an item can open a dialog without the closing menu
+// dismissing it, and the dialog later returns focus to the trigger.
+const MenuAction = React.createContext<(run: () => void) => void>((run) => run())
+
+export function Menu({ trigger, children }: { trigger: React.ReactNode; children: React.ReactNode }) {
+  const pending = React.useRef<(() => void) | null>(null)
+  const queue = React.useCallback((run: () => void) => { pending.current = run }, [])
+  return (
+    <DropdownMenu.Root modal={false}>
+      <DropdownMenu.Trigger asChild>{trigger}</DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content data-ui="menu" align="end" sideOffset={6}
+          onCloseAutoFocus={() => {
+            const run = pending.current
+            pending.current = null
+            if (run) window.setTimeout(run, 0)
+          }}>
+          <MenuAction.Provider value={queue}>{children}</MenuAction.Provider>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  )
+}
+
+export function MenuItem({ onSelect, disabled, tone, children }: { onSelect: () => void; disabled?: boolean; tone?: 'danger'; children: React.ReactNode }) {
+  const queue = React.useContext(MenuAction)
+  return <DropdownMenu.Item data-ui="menu-item" data-tone={tone} disabled={disabled} onSelect={() => queue(onSelect)}>{children}</DropdownMenu.Item>
 }
 
 // InstanceStatus is the one status display: dot + label. Live (green)
