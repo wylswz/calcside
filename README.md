@@ -370,7 +370,7 @@ make test-postgres
 
 The files live in `cmd/calcside/internal/gormstore/migrations/{sqlite,postgres}` and share a version and name. Keep GORM row structs in sync, but do not generate SQL from them. Never modify an applied migration; add a new one instead. `migrate-validate` checks both directories' checksums. Go database tests apply the migrations to fresh SQLite databases; `make test-postgres` applies them and runs the same store conformance suite on disposable PostgreSQL databases (Docker required).
 
-Migration history was consolidated before the first release: `20261024133846_baseline.sql` is the only migration in each dialect and creates the full schema on a fresh, empty database. Existing dev databases created before the consolidation are **not** upgraded by this baseline — reset them intentionally (remove the dev DB file or recreate the dev database) and let the fresh baseline apply; never auto-baseline an arbitrary nonempty DB.
+Migration history was consolidated before the first release: `20261024133846_baseline.sql` is the only migration in each dialect and creates the full schema on a fresh, empty database — including the final `llm_providers` table (`source`/`sum`/`models`, no legacy `type` column). Existing dev databases created before the consolidation are **not** upgraded by this baseline — reset them intentionally (remove the dev DB file or recreate the dev database) and let the fresh baseline apply; never auto-baseline an arbitrary nonempty DB.
 
 ## Run with Docker
 
@@ -382,6 +382,131 @@ docker compose -f docker/docker-compose.yml up --build
 Compose first runs the pinned Atlas image as a one-shot `migrate` service and starts the API only after it succeeds; the service initializes a fresh `docker/data` database from the baseline automatically. A pre-consolidation dev database must be reset intentionally instead. For PostgreSQL, set `CALCSIDE_STORE=postgres`, `CALCSIDE_DSN`, and `ATLAS_DB_URL` to the same database/schema.
 
 Compose starts the API (`:8080`) plus one execution worker; the API forwards instance execution to it over an HMAC-authenticated internal protocol. Drop local extensions into `docker/data/ext/` (bind-mounted) — workers resolve them through the API. See `docker/.env.example` for the remaining env knobs.
+
+## Run on Kubernetes (Helm)
+
+The chart lives in [`charts/calcside`](charts/calcside) and is published to GHCR
+by the release workflow. It deploys the API, a worker StatefulSet, a data
+volume, generated Secrets, and an Atlas migration init container.
+
+```bash
+helm install calcside oci://ghcr.io/wylswz/charts/calcside \
+  --version 0.0.1 \
+  --namespace calcside --create-namespace \
+  --set config.consoleOrigin=https://calcside.example.com \
+  --set config.cookieSecure=true \
+  --set ingress.enabled=true \
+  --set ingress.host=calcside.example.com
+```
+
+Defaults: SQLite on a PersistentVolumeClaim, one API replica, one worker,
+migrations enabled, and no local administrator. For production, use
+PostgreSQL and multiple API replicas:
+
+```bash
+kubectl create secret generic calcside-postgres \
+  --from-literal=dsn='postgres://user:pass@db:5432/calcside?sslmode=require&search_path=public'
+
+helm install calcside oci://ghcr.io/wylswz/charts/calcside \
+  --set database.driver=postgres \
+  --set database.postgres.existingSecret=calcside-postgres \
+  --set replicaCount=2
+```
+
+The chart generates the API↔worker key in `Secret/<release>-secrets` and
+preserves it across upgrades. Set `secrets.existingSecret` for GitOps, and set
+`config.adminUsername` plus `secrets.adminPassword` to bootstrap a local
+administrator (or configure Google SSO). The OCI chart is
+`oci://ghcr.io/wylswz/charts/calcside`, and the images are
+`ghcr.io/wylswz/calcside` and `ghcr.io/wylswz/calcside-migrate`.
+
+Workers use process-per-instance isolation. Per-instance cgroup memory caps
+need a writable cgroup v2 subtree, which unprivileged Kubernetes pods normally
+do not have; `worker.instanceMemoryMax` defaults to `0`. The pod memory limit
+and heap watchdog still apply. Global policies and local extensions live under
+`/data` on the API volume. See the [chart README](charts/calcside/README.md) for
+all values.
+
+`make helm-lint` renders the SQLite, PostgreSQL, ingress, and API-only variants;
+CI runs it in the `helm` job.
+
+## Releases
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`:
+
+1. verify the Go build/tests and lint/render the chart;
+2. build and push multi-arch (`linux/amd64`, `linux/arm64`) API/worker and
+   migration images to GHCR with version, `sha-*`, and (for stable versions)
+   `latest` tags;
+3. package the chart with `version`/`appVersion` from the tag and push it to
+   `oci://ghcr.io/<owner>/charts`, then attach the chart and checksums to the
+   GitHub release.
+
+```bash
+git tag v0.0.1
+git push origin v0.0.1
+```
+
+## Release validation
+
+`.github/workflows/deployment-tests.yml` gates each release on a real
+deployment of the built images in two isolated backends — a throwaway kind
+cluster and the standalone `docker/compose.test.yml` stack — both on
+PostgreSQL with process-isolated workers. Neither touches a developer
+cluster, compose project, or database: the kind backend requires a fresh
+cluster (`TEST_KIND_CLUSTER`, default `calcside-release-test`) and the
+compose backend fails if `TEST_COMPOSE_PROJECT` already exists.
+
+Build the candidate images first; both backends deploy these exact tags:
+
+```bash
+docker build -f docker/Dockerfile -t ghcr.io/wylswz/calcside:test .
+docker build -f docker/Dockerfile.migrate -t ghcr.io/wylswz/calcside-migrate:test .
+```
+
+Deploy a stack and mint a one-hour validation API key. `STATE_DIR` must be
+new; it receives private credentials plus `connection.json`
+(`{"base_url", "api_key"}`), the runner's primary interface, and a `test.env`
+convenience exporting the same values for manual use.
+
+```bash
+python3 benchmark/deploy-release.py kind /tmp/calcside-kind       # cluster + port-forward :18080
+python3 benchmark/deploy-release.py compose /tmp/calcside-compose # docker/compose.test.yml
+```
+
+Run the gate against each deployment's `--state` — three integration cases,
+then three timed load cases (`BENCH_VUS=5`, `BENCH_DURATION=30s`,
+per-operation p95 < `BENCH_P95_MS` 2000 ms). It writes `report.md`,
+`runs.json`, and the raw k6 summaries/logs to a new output directory and
+fails unless all six cases pass.
+
+```bash
+python3 benchmark/run-release.py kind test-results/kind --state /tmp/calcside-kind
+python3 benchmark/run-release.py compose test-results/compose --state /tmp/calcside-compose
+```
+
+Pushing a `v*` tag triggers this automatically: `release.yml` runs the
+source verification and both deployment gates (kind and compose) first, and
+the image/chart publish jobs only start after all of them pass — nothing is
+published on a gate failure.
+
+Optionally, the same checks can run locally before tagging: build the `:test`
+images, `deploy-release.py` each backend into a fresh state directory, run
+`run-release.py <backend> <out> --state <dir>` for both, and collect
+diagnostics with `deploy-release.py ... diagnostics <out>`.
+
+Collect sanitized diagnostics for a deployment — status, events, container
+image IDs, and logs with generated credentials redacted (never Secret
+objects, helm values, compose config, or `test.env`):
+
+```bash
+python3 benchmark/deploy-release.py kind /tmp/calcside-kind diagnostics test-results/kind-diagnostics
+```
+
+Deployments are left running for the benchmark; nothing is deleted
+automatically. Tear down manually with
+`kind delete cluster --name calcside-release-test` or
+`docker compose -p calcside-release-test -f docker/compose.test.yml down -v`.
 
 ## LangChain integration
 

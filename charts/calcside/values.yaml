@@ -1,0 +1,255 @@
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: ghcr.io/wylswz/calcside
+  # Defaults to .Chart.AppVersion, which the release workflow sets from the tag.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# The API tier is stateless, but SQLite cannot be shared by multiple replicas.
+# Use PostgreSQL before raising this above 1.
+replicaCount: 1
+revisionHistoryLimit: 10
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: false
+
+podAnnotations: {}
+podLabels: {}
+priorityClassName: ""
+
+podSecurityContext:
+  fsGroup: 10001
+  fsGroupChangePolicy: OnRootMismatch
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+  runAsGroup: 10001
+  runAsNonRoot: true
+  runAsUser: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+service:
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 2Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+# /data holds the SQLite database (when used), global Rego policies, local
+# extension roots, and the extension fetch cache.
+persistence:
+  enabled: true
+  existingClaim: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 10Gi
+  storageClass: ""
+  annotations: {}
+
+database:
+  # sqlite or postgres
+  driver: sqlite
+  sqlite:
+    path: /data/calcside.db
+  postgres:
+    # Used when driver=postgres and existingSecret is empty. Prefer the
+    # existingSecret form so credentials stay out of Helm values.
+    dsn: ""
+    existingSecret: ""
+    existingSecretKey: dsn
+
+# Runs Atlas migrations in an init container before the API starts. The
+# migration image is published by the release workflow and bundles both
+# dialect directories. Disable only if migrations are applied elsewhere.
+migrations:
+  enabled: true
+  image:
+    repository: ghcr.io/wylswz/calcside-migrate
+    tag: ""
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: false
+    runAsGroup: 10001
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile:
+      type: RuntimeDefault
+
+config:
+  # Public origin users open in a browser; also used for OAuth callbacks and
+  # artifact framing. Set this to your ingress URL in any real deployment.
+  consoleOrigin: http://localhost:8080
+  # The API tier normally forwards execution to workers. These only matter
+  # when worker.enabled=false.
+  apiInstanceIsolation: inproc
+  apiInstanceMemoryMax: 0
+  cookieSecure: false
+  # Optional isolated origin for rendered HTML artifacts, e.g.
+  # https://reports.example.net. Must share the same service.
+  artifactPreviewBaseURL: ""
+  artifactAllowScripts: false
+
+  # Bootstrap-only local administrator. Set both username and password (via
+  # secrets.adminPassword or secrets.existingSecret) or neither.
+  adminUsername: ""
+  googleClientID: ""
+  googleAllowedDomains: []
+
+  policyDir: /data/policies
+  extLocalRoots:
+    - /opt/calcside/contrib
+    - /data/ext
+  extAllowSources: []
+  extCacheDir: /data/ext-cache
+  extFetchTimeout: 30s
+
+  # Additional env vars for the API container.
+  extraEnv: []
+
+extraVolumes: []
+extraVolumeMounts: []
+
+# Shared execution limits. The API and workers must agree on these values.
+limits:
+  maxInstancesPerUser: 10
+  maxInstancesPerNode: 0
+  defaultTTL: 15m
+  maxTTL: 24h
+  maxExecTimeout: 5m
+  maxConcurrentExecs: 64
+  reaperInterval: 10s
+  policyEvalTimeout: 100ms
+  maxSteps: 100000000
+  maxOutputBytes: 4194304
+  execMemoryLimit: 1073741824
+  netAllowCIDRs: []
+  maxNetResponseBytes: 33554432
+  secretsAllowHTTP: false
+
+worker:
+  enabled: true
+  replicaCount: 1
+  # worker-entrypoint gives each instance its own cgroup when the process can
+  # write to /sys/fs/cgroup (Docker's writable-cgroups); otherwise it logs a
+  # warning and execs the worker as-is.
+  useEntrypoint: true
+  terminationGracePeriodSeconds: 60
+
+  podAnnotations: {}
+  podLabels: {}
+  podSecurityContext:
+    fsGroup: 10001
+    fsGroupChangePolicy: OnRootMismatch
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: false
+    runAsGroup: 10001
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile:
+      type: RuntimeDefault
+
+  instanceIsolation: process
+  # Kubernetes mounts /sys/fs/cgroup read-only in unprivileged pods, so
+  # per-instance cgroup caps are off by default. The heap watchdog
+  # (limits.execMemoryLimit) and the pod memory limit still apply.
+  instanceMemoryMax: 0
+  instanceCgroupParent: ""
+  maxInstancesPerNode: 0
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+
+  # Extension fetch cache. Disposable; enable a per-replica PVC to keep it
+  # across restarts (uses StatefulSet volumeClaimTemplates).
+  cache:
+    persistence:
+      enabled: false
+      accessModes:
+        - ReadWriteOnce
+      size: 2Gi
+      storageClass: ""
+
+  extraVolumes: []
+  extraVolumeMounts: []
+  extraEnv: []
+
+secrets:
+  # Use an existing Secret instead of chart-managed secrets. It must contain
+  # worker-shared-key, and any of secret-key, admin-password and
+  # google-client-secret that are in use.
+  existingSecret: ""
+  # Generated (and preserved across upgrades) when left empty.
+  workerSharedKey: ""
+  # Base64-encoded 32-byte vault key. Enables the secrets vault when set.
+  secretKey: ""
+  # Bootstrap administrator password. Requires config.adminUsername.
+  adminPassword: ""
+  googleClientSecret: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  path: /
+  pathType: Prefix
+  tls:
+    enabled: false
+    secretName: ""
+  # Artifact previews use random subdomains, so the preview host must be a
+  # wildcard, e.g. *.preview.example.com, with a matching certificate.
+  preview:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: ""
+    path: /
+    pathType: Prefix
+    tls:
+      enabled: false
+      secretName: ""

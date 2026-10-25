@@ -1,0 +1,72 @@
+{{- include "calcside.validate" . -}}
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "calcside.fullname" . }}
+  labels:
+    {{- include "calcside.api.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      {{- with .Values.ingress.tls.secretName }}
+      secretName: {{ . }}
+      {{- end }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.ingress.path }}
+            pathType: {{ .Values.ingress.pathType }}
+            backend:
+              service:
+                name: {{ include "calcside.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}
+{{- if .Values.ingress.preview.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "calcside.fullname" . }}-preview
+  labels:
+    {{- include "calcside.api.labels" . | nindent 4 }}
+  {{- with .Values.ingress.preview.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.preview.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.ingress.preview.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.preview.host | quote }}
+      {{- with .Values.ingress.preview.tls.secretName }}
+      secretName: {{ . }}
+      {{- end }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.preview.host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.ingress.preview.path }}
+            pathType: {{ .Values.ingress.preview.pathType }}
+            backend:
+              service:
+                name: {{ include "calcside.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}

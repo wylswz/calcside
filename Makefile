@@ -3,7 +3,7 @@ SHELL := /bin/bash
 BINARIES := bin/calcside bin/calcside-worker
 WIRE_PACKAGES := ./internal/node ./cmd/calcside ./cmd/calcside-worker
 
-.PHONY: build test test-cgroup test-cgroup-host lint web dev serve-dev tidy gen gen-check wire wire-check migrate-new migrate-hash migrate-validate migrate-apply migrate-status test-postgres sdk-test sdk-lint docker-env benchmark benchmark-smoke
+.PHONY: build test test-cgroup test-cgroup-host lint web dev serve-dev tidy gen gen-check wire wire-check migrate-new migrate-hash migrate-validate migrate-apply migrate-status test-postgres sdk-test sdk-lint docker-env benchmark benchmark-smoke helm-lint
 
 # First-run compose setup: generate docker/.env with a random shared
 # key, or copy docker/.env.example to fill in yourself.
@@ -68,6 +68,20 @@ lint: gen-check
 	@test -z "$$(gofmt -l .)" || (gofmt -l . && exit 1)
 	pnpm -C web typecheck
 	pnpm -C web lint
+
+# Helm chart checks (requires the helm CLI). Not part of `lint` so Go/web
+# checks stay usable without Helm installed.
+helm-lint:
+	helm lint charts/calcside
+	helm template calcside charts/calcside --namespace calcside >/dev/null
+	helm template calcside charts/calcside --namespace calcside \
+	  --set ingress.enabled=true --set ingress.host=calcside.example.com >/dev/null
+	helm template calcside charts/calcside --namespace calcside \
+	  --set database.driver=postgres \
+	  --set-string database.postgres.dsn='postgres://user:pass@postgres:5432/calcside?sslmode=disable&search_path=public' \
+	  --set replicaCount=2 >/dev/null
+	helm template calcside charts/calcside --namespace calcside \
+	  --set worker.enabled=false >/dev/null
 
 wire:
 	go tool wire $(WIRE_PACKAGES)

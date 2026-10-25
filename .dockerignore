@@ -18,15 +18,19 @@ web/dist
 .env
 .env.*
 
-# Docs and examples not needed at runtime (compose bind-mounts them in)
+# Docs, examples, and release assets not needed at runtime
 docs
 blog
 examples
 sdk
+charts
+dist
 
 # Docker files themselves (the worker entrypoint is baked into the image)
 docker
 !docker/worker-entrypoint.sh
+!docker/Dockerfile.migrate
+!docker/atlas-release.hcl
 .dockerignore
 
 # Editor / OS noise

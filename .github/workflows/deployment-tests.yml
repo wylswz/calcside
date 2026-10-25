@@ -1,0 +1,98 @@
+name: Deployment Integration And Performance
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deployment:
+    name: PostgreSQL / ${{ matrix.backend }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [kind, compose]
+    env:
+      TEST_IMAGE_TAG: test
+      TEST_KIND_CLUSTER: calcside-release-test
+      TEST_COMPOSE_PROJECT: calcside-release-test
+      BENCH_VUS: "5"
+      BENCH_DURATION: 30s
+      BENCH_P95_MS: "2000"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        if: matrix.backend == 'kind'
+        with:
+          version: v3.19.0
+      - name: Install pinned test tooling
+        shell: bash
+        env:
+          BACKEND: ${{ matrix.backend }}
+        run: |
+          set -euo pipefail
+          if [[ "$BACKEND" == kind ]]; then
+            go install sigs.k8s.io/kind@v0.30.0
+          fi
+          docker pull grafana/k6:1.3.0
+          mkdir -p "$RUNNER_TEMP/test-bin"
+          cat > "$RUNNER_TEMP/test-bin/k6" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec docker run --rm --network host --user "$(id -u):$(id -g)" \
+            -v "$PWD:$PWD" -w "$PWD" \
+            -e CALCSIDE_BASE_URL -e CALCSIDE_API_KEY \
+            -e BENCH_SCENARIO -e BENCH_VUS -e BENCH_ITERATIONS \
+            -e BENCH_DURATION -e BENCH_P95_MS \
+            grafana/k6:1.3.0 "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/test-bin/k6"
+          echo "$RUNNER_TEMP/test-bin" >> "$GITHUB_PATH"
+      - name: Test deployment helpers and performance report validation
+        run: python3 -m unittest discover -s benchmark -p 'test_*.py' -v
+      - name: Build candidate API/worker and migration images
+        run: |
+          docker build -f docker/Dockerfile -t ghcr.io/wylswz/calcside:test .
+          docker build -f docker/Dockerfile.migrate -t ghcr.io/wylswz/calcside-migrate:test .
+      - name: Deploy isolated PostgreSQL stack
+        env:
+          BACKEND: ${{ matrix.backend }}
+        run: python3 benchmark/deploy-release.py "$BACKEND" "$RUNNER_TEMP/deployment"
+      - name: Integration contracts and timed performance gates
+        env:
+          BACKEND: ${{ matrix.backend }}
+        run: |
+          python3 benchmark/run-release.py "$BACKEND" "$PWD/test-results/$BACKEND" \
+            --state "$RUNNER_TEMP/deployment"
+      - name: Collect sanitized deployment diagnostics
+        if: always()
+        env:
+          BACKEND: ${{ matrix.backend }}
+        run: python3 benchmark/deploy-release.py "$BACKEND" "$RUNNER_TEMP/deployment" diagnostics "$PWD/test-results/$BACKEND-diagnostics"
+      - name: Publish report to job summary
+        if: always()
+        env:
+          BACKEND: ${{ matrix.backend }}
+        run: |
+          if [[ -f "test-results/$BACKEND/report.md" ]]; then
+            cat "test-results/$BACKEND/report.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Deployment/test failed before a report could be generated." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: deployment-tests-${{ matrix.backend }}
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 14
