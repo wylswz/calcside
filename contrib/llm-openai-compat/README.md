@@ -1,7 +1,7 @@
 # llm-openai-compat
 
-Generic OpenAI-compatible provider (vLLM, Ollama, LiteLLM, internal
-gateways). `base_url` and `model` are required. `json_schema: true`
-sends `response_format`; the default prompt-and-parse path works
-everywhere and verifies the result locally. Setup: key as
-`LLM_API_KEY` allowed for the endpoint host.
+Provider extension for the `llm` capability. It declares `interface: llm`,
+its default model catalogue in `capability.yaml`, and the provider
+protocol ops `respond` and `structured`. Workspace providers select this
+source and supply config (endpoint + secret reference). See
+`docs/extensions.md`.

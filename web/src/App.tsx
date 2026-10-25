@@ -118,6 +118,7 @@ export default function App() {
           <Route path="/keys" element={<Navigate to="/workspace/keys" replace />} />
           <Route path="/policies" element={<Navigate to="/workspace/policies" replace />} />
           <Route path="/secrets" element={<Navigate to="/workspace/secrets" replace />} />
+          <Route path="/providers" element={<Navigate to="/workspace/providers" replace />} />
           <Route path="/profile" element={user && <Profile user={user} />} />
           <Route path="/audit" element={<Audit />} />
           <Route path="/workspaces/:id" element={<WorkspaceRedirect />} />

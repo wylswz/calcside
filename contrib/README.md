@@ -22,19 +22,21 @@ policies, and audit apply unchanged.
 | `neon` | Postgres via Neon HTTP SQL | `NEON_PASSWORD` | your `*.neon.tech` host |
 | `qdrant` | Qdrant vector search | `QDRANT_API_KEY` | your Qdrant host |
 
-### LLM providers (`interface: llm`)
+### LLM
 
-| Extension | Backend | Required secret |
+| Extension | Role | Protocol / ops |
 |---|---|---|
-| `llm-openai` | OpenAI chat completions | `OPENAI_API_KEY` |
-| `llm-anthropic` | Anthropic Messages | `ANTHROPIC_API_KEY` |
-| `llm-gemini` | Gemini generateContent | `GEMINI_API_KEY` |
-| `llm-openai-compat` | OpenAI-compatible (vLLM/Ollama/LiteLLM) | `LLM_API_KEY` |
+| `llm` | capability ext | `respond` / `structured` / `score` / `choose` / `rank` |
+| `llm-openai` | provider ext | `list_models` + `respond` / `structured` |
+| `llm-anthropic` | provider ext | `list_models` + `respond` / `structured` |
+| `llm-gemini` | provider ext | `list_models` + `respond` / `structured` |
+| `llm-openai-compat` | provider ext | `list_models` + `respond` / `structured` |
 
-Providers expose `respond`/`structured`/`score`/`choose`/`rank` and are
-not used directly — a workspace registers them via
-`POST /api/v1/llm-providers`, and an ext alias selects one with
-`"llm": "<name>"`, gaining an `llm` global. See docs/extensions.md.
+Provider extensions declare their default models in `capability.yaml`.
+A workspace provider stores `{name,source,models,config}`; the `llm`
+capability ext receives all of them and scripts choose a provider/model
+per call. Provider extensions are hidden from instance creation. See
+docs/extensions.md.
 
 ## Security conventions
 

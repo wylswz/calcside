@@ -1,4 +1,11 @@
-load("llm_judge.star", "score_impl", "choose_impl", "rank_impl")
+# Anthropic Messages provider extension. Config comes from capability.yaml.
+
+
+def _err(r):
+    body = r.get("body", "")
+    if len(body) > 800:
+        body = body[:800]
+    fail("llm provider: status " + str(r["status"]) + ": " + body)
 
 
 def _auth():
@@ -23,14 +30,8 @@ def _post(body):
                  body=json.encode(body), headers=_auth(),
                  content_type="application/json")
     if r["status"] < 200 or r["status"] >= 300:
-        fail("llm provider: status " + str(r["status"]))
+        _err(r)
     return json.decode(r["body"])
-
-
-def _model(model):
-    if model == None:
-        return config["model"]
-    return model
 
 
 def _check_schema(v, schema):
@@ -53,10 +54,9 @@ def _check_schema(v, schema):
                 fail("structured output: missing required key " + req)
 
 
-def respond(messages, model=None, options=None):
+def respond(messages, model, options=None):
     system, rest = _split_system(messages)
-    body = {"model": _model(model), "max_tokens": config["max_tokens"],
-            "messages": rest}
+    body = {"model": model, "max_tokens": config["max_tokens"], "messages": rest}
     if system != "":
         body["system"] = system
     if options != None:
@@ -78,10 +78,10 @@ def respond(messages, model=None, options=None):
     }
 
 
-def structured(messages, schema, model=None):
+def structured(messages, schema, model):
     system, rest = _split_system(messages)
     body = {
-        "model": _model(model),
+        "model": model,
         "max_tokens": config["max_tokens"],
         "messages": rest,
         "tools": [{"name": "emit", "description": "Emit the answer",
@@ -97,15 +97,3 @@ def structured(messages, schema, model=None):
             _check_schema(v, schema)
             return v
     fail("llm provider: no tool_use block in response")
-
-
-def score(content, criteria, scale=1.0, model=None):
-    return score_impl(structured, content, criteria, scale, model)
-
-
-def choose(instruction, options, model=None):
-    return choose_impl(structured, instruction, options, model)
-
-
-def rank(instruction, items, model=None):
-    return rank_impl(structured, instruction, items, model)

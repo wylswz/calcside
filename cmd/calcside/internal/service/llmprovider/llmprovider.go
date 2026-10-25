@@ -1,6 +1,7 @@
 // Package llmprovider implements the workspace-level LLM provider
-// registry: named, pre-validated extension sources plus config that ext
-// aliases select by name at instance creation.
+// registry: named provider extensions plus validated config and a model
+// catalogue. The llm capability ext selects one by name at instance
+// creation.
 package llmprovider
 
 import (
@@ -11,6 +12,7 @@ import (
 	"calcside/cmd/calcside/internal/service"
 	"calcside/cmd/calcside/internal/service/access"
 	capext "calcside/internal/capability/ext"
+	"calcside/internal/llm"
 	"calcside/internal/runtime"
 	"calcside/internal/store"
 	"calcside/internal/types"
@@ -44,39 +46,63 @@ func writeErr(err error) error {
 	return service.Internal(err)
 }
 
-// validateSpec checks the name and that source+config form a usable
-// interface: llm extension.
-func (s *Service) validateSpec(name, source, sum string, config json.RawMessage) error {
+// validateSpec loads the provider extension, validates its config and
+// resolves the model catalogue (request override else manifest default).
+func (s *Service) validateSpec(ctx context.Context, wsID, name, source, sum string, models []string, config json.RawMessage) (json.RawMessage, []string, error) {
 	if !runtime.ValidPolicyName(name) {
-		return service.BadRequest("provider name must match [A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
+		return nil, nil, service.BadRequest("provider name must match [A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
+	}
+	if source == "" {
+		return nil, nil, service.BadRequest("provider source is required")
 	}
 	cfg := map[string]any{}
 	if len(config) > 0 && string(config) != "null" {
 		if err := json.Unmarshal(config, &cfg); err != nil {
-			return service.BadRequest("config must be a JSON object")
+			return nil, nil, service.BadRequest("config must be a JSON object")
 		}
 	}
-	if err := capext.ValidateProvider(s.ext, source, sum, cfg); err != nil {
-		return service.Errf(types.ErrCodeBadSpec, "%s", err.Error())
+	info, err := capext.ValidateProvider(s.ext, source, sum, cfg)
+	if err != nil {
+		return nil, nil, service.Errf(types.ErrCodeBadSpec, "%s", err.Error())
 	}
-	return nil
+	if len(models) == 0 {
+		models = info.Models
+	}
+	models, err = llm.NormalizeModels(models)
+	if err != nil {
+		return nil, nil, service.Errf(types.ErrCodeBadSpec, "%s", err.Error())
+	}
+	if len(models) == 0 {
+		return nil, nil, service.BadRequest("provider requires at least one model")
+	}
+	for _, secretName := range info.SecretNames {
+		if _, err := s.st.GetSecretByName(ctx, wsID, secretName); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, nil, service.BadRequest("provider references unknown workspace secret %q", secretName)
+			}
+			return nil, nil, service.Internal(err)
+		}
+	}
+	b, err := json.Marshal(info.Config)
+	if err != nil {
+		return nil, nil, service.Internal(err)
+	}
+	return b, models, nil
 }
 
-func (s *Service) Create(ctx context.Context, a service.Actor, name, source, sum string, config json.RawMessage) (*store.LLMProvider, error) {
+func (s *Service) Create(ctx context.Context, a service.Actor, name, source, sum string, models []string, config json.RawMessage) (*store.LLMProvider, error) {
 	if err := s.access.Workspace(ctx, a, a.WorkspaceID, access.Configure); err != nil {
 		return nil, err
 	}
 	if name == "" || source == "" {
 		return nil, service.BadRequest("name and source required")
 	}
-	if err := s.validateSpec(name, source, sum, config); err != nil {
+	eff, models, err := s.validateSpec(ctx, a.WorkspaceID, name, source, sum, models, config)
+	if err != nil {
 		return nil, err
 	}
-	if len(config) == 0 {
-		config = json.RawMessage(`{}`)
-	}
 	p := &store.LLMProvider{UserID: a.UserID, WorkspaceID: a.WorkspaceID,
-		Name: name, Source: source, Sum: sum, Config: config}
+		Name: name, Source: source, Sum: sum, Models: models, Config: eff}
 	if err := s.st.CreateLLMProvider(ctx, p); err != nil {
 		return nil, writeErr(err)
 	}
@@ -87,7 +113,7 @@ func (s *Service) Get(ctx context.Context, a service.Actor, id string) (*store.L
 	return s.access.LLMProvider(ctx, a, id, access.View)
 }
 
-func (s *Service) Update(ctx context.Context, a service.Actor, id string, name, source, sum *string, config json.RawMessage) (*store.LLMProvider, error) {
+func (s *Service) Update(ctx context.Context, a service.Actor, id string, name, source, sum *string, models *[]string, config json.RawMessage) (*store.LLMProvider, error) {
 	p, err := s.access.LLMProvider(ctx, a, id, access.Configure)
 	if err != nil {
 		return nil, err
@@ -104,12 +130,18 @@ func (s *Service) Update(ctx context.Context, a service.Actor, id string, name, 
 	if sum != nil {
 		p.Sum = *sum
 	}
+	if models != nil {
+		p.Models = *models
+	}
 	if len(config) > 0 {
 		p.Config = config
 	}
-	if err := s.validateSpec(p.Name, p.Source, p.Sum, p.Config); err != nil {
+	eff, normModels, err := s.validateSpec(ctx, p.WorkspaceID, p.Name, p.Source, p.Sum, p.Models, p.Config)
+	if err != nil {
 		return nil, err
 	}
+	p.Config = eff
+	p.Models = normModels
 	if err := s.st.UpdateLLMProvider(ctx, p); err != nil {
 		return nil, writeErr(err)
 	}

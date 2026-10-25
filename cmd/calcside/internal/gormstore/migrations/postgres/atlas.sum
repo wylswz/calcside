@@ -1,3 +1,6 @@
-h1:tQ8fLGIsPpzVPQTg4rWHd4OqrVuda5sH2gMkHpg7K7Y=
+h1:41hhjoZmrzL7Uu9oNGDDhtbwyO9yRwewYGmlQT/P6Yk=
 20261024133846_baseline.sql h1:Fyyn+vaam6+EHopwablapi4HJ1biUK6zeJMpZVN6ziw=
 20261025041151_llm_providers.sql h1:0AiP4bv4D3aYiVZN9BHfzL5DSxe6Vm3JviqtSrs5qPA=
+20261025050023_llm_provider_type.sql h1:kd8FJlgYB4Mv+iXP6LsEl9q8Be94I84HPMWwO1xQllc=
+20261025060239_llm_provider_models.sql h1:HiEIqsvSb24aHwh1x0/q9S13V77T8rBMHD+wiWyc/5U=
+20261025062258_llm_provider_ext.sql h1:OvCejxo0iep+8/cHNoDF9QM5ifycDB3w4dwCRScZqrU=

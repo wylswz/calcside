@@ -33,12 +33,12 @@ _RANK_SCHEMA = {
 }
 
 
-def score_impl(structured_fn, content, criteria, scale=1.0, model=None):
+def score_impl(structured_fn, provider, content, criteria, scale=1.0, model=None):
     if type(content) != "string" or type(criteria) != "string":
         fail("llm.score: content and criteria must be strings")
     if scale <= 0:
         fail("llm.score: scale must be positive")
-    d = structured_fn([
+    d = structured_fn(provider, [
         {"role": "system", "content":
             "You are a strict evaluator. Score the content against the " +
             "criteria on a scale from 0 to " + str(scale) + "."},
@@ -51,13 +51,13 @@ def score_impl(structured_fn, content, criteria, scale=1.0, model=None):
     return {"score": s, "rationale": d["rationale"]}
 
 
-def choose_impl(structured_fn, instruction, options, model=None):
+def choose_impl(structured_fn, provider, instruction, options, model=None):
     if type(options) != "list" or len(options) == 0:
         fail("llm.choose: options must be a non-empty list")
     if len(options) > 64:
         fail("llm.choose: at most 64 options")
     listing = "\n".join([str(i) + ". " + str(o) for i, o in enumerate(options)])
-    d = structured_fn([
+    d = structured_fn(provider, [
         {"role": "system", "content":
             "Pick the single best option index (0-based) for the instruction."},
         {"role": "user", "content": instruction + "\n\nOptions:\n" + listing},
@@ -68,13 +68,13 @@ def choose_impl(structured_fn, instruction, options, model=None):
     return {"index": i, "option": options[i], "rationale": d["rationale"]}
 
 
-def rank_impl(structured_fn, instruction, items, model=None):
+def rank_impl(structured_fn, provider, instruction, items, model=None):
     if type(items) != "list" or len(items) == 0:
         fail("llm.rank: items must be a non-empty list")
     if len(items) > 64:
         fail("llm.rank: at most 64 items")
     listing = "\n".join([str(i) + ". " + str(o) for i, o in enumerate(items)])
-    d = structured_fn([
+    d = structured_fn(provider, [
         {"role": "system", "content":
             "Rank all items for the instruction. Return every 0-based index " +
             "exactly once, best first."},

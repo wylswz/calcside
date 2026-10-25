@@ -1370,6 +1370,13 @@ components:
         version: { type: string }
         description: { type: string }
         icon_url: { type: string, description: Authenticated same-origin packaged PNG endpoint }
+        interface:
+          type: string
+          description: 'Special contract, e.g. llm for provider extensions.'
+        models:
+          type: array
+          items: { type: string }
+          description: Default model catalogue declared by a provider extension.
         dependencies:
           type: array
           items: { $ref: '#/components/schemas/CapabilityName' }
@@ -1783,24 +1790,33 @@ components:
     LLMProvider:
       type: object
       description: >-
-        A named LLM provider owned by a workspace: an interface-llm
-        extension source plus its effective config, snapshotted into
-        instances whose ext aliases select it via "llm": "<name>".
-      required: [id, name, source]
+        A named provider extension owned by a workspace. The `llm`
+        capability extension receives all workspace providers as a
+        snapshot at instance creation; scripts choose provider/model per
+        call.
+      required: [id, name, source, models]
       properties:
         id: { type: string }
         user_id: { type: string }
         name: { $ref: '#/components/schemas/PolicyName' }
         source:
           type: string
-          description: 'extension source, e.g. contrib/llm-openai'
+          description: 'provider extension source, e.g. contrib/llm-openai'
         sum:
           type: string
           description: 'h1: integrity sum (remote sources only)'
+        models:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items: { type: string }
+          description: Model ids this provider makes available to the llm extension.
         config:
           type: object
           additionalProperties: true
-          description: provider config values; secrets stay as {{secrets.NAME}} references
+          description: >-
+            effective backend config with defaults applied; api_key stays
+            as a {{secrets.NAME}} reference.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     LLMProviderRequest:
@@ -1810,6 +1826,11 @@ components:
         name: { $ref: '#/components/schemas/PolicyName' }
         source: { type: string }
         sum: { type: string }
+        models:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items: { type: string }
         config:
           type: object
           additionalProperties: true
@@ -1819,6 +1840,11 @@ components:
         name: { $ref: '#/components/schemas/PolicyName' }
         source: { type: string }
         sum: { type: string }
+        models:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items: { type: string }
         config:
           type: object
           additionalProperties: true

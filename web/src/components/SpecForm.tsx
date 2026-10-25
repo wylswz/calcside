@@ -87,7 +87,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
     retry: false,
   })
   const set = (patch: Partial<InstanceDraft>) => setDraft((d) => ({ ...d, ...patch }))
-  const extensions = useMemo(() => catalog.data?.extensions ?? [], [catalog.data])
+  const extensions = useMemo(() => (catalog.data?.extensions ?? []).filter((e) => e.interface !== 'llm'), [catalog.data])
   const activeDraft = useMemo(() => {
     if (!advanced) return { draft, errors: [] as DraftError[] }
     try {

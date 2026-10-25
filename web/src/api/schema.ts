@@ -856,6 +856,10 @@ export interface components {
             description?: string;
             /** @description Authenticated same-origin packaged PNG endpoint */
             icon_url?: string;
+            /** @description Special contract, e.g. llm for provider extensions. */
+            interface?: string;
+            /** @description Default model catalogue declared by a provider extension. */
+            models?: string[];
             dependencies: components["schemas"]["CapabilityName"][];
             ops: components["schemas"]["OpDoc"][];
             config: components["schemas"]["ExtConfigField"][];
@@ -1198,16 +1202,18 @@ export interface components {
         PoliciesResponse: {
             policies?: components["schemas"]["Policy"][];
         };
-        /** @description A named LLM provider owned by a workspace: an interface-llm extension source plus its effective config, snapshotted into instances whose ext aliases select it via "llm": "<name>". */
+        /** @description A named provider extension owned by a workspace. The `llm` capability extension receives all workspace providers as a snapshot at instance creation; scripts choose provider/model per call. */
         LLMProvider: {
             id: string;
             user_id?: string;
             name: components["schemas"]["PolicyName"];
-            /** @description extension source, e.g. contrib/llm-openai */
+            /** @description provider extension source, e.g. contrib/llm-openai */
             source: string;
             /** @description h1: integrity sum (remote sources only) */
             sum?: string;
-            /** @description provider config values; secrets stay as {{secrets.NAME}} references */
+            /** @description Model ids this provider makes available to the llm extension. */
+            models: string[];
+            /** @description effective backend config with defaults applied; api_key stays as a {{secrets.NAME}} reference. */
             config?: {
                 [key: string]: unknown;
             };
@@ -1220,6 +1226,7 @@ export interface components {
             name: components["schemas"]["PolicyName"];
             source: string;
             sum?: string;
+            models?: string[];
             config?: {
                 [key: string]: unknown;
             };
@@ -1228,6 +1235,7 @@ export interface components {
             name?: components["schemas"]["PolicyName"];
             source?: string;
             sum?: string;
+            models?: string[];
             config?: {
                 [key: string]: unknown;
             };

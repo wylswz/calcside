@@ -1,4 +1,30 @@
-load("llm_judge.star", "score_impl", "choose_impl", "rank_impl")
+# OpenAI Chat Completions provider extension (also the base for
+# openai-compatible servers). Config is validated from capability.yaml.
+
+
+def _err(r):
+    body = r.get("body", "")
+    if len(body) > 800:
+        body = body[:800]
+    fail("llm provider: status " + str(r["status"]) + ": " + body)
+
+
+def _options(options):
+    out = {}
+    if options != None:
+        for k in options:
+            if k == "max_output_tokens":
+                out["max_tokens"] = options[k]
+            else:
+                out[k] = options[k]
+    return out
+
+
+def _auth():
+    key = config["api_key"]
+    if key == "":
+        return {}
+    return {"Authorization": "Bearer " + key}
 
 
 def _chat(messages, model, extra=None):
@@ -7,28 +33,11 @@ def _chat(messages, model, extra=None):
         for k in extra:
             body[k] = extra[k]
     r = net.post(url=config["base_url"] + "/chat/completions",
-                 body=json.encode(body),
-                 headers={"Authorization": "Bearer " + config["api_key"]},
+                 body=json.encode(body), headers=_auth(),
                  content_type="application/json")
     if r["status"] < 200 or r["status"] >= 300:
-        fail("llm provider: status " + str(r["status"]))
+        _err(r)
     return json.decode(r["body"])
-
-
-def _model(model):
-    if model != None:
-        return model
-    m = config["model"]
-    if m == "":
-        fail("llm provider: config model is required")
-    return m
-
-
-def _base():
-    b = config["base_url"]
-    if b == "":
-        fail("llm provider: config base_url is required")
-    return b
 
 
 def _check_schema(v, schema):
@@ -60,13 +69,8 @@ def _decode(text):
     return json.decode(t.strip())
 
 
-def respond(messages, model=None, options=None):
-    opts = {}
-    if options != None:
-        for k in options:
-            opts[k] = options[k]
-    b = _base()
-    d = _chat(messages, _model(model), opts)
+def respond(messages, model, options=None):
+    d = _chat(messages, model, _options(options))
     c = d["choices"][0]
     u = d.get("usage", {})
     return {
@@ -79,11 +83,9 @@ def respond(messages, model=None, options=None):
     }
 
 
-def structured(messages, schema, model=None):
-    b = _base()
-    m = _model(model)
+def structured(messages, schema, model):
     if config["json_schema"]:
-        d = _chat(messages, m, {"response_format": {
+        d = _chat(messages, model, {"response_format": {
             "type": "json_schema",
             "json_schema": {"name": "output", "schema": schema},
         }})
@@ -93,19 +95,7 @@ def structured(messages, schema, model=None):
         fixed.append({"role": "user", "content":
             "Respond with ONLY a JSON value conforming to this schema, " +
             "no prose, no code fences: " + json.encode(schema)})
-        d = _chat(fixed, m)
+        d = _chat(fixed, model)
         v = _decode(d["choices"][0]["message"]["content"])
     _check_schema(v, schema)
     return v
-
-
-def score(content, criteria, scale=1.0, model=None):
-    return score_impl(structured, content, criteria, scale, model)
-
-
-def choose(instruction, options, model=None):
-    return choose_impl(structured, instruction, options, model)
-
-
-def rank(instruction, items, model=None):
-    return rank_impl(structured, instruction, items, model)

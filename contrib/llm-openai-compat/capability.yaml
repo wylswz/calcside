@@ -1,6 +1,6 @@
 name: llm_openai_compat
 version: 0.1.0
-description: OpenAI-compatible LLM provider (vLLM, Ollama, LiteLLM, gateways) — chat completions with optional prompt-based structured output.
+description: OpenAI-compatible provider (vLLM, Ollama, LiteLLM, gateways).
 interface: llm
 icon: icon.png
 dependencies: [net]
@@ -11,15 +11,6 @@ ops:
   - name: structured
     doc: Completion parsed as JSON; schema enforced by prompt, verified locally
     params: [messages, schema, model]
-  - name: score
-    doc: Score content against criteria; returns {score, rationale}
-    params: [content, criteria, scale, model]
-  - name: choose
-    doc: Pick the best option for an instruction; returns {index, option, rationale}
-    params: [instruction, options, model]
-  - name: rank
-    doc: Rank items for an instruction; returns {order, rationale}
-    params: [instruction, items, model]
 config:
   - name: base_url
     type: string
@@ -27,11 +18,7 @@ config:
     default: ""
   - name: api_key
     type: secret
-    doc: API key for the endpoint (secret reference)
-    default: "{{secrets.LLM_API_KEY}}"
-  - name: model
-    type: string
-    doc: Default model served by the endpoint (required)
+    doc: API key for the endpoint (optional; empty disables auth)
     default: ""
   - name: json_schema
     type: bool

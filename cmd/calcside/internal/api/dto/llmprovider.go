@@ -14,6 +14,7 @@ type LLMProvider struct {
 	Name      string          `json:"name"`
 	Source    string          `json:"source"`
 	Sum       string          `json:"sum,omitempty"`
+	Models    []string        `json:"models"`
 	Config    json.RawMessage `json:"config"`
 	CreatedAt *time.Time      `json:"created_at,omitempty"`
 	UpdatedAt *time.Time      `json:"updated_at,omitempty"`
@@ -26,7 +27,7 @@ func NewLLMProvider(p *store.LLMProvider) LLMProvider {
 	}
 	return LLMProvider{
 		ID: p.ID, UserID: p.UserID, Name: p.Name, Source: p.Source,
-		Sum: p.Sum, Config: cfg,
+		Sum: p.Sum, Models: p.Models, Config: cfg,
 		CreatedAt: &p.CreatedAt, UpdatedAt: &p.UpdatedAt,
 	}
 }

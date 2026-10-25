@@ -10,6 +10,8 @@ type Info struct {
 	Description  string                 `json:"description"`
 	IconURL      string                 `json:"icon_url,omitempty"`
 	Icon         []byte                 `json:"-"`
+	Interface    string                 `json:"interface,omitempty"`
+	Models       []string               `json:"models,omitempty"`
 	Dependencies []types.CapabilityName `json:"dependencies"`
 	Ops          []OpSpec               `json:"ops"`
 	Config       []ConfigField          `json:"config"`

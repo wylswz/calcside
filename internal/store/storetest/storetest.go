@@ -675,31 +675,33 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		s := newStore(t)
 		u, _ := s.UpsertUserByEmail(ctx, "lp@x.com", "", "")
 		p := &store.LLMProvider{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID),
-			Name: "main", Source: "contrib/llm-openai", Config: json.RawMessage(`{"model":"gpt-5-mini"}`)}
+			Name: "main", Source: "contrib/llm-openai", Models: []string{"gpt-5-mini"},
+			Config: json.RawMessage(`{}`)}
 		if err := s.CreateLLMProvider(ctx, p); err != nil {
 			t.Fatal(err)
 		}
 		got, err := s.GetLLMProvider(ctx, p.ID)
-		if err != nil || got.Name != "main" || string(got.Config) != `{"model":"gpt-5-mini"}` {
+		if err != nil || got.Name != "main" || len(got.Models) != 1 || got.Models[0] != "gpt-5-mini" {
 			t.Fatalf("GetLLMProvider: %v %+v", err, got)
 		}
 		dup := &store.LLMProvider{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID),
-			Name: "main", Source: "contrib/llm-openai", Config: json.RawMessage(`{}`)}
+			Name: "main", Source: "contrib/llm-openai", Models: []string{"m"}, Config: json.RawMessage(`{}`)}
 		if err := s.CreateLLMProvider(ctx, dup); !errors.Is(err, store.ErrConflict) {
 			t.Fatalf("duplicate name: want ErrConflict, got %v", err)
 		}
 		other, _ := s.UpsertUserByEmail(ctx, "lp2@x.com", "", "")
 		if err := s.CreateLLMProvider(ctx, &store.LLMProvider{UserID: other.ID,
 			WorkspaceID: store.PersonalWorkspaceID(other.ID), Name: "main",
-			Source: "contrib/llm-openai", Config: json.RawMessage(`{}`)}); err != nil {
+			Source: "contrib/llm-openai", Models: []string{"m"}, Config: json.RawMessage(`{}`)}); err != nil {
 			t.Fatalf("same name for another user: %v", err)
 		}
-		p.Config = json.RawMessage(`{"model":"gpt-5"}`)
+		p.Models = []string{"gpt-5"}
+		p.Config = json.RawMessage(`{}`)
 		if err := s.UpdateLLMProvider(ctx, p); err != nil {
 			t.Fatal(err)
 		}
 		got, _ = s.GetLLMProvider(ctx, p.ID)
-		if string(got.Config) != `{"model":"gpt-5"}` {
+		if len(got.Models) != 1 || got.Models[0] != "gpt-5" {
 			t.Fatalf("UpdateLLMProvider: %+v", got)
 		}
 		lst, _ := s.ListLLMProviders(ctx, store.PersonalWorkspaceID(u.ID))

@@ -1,6 +1,7 @@
 # llm-gemini
 
-Gemini provider for the `llm` interface. `structured` uses
-`responseSchema` + `responseMimeType: application/json`. Setup: API key
-as `GEMINI_API_KEY` allowed for `generativelanguage.googleapis.com`;
-grant that host in `net.allow_hosts`.
+Provider extension for the `llm` capability. It declares `interface: llm`,
+its default model catalogue in `capability.yaml`, and the provider
+protocol ops `respond` and `structured`. Workspace providers select this
+source and supply config (endpoint + secret reference). See
+`docs/extensions.md`.

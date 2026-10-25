@@ -23,6 +23,8 @@ import (
 	"calcside/cmd/calcside/internal/service"
 	"calcside/cmd/calcside/internal/service/access"
 	"calcside/internal/capability"
+	capext "calcside/internal/capability/ext"
+	"calcside/internal/llm"
 	"calcside/internal/runtime"
 	"calcside/internal/store"
 	"calcside/internal/types"
@@ -231,15 +233,12 @@ func (s *Service) ValidateSpec(ctx context.Context, a service.Actor, rawSpec []b
 	return spec.Sanitized(secs), nil
 }
 
-// resolveLLMProviders rewrites each ext alias's "llm" provider name
-// into a resolved {name,source,sum,config} snapshot before
-// normalization, so the node's ext factory sees only concrete sources.
-// Unknown names fail closed, like unknown policy names. An object form
-// (already-resolved spec) passes through untouched.
+// resolveLLMProviders snapshots every workspace provider into each llm
+// capability ext alias. The instance sees the whole provider registry;
+// provider and model selection happen in code at call time. Unknown
+// providers/models therefore fail in the ext, not at instance creation.
+// An alias that already carries a snapshot passes through untouched.
 func (s *Service) resolveLLMProviders(ctx context.Context, wsID string, raw []byte) ([]byte, error) {
-	if !bytes.Contains(raw, []byte(`"llm"`)) {
-		return raw, nil
-	}
 	var spec map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &spec); err != nil {
 		return raw, nil // malformed JSON is reported by NormalizeSpec
@@ -252,51 +251,77 @@ func (s *Service) resolveLLMProviders(ctx context.Context, wsID string, raw []by
 	if err := json.Unmarshal(caps["ext"], &aliases); err != nil || aliases == nil {
 		return raw, nil
 	}
-	type slot struct {
-		obj  map[string]json.RawMessage
-		name string
-	}
-	slots := map[string]slot{}
+	var targets []string
 	for a, ra := range aliases {
 		var obj map[string]json.RawMessage
 		if err := json.Unmarshal(ra, &obj); err != nil || obj == nil {
 			continue
 		}
-		lraw, ok := obj["llm"]
-		if !ok {
+		var source string
+		if err := json.Unmarshal(obj["source"], &source); err != nil || !capext.IsLLMExtSource(source) {
 			continue
 		}
-		var name string
-		if err := json.Unmarshal(lraw, &name); err != nil {
-			continue // object form or invalid JSON — left for validation
+		if _, resolved := obj["llm"]; resolved {
+			continue // already-resolved spec
 		}
-		slots[a] = slot{obj: obj, name: name}
+		targets = append(targets, a)
 	}
-	if len(slots) == 0 {
+	if len(targets) == 0 {
 		return raw, nil
 	}
 	provs, err := s.st.ListLLMProviders(ctx, wsID)
 	if err != nil {
 		return nil, service.Internal(err)
 	}
-	byName := make(map[string]*store.LLMProvider, len(provs))
+	snapshots := make([]map[string]any, 0, len(provs))
 	for _, p := range provs {
-		byName[p.Name] = p
-	}
-	for a, sl := range slots {
-		p, ok := byName[sl.name]
-		if !ok {
-			return nil, service.Errf(types.ErrCodeBadSpec, "capabilities.ext.%s.llm: unknown llm provider %q", a, sl.name)
+		cfg := p.Config
+		if len(cfg) == 0 {
+			cfg = json.RawMessage(`{}`)
 		}
-		snap, err := json.Marshal(map[string]any{
+		snapshots = append(snapshots, map[string]any{
 			"name": p.Name, "source": p.Source, "sum": p.Sum,
-			"config": json.RawMessage(p.Config),
+			"models": p.Models, "config": json.RawMessage(cfg),
 		})
-		if err != nil {
-			return nil, service.Internal(err)
+	}
+	blob, err := json.Marshal(snapshots)
+	if err != nil {
+		return nil, service.Internal(err)
+	}
+	// Provider configs reference workspace vault secrets. Carry those
+	// references into the instance so adding the llm ext also installs
+	// the credentials it needs, just like an ext's secret config field.
+	secretNames := map[string]bool{}
+	for _, p := range provs {
+		for _, name := range llm.SecretRefs(string(p.Config)) {
+			secretNames[name] = true
 		}
-		sl.obj["llm"] = snap
-		if b, err := json.Marshal(sl.obj); err == nil {
+	}
+	if len(secretNames) > 0 {
+		secs := map[string]json.RawMessage{}
+		if rawSecs, ok := spec["secrets"]; ok {
+			if err := json.Unmarshal(rawSecs, &secs); err != nil {
+				secs = nil // invalid shape is reported by NormalizeSpec
+			}
+		}
+		if secs != nil {
+			for name := range secretNames {
+				if _, exists := secs[name]; exists {
+					continue
+				}
+				ref, _ := json.Marshal(map[string]string{"ref": name})
+				secs[name] = ref
+			}
+			spec["secrets"], _ = json.Marshal(secs)
+		}
+	}
+	for _, a := range targets {
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(aliases[a], &obj); err != nil {
+			continue
+		}
+		obj["llm"] = blob
+		if b, err := json.Marshal(obj); err == nil {
 			aliases[a] = b
 		}
 	}

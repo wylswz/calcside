@@ -1083,11 +1083,15 @@ func (s *strictImpl) CreateLLMProvider(ctx context.Context, req gen.CreateLLMPro
 		return createLLMProviderResp{*e}, nil
 	}
 	var name, source, sum string
+	var models []string
 	var cfg json.RawMessage
 	if req.Body != nil {
 		name, source = string(req.Body.Name), req.Body.Source
 		if req.Body.Sum != nil {
 			sum = *req.Body.Sum
+		}
+		if req.Body.Models != nil {
+			models = *req.Body.Models
 		}
 		if req.Body.Config != nil {
 			cfg, _ = json.Marshal(*req.Body.Config)
@@ -1097,7 +1101,7 @@ func (s *strictImpl) CreateLLMProvider(ctx context.Context, req gen.CreateLLMPro
 	if err != nil {
 		return createLLMProviderResp{fail(err)}, nil
 	}
-	prov, err := s.d.LLMProvider.Create(ctx, a, name, source, sum, cfg)
+	prov, err := s.d.LLMProvider.Create(ctx, a, name, source, sum, models, cfg)
 	if err != nil {
 		return createLLMProviderResp{fail(err)}, nil
 	}
@@ -1124,6 +1128,7 @@ func (s *strictImpl) UpdateLLMProvider(ctx context.Context, req gen.UpdateLLMPro
 		return updateLLMProviderResp{*e}, nil
 	}
 	var name, source, sum *string
+	var models *[]string
 	var cfg json.RawMessage
 	if req.Body != nil {
 		if req.Body.Name != nil {
@@ -1131,11 +1136,14 @@ func (s *strictImpl) UpdateLLMProvider(ctx context.Context, req gen.UpdateLLMPro
 			name = &n
 		}
 		source, sum = req.Body.Source, req.Body.Sum
+		if req.Body.Models != nil {
+			models = req.Body.Models
+		}
 		if req.Body.Config != nil {
 			cfg, _ = json.Marshal(*req.Body.Config)
 		}
 	}
-	prov, err := s.d.LLMProvider.Update(ctx, actorOf(p), req.Id, name, source, sum, cfg)
+	prov, err := s.d.LLMProvider.Update(ctx, actorOf(p), req.Id, name, source, sum, models, cfg)
 	if err != nil {
 		return updateLLMProviderResp{fail(err)}, nil
 	}

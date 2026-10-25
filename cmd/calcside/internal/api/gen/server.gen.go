@@ -678,8 +678,14 @@ type ExtensionInfo struct {
 
 	// IconUrl Authenticated same-origin packaged PNG endpoint
 	IconUrl *string `json:"icon_url,omitempty"`
-	Name    string  `json:"name"`
-	Ops     []OpDoc `json:"ops"`
+
+	// Interface Special contract, e.g. llm for provider extensions.
+	Interface *string `json:"interface,omitempty"`
+
+	// Models Default model catalogue declared by a provider extension.
+	Models *[]string `json:"models,omitempty"`
+	Name   string    `json:"name"`
+	Ops    []OpDoc   `json:"ops"`
 
 	// Source Server-local root-name/extension identifier; never a host filesystem path.
 	//
@@ -784,17 +790,20 @@ type KeysResponse struct {
 	Keys *[]APIKey `json:"keys,omitempty"`
 }
 
-// LLMProvider A named LLM provider owned by a workspace: an interface-llm extension source plus its effective config, snapshotted into instances whose ext aliases select it via "llm": "<name>".
+// LLMProvider A named provider extension owned by a workspace. The `llm` capability extension receives all workspace providers as a snapshot at instance creation; scripts choose provider/model per call.
 type LLMProvider struct {
-	// Config provider config values; secrets stay as {{secrets.NAME}} references
+	// Config effective backend config with defaults applied; api_key stays as a {{secrets.NAME}} reference.
 	Config    *map[string]interface{} `json:"config,omitempty"`
 	CreatedAt *time.Time              `json:"created_at,omitempty"`
 	Id        string                  `json:"id"`
 
+	// Models Model ids this provider makes available to the llm extension.
+	Models []string `json:"models"`
+
 	// Name Unique per user; the builtin. prefix is reserved for read-only built-in policies.
 	Name PolicyName `json:"name"`
 
-	// Source extension source, e.g. contrib/llm-openai
+	// Source provider extension source, e.g. contrib/llm-openai
 	Source string `json:"source"`
 
 	// Sum h1: integrity sum (remote sources only)
@@ -806,6 +815,7 @@ type LLMProvider struct {
 // LLMProviderRequest defines model for LLMProviderRequest.
 type LLMProviderRequest struct {
 	Config *map[string]interface{} `json:"config,omitempty"`
+	Models *[]string               `json:"models,omitempty"`
 
 	// Name Unique per user; the builtin. prefix is reserved for read-only built-in policies.
 	Name   PolicyName `json:"name"`
@@ -815,13 +825,14 @@ type LLMProviderRequest struct {
 
 // LLMProviderResponse defines model for LLMProviderResponse.
 type LLMProviderResponse struct {
-	// Provider A named LLM provider owned by a workspace: an interface-llm extension source plus its effective config, snapshotted into instances whose ext aliases select it via "llm": "<name>".
+	// Provider A named provider extension owned by a workspace. The `llm` capability extension receives all workspace providers as a snapshot at instance creation; scripts choose provider/model per call.
 	Provider *LLMProvider `json:"provider,omitempty"`
 }
 
 // LLMProviderUpdateRequest defines model for LLMProviderUpdateRequest.
 type LLMProviderUpdateRequest struct {
 	Config *map[string]interface{} `json:"config,omitempty"`
+	Models *[]string               `json:"models,omitempty"`
 
 	// Name Unique per user; the builtin. prefix is reserved for read-only built-in policies.
 	Name   *PolicyName `json:"name,omitempty"`

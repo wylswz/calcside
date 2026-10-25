@@ -269,9 +269,9 @@ type Policy struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// LLMProvider is a workspace-level named LLM provider: an extension
-// source plus its effective config, snapshotted into instances whose
-// ext aliases select it by name.
+// LLMProvider is a workspace-level named provider extension: an ext
+// source, its model catalogue and effective config, snapshotted into
+// instances whose llm capability ext selects it by name.
 type LLMProvider struct {
 	ID          string          `json:"id"`
 	UserID      string          `json:"user_id"`
@@ -279,6 +279,7 @@ type LLMProvider struct {
 	Name        string          `json:"name"`
 	Source      string          `json:"source"`
 	Sum         string          `json:"sum,omitempty"`
+	Models      []string        `json:"models"`
 	Config      json.RawMessage `json:"config"`
 	CreatedAt   time.Time       `json:"created_at"`
 	UpdatedAt   time.Time       `json:"updated_at"`

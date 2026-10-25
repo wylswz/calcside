@@ -6,17 +6,19 @@ import { PageHeader, Loading, Notice } from '../components/ui'
 import Members from './Members'
 import Policies from './Policies'
 import Secrets from './Secrets'
+import Providers from './Providers'
 import Keys from './Keys'
 
 const tabs = [
   { to: 'members', label: 'Members' },
   { to: 'policies', label: 'Policies' },
   { to: 'secrets', label: 'Secrets' },
+  { to: 'providers', label: 'LLM providers' },
   { to: 'keys', label: 'API keys' },
 ] as const
 
 // Workspace settings for the current workspace: members, policies,
-// secrets, keys.
+// secrets, LLM providers, keys.
 export default function WorkspaceTabs() {
   const { tab = 'members' } = useParams()
   const { data } = useQuery({ queryKey: ['workspaces'], queryFn: workspaces })
@@ -38,6 +40,7 @@ export default function WorkspaceTabs() {
       {tab === 'members' && <Members ws={ws} />}
       {tab === 'policies' && <Policies bare />}
       {tab === 'secrets' && <Secrets bare />}
+      {tab === 'providers' && <Providers bare />}
       {tab === 'keys' && <Keys bare />}
       {!tabs.find((t) => t.to === tab) && <Navigate to="/workspace/members" replace />}
     </div>
@@ -55,7 +58,7 @@ export function WorkspaceRedirect() {
     if (id && data.find((w) => w.id === id)) {
       setWorkspace(id)
       // scoped lists cached under the previous workspace are stale
-      for (const k of ['instances', 'members', 'changes', 'keys', 'policies', 'secrets']) {
+      for (const k of ['instances', 'members', 'changes', 'keys', 'policies', 'secrets', 'llm-providers']) {
         qc.invalidateQueries({ queryKey: [k] })
       }
     }

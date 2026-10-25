@@ -82,25 +82,36 @@ func (id CapabilityIdentifier) IsRemote() bool {
 // it's uniquely defined by capability identifier and can depend on
 // other capabilities
 type CapabilityManifest struct {
-	Identifier  CapabilityIdentifier `yaml:"-"` // source it was loaded under
-	Name        string               `yaml:"name"`
-	Version     string               `yaml:"version"`
-	Description string               `yaml:"description"`
-	Icon        string               `yaml:"icon"`
-	// Interface marks a special contract the module satisfies. "llm"
-	// declares an LLM provider usable as an ext alias's llm binding.
+	Identifier   CapabilityIdentifier   `yaml:"-"` // source it was loaded under
+	Name         string                 `yaml:"name"`
+	Version      string                 `yaml:"version"`
+	Description  string                 `yaml:"description"`
+	Icon         string                 `yaml:"icon"`
 	Interface    string                 `yaml:"interface"`
+	Models       []string               `yaml:"models"`
 	Dependencies []types.CapabilityName `yaml:"dependencies"`
 	Ops          []OpSpec               `yaml:"ops"`
 	Config       []ConfigField          `yaml:"config"`
 }
 
-// InterfaceLLM is the manifest interface for LLM providers.
-const InterfaceLLM = "llm"
+// LLMExtName is the reserved basename of the single extension that
+// exposes LLM ops. Ext aliases with this source select a workspace
+// provider through config.provider.
+const LLMExtName = "llm"
 
-// LLMProviderOps is the op set every interface: llm extension must
-// export: one uniform contract across providers.
-var LLMProviderOps = []string{"respond", "structured", "score", "choose", "rank"}
+// IsLLMExtSource reports whether source names the llm extension. A
+// trailing @version is ignored; only the path basename is compared.
+func IsLLMExtSource(source string) bool {
+	if i := strings.IndexByte(source, '@'); i >= 0 {
+		source = source[:i]
+	}
+	source = strings.TrimRight(source, "/")
+	if source == "" {
+		return false
+	}
+	i := strings.LastIndexByte(source, '/')
+	return source[i+1:] == LLMExtName
+}
 
 // OpSpec declares one exported operation.
 type OpSpec struct {

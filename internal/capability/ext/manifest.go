@@ -7,6 +7,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"calcside/internal/llm"
 	"calcside/internal/types"
 )
 
@@ -30,6 +31,15 @@ func validateManifest(m *CapabilityManifest) error {
 	if m.Icon != "" && !ValidIconPath(m.Icon) {
 		return fmt.Errorf("ext: invalid icon path")
 	}
+	if m.Interface != "" && m.Interface != llm.Interface {
+		return fmt.Errorf("ext: %s: invalid interface %q", m.Name, m.Interface)
+	}
+	if m.Interface != llm.Interface && len(m.Models) > 0 {
+		return fmt.Errorf("ext: %s: models are only valid for interface %q", m.Name, llm.Interface)
+	}
+	if _, err := llm.NormalizeModels(m.Models); err != nil {
+		return fmt.Errorf("ext: %s: %w", m.Name, err)
+	}
 	for _, d := range m.Dependencies {
 		// Extensions may only depend on base capabilities (net/fs/io) —
 		// never on other extensions.
@@ -49,16 +59,6 @@ func validateManifest(m *CapabilityManifest) error {
 		for _, p := range op.Params {
 			if !identRe.MatchString(p) {
 				return fmt.Errorf("ext: %s op %s: invalid param %q", m.Name, op.Name, p)
-			}
-		}
-	}
-	if m.Interface != "" && m.Interface != InterfaceLLM {
-		return fmt.Errorf("ext: %s: invalid interface %q", m.Name, m.Interface)
-	}
-	if m.Interface == InterfaceLLM {
-		for _, req := range LLMProviderOps {
-			if !seen[req] {
-				return fmt.Errorf("ext: %s: interface llm requires op %q", m.Name, req)
 			}
 		}
 	}

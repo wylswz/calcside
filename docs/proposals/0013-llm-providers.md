@@ -1,6 +1,6 @@
 # EP-0013: LLM providers with a unified response / structured / judge interface
 
-- **Status:** Partially implemented (Starlark providers + workspace registry + ext `llm` binding); native `llm` capability remains future work
+- **Status:** Partially implemented: provider extensions (`interface: llm`) declare model metadata and the `respond`/`structured` protocol; the `contrib/llm` capability extension consumes all workspace providers, with provider/model chosen in code. A native Go `llm` capability remains future work.
 - **Area:** New `llm` capability, instance spec, provider adapters, audit
 - **Related:** EP-0003 (extensions), EP-0008 (restricted keys, gate audit)
 
@@ -26,6 +26,18 @@ judge-style operations that score content against a rubric, choose between
 candidate options, or rank items. These are the same completion under a
 constrained contract, and they deserve first-class ops rather than each script
 re-implementing "reply with only a number" prompts that parse unreliably.
+
+## Implementation note
+
+The shipped shape splits the interface from the vendor adapters:
+provider extensions declare `interface: llm`, their model catalogue in
+`capability.yaml`, and the `respond`/`structured` protocol. The `llm`
+capability extension consumes every configured provider and exposes the
+higher-level ops. Workspaces register providers through
+`/api/v1/llm-providers` (`{name, source, models, config}`); instances add
+only the `llm` capability ext and choose provider/model per call.
+Provider extensions are hidden from instance creation. No vendor model
+ids are hardcoded in the server or console. See `docs/extensions.md`.
 
 ## Proposal
 

@@ -1,7 +1,7 @@
 # llm-openai
 
-OpenAI provider for the `llm` interface. Ops: `respond`, `structured`
-(native `response_format: json_schema`), `score`, `choose`, `rank`.
-Setup: key `sk-...` as `OPENAI_API_KEY` allowed for `api.openai.com`;
-grant `net.allow_hosts: ["api.openai.com"]`. Set `json_schema: false`
-for prompt-and-parse fallback.
+OpenAI provider extension (Responses API) for the `llm` capability. It declares `interface: llm`,
+its default model catalogue in `capability.yaml`, and the provider
+protocol ops `respond` and `structured`. Workspace providers select this
+source and supply config (endpoint + secret reference). See
+`docs/extensions.md`.

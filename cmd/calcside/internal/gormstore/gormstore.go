@@ -356,6 +356,7 @@ type llmProviderRow struct {
 	Name        string `gorm:"uniqueIndex:idx_llm_providers_workspace_name"`
 	Source      string
 	Sum         string
+	Models      []string `gorm:"serializer:json"`
 	Config      string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
@@ -366,7 +367,7 @@ func (llmProviderRow) TableName() string { return "llm_providers" }
 func (r llmProviderRow) toStore() *store.LLMProvider {
 	return &store.LLMProvider{
 		ID: r.ID, UserID: r.UserID, WorkspaceID: r.WorkspaceID, Name: r.Name,
-		Source: r.Source, Sum: r.Sum, Config: json.RawMessage(r.Config),
+		Source: r.Source, Sum: r.Sum, Models: r.Models, Config: json.RawMessage(r.Config),
 		CreatedAt: r.CreatedAt.UTC(), UpdatedAt: r.UpdatedAt.UTC(),
 	}
 }
@@ -994,7 +995,7 @@ func (d *sqlDB) CreateLLMProvider(ctx context.Context, p *store.LLMProvider) err
 	p.UpdatedAt = now
 	err := gorm.G[llmProviderRow](d.g).Create(ctx, &llmProviderRow{
 		ID: p.ID, UserID: p.UserID, WorkspaceID: p.WorkspaceID, Name: p.Name,
-		Source: p.Source, Sum: p.Sum, Config: string(p.Config),
+		Source: p.Source, Sum: p.Sum, Models: p.Models, Config: string(p.Config),
 		CreatedAt: p.CreatedAt.UTC(), UpdatedAt: p.UpdatedAt.UTC(),
 	})
 	return mapWriteErr(err)
@@ -1023,10 +1024,15 @@ func (d *sqlDB) ListLLMProviders(ctx context.Context, workspaceID string) ([]*st
 
 func (d *sqlDB) UpdateLLMProvider(ctx context.Context, p *store.LLMProvider) error {
 	p.UpdatedAt = time.Now().UTC()
+	mj, err := json.Marshal(p.Models)
+	if err != nil {
+		return err
+	}
 	n, err := gorm.G[llmProviderRow](d.g).Where("id = ?", p.ID).Set(
 		col("name", p.Name),
 		col("source", p.Source),
 		col("sum", p.Sum),
+		col("models", string(mj)),
 		col("config", string(p.Config)),
 		col("updated_at", p.UpdatedAt),
 	).Update(ctx)
