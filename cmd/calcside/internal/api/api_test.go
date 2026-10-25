@@ -15,12 +15,14 @@ import (
 	"calcside/cmd/calcside/internal/audit"
 	"calcside/cmd/calcside/internal/auth"
 	_ "calcside/cmd/calcside/internal/gormstore"
+	"calcside/cmd/calcside/internal/service/access"
 	auditsvc "calcside/cmd/calcside/internal/service/audit"
 	"calcside/cmd/calcside/internal/service/catalog"
 	"calcside/cmd/calcside/internal/service/iam"
 	policysvc "calcside/cmd/calcside/internal/service/policy"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/vault"
+	workspacesvc "calcside/cmd/calcside/internal/service/workspace"
 	"calcside/cmd/calcside/internal/vaultcipher"
 	"calcside/internal/capability"
 	capfs "calcside/internal/capability/fs"
@@ -106,10 +108,11 @@ func newArtifactEnv(t *testing.T, cipher *vaultcipher.Cipher, global map[string]
 	})
 	e.mgr = mgr
 	t.Cleanup(mgr.StopReaper)
-	vaultSvc := vault.New(st, cipher)
+	ac := access.New(st)
+	vaultSvc := vault.New(st, cipher, ac)
 	e.sbx = sandbox.New(sandbox.Options{
 		Store: st, Runtime: mgr, Secrets: vaultSvc, Audit: rec,
-		Registry: reg, Limits: limits, MaxInstancesPerUser: 10, GlobalPolicies: global,
+		Registry: reg, Limits: limits, Access: ac, MaxInstancesPerUser: 10, GlobalPolicies: global,
 	})
 	previews, err := NewArtifactPreviews(cfg, e.sbx)
 	if err != nil {
@@ -118,9 +121,9 @@ func newArtifactEnv(t *testing.T, cipher *vaultcipher.Cipher, global map[string]
 	t.Cleanup(previews.Close)
 	svc := auth.NewService(st, false)
 	h := Handler(Deps{
-		IAM: iam.New(st, nil), Vault: vaultSvc,
-		Policy: policysvc.New(st), Audit: auditsvc.New(st),
-		Catalog: catalog.New(reg, nil), Sandbox: e.sbx,
+		IAM: iam.New(st, ac, e.sbx, 10, nil), Vault: vaultSvc,
+		Policy: policysvc.New(st, ac), Audit: auditsvc.New(st, ac),
+		Catalog: catalog.New(reg, nil), Sandbox: e.sbx, Access: ac, Workspace: workspacesvc.New(st, ac),
 		Auth: svc, Previews: previews,
 	})
 	srv := httptest.NewServer(h)
@@ -286,6 +289,111 @@ func TestExecOnEndedInstance409(t *testing.T) {
 	}
 }
 
+func TestRestrictedKey(t *testing.T) {
+	e := newEnv(t)
+	cookies := login(e, "a@x.com")
+	csrf := map[string]string{"X-Requested-With": "calcside"}
+
+	// restricted key: spec + max_instances
+	_, m, _ := e.req("POST", "/api/v1/keys", `{"name":"rk","spec":{"ttl_seconds":600,"capabilities":{"fs":{}}},"max_instances":2}`, csrf, cookies)
+	key := m["key"].(map[string]any)
+	if key["restricted"] != true || m["secret"] == "" {
+		t.Fatalf("create restricted key: %v", m)
+	}
+	bearer := map[string]string{"Authorization": "Bearer " + m["secret"].(string)}
+
+	// console-created instance is invisible to the restricted key
+	_, m, _ = e.req("POST", "/api/v1/instances", `{"capabilities":{"fs":{}}}`, csrf, cookies)
+	consoleInst := m["instance"].(map[string]any)["id"].(string)
+	code, _, _ := e.req("GET", "/api/v1/instances/"+consoleInst, "", bearer, nil)
+	if code != 404 {
+		t.Fatalf("restricted key saw console instance: %d", code)
+	}
+
+	// only labels + ttl_seconds allowed on create
+	code, m, _ = e.req("POST", "/api/v1/instances", `{"labels":{"task":"t"}}`, bearer, nil)
+	if code != 201 {
+		t.Fatalf("restricted create: %d %v", code, m)
+	}
+	instID := m["instance"].(map[string]any)["id"].(string)
+	code, m, _ = e.req("POST", "/api/v1/instances", `{"capabilities":{"net":{}}}`, bearer, nil)
+	if code != 403 {
+		t.Fatalf("restricted create with caps: %d %v", code, m)
+	}
+	// exec + list work on its own instance
+	code, m, _ = e.req("POST", "/api/v1/instances/"+instID+"/exec", `{"code":"print('hi')"}`, bearer, nil)
+	if code != 200 {
+		t.Fatalf("restricted exec: %d %v", code, m)
+	}
+	code, m, _ = e.req("GET", "/api/v1/instances", "", bearer, nil)
+	if code != 200 || len(m["instances"].([]any)) != 1 {
+		t.Fatalf("restricted list: %d %v", code, m)
+	}
+	// a smaller requested ttl_seconds survives renewal: the instance's
+	// sliding deadline uses 60s, not the key spec's 600s.
+	code, m, _ = e.req("POST", "/api/v1/instances", `{"ttl_seconds":60}`, bearer, nil)
+	if code != 201 {
+		t.Fatalf("short-ttl create: %d %v", code, m)
+	}
+	shortID := m["instance"].(map[string]any)["id"].(string)
+	exp1 := m["instance"].(map[string]any)["expires_at"].(string)
+	t1, _ := time.Parse(time.RFC3339, exp1)
+	if time.Until(t1) > 90*time.Second {
+		t.Fatalf("short ttl not applied: %v", t1)
+	}
+	code, m, _ = e.req("POST", "/api/v1/instances/"+shortID+"/exec", `{"code":"print('x')"}`, bearer, nil)
+	if code != 200 {
+		t.Fatalf("short-ttl exec: %d %v", code, m)
+	}
+	code, m, _ = e.req("GET", "/api/v1/instances/"+shortID, "", bearer, nil)
+	t2, _ := time.Parse(time.RFC3339, m["instance"].(map[string]any)["expires_at"].(string))
+	if time.Until(t2) > 90*time.Second {
+		t.Fatalf("renewal used key TTL: %v", t2)
+	}
+	// and the max_instances accounting now counts both.
+	code, _, _ = e.req("DELETE", "/api/v1/instances/"+shortID, "", bearer, nil)
+	if code != 200 {
+		t.Fatalf("delete short-ttl instance: %d", code)
+	}
+	// audit requires an instance scope
+	code, _, _ = e.req("GET", "/api/v1/audit", "", bearer, nil)
+	if code != 403 {
+		t.Fatalf("unscoped audit: %d", code)
+	}
+	code, _, _ = e.req("GET", "/api/v1/audit?instance_id="+instID, "", bearer, nil)
+	if code != 200 {
+		t.Fatalf("scoped audit: %d", code)
+	}
+	// policy mutation forbidden
+	code, _, _ = e.req("POST", "/api/v1/policies", `{"name":"p","rego":"package calcside.hooks"}`, bearer, nil)
+	if code != 403 {
+		t.Fatalf("policy create: %d", code)
+	}
+	// max_instances enforced
+	code, _, _ = e.req("POST", "/api/v1/instances", `{}`, bearer, nil)
+	if code != 201 {
+		t.Fatalf("second instance: %d", code)
+	}
+	code, m, _ = e.req("POST", "/api/v1/instances", `{}`, bearer, nil)
+	if code == 201 {
+		t.Fatal("third instance should hit max_instances")
+	}
+	// full-access rules: spec without max_instances rejected; inline secret rejected
+	code, m, _ = e.req("POST", "/api/v1/keys", `{"name":"bad","spec":{"capabilities":{"fs":{}}}}`, csrf, cookies)
+	if code == 201 {
+		t.Fatalf("restricted key without max_instances accepted: %v", m)
+	}
+	code, m, _ = e.req("POST", "/api/v1/keys", `{"name":"bad2","spec":{"capabilities":{"fs":{}},"secrets":{"T":{"value":"x"}}},"max_instances":1}`, csrf, cookies)
+	if code == 201 {
+		t.Fatalf("key spec with inline secret accepted: %v", m)
+	}
+	// key management is still session-only for restricted keys
+	code, _, _ = e.req("GET", "/api/v1/keys", "", bearer, nil)
+	if code != 403 {
+		t.Fatalf("key list via key: %d", code)
+	}
+}
+
 func TestGetExecution(t *testing.T) {
 	e := newEnv(t)
 	cookies := login(e, "a@x.com")
@@ -306,6 +414,34 @@ func TestGetExecution(t *testing.T) {
 	}
 	if m["execution"].(map[string]any)["code"] != nil {
 		t.Fatal("execution object should not embed code")
+	}
+	if m["output"] != "hi\n" || m["output_truncated"] != false || m["error"] != nil {
+		t.Fatalf("execution detail fields: %v", m)
+	}
+	if m["execution"].(map[string]any)["via"] != "api_key" {
+		t.Fatalf("via: %v", m["execution"])
+	}
+
+	// a run by the console session reports via=session
+	code, m, _ = e.req("POST", "/api/v1/instances/"+instID+"/exec", `{"code":"print('sess')"}`, csrf, cookies)
+	if code != 200 {
+		t.Fatalf("session exec: %d %v", code, m)
+	}
+	code, m, _ = e.req("GET", "/api/v1/executions/"+m["exec_id"].(string), "", bearer, nil)
+	if code != 200 || m["execution"].(map[string]any)["via"] != "session" {
+		t.Fatalf("session via: %d %v", code, m)
+	}
+
+	// a failed run reports the structured error
+	code, m, _ = e.req("POST", "/api/v1/instances/"+instID+"/exec", `{"code":"fail('boom')"}`, bearer, nil)
+	if code != 200 {
+		t.Fatalf("failing exec: %d %v", code, m)
+	}
+	code, m, _ = e.req("GET", "/api/v1/executions/"+m["exec_id"].(string), "", bearer, nil)
+	errObj, _ := m["error"].(map[string]any)
+	if code != 200 || errObj == nil || errObj["type"] != "runtime" ||
+		!strings.Contains(errObj["message"].(string), "boom") {
+		t.Fatalf("error detail: %d %v", code, m)
 	}
 
 	cookiesB := login(e, "b@x.com")

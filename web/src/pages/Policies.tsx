@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
-import { api, Policy } from '../api'
-import { Button, EmptyRow, Field, Modal, PageHeader, fmtTime, inputCls, Tag } from '../components/ui'
+import { api, Policy, wsPath } from '../api'
+import { Button, EmptyRow, Field, Confirm, Modal, PageHeader, SwapLabel, inputCls, Tag } from '../components/ui'
+import { fmtTime } from '../format'
 import { cmTheme } from '../components/codemirror'
 import { useRegoEditor } from '../components/editor'
 
@@ -28,6 +29,7 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
   const [rego, setRego] = useState(policy?.rego ?? 'package calcside.hooks\n\n')
   const [validation, setValidation] = useState<{ valid: boolean; error?: string } | null>(null)
   const [err, setErr] = useState('')
+  const [validating, setValidating] = useState(false)
   const [capability, setCapability] = useState('')
   const [op, setOp] = useState('')
   const editor = useRegoEditor(capability, op)
@@ -35,10 +37,11 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
 
   const save = useMutation({
     mutationFn: async () => {
+      setErr('')
       if (policy) {
         return api.put<{ policy: Policy }>(`/api/v1/policies/${policy.id}`, { name, rego })
       }
-      return api.post<{ policy: Policy }>('/api/v1/policies', { name, rego })
+      return api.post<{ policy: Policy }>(wsPath('/api/v1/policies'), { name, rego })
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['policies'] })
@@ -48,17 +51,41 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
   })
 
   const validate = async () => {
-    const r = await api.post<{ valid: boolean; error?: string }>('/api/v1/policies/validate', { rego })
-    setValidation(r)
+    setErr('')
+    setValidating(true)
+    try {
+      setValidation(await api.post<{ valid: boolean; error?: string }>('/api/v1/policies/validate', { rego }))
+    } catch (e: any) {
+      setErr(e.message)
+    } finally {
+      setValidating(false)
+    }
   }
+
+  // Feedback lives in the footer beside the buttons that cause it (P5);
+  // the details stay in the content above.
+  const nameInvalid = name !== '' && !nameRe.test(name)
+  const feedback = err ? `Save failed: ${err}`
+    : !name ? 'Enter a name to save.'
+      : nameInvalid ? 'Name allows letters, digits, _ . - (max 64), not builtin.'
+        : validation ? validation.valid ? 'Policy is valid.' : `Invalid Rego: ${validation.error}`
+          : ''
 
   return (
     <Modal title={policy ? `Edit ${policy.name}` : 'New policy'} onClose={onClose} wide footer={
       <>
-        <Button onClick={validate}>Validate</Button>
+        <Button onClick={validate} disabled={validating}>
+          <SwapLabel show={validating ? 'Validating…' : 'Validate'} options={['Validate', 'Validating…']} />
+        </Button>
+        <p role="status" aria-live="polite" title={feedback}
+          className={`min-w-0 flex-1 truncate text-xs ${err || nameInvalid || (validation && !validation.valid) ? 'text-warn-text' : 'text-sec'}`}>
+          {feedback}
+        </p>
         <div className="ml-auto flex gap-2">
           <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" disabled={!nameRe.test(name) || save.isPending} onClick={() => save.mutate()}>Save</Button>
+          <Button variant="primary" disabled={!nameRe.test(name) || save.isPending} onClick={() => save.mutate()}>
+            <SwapLabel show={save.isPending ? 'Saving…' : 'Save'} options={['Save', 'Saving…']} />
+          </Button>
         </div>
       </>
     }>
@@ -67,26 +94,26 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
           <Field label="Name (referenced by spec.policies)">
             <input className={inputCls + ' font-mono'} value={name} onChange={(e) => setName(e.target.value)} placeholder="deny_net_hosts" />
           </Field>
-          {name && !nameRe.test(name) && <p className="text-xs text-danger">letters, digits, _ . - (max 64), starting with a letter or digit; builtin. is reserved</p>}
-          <div className="border border-ink">
-            <div className="flex items-center gap-3 border-b border-ink px-3 py-1.5">
-              <span className="eyebrow">Rego</span>
+          {name && !nameRe.test(name) && <p className="text-xs text-warn-text">letters, digits, _ . - (max 64), starting with a letter or digit; builtin. is reserved</p>}
+          <div className="overflow-hidden rounded-md border border-line">
+            <div className="flex items-center gap-3 border-b border-line px-3 py-2">
+              <span className="text-xs font-medium text-sec">Rego</span>
               {validation && (
-                <span className={`ml-auto truncate text-xs ${validation.valid ? 'text-accent' : 'text-danger'}`}>
+                <span className={`ml-auto truncate text-xs ${validation.valid ? 'text-ink' : 'text-warn-text'}`}>
                   {validation.valid ? '● valid' : validation.error}
                 </span>
               )}
             </div>
-            <CodeMirror value={rego} height="340px" extensions={editor.extensions} onChange={setRego} theme={cmTheme} />
+            <CodeMirror value={rego} height="340px" extensions={editor.extensions} onChange={(v) => { setRego(v); setValidation(null) }} theme={cmTheme} />
             <div className="border-t border-line px-3 py-1.5 text-[11px] text-mute">
               Ctrl+Space to complete{editor.isFetching ? ' · Loading metadata…' : ''}
               {editor.error && <span className="ml-3 text-warn-text">Completion metadata unavailable</span>}
             </div>
           </div>
-          {err && <p className="text-xs text-danger">{err}</p>}
+          {err && <p className="text-xs text-warn-text">{err}</p>}
         </div>
         <div className="min-w-0">
-          <div className="eyebrow mb-2">Completion context</div>
+          <div className="mb-2 text-xs font-medium text-sec">Completion context</div>
           <div className="mb-2 grid grid-cols-2 gap-2">
             <Field label="Capability">
               <select className={inputCls} value={capability} onChange={(e) => { setCapability(e.target.value); setOp('') }}>
@@ -102,7 +129,7 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
             </Field>
           </div>
           <p className="mb-4 text-xs text-mute">Select an operation for args / result field suggestions. This only changes completion hints; Validate compiles the policy, it does not execute it.</p>
-          <div className="eyebrow mb-2">Input schema</div>
+          <div className="mb-2 text-xs font-medium text-sec">Input schema</div>
           <pre className="pre mb-4 max-h-64 text-sec">{editor.fields.length ? editor.fields.map((s) => `${s.name}  ${s.detail ?? ''}`).join('\n') : editor.error ? 'Schema unavailable' : 'Loading schema…'}</pre>
           <pre className="pre max-h-64 text-sec">{POLICY_DOC}</pre>
         </div>
@@ -111,13 +138,14 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
   )
 }
 
-export default function Policies() {
+export default function Policies({ bare }: { bare?: boolean }) {
   const qc = useQueryClient()
   const [editing, setEditing] = useState<Policy | null>(null)
   const [showNew, setShowNew] = useState(false)
+  const [deleting, setDeleting] = useState<Policy | null>(null)
   const { data } = useQuery({
     queryKey: ['policies'],
-    queryFn: () => api.get<{ policies: Policy[] }>('/api/v1/policies'),
+    queryFn: () => api.get<{ policies: Policy[] }>(wsPath('/api/v1/policies')),
   })
   const del = useMutation({
     mutationFn: (id: string) => api.del(`/api/v1/policies/${id}`),
@@ -126,10 +154,11 @@ export default function Policies() {
 
   return (
     <div>
-      <PageHeader index="02" section="Governance" title="Policies"
+      {bare && <div className="mb-4 flex items-center justify-between"><p className="text-xs text-sec" /><Button variant="primary" onClick={() => setShowNew(true)}>New policy</Button></div>}
+{!bare && <PageHeader title="Policies"
         actions={<Button variant="primary" onClick={() => setShowNew(true)}>New policy</Button>}>
         Built-in and Rego policies share one selection list at instance creation (spec.policies). Built-in policies run native runtime checks and are read-only; default policies are preselected, not mandatory. Rego policies are snapshotted at creation. Server policies (--policy-dir) always apply.
-      </PageHeader>
+      </PageHeader>}
       <div className="tbl-wrap">
         <table className="tbl">
           <thead>
@@ -148,7 +177,7 @@ export default function Policies() {
                 <td className="space-x-2 whitespace-nowrap text-right">
                   {p.kind === 'builtin' ? <span className="text-xs text-mute">Read-only</span> : <>
                     <Button size="sm" onClick={() => setEditing(p)}>Edit</Button>
-                    <Button variant="danger" size="sm" onClick={() => del.mutate(p.id)}>Delete</Button>
+                    <Button size="sm" onClick={() => setDeleting(p)}>Delete</Button>
                   </>}
                 </td>
               </tr>
@@ -158,6 +187,12 @@ export default function Policies() {
         </table>
       </div>
       {(editing || showNew) && <PolicyEditor policy={editing} onClose={() => { setEditing(null); setShowNew(false) }} />}
+      {deleting && (
+        <Confirm title={`Delete policy ${deleting.name}?`} confirm="Delete" pending="Deleting…"
+          action={() => del.mutateAsync(deleting.id)} onClose={() => setDeleting(null)}>
+          <p className="text-sm text-body">New instances can no longer select <code className="font-mono text-ink">{deleting.name}</code>. This cannot be undone.</p>
+        </Confirm>
+      )}
     </div>
   )
 }

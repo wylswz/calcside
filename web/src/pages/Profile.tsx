@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { api, User } from '../api'
-import { Badge, Button, Field, Notice, PageHeader, SectionTitle, inputCls } from '../components/ui'
+import { Button, Field, Notice, PageHeader, SectionTitle, SwapLabel, inputCls } from '../components/ui'
 
 export default function Profile({ user }: { user: User }) {
   const [currentPassword, setCurrentPassword] = useState('')
@@ -21,12 +21,12 @@ export default function Profile({ user }: { user: User }) {
 
   return (
     <div className="max-w-xl">
-      <PageHeader index="06" section="Account" title="Profile">Your account and sign-in settings.</PageHeader>
+      <PageHeader title="Profile">Your account and sign-in settings.</PageHeader>
       <SectionTitle>Account</SectionTitle>
       <dl className="mb-10 grid grid-cols-[auto_1fr] gap-x-8 gap-y-3 text-sm">
         <dt className="text-sec">Name</dt><dd className="text-ink">{user.name || '—'}</dd>
         <dt className="text-sec">{user.username ? 'Login name' : 'Email'}</dt><dd className="break-all text-ink">{user.username || user.email}</dd>
-        <dt className="text-sec">Role</dt><dd><Badge tone={user.is_admin ? 'blue' : 'gray'}>{user.is_admin ? 'Administrator' : 'User'}</Badge></dd>
+        <dt className="text-sec">Role</dt><dd className="text-ink">{user.is_admin ? 'Administrator' : 'User'}</dd>
       </dl>
       <SectionTitle>Password</SectionTitle>
       {user.has_password ? (
@@ -56,9 +56,9 @@ export default function Profile({ user }: { user: User }) {
             <input className={inputCls} type="password" name="confirm-password" autoComplete="new-password" required maxLength={72}
               value={confirmation} onChange={(e) => setConfirmation(e.target.value)} disabled={changePassword.isPending} />
           </Field>
-          {error && <div role="alert"><Notice tone="red">{error}</Notice></div>}
+          {error && <div role="alert"><Notice tone="warning">{error}</Notice></div>}
           <Button type="submit" variant="primary" disabled={changePassword.isPending}>
-            {changePassword.isPending ? 'Changing password…' : 'Change password'}
+            <SwapLabel show={changePassword.isPending ? 'Changing password…' : 'Change password'} options={['Change password', 'Changing password…']} />
           </Button>
         </form>
       ) : (

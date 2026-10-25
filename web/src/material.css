@@ -1,0 +1,290 @@
+/* material.css — the console's one surface language.
+
+   Modelled on how Apple's icons balance flat and physical:
+   - one light source from above; a surface is lit by a single same-hue
+     gradient whose lightness changes by only a few percent, placed as a
+     wide radial falloff so the face reads as a gentle curve, never a ramp;
+   - edges carry at most a barely visible specular line, no bevels and no
+     inner shading bands;
+   - shadows are neutral (black at low alpha): a tight contact shadow plus
+     a soft ambient one;
+   - frosted translucency only on what floats above the page.
+   Interaction feedback is paint-only (docs/interaction-stability.md, S1/S2):
+   hover, press, focus, open and selected states change light, shadow and
+   colour, never a control's box (no transform, size, spacing, border width
+   or font metrics). Nothing moves under the pointer, and floating layers
+   anchored to a control (menus) stay exactly where they opened. Only
+   entrances move, once (P4). src/interactionStability.test.ts enforces
+   this. Colour stays
+   functional (blue = act, green = live, rose = denied, orange = attention). */
+
+:root {
+  --desk: 255 255 255;
+  --radius-surface: 16px;
+  --radius-control: 10px;
+  --radius-inset: 10px;
+  --edge: rgba(15, 23, 42, 0.075);
+  --edge-strong: rgba(15, 23, 42, 0.1);
+  --fill-muted: rgb(244 246 249);
+  --fill-muted-hover: rgb(239 242 246);
+  --glass: rgba(255, 255, 255, 0.72);
+  --glass-strong: rgba(255, 255, 255, 0.86);
+  --frost: saturate(180%) blur(20px);
+  --ease-damped: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-press: cubic-bezier(0.4, 0, 0.6, 1);
+
+  /* light: brightest just above the top edge, ~2-5% darker at the bottom */
+  --dome: radial-gradient(140% 120% at 50% -20%, #ffffff 0%, #ffffff 45%, #f7f8fa 100%);
+  --dome-surface: radial-gradient(160% 140% at 50% -30%, #ffffff 0%, #ffffff 60%, #fbfbfd 100%);
+  --dome-primary: radial-gradient(140% 120% at 50% -20%, #4783f3 0%, #3170ee 45%, #2563eb 100%);
+  --dome-pressed: radial-gradient(140% 120% at 50% -20%, #f6f7f9 0%, #f3f5f8 100%);
+  --dome-primary-pressed: radial-gradient(140% 120% at 50% -20%, #2a65e6 0%, #2259d8 100%);
+  --well: none;
+
+  --spec: inset 0 0.5px 0 rgba(255, 255, 255, 0.9);
+  --shadow-surface: 0 0.5px 1px rgba(0, 0, 0, 0.04), 0 8px 24px -12px rgba(0, 0, 0, 0.1);
+  --shadow-control: 0 0.5px 1px rgba(0, 0, 0, 0.06), 0 2px 6px -2px rgba(0, 0, 0, 0.06);
+  --shadow-control-hover: 0 0.5px 1px rgba(0, 0, 0, 0.06), 0 8px 18px -8px rgba(0, 0, 0, 0.14);
+  --shadow-pressed: 0 0.5px 1px rgba(0, 0, 0, 0.05);
+  --shadow-inset: inset 0 0.5px 1px rgba(0, 0, 0, 0.04);
+  --shadow-primary: inset 0 0.5px 0 rgba(255, 255, 255, 0.22), 0 0.5px 1px rgba(0, 0, 0, 0.12), 0 4px 10px -4px rgba(0, 0, 0, 0.18);
+  --shadow-primary-hover: inset 0 0.5px 0 rgba(255, 255, 255, 0.24), 0 0.5px 1px rgba(0, 0, 0, 0.12), 0 10px 20px -10px rgba(0, 0, 0, 0.28);
+  --shadow-primary-pressed: 0 0.5px 1px rgba(0, 0, 0, 0.12);
+  --shadow-float: inset 0 0.5px 0 rgba(255, 255, 255, 0.7), 0 4px 12px rgba(0, 0, 0, 0.05), 0 24px 56px -20px rgba(0, 0, 0, 0.22);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --desk: 11 18 32;
+    --edge: rgba(255, 255, 255, 0.08);
+    --edge-strong: rgba(255, 255, 255, 0.11);
+    --fill-muted: rgb(24 35 54);
+    --fill-muted-hover: rgb(30 43 64);
+    --glass: rgba(17, 27, 45, 0.7);
+    --glass-strong: rgba(20, 31, 51, 0.86);
+    --dome: radial-gradient(140% 120% at 50% -20%, #25344c 0%, #223047 45%, #1e2b41 100%);
+    --dome-surface: radial-gradient(160% 140% at 50% -30%, #152136 0%, #142033 60%, #121d30 100%);
+    --dome-primary: radial-gradient(140% 120% at 50% -20%, #7db4fb 0%, #6aa9fa 45%, #60a5fa 100%);
+    --dome-pressed: radial-gradient(140% 120% at 50% -20%, #1b273b 0%, #192438 100%);
+    --dome-primary-pressed: radial-gradient(140% 120% at 50% -20%, #5596f2 0%, #4c8ced 100%);
+    --shadow-surface: inset 0 0.5px 0 rgba(255, 255, 255, 0.05), 0 0.5px 1px rgba(0, 0, 0, 0.3), 0 10px 28px -12px rgba(0, 0, 0, 0.5);
+    --shadow-control: inset 0 0.5px 0 rgba(255, 255, 255, 0.07), 0 0.5px 1px rgba(0, 0, 0, 0.35), 0 2px 6px -2px rgba(0, 0, 0, 0.35);
+    --shadow-control-hover: inset 0 0.5px 0 rgba(255, 255, 255, 0.08), 0 0.5px 1px rgba(0, 0, 0, 0.35), 0 8px 18px -8px rgba(0, 0, 0, 0.55);
+    --shadow-pressed: 0 0.5px 1px rgba(0, 0, 0, 0.35);
+    --shadow-inset: inset 0 0.5px 1px rgba(0, 0, 0, 0.3);
+    --shadow-primary: inset 0 0.5px 0 rgba(255, 255, 255, 0.3), 0 0.5px 1px rgba(0, 0, 0, 0.35), 0 4px 10px -4px rgba(0, 0, 0, 0.45);
+    --shadow-primary-hover: inset 0 0.5px 0 rgba(255, 255, 255, 0.32), 0 0.5px 1px rgba(0, 0, 0, 0.35), 0 10px 20px -10px rgba(0, 0, 0, 0.6);
+    --shadow-primary-pressed: 0 0.5px 1px rgba(0, 0, 0, 0.35);
+    --shadow-float: inset 0 0.5px 0 rgba(255, 255, 255, 0.06), 0 4px 12px rgba(0, 0, 0, 0.35), 0 24px 56px -20px rgba(0, 0, 0, 0.7);
+  }
+}
+
+body { background-color: rgb(var(--desk)); }
+
+/* ---- frosted: things that float over content ---- */
+.console-header {
+  background-color: var(--glass);
+  -webkit-backdrop-filter: var(--frost);
+  backdrop-filter: var(--frost);
+  border-bottom-color: var(--edge);
+}
+[data-ui='dialog-surface'], [data-ui='menu'] {
+  background-color: var(--glass-strong);
+  -webkit-backdrop-filter: var(--frost);
+  backdrop-filter: var(--frost);
+  border: 1px solid var(--edge);
+  box-shadow: var(--shadow-float);
+}
+
+/* ---- surfaces: flat white, hairline edge, diffuse shadow ---- */
+.builder-work-panel,
+.instance-detail .next-action,
+.instance-detail .work-surface,
+.settings-card {
+  background-color: rgb(var(--paper));
+  background-image: var(--dome-surface);
+  border: 1px solid var(--edge);
+  box-shadow: var(--shadow-surface);
+}
+
+/* ---- muted wells and trays: a flat tint, no inner shadow ---- */
+.segmented,
+.workspace-tabs,
+.instance-detail .seg-filters,
+.spec-selection {
+  background-color: var(--fill-muted);
+  background-image: var(--well);
+  border: 1px solid transparent;
+  box-shadow: var(--shadow-inset);
+}
+
+/* ---- controls ----
+   Every control owns a 1px border in all states; states only recolour it. */
+[data-ui='button'], .ability-choice, .ext-card { border: 1px solid transparent; }
+[data-ui='button'],
+.ability-choice,
+.ext-card,
+.selected-row:not(.is-empty):not(.is-removed),
+.segmented [role='tab'][aria-selected='true'],
+.workspace-tabs a[aria-current='page'],
+.instance-detail .seg-filters button[aria-pressed='true'] {
+  background-color: rgb(var(--paper));
+  background-image: var(--dome);
+  border-color: var(--edge);
+  box-shadow: var(--shadow-control);
+}
+[data-ui='button'],
+.ability-choice,
+.ext-card,
+.selected-row,
+.segmented [role='tab'],
+.workspace-tabs a,
+.instance-detail .seg-filters button,
+.input {
+  transition:
+    box-shadow 320ms var(--ease-damped),
+    background-color 240ms var(--ease-damped),
+    border-color 240ms var(--ease-damped),
+    color 240ms var(--ease-damped);
+}
+[data-ui='button'] { border-radius: var(--radius-control); color: rgb(var(--ink)); min-height: 32px; height: auto; }
+/* hover lifts the light, not the control; an open toggle stays held */
+[data-ui='button']:hover:not(:disabled):not([aria-expanded='true']),
+.ability-choice:hover,
+.ext-card:hover {
+  box-shadow: var(--shadow-control-hover);
+}
+[data-ui='button']:active:not(:disabled), .ability-choice:active {
+  background-image: var(--dome-pressed);
+  box-shadow: var(--shadow-pressed);
+  transition-duration: 90ms;
+  transition-timing-function: var(--ease-press);
+}
+[data-ui='button']:focus-visible, .ability-choice:focus-visible, .segmented [role='tab']:focus-visible {
+  outline: 2px solid rgb(var(--accent) / 0.55);
+  outline-offset: 2px;
+}
+[data-ui='button']:disabled { opacity: 0.5; box-shadow: none; }
+
+[data-ui='button'][data-variant='primary'] {
+  background-color: rgb(var(--accent));
+  background-image: var(--dome-primary);
+  border-color: transparent;
+  color: #ffffff;
+  box-shadow: var(--shadow-primary);
+}
+[data-ui='button'][data-variant='primary']:hover:not(:disabled) { box-shadow: var(--shadow-primary-hover); }
+[data-ui='button'][data-variant='primary']:active:not(:disabled) { background-image: var(--dome-primary-pressed); box-shadow: var(--shadow-primary-pressed); }
+@media (prefers-color-scheme: dark) {
+  [data-ui='button'][data-variant='primary'] { color: #08111f; }
+}
+@media (max-width: 900px) { [data-ui='button'] { min-height: 44px; } }
+
+.segmented [role='tab']:not([aria-selected='true']):hover,
+.workspace-tabs a:not([aria-current='page']):hover { color: rgb(var(--ink)); background-color: var(--fill-muted-hover); }
+
+/* inputs: a flat muted field that turns white and rings softly on focus */
+.input {
+  background-color: var(--fill-muted);
+  background-image: var(--well);
+  border-color: transparent;
+  border-radius: var(--radius-inset);
+  box-shadow: var(--shadow-inset);
+}
+.input:hover { background-color: var(--fill-muted-hover); }
+.input:focus, .input:focus-visible {
+  outline: none;
+  background-color: rgb(var(--paper));
+  background-image: none;
+  border-color: rgb(var(--accent) / 0.55);
+  box-shadow: 0 0 0 4px rgb(var(--accent) / 0.12);
+}
+select.input { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 5'%3E%3Cpolygon points='0,0 8,0 4,5' fill='%23666666'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 0.75rem center; background-size: 8px 5px; }
+
+/* states layered on the material */
+.ext-card.ext-card-added, .ability-choice[data-selected='true'] {
+  background-image: linear-gradient(rgb(var(--accent) / 0.045), rgb(var(--accent) / 0.045)), var(--dome);
+  border-color: rgb(var(--accent) / 0.28);
+}
+.selected-row.is-flash:not(.is-empty):not(.is-removed) {
+  border-color: rgb(var(--accent) / 0.45);
+  box-shadow: var(--shadow-control), 0 0 0 4px rgb(var(--accent) / 0.12);
+}
+.selected-row.is-empty, .selected-row.is-removed { background: rgb(var(--paper) / 0.6); }
+
+/* ---- dialog ---- */
+[data-ui='dialog-overlay'] {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgb(15 23 42 / 0.28);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+/* anchored at the top: a dialog whose content grows extends downwards and
+   never moves its title or anything above the change (S3) */
+[data-ui='dialog-surface'] {
+  --dialog-top: min(12vh, 96px);
+  position: fixed; left: 50%; top: var(--dialog-top); z-index: 51;
+  display: flex; flex-direction: column;
+  width: calc(100% - 32px); max-height: calc(100vh - 2 * var(--dialog-top));
+  transform: translateX(-50%);
+  border-radius: var(--radius-surface);
+  overflow: hidden;
+}
+/* the discard question covers the dialog in place instead of resizing it */
+[data-ui='dialog-discard'] {
+  position: absolute; inset: 0;
+  display: flex; align-items: flex-end;
+  background: rgb(var(--paper) / 0.72);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+[data-ui='dialog-discard'] > div { background: var(--glass-strong); }
+[data-ui='dialog-close'] {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; margin-right: -8px;
+  border-radius: var(--radius-control);
+  font-size: 20px; line-height: 1; color: rgb(var(--mute));
+  transition: background-color 240ms var(--ease-damped), color 240ms var(--ease-damped);
+}
+[data-ui='dialog-close']:hover { background: var(--fill-muted); color: rgb(var(--ink)); }
+
+/* ---- menu ---- */
+[data-ui='menu'] { z-index: 60; min-width: 200px; padding: 6px; border-radius: 12px; }
+[data-ui='menu-item'] {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 10px; border-radius: 8px;
+  font-size: 13px; color: rgb(var(--ink)); cursor: pointer; outline: none; user-select: none;
+  transition: background-color 200ms var(--ease-damped), color 200ms var(--ease-damped);
+}
+[data-ui='menu-item'][data-highlighted] { background: rgb(var(--accent) / 0.08); color: rgb(var(--accent)); }
+[data-ui='menu-item'][data-disabled] { opacity: 0.5; cursor: default; }
+[data-ui='menu-item'][data-tone='danger'] { color: rgb(var(--danger)); }
+[data-ui='menu-item'][data-tone='danger'][data-highlighted] { background: rgb(var(--danger) / 0.08); }
+[data-ui='menu-separator'] { height: 1px; margin: 6px -6px; background: var(--edge); }
+
+/* ---- motion: damped entrances, none when reduced motion is asked ---- */
+@media (prefers-reduced-motion: no-preference) {
+  [data-ui='dialog-overlay'][data-state='open'] { animation: material-fade 280ms var(--ease-damped); }
+  [data-ui='dialog-surface'][data-state='open'] { animation: material-rise 420ms var(--ease-damped); }
+  [data-ui='menu'][data-state='open'] { animation: material-drop 320ms var(--ease-damped); transform-origin: var(--radix-dropdown-menu-content-transform-origin); }
+  .selected-row:not(.is-empty):not(.is-removed) { animation: material-settle 420ms var(--ease-damped); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-ui='button'], .ability-choice, .ext-card, .selected-row, .segmented [role='tab'], .workspace-tabs a, .input { transition: none; }
+}
+@keyframes material-fade { from { opacity: 0; } }
+@keyframes material-rise { from { opacity: 0; transform: translate(-50%, 12px) scale(0.98); } }
+@keyframes material-drop { from { opacity: 0; transform: translateY(-6px) scale(0.98); } }
+@keyframes material-settle { from { opacity: 0; transform: translateY(6px); } }
+
+/* ---- stable labels: options share one cell, only the current shows ---- */
+.swap-label { display: inline-grid; }
+.swap-label > span { grid-area: 1 / 1; text-align: center; }
+.swap-label > span[data-on='false'] { visibility: hidden; }
+
+/* a toggle button that is open reads as held down */
+[data-ui='button'][aria-expanded='true'] {
+  background-image: var(--dome-pressed);
+  box-shadow: var(--shadow-pressed);
+  color: rgb(var(--accent));
+}

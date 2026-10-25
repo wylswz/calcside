@@ -274,6 +274,27 @@ func (e InstanceStatus) Valid() bool {
 	}
 }
 
+// Defines values for MemberRole.
+const (
+	Editor MemberRole = "editor"
+	Owner  MemberRole = "owner"
+	Viewer MemberRole = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the MemberRole enum.
+func (e MemberRole) Valid() bool {
+	switch e {
+	case Editor:
+		return true
+	case Owner:
+		return true
+	case Viewer:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Phase.
 const (
 	After  Phase = "after"
@@ -375,14 +396,27 @@ type APIErrorCode string
 
 // APIKey defines model for APIKey.
 type APIKey struct {
-	CreatedAt  time.Time  `json:"created_at"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
-	Id         string     `json:"id"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Id        string     `json:"id"`
+
+	// InstanceId when set the key can only reach this instance
+	InstanceId *string    `json:"instance_id,omitempty"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-	Name       string     `json:"name"`
-	Prefix     string     `json:"prefix"`
-	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
-	UserId     string     `json:"user_id"`
+
+	// MaxInstances live-instance bound for a restricted key
+	MaxInstances *int   `json:"max_instances,omitempty"`
+	Name         string `json:"name"`
+	Prefix       string `json:"prefix"`
+
+	// Restricted true when the key carries an instance spec
+	Restricted *bool         `json:"restricted,omitempty"`
+	RevokedAt  *time.Time    `json:"revoked_at,omitempty"`
+	Spec       *InstanceSpec `json:"spec,omitempty"`
+	UserId     string        `json:"user_id"`
+
+	// ViewOnly ceiling capped at view — cannot run code
+	ViewOnly *bool `json:"view_only,omitempty"`
 }
 
 // ArtifactConfig defines model for ArtifactConfig.
@@ -474,6 +508,11 @@ type CapabilityDoc struct {
 // CapabilityName defines model for CapabilityName.
 type CapabilityName string
 
+// ChangesResponse defines model for ChangesResponse.
+type ChangesResponse struct {
+	Changes *[]WorkspaceChange `json:"changes,omitempty"`
+}
+
 // CompletionContext defines model for CompletionContext.
 type CompletionContext struct {
 	EnvKeys   []string           `json:"env_keys"`
@@ -493,7 +532,17 @@ type CompletionSymbol struct {
 // CreateKeyRequest defines model for CreateKeyRequest.
 type CreateKeyRequest struct {
 	ExpiresInSeconds *int64 `json:"expires_in_seconds,omitempty"`
-	Name             string `json:"name"`
+
+	// InstanceId bind the key to this instance only; mutually exclusive with spec and view_only
+	InstanceId *string `json:"instance_id,omitempty"`
+
+	// MaxInstances required 1..maxPerUser when spec is set; must be absent for full access
+	MaxInstances *int          `json:"max_instances,omitempty"`
+	Name         string        `json:"name"`
+	Spec         *InstanceSpec `json:"spec,omitempty"`
+
+	// ViewOnly view-only key — sees the workspace's instances, runs and files; cannot run code
+	ViewOnly *bool `json:"view_only,omitempty"`
 }
 
 // CreateSecretRequest defines model for CreateSecretRequest.
@@ -530,6 +579,15 @@ type ErrorEnvelope struct {
 		Code    APIErrorCode `json:"code"`
 		Message string       `json:"message"`
 	} `json:"error"`
+}
+
+// ExecActivity defines model for ExecActivity.
+type ExecActivity struct {
+	DeniedRuns *int       `json:"denied_runs,omitempty"`
+	FailedRuns *int       `json:"failed_runs,omitempty"`
+	LastRunAt  *time.Time `json:"last_run_at,omitempty"`
+	LastStatus *string    `json:"last_status,omitempty"`
+	Runs       *int       `json:"runs,omitempty"`
 }
 
 // ExecError defines model for ExecError.
@@ -573,13 +631,21 @@ type Execution struct {
 	Status      ExecStatus     `json:"status"`
 	Steps       int64          `json:"steps"`
 	UserId      string         `json:"user_id"`
+	Via         *AuthKind      `json:"via,omitempty"`
 }
 
 // ExecutionDetail defines model for ExecutionDetail.
 type ExecutionDetail struct {
 	// Code full submitted code (empty for executions recorded before this field existed)
 	Code      string    `json:"code"`
+	Error     ExecError `json:"error"`
 	Execution Execution `json:"execution"`
+
+	// Output secret-scrubbed run output
+	Output string `json:"output"`
+
+	// OutputTruncated true when output was capped
+	OutputTruncated bool `json:"output_truncated"`
 }
 
 // ExecutionsResponse defines model for ExecutionsResponse.
@@ -651,6 +717,7 @@ type FilesResult struct {
 
 // Instance defines model for Instance.
 type Instance struct {
+	Activity     *ExecActivity     `json:"activity,omitempty"`
 	CreatedAt    time.Time         `json:"created_at"`
 	EndedAt      *time.Time        `json:"ended_at,omitempty"`
 	ExpiresAt    time.Time         `json:"expires_at"`
@@ -660,6 +727,7 @@ type Instance struct {
 	Spec         InstanceSpec      `json:"spec"`
 	Status       InstanceStatus    `json:"status"`
 	UserId       string            `json:"user_id"`
+	WorkspaceId  *string           `json:"workspace_id,omitempty"`
 }
 
 // InstanceInspect live globals snapshot; values are reprs, secret-scrubbed
@@ -728,6 +796,27 @@ type MeInfo struct {
 	Kind   AuthKind `json:"kind"`
 	User   User     `json:"user"`
 	ViaKey bool     `json:"via_key"`
+}
+
+// Member defines model for Member.
+type Member struct {
+	Email  string  `json:"email"`
+	Name   *string `json:"name,omitempty"`
+	Role   string  `json:"role"`
+	UserId string  `json:"user_id"`
+}
+
+// MemberResponse defines model for MemberResponse.
+type MemberResponse struct {
+	Member *Member `json:"member,omitempty"`
+}
+
+// MemberRole defines model for MemberRole.
+type MemberRole string
+
+// MembersResponse defines model for MembersResponse.
+type MembersResponse struct {
+	Members *[]Member `json:"members,omitempty"`
 }
 
 // OkResponse defines model for OkResponse.
@@ -844,6 +933,27 @@ type SecretsResponse struct {
 	Secrets *[]Secret `json:"secrets,omitempty"`
 }
 
+// Share defines model for Share.
+type Share struct {
+	CreatedAt  time.Time `json:"created_at"`
+	CreatedBy  *string   `json:"created_by,omitempty"`
+	Email      *string   `json:"email,omitempty"`
+	InstanceId string    `json:"instance_id"`
+	Name       *string   `json:"name,omitempty"`
+	Role       string    `json:"role"`
+	UserId     string    `json:"user_id"`
+}
+
+// ShareResponse defines model for ShareResponse.
+type ShareResponse struct {
+	Share *Share `json:"share,omitempty"`
+}
+
+// SharesResponse defines model for SharesResponse.
+type SharesResponse struct {
+	Shares *[]Share `json:"shares,omitempty"`
+}
+
 // UpdateSecretRequest defines model for UpdateSecretRequest.
 type UpdateSecretRequest struct {
 	// AllowedDomains optional; empty = any host permitted by net allow_hosts
@@ -881,6 +991,36 @@ type ValidationResult struct {
 	Valid bool    `json:"valid"`
 }
 
+// Workspace defines model for Workspace.
+type Workspace struct {
+	Id       string `json:"id"`
+	Name     string `json:"name"`
+	Personal bool   `json:"personal"`
+	Role     string `json:"role"`
+}
+
+// WorkspaceChange defines model for WorkspaceChange.
+type WorkspaceChange struct {
+	ByUserId    string    `json:"by_user_id"`
+	Change      string    `json:"change"`
+	CreatedAt   time.Time `json:"created_at"`
+	Id          string    `json:"id"`
+	InstanceId  *string   `json:"instance_id,omitempty"`
+	Role        *string   `json:"role,omitempty"`
+	UserId      *string   `json:"user_id,omitempty"`
+	WorkspaceId string    `json:"workspace_id"`
+}
+
+// WorkspaceResponse defines model for WorkspaceResponse.
+type WorkspaceResponse struct {
+	Workspace *Workspace `json:"workspace,omitempty"`
+}
+
+// WorkspacesResponse defines model for WorkspacesResponse.
+type WorkspacesResponse struct {
+	Workspaces *[]Workspace `json:"workspaces,omitempty"`
+}
+
 // IdPath defines model for IdPath.
 type IdPath = string
 
@@ -893,11 +1033,19 @@ type ListAuditParams struct {
 	ExecId     *string    `form:"exec_id,omitempty" json:"exec_id,omitempty"`
 	Limit      *int       `form:"limit,omitempty" json:"limit,omitempty"`
 	Before     *time.Time `form:"before,omitempty" json:"before,omitempty"`
+	Workspace  *string    `form:"workspace,omitempty" json:"workspace,omitempty"`
 }
 
 // ListInstancesParams defines parameters for ListInstances.
 type ListInstancesParams struct {
-	Status *InstanceStatus `form:"status,omitempty" json:"status,omitempty"`
+	Status    *InstanceStatus `form:"status,omitempty" json:"status,omitempty"`
+	Workspace *string         `form:"workspace,omitempty" json:"workspace,omitempty"`
+	Shared    *bool           `form:"shared,omitempty" json:"shared,omitempty"`
+}
+
+// CreateInstanceParams defines parameters for CreateInstance.
+type CreateInstanceParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
 }
 
 // ExportArtifactsJSONBody defines parameters for ExportArtifacts.
@@ -937,12 +1085,69 @@ type InstancePromptParams struct {
 	ToolPrefix *string `form:"tool_prefix,omitempty" json:"tool_prefix,omitempty"`
 }
 
+// PutShareJSONBody defines parameters for PutShare.
+type PutShareJSONBody struct {
+	Email string     `json:"email"`
+	Role  MemberRole `json:"role"`
+}
+
+// ListKeysParams defines parameters for ListKeys.
+type ListKeysParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
+// CreateKeyParams defines parameters for CreateKey.
+type CreateKeyParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
 // ChangePasswordJSONBody defines parameters for ChangePassword.
 type ChangePasswordJSONBody struct {
 	CurrentPassword *string `json:"current_password,omitempty"`
 
 	// NewPassword 8-72 UTF-8 bytes
 	NewPassword *string `json:"new_password,omitempty"`
+}
+
+// ListPoliciesParams defines parameters for ListPolicies.
+type ListPoliciesParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
+// CreatePolicyParams defines parameters for CreatePolicy.
+type CreatePolicyParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
+// ListSecretsParams defines parameters for ListSecrets.
+type ListSecretsParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
+// CreateSecretParams defines parameters for CreateSecret.
+type CreateSecretParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
+// CreateWorkspaceJSONBody defines parameters for CreateWorkspace.
+type CreateWorkspaceJSONBody struct {
+	Name string `json:"name"`
+}
+
+// UpdateWorkspaceJSONBody defines parameters for UpdateWorkspace.
+type UpdateWorkspaceJSONBody struct {
+	Name string `json:"name"`
+}
+
+// AddMemberJSONBody defines parameters for AddMember.
+type AddMemberJSONBody struct {
+	Email string     `json:"email"`
+	Role  MemberRole `json:"role"`
+}
+
+// SetMemberRoleJSONBody defines parameters for SetMemberRole.
+type SetMemberRoleJSONBody struct {
+	Role MemberRole `json:"role"`
 }
 
 // CreateInstanceJSONRequestBody defines body for CreateInstance for application/json ContentType.
@@ -956,6 +1161,9 @@ type PreviewArtifactJSONRequestBody PreviewArtifactJSONBody
 
 // ExecJSONRequestBody defines body for Exec for application/json ContentType.
 type ExecJSONRequestBody = ExecRequest
+
+// PutShareJSONRequestBody defines body for PutShare for application/json ContentType.
+type PutShareJSONRequestBody PutShareJSONBody
 
 // CreateKeyJSONRequestBody defines body for CreateKey for application/json ContentType.
 type CreateKeyJSONRequestBody = CreateKeyRequest
@@ -977,6 +1185,18 @@ type CreateSecretJSONRequestBody = CreateSecretRequest
 
 // UpdateSecretJSONRequestBody defines body for UpdateSecret for application/json ContentType.
 type UpdateSecretJSONRequestBody = UpdateSecretRequest
+
+// CreateWorkspaceJSONRequestBody defines body for CreateWorkspace for application/json ContentType.
+type CreateWorkspaceJSONRequestBody CreateWorkspaceJSONBody
+
+// UpdateWorkspaceJSONRequestBody defines body for UpdateWorkspace for application/json ContentType.
+type UpdateWorkspaceJSONRequestBody UpdateWorkspaceJSONBody
+
+// AddMemberJSONRequestBody defines body for AddMember for application/json ContentType.
+type AddMemberJSONRequestBody AddMemberJSONBody
+
+// SetMemberRoleJSONRequestBody defines body for SetMemberRole for application/json ContentType.
+type SetMemberRoleJSONRequestBody SetMemberRoleJSONBody
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -1009,7 +1229,7 @@ type ServerInterface interface {
 	ListInstances(c *gin.Context, params ListInstancesParams)
 
 	// (POST /api/v1/instances)
-	CreateInstance(c *gin.Context)
+	CreateInstance(c *gin.Context, params CreateInstanceParams)
 
 	// (DELETE /api/v1/instances/{id})
 	DeleteInstance(c *gin.Context, id IdPath)
@@ -1044,11 +1264,20 @@ type ServerInterface interface {
 	// (GET /api/v1/instances/{id}/prompt)
 	InstancePrompt(c *gin.Context, id IdPath, params InstancePromptParams)
 
+	// (GET /api/v1/instances/{id}/shares)
+	ListShares(c *gin.Context, id IdPath)
+
+	// (PUT /api/v1/instances/{id}/shares)
+	PutShare(c *gin.Context, id IdPath)
+
+	// (DELETE /api/v1/instances/{id}/shares/{user_id})
+	DeleteShare(c *gin.Context, id IdPath, userId string)
+
 	// (GET /api/v1/keys)
-	ListKeys(c *gin.Context)
+	ListKeys(c *gin.Context, params ListKeysParams)
 
 	// (POST /api/v1/keys)
-	CreateKey(c *gin.Context)
+	CreateKey(c *gin.Context, params CreateKeyParams)
 
 	// (DELETE /api/v1/keys/{id})
 	DeleteKey(c *gin.Context, id IdPath)
@@ -1060,10 +1289,10 @@ type ServerInterface interface {
 	ChangePassword(c *gin.Context)
 
 	// (GET /api/v1/policies)
-	ListPolicies(c *gin.Context)
+	ListPolicies(c *gin.Context, params ListPoliciesParams)
 
 	// (POST /api/v1/policies)
-	CreatePolicy(c *gin.Context)
+	CreatePolicy(c *gin.Context, params CreatePolicyParams)
 
 	// (POST /api/v1/policies/validate)
 	ValidatePolicy(c *gin.Context)
@@ -1078,16 +1307,43 @@ type ServerInterface interface {
 	UpdatePolicy(c *gin.Context, id IdPath)
 
 	// (GET /api/v1/secrets)
-	ListSecrets(c *gin.Context)
+	ListSecrets(c *gin.Context, params ListSecretsParams)
 
 	// (POST /api/v1/secrets)
-	CreateSecret(c *gin.Context)
+	CreateSecret(c *gin.Context, params CreateSecretParams)
 
 	// (DELETE /api/v1/secrets/{id})
 	DeleteSecret(c *gin.Context, id IdPath)
 
 	// (PUT /api/v1/secrets/{id})
 	UpdateSecret(c *gin.Context, id IdPath)
+
+	// (GET /api/v1/workspaces)
+	ListWorkspaces(c *gin.Context)
+
+	// (POST /api/v1/workspaces)
+	CreateWorkspace(c *gin.Context)
+
+	// (DELETE /api/v1/workspaces/{id})
+	DeleteWorkspace(c *gin.Context, id IdPath)
+
+	// (PATCH /api/v1/workspaces/{id})
+	UpdateWorkspace(c *gin.Context, id IdPath)
+
+	// (GET /api/v1/workspaces/{id}/changes)
+	ListChanges(c *gin.Context, id IdPath)
+
+	// (GET /api/v1/workspaces/{id}/members)
+	ListMembers(c *gin.Context, id IdPath)
+
+	// (POST /api/v1/workspaces/{id}/members)
+	AddMember(c *gin.Context, id IdPath)
+
+	// (DELETE /api/v1/workspaces/{id}/members/{user_id})
+	RemoveMember(c *gin.Context, id IdPath, userId string)
+
+	// (PUT /api/v1/workspaces/{id}/members/{user_id})
+	SetMemberRole(c *gin.Context, id IdPath, userId string)
 
 	// (GET /healthz)
 	Healthz(c *gin.Context)
@@ -1153,6 +1409,14 @@ func (siw *ServerInterfaceWrapper) ListAudit(c *gin.Context) {
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "before", c.Request.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
 	if err != nil {
 		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter before: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
 		return
 	}
 
@@ -1285,6 +1549,22 @@ func (siw *ServerInterfaceWrapper) ListInstances(c *gin.Context) {
 		return
 	}
 
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "shared" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "shared", c.Request.URL.Query(), &params.Shared, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter shared: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -1298,6 +1578,20 @@ func (siw *ServerInterfaceWrapper) ListInstances(c *gin.Context) {
 // CreateInstance operation middleware
 func (siw *ServerInterfaceWrapper) CreateInstance(c *gin.Context) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateInstanceParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -1305,7 +1599,7 @@ func (siw *ServerInterfaceWrapper) CreateInstance(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.CreateInstance(c)
+	siw.Handler.CreateInstance(c, params)
 }
 
 // DeleteInstance operation middleware
@@ -1624,8 +1918,20 @@ func (siw *ServerInterfaceWrapper) InstancePrompt(c *gin.Context) {
 	siw.Handler.InstancePrompt(c, id, params)
 }
 
-// ListKeys operation middleware
-func (siw *ServerInterfaceWrapper) ListKeys(c *gin.Context) {
+// ListShares operation middleware
+func (siw *ServerInterfaceWrapper) ListShares(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
 
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
@@ -1634,12 +1940,112 @@ func (siw *ServerInterfaceWrapper) ListKeys(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.ListKeys(c)
+	siw.Handler.ListShares(c, id)
+}
+
+// PutShare operation middleware
+func (siw *ServerInterfaceWrapper) PutShare(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PutShare(c, id)
+}
+
+// DeleteShare operation middleware
+func (siw *ServerInterfaceWrapper) DeleteShare(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "user_id" -------------
+	var userId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "user_id", c.Param("user_id"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter user_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteShare(c, id, userId)
+}
+
+// ListKeys operation middleware
+func (siw *ServerInterfaceWrapper) ListKeys(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListKeysParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListKeys(c, params)
 }
 
 // CreateKey operation middleware
 func (siw *ServerInterfaceWrapper) CreateKey(c *gin.Context) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateKeyParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -1647,7 +2053,7 @@ func (siw *ServerInterfaceWrapper) CreateKey(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.CreateKey(c)
+	siw.Handler.CreateKey(c, params)
 }
 
 // DeleteKey operation middleware
@@ -1704,6 +2110,20 @@ func (siw *ServerInterfaceWrapper) ChangePassword(c *gin.Context) {
 // ListPolicies operation middleware
 func (siw *ServerInterfaceWrapper) ListPolicies(c *gin.Context) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListPoliciesParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -1711,12 +2131,26 @@ func (siw *ServerInterfaceWrapper) ListPolicies(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.ListPolicies(c)
+	siw.Handler.ListPolicies(c, params)
 }
 
 // CreatePolicy operation middleware
 func (siw *ServerInterfaceWrapper) CreatePolicy(c *gin.Context) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreatePolicyParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -1724,7 +2158,7 @@ func (siw *ServerInterfaceWrapper) CreatePolicy(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.CreatePolicy(c)
+	siw.Handler.CreatePolicy(c, params)
 }
 
 // ValidatePolicy operation middleware
@@ -1818,6 +2252,20 @@ func (siw *ServerInterfaceWrapper) UpdatePolicy(c *gin.Context) {
 // ListSecrets operation middleware
 func (siw *ServerInterfaceWrapper) ListSecrets(c *gin.Context) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListSecretsParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -1825,12 +2273,26 @@ func (siw *ServerInterfaceWrapper) ListSecrets(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.ListSecrets(c)
+	siw.Handler.ListSecrets(c, params)
 }
 
 // CreateSecret operation middleware
 func (siw *ServerInterfaceWrapper) CreateSecret(c *gin.Context) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateSecretParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -1838,7 +2300,7 @@ func (siw *ServerInterfaceWrapper) CreateSecret(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.CreateSecret(c)
+	siw.Handler.CreateSecret(c, params)
 }
 
 // DeleteSecret operation middleware
@@ -1889,6 +2351,225 @@ func (siw *ServerInterfaceWrapper) UpdateSecret(c *gin.Context) {
 	}
 
 	siw.Handler.UpdateSecret(c, id)
+}
+
+// ListWorkspaces operation middleware
+func (siw *ServerInterfaceWrapper) ListWorkspaces(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListWorkspaces(c)
+}
+
+// CreateWorkspace operation middleware
+func (siw *ServerInterfaceWrapper) CreateWorkspace(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CreateWorkspace(c)
+}
+
+// DeleteWorkspace operation middleware
+func (siw *ServerInterfaceWrapper) DeleteWorkspace(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteWorkspace(c, id)
+}
+
+// UpdateWorkspace operation middleware
+func (siw *ServerInterfaceWrapper) UpdateWorkspace(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.UpdateWorkspace(c, id)
+}
+
+// ListChanges operation middleware
+func (siw *ServerInterfaceWrapper) ListChanges(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListChanges(c, id)
+}
+
+// ListMembers operation middleware
+func (siw *ServerInterfaceWrapper) ListMembers(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListMembers(c, id)
+}
+
+// AddMember operation middleware
+func (siw *ServerInterfaceWrapper) AddMember(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.AddMember(c, id)
+}
+
+// RemoveMember operation middleware
+func (siw *ServerInterfaceWrapper) RemoveMember(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "user_id" -------------
+	var userId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "user_id", c.Param("user_id"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter user_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RemoveMember(c, id, userId)
+}
+
+// SetMemberRole operation middleware
+func (siw *ServerInterfaceWrapper) SetMemberRole(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "user_id" -------------
+	var userId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "user_id", c.Param("user_id"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter user_id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.SetMemberRole(c, id, userId)
 }
 
 // Healthz operation middleware
@@ -1957,6 +2638,18 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/instances/:id/inspect", wrapper.InstanceInspect)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/executions", wrapper.ListExecutions)
 	router.GET(options.BaseURL+"/api/v1/executions/:id", wrapper.GetExecution)
+	router.GET(options.BaseURL+"/api/v1/workspaces", wrapper.ListWorkspaces)
+	router.POST(options.BaseURL+"/api/v1/workspaces", wrapper.CreateWorkspace)
+	router.DELETE(options.BaseURL+"/api/v1/workspaces/:id", wrapper.DeleteWorkspace)
+	router.PATCH(options.BaseURL+"/api/v1/workspaces/:id", wrapper.UpdateWorkspace)
+	router.GET(options.BaseURL+"/api/v1/workspaces/:id/members", wrapper.ListMembers)
+	router.POST(options.BaseURL+"/api/v1/workspaces/:id/members", wrapper.AddMember)
+	router.DELETE(options.BaseURL+"/api/v1/workspaces/:id/members/:user_id", wrapper.RemoveMember)
+	router.PUT(options.BaseURL+"/api/v1/workspaces/:id/members/:user_id", wrapper.SetMemberRole)
+	router.GET(options.BaseURL+"/api/v1/workspaces/:id/changes", wrapper.ListChanges)
+	router.GET(options.BaseURL+"/api/v1/instances/:id/shares", wrapper.ListShares)
+	router.PUT(options.BaseURL+"/api/v1/instances/:id/shares", wrapper.PutShare)
+	router.DELETE(options.BaseURL+"/api/v1/instances/:id/shares/:user_id", wrapper.DeleteShare)
 	router.GET(options.BaseURL+"/api/v1/audit", wrapper.ListAudit)
 	router.GET(options.BaseURL+"/api/v1/policies", wrapper.ListPolicies)
 	router.POST(options.BaseURL+"/api/v1/policies", wrapper.CreatePolicy)
@@ -2326,7 +3019,8 @@ func (response ListInstances401JSONResponse) VisitListInstancesResponse(w http.R
 }
 
 type CreateInstanceRequestObject struct {
-	Body *CreateInstanceJSONRequestBody
+	Params CreateInstanceParams
+	Body   *CreateInstanceJSONRequestBody
 }
 
 type CreateInstanceResponseObject interface {
@@ -3277,7 +3971,216 @@ func (response InstancePrompt409JSONResponse) VisitInstancePromptResponse(w http
 	return err
 }
 
+type ListSharesRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type ListSharesResponseObject interface {
+	VisitListSharesResponse(w http.ResponseWriter) error
+}
+
+type ListShares200JSONResponse SharesResponse
+
+func (response ListShares200JSONResponse) VisitListSharesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListShares401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListShares401JSONResponse) VisitListSharesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListShares403JSONResponse ErrorEnvelope
+
+func (response ListShares403JSONResponse) VisitListSharesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListShares404JSONResponse ErrorEnvelope
+
+func (response ListShares404JSONResponse) VisitListSharesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutShareRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *PutShareJSONRequestBody
+}
+
+type PutShareResponseObject interface {
+	VisitPutShareResponse(w http.ResponseWriter) error
+}
+
+type PutShare200JSONResponse ShareResponse
+
+func (response PutShare200JSONResponse) VisitPutShareResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutShare400JSONResponse struct{ ErrorJSONResponse }
+
+func (response PutShare400JSONResponse) VisitPutShareResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutShare401JSONResponse ErrorEnvelope
+
+func (response PutShare401JSONResponse) VisitPutShareResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutShare403JSONResponse ErrorEnvelope
+
+func (response PutShare403JSONResponse) VisitPutShareResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutShare404JSONResponse ErrorEnvelope
+
+func (response PutShare404JSONResponse) VisitPutShareResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteShareRequestObject struct {
+	Id     IdPath `json:"id"`
+	UserId string `json:"user_id"`
+}
+
+type DeleteShareResponseObject interface {
+	VisitDeleteShareResponse(w http.ResponseWriter) error
+}
+
+type DeleteShare200JSONResponse OkResponse
+
+func (response DeleteShare200JSONResponse) VisitDeleteShareResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteShare401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteShare401JSONResponse) VisitDeleteShareResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteShare403JSONResponse ErrorEnvelope
+
+func (response DeleteShare403JSONResponse) VisitDeleteShareResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteShare404JSONResponse ErrorEnvelope
+
+func (response DeleteShare404JSONResponse) VisitDeleteShareResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListKeysRequestObject struct {
+	Params ListKeysParams
 }
 
 type ListKeysResponseObject interface {
@@ -3327,7 +4230,8 @@ func (response ListKeys403JSONResponse) VisitListKeysResponse(w http.ResponseWri
 }
 
 type CreateKeyRequestObject struct {
-	Body *CreateKeyJSONRequestBody
+	Params CreateKeyParams
+	Body   *CreateKeyJSONRequestBody
 }
 
 type CreateKeyResponseObject interface {
@@ -3592,6 +4496,7 @@ func (response ChangePassword500JSONResponse) VisitChangePasswordResponse(w http
 }
 
 type ListPoliciesRequestObject struct {
+	Params ListPoliciesParams
 }
 
 type ListPoliciesResponseObject interface {
@@ -3627,7 +4532,8 @@ func (response ListPolicies401JSONResponse) VisitListPoliciesResponse(w http.Res
 }
 
 type CreatePolicyRequestObject struct {
-	Body *CreatePolicyJSONRequestBody
+	Params CreatePolicyParams
+	Body   *CreatePolicyJSONRequestBody
 }
 
 type CreatePolicyResponseObject interface {
@@ -3948,6 +4854,7 @@ func (response UpdatePolicy409JSONResponse) VisitUpdatePolicyResponse(w http.Res
 }
 
 type ListSecretsRequestObject struct {
+	Params ListSecretsParams
 }
 
 type ListSecretsResponseObject interface {
@@ -4011,7 +4918,8 @@ func (response ListSecrets503JSONResponse) VisitListSecretsResponse(w http.Respo
 }
 
 type CreateSecretRequestObject struct {
-	Body *CreateSecretJSONRequestBody
+	Params CreateSecretParams
+	Body   *CreateSecretJSONRequestBody
 }
 
 type CreateSecretResponseObject interface {
@@ -4273,6 +5181,656 @@ func (response UpdateSecret503JSONResponse) VisitUpdateSecretResponse(w http.Res
 	return err
 }
 
+type ListWorkspacesRequestObject struct {
+}
+
+type ListWorkspacesResponseObject interface {
+	VisitListWorkspacesResponse(w http.ResponseWriter) error
+}
+
+type ListWorkspaces200JSONResponse WorkspacesResponse
+
+func (response ListWorkspaces200JSONResponse) VisitListWorkspacesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkspaces401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListWorkspaces401JSONResponse) VisitListWorkspacesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkspaceRequestObject struct {
+	Body *CreateWorkspaceJSONRequestBody
+}
+
+type CreateWorkspaceResponseObject interface {
+	VisitCreateWorkspaceResponse(w http.ResponseWriter) error
+}
+
+type CreateWorkspace201JSONResponse WorkspaceResponse
+
+func (response CreateWorkspace201JSONResponse) VisitCreateWorkspaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkspace400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateWorkspace400JSONResponse) VisitCreateWorkspaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkspace401JSONResponse ErrorEnvelope
+
+func (response CreateWorkspace401JSONResponse) VisitCreateWorkspaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkspace403JSONResponse ErrorEnvelope
+
+func (response CreateWorkspace403JSONResponse) VisitCreateWorkspaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkspaceRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type DeleteWorkspaceResponseObject interface {
+	VisitDeleteWorkspaceResponse(w http.ResponseWriter) error
+}
+
+type DeleteWorkspace200JSONResponse OkResponse
+
+func (response DeleteWorkspace200JSONResponse) VisitDeleteWorkspaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkspace401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteWorkspace401JSONResponse) VisitDeleteWorkspaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkspace403JSONResponse ErrorEnvelope
+
+func (response DeleteWorkspace403JSONResponse) VisitDeleteWorkspaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkspace404JSONResponse ErrorEnvelope
+
+func (response DeleteWorkspace404JSONResponse) VisitDeleteWorkspaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkspace409JSONResponse ErrorEnvelope
+
+func (response DeleteWorkspace409JSONResponse) VisitDeleteWorkspaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWorkspaceRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *UpdateWorkspaceJSONRequestBody
+}
+
+type UpdateWorkspaceResponseObject interface {
+	VisitUpdateWorkspaceResponse(w http.ResponseWriter) error
+}
+
+type UpdateWorkspace200JSONResponse WorkspaceResponse
+
+func (response UpdateWorkspace200JSONResponse) VisitUpdateWorkspaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWorkspace400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateWorkspace400JSONResponse) VisitUpdateWorkspaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWorkspace401JSONResponse ErrorEnvelope
+
+func (response UpdateWorkspace401JSONResponse) VisitUpdateWorkspaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWorkspace403JSONResponse ErrorEnvelope
+
+func (response UpdateWorkspace403JSONResponse) VisitUpdateWorkspaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWorkspace404JSONResponse ErrorEnvelope
+
+func (response UpdateWorkspace404JSONResponse) VisitUpdateWorkspaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListChangesRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type ListChangesResponseObject interface {
+	VisitListChangesResponse(w http.ResponseWriter) error
+}
+
+type ListChanges200JSONResponse ChangesResponse
+
+func (response ListChanges200JSONResponse) VisitListChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListChanges401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListChanges401JSONResponse) VisitListChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListChanges403JSONResponse ErrorEnvelope
+
+func (response ListChanges403JSONResponse) VisitListChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListChanges404JSONResponse ErrorEnvelope
+
+func (response ListChanges404JSONResponse) VisitListChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMembersRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type ListMembersResponseObject interface {
+	VisitListMembersResponse(w http.ResponseWriter) error
+}
+
+type ListMembers200JSONResponse MembersResponse
+
+func (response ListMembers200JSONResponse) VisitListMembersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMembers401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListMembers401JSONResponse) VisitListMembersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMembers403JSONResponse ErrorEnvelope
+
+func (response ListMembers403JSONResponse) VisitListMembersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMembers404JSONResponse ErrorEnvelope
+
+func (response ListMembers404JSONResponse) VisitListMembersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddMemberRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *AddMemberJSONRequestBody
+}
+
+type AddMemberResponseObject interface {
+	VisitAddMemberResponse(w http.ResponseWriter) error
+}
+
+type AddMember201JSONResponse MemberResponse
+
+func (response AddMember201JSONResponse) VisitAddMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddMember400JSONResponse struct{ ErrorJSONResponse }
+
+func (response AddMember400JSONResponse) VisitAddMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddMember401JSONResponse ErrorEnvelope
+
+func (response AddMember401JSONResponse) VisitAddMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddMember403JSONResponse ErrorEnvelope
+
+func (response AddMember403JSONResponse) VisitAddMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddMember404JSONResponse ErrorEnvelope
+
+func (response AddMember404JSONResponse) VisitAddMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddMember409JSONResponse ErrorEnvelope
+
+func (response AddMember409JSONResponse) VisitAddMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMemberRequestObject struct {
+	Id     IdPath `json:"id"`
+	UserId string `json:"user_id"`
+}
+
+type RemoveMemberResponseObject interface {
+	VisitRemoveMemberResponse(w http.ResponseWriter) error
+}
+
+type RemoveMember200JSONResponse OkResponse
+
+func (response RemoveMember200JSONResponse) VisitRemoveMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMember401JSONResponse struct{ ErrorJSONResponse }
+
+func (response RemoveMember401JSONResponse) VisitRemoveMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMember403JSONResponse ErrorEnvelope
+
+func (response RemoveMember403JSONResponse) VisitRemoveMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMember404JSONResponse ErrorEnvelope
+
+func (response RemoveMember404JSONResponse) VisitRemoveMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMember409JSONResponse ErrorEnvelope
+
+func (response RemoveMember409JSONResponse) VisitRemoveMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMemberRoleRequestObject struct {
+	Id     IdPath `json:"id"`
+	UserId string `json:"user_id"`
+	Body   *SetMemberRoleJSONRequestBody
+}
+
+type SetMemberRoleResponseObject interface {
+	VisitSetMemberRoleResponse(w http.ResponseWriter) error
+}
+
+type SetMemberRole200JSONResponse OkResponse
+
+func (response SetMemberRole200JSONResponse) VisitSetMemberRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMemberRole400JSONResponse struct{ ErrorJSONResponse }
+
+func (response SetMemberRole400JSONResponse) VisitSetMemberRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMemberRole401JSONResponse ErrorEnvelope
+
+func (response SetMemberRole401JSONResponse) VisitSetMemberRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMemberRole403JSONResponse ErrorEnvelope
+
+func (response SetMemberRole403JSONResponse) VisitSetMemberRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMemberRole404JSONResponse ErrorEnvelope
+
+func (response SetMemberRole404JSONResponse) VisitSetMemberRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMemberRole409JSONResponse ErrorEnvelope
+
+func (response SetMemberRole409JSONResponse) VisitSetMemberRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type HealthzRequestObject struct {
 }
 
@@ -4360,6 +5918,15 @@ type StrictServerInterface interface {
 	// (GET /api/v1/instances/{id}/prompt)
 	InstancePrompt(ctx context.Context, request InstancePromptRequestObject) (InstancePromptResponseObject, error)
 
+	// (GET /api/v1/instances/{id}/shares)
+	ListShares(ctx context.Context, request ListSharesRequestObject) (ListSharesResponseObject, error)
+
+	// (PUT /api/v1/instances/{id}/shares)
+	PutShare(ctx context.Context, request PutShareRequestObject) (PutShareResponseObject, error)
+
+	// (DELETE /api/v1/instances/{id}/shares/{user_id})
+	DeleteShare(ctx context.Context, request DeleteShareRequestObject) (DeleteShareResponseObject, error)
+
 	// (GET /api/v1/keys)
 	ListKeys(ctx context.Context, request ListKeysRequestObject) (ListKeysResponseObject, error)
 
@@ -4404,6 +5971,33 @@ type StrictServerInterface interface {
 
 	// (PUT /api/v1/secrets/{id})
 	UpdateSecret(ctx context.Context, request UpdateSecretRequestObject) (UpdateSecretResponseObject, error)
+
+	// (GET /api/v1/workspaces)
+	ListWorkspaces(ctx context.Context, request ListWorkspacesRequestObject) (ListWorkspacesResponseObject, error)
+
+	// (POST /api/v1/workspaces)
+	CreateWorkspace(ctx context.Context, request CreateWorkspaceRequestObject) (CreateWorkspaceResponseObject, error)
+
+	// (DELETE /api/v1/workspaces/{id})
+	DeleteWorkspace(ctx context.Context, request DeleteWorkspaceRequestObject) (DeleteWorkspaceResponseObject, error)
+
+	// (PATCH /api/v1/workspaces/{id})
+	UpdateWorkspace(ctx context.Context, request UpdateWorkspaceRequestObject) (UpdateWorkspaceResponseObject, error)
+
+	// (GET /api/v1/workspaces/{id}/changes)
+	ListChanges(ctx context.Context, request ListChangesRequestObject) (ListChangesResponseObject, error)
+
+	// (GET /api/v1/workspaces/{id}/members)
+	ListMembers(ctx context.Context, request ListMembersRequestObject) (ListMembersResponseObject, error)
+
+	// (POST /api/v1/workspaces/{id}/members)
+	AddMember(ctx context.Context, request AddMemberRequestObject) (AddMemberResponseObject, error)
+
+	// (DELETE /api/v1/workspaces/{id}/members/{user_id})
+	RemoveMember(ctx context.Context, request RemoveMemberRequestObject) (RemoveMemberResponseObject, error)
+
+	// (PUT /api/v1/workspaces/{id}/members/{user_id})
+	SetMemberRole(ctx context.Context, request SetMemberRoleRequestObject) (SetMemberRoleResponseObject, error)
 
 	// (GET /healthz)
 	Healthz(ctx context.Context, request HealthzRequestObject) (HealthzResponseObject, error)
@@ -4691,8 +6285,10 @@ func (sh *strictHandler) ListInstances(ctx *gin.Context, params ListInstancesPar
 }
 
 // CreateInstance operation middleware
-func (sh *strictHandler) CreateInstance(ctx *gin.Context) {
+func (sh *strictHandler) CreateInstance(ctx *gin.Context, params CreateInstanceParams) {
 	var request CreateInstanceRequestObject
+
+	request.Params = params
 
 	var body CreateInstanceJSONRequestBody
 	if err := ctx.ShouldBindJSON(&body); err != nil {
@@ -5031,9 +6627,97 @@ func (sh *strictHandler) InstancePrompt(ctx *gin.Context, id IdPath, params Inst
 	}
 }
 
+// ListShares operation middleware
+func (sh *strictHandler) ListShares(ctx *gin.Context, id IdPath) {
+	var request ListSharesRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListShares(ctx, request.(ListSharesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListShares")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ListSharesResponseObject); ok {
+		if err := validResponse.VisitListSharesResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutShare operation middleware
+func (sh *strictHandler) PutShare(ctx *gin.Context, id IdPath) {
+	var request PutShareRequestObject
+
+	request.Id = id
+
+	var body PutShareJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.PutShare(ctx, request.(PutShareRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutShare")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(PutShareResponseObject); ok {
+		if err := validResponse.VisitPutShareResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteShare operation middleware
+func (sh *strictHandler) DeleteShare(ctx *gin.Context, id IdPath, userId string) {
+	var request DeleteShareRequestObject
+
+	request.Id = id
+	request.UserId = userId
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteShare(ctx, request.(DeleteShareRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteShare")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(DeleteShareResponseObject); ok {
+		if err := validResponse.VisitDeleteShareResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListKeys operation middleware
-func (sh *strictHandler) ListKeys(ctx *gin.Context) {
+func (sh *strictHandler) ListKeys(ctx *gin.Context, params ListKeysParams) {
 	var request ListKeysRequestObject
+
+	request.Params = params
 
 	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
 		return sh.ssi.ListKeys(ctx, request.(ListKeysRequestObject))
@@ -5056,8 +6740,10 @@ func (sh *strictHandler) ListKeys(ctx *gin.Context) {
 }
 
 // CreateKey operation middleware
-func (sh *strictHandler) CreateKey(ctx *gin.Context) {
+func (sh *strictHandler) CreateKey(ctx *gin.Context, params CreateKeyParams) {
 	var request CreateKeyRequestObject
+
+	request.Params = params
 
 	var body CreateKeyJSONRequestBody
 	if err := ctx.ShouldBindJSON(&body); err != nil {
@@ -5168,8 +6854,10 @@ func (sh *strictHandler) ChangePassword(ctx *gin.Context) {
 }
 
 // ListPolicies operation middleware
-func (sh *strictHandler) ListPolicies(ctx *gin.Context) {
+func (sh *strictHandler) ListPolicies(ctx *gin.Context, params ListPoliciesParams) {
 	var request ListPoliciesRequestObject
+
+	request.Params = params
 
 	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
 		return sh.ssi.ListPolicies(ctx, request.(ListPoliciesRequestObject))
@@ -5192,8 +6880,10 @@ func (sh *strictHandler) ListPolicies(ctx *gin.Context) {
 }
 
 // CreatePolicy operation middleware
-func (sh *strictHandler) CreatePolicy(ctx *gin.Context) {
+func (sh *strictHandler) CreatePolicy(ctx *gin.Context, params CreatePolicyParams) {
 	var request CreatePolicyRequestObject
+
+	request.Params = params
 
 	var body CreatePolicyJSONRequestBody
 	if err := ctx.ShouldBindJSON(&body); err != nil {
@@ -5339,8 +7029,10 @@ func (sh *strictHandler) UpdatePolicy(ctx *gin.Context, id IdPath) {
 }
 
 // ListSecrets operation middleware
-func (sh *strictHandler) ListSecrets(ctx *gin.Context) {
+func (sh *strictHandler) ListSecrets(ctx *gin.Context, params ListSecretsParams) {
 	var request ListSecretsRequestObject
+
+	request.Params = params
 
 	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
 		return sh.ssi.ListSecrets(ctx, request.(ListSecretsRequestObject))
@@ -5363,8 +7055,10 @@ func (sh *strictHandler) ListSecrets(ctx *gin.Context) {
 }
 
 // CreateSecret operation middleware
-func (sh *strictHandler) CreateSecret(ctx *gin.Context) {
+func (sh *strictHandler) CreateSecret(ctx *gin.Context, params CreateSecretParams) {
 	var request CreateSecretRequestObject
+
+	request.Params = params
 
 	var body CreateSecretJSONRequestBody
 	if err := ctx.ShouldBindJSON(&body); err != nil {
@@ -5445,6 +7139,266 @@ func (sh *strictHandler) UpdateSecret(ctx *gin.Context, id IdPath) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(UpdateSecretResponseObject); ok {
 		if err := validResponse.VisitUpdateSecretResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWorkspaces operation middleware
+func (sh *strictHandler) ListWorkspaces(ctx *gin.Context) {
+	var request ListWorkspacesRequestObject
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWorkspaces(ctx, request.(ListWorkspacesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWorkspaces")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ListWorkspacesResponseObject); ok {
+		if err := validResponse.VisitListWorkspacesResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateWorkspace operation middleware
+func (sh *strictHandler) CreateWorkspace(ctx *gin.Context) {
+	var request CreateWorkspaceRequestObject
+
+	var body CreateWorkspaceJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateWorkspace(ctx, request.(CreateWorkspaceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateWorkspace")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(CreateWorkspaceResponseObject); ok {
+		if err := validResponse.VisitCreateWorkspaceResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteWorkspace operation middleware
+func (sh *strictHandler) DeleteWorkspace(ctx *gin.Context, id IdPath) {
+	var request DeleteWorkspaceRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteWorkspace(ctx, request.(DeleteWorkspaceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteWorkspace")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(DeleteWorkspaceResponseObject); ok {
+		if err := validResponse.VisitDeleteWorkspaceResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateWorkspace operation middleware
+func (sh *strictHandler) UpdateWorkspace(ctx *gin.Context, id IdPath) {
+	var request UpdateWorkspaceRequestObject
+
+	request.Id = id
+
+	var body UpdateWorkspaceJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateWorkspace(ctx, request.(UpdateWorkspaceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateWorkspace")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(UpdateWorkspaceResponseObject); ok {
+		if err := validResponse.VisitUpdateWorkspaceResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListChanges operation middleware
+func (sh *strictHandler) ListChanges(ctx *gin.Context, id IdPath) {
+	var request ListChangesRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListChanges(ctx, request.(ListChangesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListChanges")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ListChangesResponseObject); ok {
+		if err := validResponse.VisitListChangesResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMembers operation middleware
+func (sh *strictHandler) ListMembers(ctx *gin.Context, id IdPath) {
+	var request ListMembersRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMembers(ctx, request.(ListMembersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMembers")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ListMembersResponseObject); ok {
+		if err := validResponse.VisitListMembersResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AddMember operation middleware
+func (sh *strictHandler) AddMember(ctx *gin.Context, id IdPath) {
+	var request AddMemberRequestObject
+
+	request.Id = id
+
+	var body AddMemberJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.AddMember(ctx, request.(AddMemberRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AddMember")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(AddMemberResponseObject); ok {
+		if err := validResponse.VisitAddMemberResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RemoveMember operation middleware
+func (sh *strictHandler) RemoveMember(ctx *gin.Context, id IdPath, userId string) {
+	var request RemoveMemberRequestObject
+
+	request.Id = id
+	request.UserId = userId
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.RemoveMember(ctx, request.(RemoveMemberRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RemoveMember")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(RemoveMemberResponseObject); ok {
+		if err := validResponse.VisitRemoveMemberResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetMemberRole operation middleware
+func (sh *strictHandler) SetMemberRole(ctx *gin.Context, id IdPath, userId string) {
+	var request SetMemberRoleRequestObject
+
+	request.Id = id
+	request.UserId = userId
+
+	var body SetMemberRoleJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.SetMemberRole(ctx, request.(SetMemberRoleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetMemberRole")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(SetMemberRoleResponseObject); ok {
+		if err := validResponse.VisitSetMemberRoleResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

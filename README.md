@@ -29,7 +29,32 @@ with Client(base_url="http://127.0.0.1:8787", api_key="") as client:
         client.delete_instance(instance["id"])
 ```
 
-Outside dev mode, create an API key in the web console and pass it via `CALCSIDE_API_KEY` or the SDK's `api_key` argument. Manage library policies through the console or `/api/v1/policies`, then select them in the instance spec.
+Outside dev mode, create an API key in the web console and pass it via `CALCSIDE_API_KEY` or the SDK's `api_key` argument. Keys are **restricted** or **full access**: a restricted key carries an instance spec and a live-instance bound — it may only create and use instances from that spec; full-access keys keep the owner's full API power and are for trusted automation only. Manage library policies through the console or `/api/v1/policies`, then select them in the instance spec.
+
+## Workspaces and sharing
+
+Every user gets a personal workspace. `POST /api/v1/workspaces` creates a
+shared workspace; owners manage members (`/api/v1/workspaces/{id}/members`)
+and roles — `viewer` sees instances/runs/files, `editor` can also run code
+and change policies, `owner` also manages members, shares and the
+workspace itself. The console header switches workspaces; every
+list/create call takes `?workspace=`. Single instances can be shared
+outside the workspace with `PUT /api/v1/instances/{id}/shares`
+(`viewer` or `editor`), and `GET /api/v1/instances?shared=true` lists
+instances shared with you. `view_only` API keys see a workspace's
+instances and runs but cannot execute code. All membership/share changes
+are recorded under `GET /api/v1/workspaces/{id}/changes`.
+
+## Connect an agent over MCP
+
+`POST /mcp` speaks the Model Context Protocol over streamable HTTP to any MCP client (Claude Code, Cursor, VS Code, agent frameworks). It requires a **restricted** API key: create one in the console under API keys with the instance spec the agent needs.
+
+```sh
+claude mcp add --transport http calcside http://localhost:8787/mcp \
+  --header "Authorization: Bearer cs_your_key"
+```
+
+The server is stateless: `create_instance` returns an `instance_id` (plus `expires_at` and the agent prompt), and `exec`, `list_files`, `read_file` (fs-granted keys only), and `delete_instance` all name the instance. Inside the instance, `print(help())` lists the utility modules and `print(help("stats"))` their signatures.
 
 Instance spec (`POST /api/v1/instances`):
 
@@ -118,9 +143,9 @@ arrival-rate test; run the load generator on a separate machine for capacity res
 ## Built-in utilities
 
 Every instance and extension has `json`, `math`, `url`, `csv`, `base64`, `hashlib`,
-`regex`, and `datetime`. These are bounded pure functions, not capability grants:
+`regex`, `datetime`, `stats`, `linalg`, `dist`, `series`, and `decimal`. These are bounded pure functions, not capability grants:
 no implicit I/O, secrets, current clock, randomness, or host timezone. The server
-prompt and editor completion describe their signatures and limits.
+prompt lists each module's one-liner; `help()` / `help("module")` / `help("module.function")` inside an instance return the full signatures, and editor completion shows the same text.
 
 ```python
 rows = csv.parse_dicts("id,amount_minor\nA,1200\nB,300\n")
@@ -135,9 +160,47 @@ text utilities require explicit decoding. Regex uses RE2 (not Python regex),
 UTF-8 byte offsets, and literal replacement strings. Module names are reserved
 predeclared bindings; rename existing script variables that used these names.
 
+Numeric modules are backed by [gonum](https://github.com/gonum/gonum):
+
+- `stats`: descriptive statistics, covariance/correlation, simple and multiple
+  OLS (`ols`), logistic regression (`logit`), t-tests, Mann-Whitney U,
+  Pearson/Spearman tests, chi-square and Fisher's exact tests, one-way ANOVA,
+  and mean/proportion confidence intervals. Results match SciPy/statsmodels
+  conventions (Welch's t-test by default; Mann-Whitney uses the normal
+  approximation with tie and continuity correction).
+- `linalg`: matmul, solve, lstsq, inv, det.
+- `dist`: `cdf`/`sf`/`pdf`/`ppf` for normal, t, chi2, f, lognormal,
+  exponential, uniform, beta, gamma, binomial and poisson, with distribution
+  parameters as keywords (`dist.ppf("t", 0.975, df=10)`).
+- `series`: diff, pct_change, log_return, shift, cumsum, cumprod, drawdown,
+  rolling windows and EWMA. Outputs keep the input length, with `None` where a
+  position is undefined.
+
+They take finite ints/floats (convert CSV cells with `float()`), return floats,
+and fail instead of returning NaN/Inf. Matrices are nested lists of rows; a flat
+`b` in `linalg.solve`/`lstsq` is a vector. Floating-point results may differ in
+the last bits across CPU architectures.
+
+`decimal` does exact base-10 arithmetic for money: operands are decimal strings
+or ints (floats are rejected), results are strings, and division/rounding take an
+explicit scale and rounding mode (default `half_even`). `to_minor`/`from_minor`
+convert to and from integer minor units.
+
+```python
+rows = csv.parse_dicts(fs.read("sales.csv"))
+spend = [float(r["ad_spend"]) for r in rows]
+revenue = [float(r["revenue"]) for r in rows]
+print(stats.describe(revenue), stats.linear_regression(spend, revenue))
+print(stats.ttest_ind(revenue[:10], revenue[10:])["p_value"])
+print(decimal.div(decimal.sum([r["revenue"] for r in rows]), len(rows), 2))
+```
+
 Limits include 8 MiB general input/output, 10,000 CSV records / 100,000 cells,
-256 CSV columns / 256 KiB fields, 64 KiB URLs / 1,024 query pairs, and 1 MiB regex
-text / 8 KiB patterns / 10,000 matches, with a separate pattern-complexity bound.
+256 CSV columns / 256 KiB fields, 64 KiB URLs / 1,024 query pairs, 1 MiB regex
+text / 8 KiB patterns / 10,000 matches (with a separate pattern-complexity bound),
+100,000 `stats`/`series` values, 256 per `linalg` matrix axis, 64 regression
+predictors / 1,000,000 design cells, 64 per contingency-table axis, 10,000,000
+rolling-window cells, and 128-character `decimal` operands / 1,000-digit results.
 
 ## Artifacts: preview and download
 
@@ -307,13 +370,7 @@ make test-postgres
 
 The files live in `cmd/calcside/internal/gormstore/migrations/{sqlite,postgres}` and share a version and name. Keep GORM row structs in sync, but do not generate SQL from them. Never modify an applied migration; add a new one instead. `migrate-validate` checks both directories' checksums. Go database tests apply the migrations to fresh SQLite databases; `make test-postgres` applies them and runs the same store conformance suite on disposable PostgreSQL databases (Docker required).
 
-For an existing **unversioned SQLite database**, back it up and confirm its schema already matches `20261004092922_baseline.sql` before marking the baseline:
-
-```bash
-atlas migrate apply --env sqlite --baseline 20261004092922
-```
-
-This uses `ATLAS_DB_URL`, records the baseline without executing its CREATE statements, and applies later migrations. It does **not** upgrade an older schema; in particular, a database still carrying `policies.enabled` needs a separately reviewed upgrade first. Do not pass `--baseline` for an empty database.
+Migration history was consolidated before the first release: `20261024133846_baseline.sql` is the only migration in each dialect and creates the full schema on a fresh, empty database. Existing dev databases created before the consolidation are **not** upgraded by this baseline — reset them intentionally (remove the dev DB file or recreate the dev database) and let the fresh baseline apply; never auto-baseline an arbitrary nonempty DB.
 
 ## Run with Docker
 
@@ -322,7 +379,7 @@ make docker-env                    # first run: generates docker/.env with a ran
 docker compose -f docker/docker-compose.yml up --build
 ```
 
-Compose first runs the pinned Atlas image as a one-shot `migrate` service and starts the API only after it succeeds. The migration service and API share `docker/data`; existing unversioned databases need the explicit baseline step above. For PostgreSQL, set `CALCSIDE_STORE=postgres`, `CALCSIDE_DSN`, and `ATLAS_DB_URL` to the same database/schema.
+Compose first runs the pinned Atlas image as a one-shot `migrate` service and starts the API only after it succeeds; the service initializes a fresh `docker/data` database from the baseline automatically. A pre-consolidation dev database must be reset intentionally instead. For PostgreSQL, set `CALCSIDE_STORE=postgres`, `CALCSIDE_DSN`, and `ATLAS_DB_URL` to the same database/schema.
 
 Compose starts the API (`:8080`) plus one execution worker; the API forwards instance execution to it over an HMAC-authenticated internal protocol. Drop local extensions into `docker/data/ext/` (bind-mounted) — workers resolve them through the API. See `docker/.env.example` for the remaining env knobs.
 

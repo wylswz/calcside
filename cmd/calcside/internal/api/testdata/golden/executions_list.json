@@ -12,7 +12,8 @@
         "output_bytes": 0,
         "status": "error",
         "steps": "\u003cnum\u003e",
-        "user_id": "\u003cid:usr\u003e"
+        "user_id": "\u003cid:usr\u003e",
+        "via": "api_key"
       },
       {
         "code_sha256": "9e0d00e22d5613f9662ee357c9c921de992664671e1fb4657d92b42fabeac129",
@@ -24,7 +25,8 @@
         "output_bytes": 6,
         "status": "ok",
         "steps": "\u003cnum\u003e",
-        "user_id": "\u003cid:usr\u003e"
+        "user_id": "\u003cid:usr\u003e",
+        "via": "api_key"
       }
     ]
   },

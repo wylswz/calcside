@@ -1,93 +1,171 @@
-import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, APIKey } from '../api'
-import { Badge, Button, EmptyRow, Field, Modal, Notice, PageHeader, fmtTime, inputCls } from '../components/ui'
+import { api, APIKey, CreateKeyRequest, wsPath } from '../api'
+import { Button, Confirm, EmptyRow, Field, Modal, Notice, PageHeader, inputCls } from '../components/ui'
+import { SpecForm, type SpecFormHandle } from '../components/SpecForm'
+import { CopyBlock, MCPGuide } from '../components/MCP'
+import { mcpURL } from '../mcpSnippets'
+import { fmtTime } from '../format'
+import { allowedSummary } from '../activity'
 
-export default function Keys() {
+type Access = 'restricted' | 'full' | 'view'
+
+
+// SecretBlock shows the one-time secret with a copy button.
+
+export default function Keys({ bare }: { bare?: boolean }) {
   const qc = useQueryClient()
+  const form = useRef<SpecFormHandle>(null)
   const [showNew, setShowNew] = useState(false)
   const [name, setName] = useState('')
   const [days, setDays] = useState(90)
+  const [access, setAccess] = useState<Access>('restricted')
+  const [maxInstances, setMaxInstances] = useState(2)
   const [secret, setSecret] = useState('')
-  const [copied, setCopied] = useState(false)
+  const [secretRestricted, setSecretRestricted] = useState(false)
+  const [err, setErr] = useState('')
+  const [revoking, setRevoking] = useState<APIKey | null>(null)
+  const startNew = () => { setShowNew(true); setSecret(''); setName(''); setErr(''); setAccess('restricted') }
 
   const { data } = useQuery({
     queryKey: ['keys'],
-    queryFn: () => api.get<{ keys: APIKey[] }>('/api/v1/keys'),
+    queryFn: () => api.get<{ keys: APIKey[] }>(wsPath('/api/v1/keys')),
   })
   const create = useMutation({
-    mutationFn: () => api.post<{ key: APIKey; secret: string }>('/api/v1/keys', { name, expires_in_seconds: days * 86400 }),
+    mutationFn: (body: CreateKeyRequest) => api.post<{ key: APIKey; secret: string }>(wsPath('/api/v1/keys'), body),
     onSuccess: (r) => {
       setSecret(r.secret)
-      setCopied(false)
+      setSecretRestricted(!!r.key.restricted)
       qc.invalidateQueries({ queryKey: ['keys'] })
     },
+    onError: (e: Error) => setErr(e.message),
   })
   const revoke = useMutation({
     mutationFn: (id: string) => api.del(`/api/v1/keys/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['keys'] }),
   })
 
-  const copy = async () => {
-    await navigator.clipboard.writeText(secret)
-    setCopied(true)
+  const submit = () => {
+    setErr('')
+    const body: CreateKeyRequest = { name, expires_in_seconds: days * 86400 }
+    if (access === 'restricted') {
+      const { spec, err: e } = form.current?.buildSpec() ?? {}
+      if (e) { setErr(e); return }
+      body.spec = spec
+      body.max_instances = maxInstances
+    }
+    if (access === 'view') body.view_only = true
+    create.mutate(body)
   }
 
   return (
     <div>
-      <PageHeader index="03" section="Access" title="API Keys"
-        actions={<Button variant="primary" onClick={() => { setShowNew(true); setSecret(''); setName('') }}>New key</Button>}>
-        Bearer tokens (<code className="font-mono text-ink">cs_…</code>) for the SDK and agents. The secret is shown once at creation.
-      </PageHeader>
+      {bare && <div className="mb-4 flex items-center justify-between"><p className="text-xs text-sec" /><Button variant="primary" onClick={startNew}>New key</Button></div>}
+{!bare && <PageHeader title="API keys"
+        actions={<Button variant="primary" onClick={startNew}>New key</Button>}>
+        Bearer tokens (<code className="font-mono text-ink">cs_…</code>) for the SDK and agents. A restricted key may only create and use instances from its instance spec; the secret is shown once at creation.
+      </PageHeader>}
       <div className="tbl-wrap">
         <table className="tbl">
           <thead>
-            <tr><th>Name</th><th>Prefix</th><th>Created</th><th>Expires</th><th>Status</th><th /></tr>
+            <tr><th>Name</th><th>Prefix</th><th>Access</th><th>Created</th><th>Expires</th><th>Status</th><th /></tr>
           </thead>
           <tbody>
             {(data?.keys ?? []).map((k) => (
               <tr key={k.id} className={`row-hover ${k.revoked_at ? 'text-mute' : ''}`}>
                 <td className={k.revoked_at ? 'line-through' : 'font-medium text-ink'}>{k.name}</td>
                 <td className="font-mono text-xs">{k.prefix}…</td>
+                <td className="max-w-[320px]">
+                  {k.instance_id
+                    ? <Link to={`/instances/${k.instance_id}`} className="link font-mono text-xs">this instance · {k.instance_id.slice(0, 12)}</Link>
+                    : k.view_only
+                    ? <span className="font-mono text-xs text-sec">view only</span>
+                    : k.restricted
+                      ? <span className="block truncate font-mono text-xs text-sec" title={allowedSummary(k.spec)}>restricted · {allowedSummary(k.spec)}</span>
+                      : <span className="font-mono text-xs text-sec">full access</span>}
+                </td>
                 <td className="whitespace-nowrap text-xs text-sec">{fmtTime(k.created_at)}</td>
                 <td className="whitespace-nowrap text-xs text-sec">{k.expires_at ? fmtTime(k.expires_at) : 'never'}</td>
-                <td>{k.revoked_at ? <Badge tone="gray">revoked</Badge> : <Badge tone="blue">active</Badge>}</td>
+                <td className="text-xs">{k.revoked_at ? <span className="text-mute">revoked</span> : <span className="text-sec">active</span>}</td>
                 <td className="text-right">
-                  {!k.revoked_at && <Button variant="danger" size="sm" onClick={() => revoke.mutate(k.id)}>Revoke</Button>}
+                  {!k.revoked_at && <Button size="sm" onClick={() => setRevoking(k)}>Revoke</Button>}
                 </td>
               </tr>
             ))}
-            {data && data.keys.length === 0 && <EmptyRow cols={6}>no keys</EmptyRow>}
+            {data && data.keys.length === 0 && <EmptyRow cols={7}>no keys</EmptyRow>}
           </tbody>
         </table>
       </div>
 
       {showNew && (
-        <Modal title="New API key" onClose={() => setShowNew(false)}>
+        <Modal title="New API key" onClose={() => setShowNew(false)} wide={!secret && access === 'restricted'}
+          dirty={secret ? true : undefined} discardPrompt={secret ? 'Close? The key secret is not shown again.' : undefined}>
           {!secret ? (
             <div className="space-y-4">
-              <Field label="Name"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} /></Field>
-              <Field label="Expires in (days; 0 = never)"><input type="number" className={inputCls} value={days} onChange={(e) => setDays(Number(e.target.value))} /></Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Name"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} /></Field>
+                <Field label="Expires in (days; 0 = never)"><input type="number" className={inputCls} value={days} onChange={(e) => setDays(Number(e.target.value))} /></Field>
+              </div>
+              <Field label="Access">
+                <div className="flex gap-3">
+                  {(['restricted', 'full', 'view'] as const).map((a) => (
+                    <label key={a} className={`flex flex-1 items-start gap-2 rounded-md border px-3 py-2 text-xs ${access === a ? 'border-accent bg-accent/5' : 'border-line'}`}>
+                      <input type="radio" className="mt-0.5" checked={access === a} onChange={() => setAccess(a)} />
+                      <span>
+                        <span className="block font-medium text-ink">
+                          {a === 'restricted' ? 'Restricted' : a === 'full' ? 'Full access' : 'View only'}
+                        </span>
+                        <span className="block text-mute">
+                          {a === 'restricted'
+                            ? 'creates and uses instances from the spec below — for agents'
+                            : a === 'full'
+                              ? 'the key can create any instance and use every instance and vault secret reference'
+                              : "can see this workspace's instances, runs and files; cannot run code"}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </Field>
+              {access === 'full' && (
+                <Notice tone="warning">Full access keys are for trusted automation only.</Notice>
+              )}
+              {access === 'restricted' && (
+                <>
+                  <Field label="Max instances">
+                    <input type="number" min={1} className={inputCls + ' !w-32'} value={maxInstances} onChange={(e) => setMaxInstances(Number(e.target.value))} />
+                  </Field>
+                  <SpecForm ref={form} keyMode />
+                </>
+              )}
+              {err && <p className="text-xs text-warn-text">{err}</p>}
               <div className="flex justify-end gap-2 pt-2">
                 <Button onClick={() => setShowNew(false)}>Cancel</Button>
-                <Button variant="primary" disabled={!name || create.isPending} onClick={() => create.mutate()}>Create</Button>
+                <Button variant="primary" disabled={!name || create.isPending} onClick={submit}>Create</Button>
               </div>
             </div>
           ) : (
             <div className="space-y-4">
-              <Notice tone="yellow">
+              <Notice tone="warning">
                 <span className="font-medium text-ink">Copy this secret now — it will never be shown again.</span>
               </Notice>
-              <div className="flex gap-2">
-                <code className="flex-1 break-all border border-ink bg-code px-3 py-2 font-mono text-xs text-ink">{secret}</code>
-                <Button onClick={copy}>{copied ? 'Copied' : 'Copy'}</Button>
-              </div>
+              <CopyBlock text={secret} mono />
+              {secretRestricted
+                ? <MCPGuide secret={secret} />
+                : <p className="text-xs text-sec">This is a full access key. The MCP endpoint (<code className="font-mono text-ink">{mcpURL(window.location.origin)}</code>) requires a restricted key.</p>}
               <div className="flex justify-end">
                 <Button onClick={() => setShowNew(false)}>Done</Button>
               </div>
             </div>
           )}
         </Modal>
+      )}
+      {revoking && (
+        <Confirm title={`Revoke key ${revoking.name}?`} confirm="Revoke" pending="Revoking…"
+          action={() => revoke.mutateAsync(revoking.id)} onClose={() => setRevoking(null)}>
+          <p className="text-sm text-body">Agents using this key lose access immediately. This cannot be undone.</p>
+        </Confirm>
       )}
     </div>
   )

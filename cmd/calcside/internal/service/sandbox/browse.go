@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"calcside/cmd/calcside/internal/service"
+	"calcside/cmd/calcside/internal/service/access"
 	"calcside/internal/runtime"
 )
 
@@ -22,12 +23,12 @@ type FileView struct {
 // is policy-checked and audited like a scripted read, and the content
 // comes back with the instance's secrets already scrubbed.
 func (s *Service) Browse(ctx context.Context, a service.Actor, id, path string, listOnly bool) (*FileView, error) {
-	in, err := s.running(ctx, a, id)
+	in, err := s.running(ctx, a, id, access.View)
 	if err != nil {
 		return nil, err
 	}
 	resp, err := s.rt.Browse(ctx, &runtime.BrowseRequest{
-		InstanceID: in.ID, Owner: owner(a), Path: path, Epoch: in.LeaseEpoch, ListOnly: listOnly,
+		InstanceID: in.ID, Owner: runtime.Owner{UserID: in.UserID}, Actor: actorOwner(a), Path: path, Epoch: in.LeaseEpoch, ListOnly: listOnly,
 	})
 	// A failed browse can still have produced audit events.
 	if resp != nil {

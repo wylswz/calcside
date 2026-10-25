@@ -1,12 +1,12 @@
 package gormstore
 
 import (
-	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"calcside/internal/store"
 	"calcside/internal/store/storetest"
@@ -33,6 +33,9 @@ func TestMigrationDirsInLockstep(t *testing.T) {
 		}
 		for i := range files {
 			files[i] = filepath.Base(files[i])
+		}
+		if len(files) != 1 || files[0] != "20261024133846_baseline.sql" {
+			t.Fatalf("%s migrations = %v, want exactly 20261024133846_baseline.sql", driver, files)
 		}
 		if want == nil {
 			want = files
@@ -68,32 +71,6 @@ func TestMigrateFresh(t *testing.T) {
 	}
 }
 
-func TestMigrateLegacyBaseline(t *testing.T) {
-	dsn := filepath.Join(t.TempDir(), "legacy.db")
-	d := openTest(t, types.DriverSQLite, dsn)
-	baseline, err := os.ReadFile("migrations/sqlite/20261004092922_baseline.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	db, err := d.g.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(t.Context(), string(baseline)); err != nil {
-		t.Fatal(err)
-	}
-	u := store.User{ID: "usr_legacy", Email: "legacy@example.com", Name: "legacy"}
-	if _, err := db.ExecContext(t.Context(), "INSERT INTO users (id, email, name) VALUES (?, ?, ?)", u.ID, u.Email, u.Name); err != nil {
-		t.Fatal(err)
-	}
-	_ = d.Close()
-	storetest.Atlas(t, types.DriverSQLite, dsn, "apply", "--baseline", "20261004092922")
-	d = openTest(t, types.DriverSQLite, dsn)
-	if got, err := d.GetUser(t.Context(), u.ID); err != nil || got.Email != u.Email || got.IsAdmin {
-		t.Fatalf("existing user changed identity or became admin during migration: %v, %+v", err, got)
-	}
-}
-
 func TestOpenDoesNotMigrate(t *testing.T) {
 	d := openTest(t, types.DriverSQLite, filepath.Join(t.TempDir(), "empty.db"))
 	var n int
@@ -102,5 +79,58 @@ func TestOpenDoesNotMigrate(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("opening a store created %d tables; migration must be explicit", n)
+	}
+}
+
+// The consolidated baseline creates every workspace artifact end to end on a
+// fresh SQLite database.
+func TestBaselineWorkspaceSQLite(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "baseline.db")
+	storetest.Atlas(t, types.DriverSQLite, dsn, "apply")
+	d := openTest(t, types.DriverSQLite, dsn)
+	ctx := t.Context()
+
+	u, err := d.UpsertUserByEmail(ctx, "base@example.com", "base", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := d.GetWorkspace(ctx, store.PersonalWorkspaceID(u.ID))
+	if err != nil {
+		t.Fatalf("personal workspace: %v", err)
+	}
+	if !w.Personal || w.CreatedAt.IsZero() || w.CreatedAt.Location() != time.UTC {
+		t.Fatalf("personal workspace row %+v", w)
+	}
+	ms, err := d.ListMemberships(ctx, u.ID)
+	if err != nil || len(ms) != 1 || ms[0].Role != types.RoleOwner {
+		t.Fatalf("memberships %v %+v", err, ms)
+	}
+
+	team := &store.Workspace{Name: "team"}
+	if err := d.CreateWorkspace(ctx, team); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.AddMember(ctx, &store.Member{WorkspaceID: team.ID, UserID: u.ID, Role: types.RoleEditor}); err != nil {
+		t.Fatal(err)
+	}
+	ms, err = d.ListMemberships(ctx, u.ID)
+	if err != nil || len(ms) != 2 {
+		t.Fatalf("memberships after team add %v %+v", err, ms)
+	}
+
+	// workspaces.created_at must declare a plain datetime, not the legacy
+	// TIMESTAMPTZ the old migration used.
+	rows, err := d.g.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := rows.QueryContext(ctx, `SELECT type FROM pragma_table_info('workspaces') WHERE name = 'created_at'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	var typ string
+	if !r.Next() || r.Scan(&typ) != nil || !strings.EqualFold(typ, "datetime") {
+		t.Fatalf("created_at type %q, want datetime", typ)
 	}
 }

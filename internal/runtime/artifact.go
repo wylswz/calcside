@@ -13,6 +13,7 @@ type ExportRequest struct {
 	CheckOnly   bool     `json:"check_only,omitempty"`
 	InstanceID  string   `json:"instance_id"`
 	Owner       Owner    `json:"owner"`
+	Actor       Owner    `json:"actor,omitempty"`
 	Epoch       int64    `json:"epoch,omitempty"`
 	Paths       []string `json:"paths"`
 	Recursive   bool     `json:"recursive"`

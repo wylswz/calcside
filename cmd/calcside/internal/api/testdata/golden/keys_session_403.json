@@ -2,7 +2,7 @@
   "body": {
     "error": {
       "code": "forbidden",
-      "message": "session required to manage API keys"
+      "message": "forbidden"
     }
   },
   "status": 403

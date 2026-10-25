@@ -385,6 +385,119 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description the caller's workspaces (sessions list all memberships; keys get their one workspace) */
+        get: operations["listWorkspaces"];
+        put?: never;
+        post: operations["createWorkspace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteWorkspace"];
+        options?: never;
+        head?: never;
+        patch: operations["updateWorkspace"];
+        trace?: never;
+    };
+    "/api/v1/workspaces/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listMembers"];
+        put?: never;
+        post: operations["addMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{id}/members/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["setMemberRole"];
+        post?: never;
+        delete: operations["removeMember"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{id}/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instances/{id}/shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listShares"];
+        put: operations["putShare"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instances/{id}/shares/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteShare"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit": {
         parameters: {
             query?: never;
@@ -733,11 +846,90 @@ export interface components {
             expires_at?: string;
             /** Format: date-time */
             revoked_at?: string;
+            /** @description true when the key carries an instance spec */
+            restricted?: boolean;
+            /** @description the instance spec a restricted key may create (absent = full access) */
+            spec?: components["schemas"]["InstanceSpec"];
+            /** @description live-instance bound for a restricted key */
+            max_instances?: number;
+            /** @description ceiling capped at view — cannot run code */
+            view_only?: boolean;
+            /** @description when set the key can only reach this instance */
+            instance_id?: string;
         };
         CreateKeyRequest: {
             name: string;
             /** Format: int64 */
             expires_in_seconds?: number;
+            /** @description present = restricted key; absent = full access */
+            spec?: components["schemas"]["InstanceSpec"];
+            /** @description required 1..maxPerUser when spec is set; must be absent for full access */
+            max_instances?: number;
+            /** @description view-only key — sees the workspace's instances, runs and files; cannot run code */
+            view_only?: boolean;
+            /** @description bind the key to this instance only; mutually exclusive with spec and view_only */
+            instance_id?: string;
+        };
+        /** @enum {string} */
+        MemberRole: "viewer" | "editor" | "owner";
+        Member: {
+            user_id: string;
+            email: string;
+            name?: string;
+            role: string;
+        };
+        MembersResponse: {
+            members?: components["schemas"]["Member"][];
+        };
+        MemberResponse: {
+            member?: components["schemas"]["Member"];
+        };
+        WorkspaceChange: {
+            id: string;
+            workspace_id: string;
+            by_user_id: string;
+            change: string;
+            user_id?: string;
+            instance_id?: string;
+            role?: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        ChangesResponse: {
+            changes?: components["schemas"]["WorkspaceChange"][];
+        };
+        Share: {
+            instance_id: string;
+            user_id: string;
+            email?: string;
+            name?: string;
+            role: string;
+            created_by?: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        SharesResponse: {
+            shares?: components["schemas"]["Share"][];
+        };
+        ShareResponse: {
+            share?: components["schemas"]["Share"];
+        };
+        WorkspaceResponse: {
+            workspace?: components["schemas"]["Workspace"];
+        };
+        SharedInstance: {
+            instance: components["schemas"]["Instance"];
+            role: string;
+            workspace_name?: string;
+        };
+        Workspace: {
+            id: string;
+            name: string;
+            personal: boolean;
+            role: string;
+        };
+        WorkspacesResponse: {
+            workspaces?: components["schemas"]["Workspace"][];
         };
         CreatedKey: {
             key?: components["schemas"]["APIKey"];
@@ -783,9 +975,20 @@ export interface components {
             /** @description Policy names to attach (at most 32), including built-in policies. Omitted or null selects builtin.block_private_network by default. An explicit list replaces the defaults; [] selects none. Library Rego is snapshotted at creation; server policies (--policy-dir) always apply in addition. */
             policies?: components["schemas"]["PolicyName"][] | null;
         };
+        ExecActivity: {
+            runs?: number;
+            denied_runs?: number;
+            failed_runs?: number;
+            /** Format: date-time */
+            last_run_at?: string;
+            last_status?: string;
+        };
         Instance: {
             id: string;
             user_id: string;
+            workspace_id?: string;
+            /** @description run summary — populated on list responses */
+            activity?: components["schemas"]["ExecActivity"];
             spec: components["schemas"]["InstanceSpec"];
             labels: {
                 [key: string]: string;
@@ -891,6 +1094,8 @@ export interface components {
             steps: number;
             /** Format: int64 */
             output_bytes: number;
+            /** @description how the run was authenticated (absent for executions recorded before this field existed) */
+            via?: components["schemas"]["AuthKind"];
             /** Format: date-time */
             created_at: string;
         };
@@ -901,6 +1106,12 @@ export interface components {
             execution: components["schemas"]["Execution"];
             /** @description full submitted code (empty for executions recorded before this field existed) */
             code: string;
+            /** @description secret-scrubbed run output */
+            output: string;
+            /** @description true when output was capped */
+            output_truncated: boolean;
+            /** @description structured failure; null when the run completed without error */
+            error: components["schemas"]["ExecError"];
         };
         AuditEvent: {
             id: string;
@@ -1196,7 +1407,9 @@ export interface operations {
     };
     listKeys: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1218,7 +1431,9 @@ export interface operations {
     };
     createKey: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1272,6 +1487,8 @@ export interface operations {
         parameters: {
             query?: {
                 status?: components["schemas"]["InstanceStatus"];
+                workspace?: string;
+                shared?: boolean;
             };
             header?: never;
             path?: never;
@@ -1294,7 +1511,9 @@ export interface operations {
     };
     createInstance: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1684,6 +1903,343 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
+    listWorkspaces: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description workspaces */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacesResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    createWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description created workspace */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    deleteWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    updateWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description renamed workspace */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description members */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MembersResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    addMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    role: components["schemas"]["MemberRole"];
+                };
+            };
+        };
+        responses: {
+            /** @description added member */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    setMemberRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    role: components["schemas"]["MemberRole"];
+                };
+            };
+        };
+        responses: {
+            /** @description updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    removeMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description removed (the member's keys in this workspace are revoked) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    listChanges: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description change log, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangesResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listShares: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description shares */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharesResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    putShare: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    role: components["schemas"]["MemberRole"];
+                };
+            };
+        };
+        responses: {
+            /** @description upserted share */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShareResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteShare: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
     listAudit: {
         parameters: {
             query?: {
@@ -1691,6 +2247,7 @@ export interface operations {
                 exec_id?: string;
                 limit?: number;
                 before?: string;
+                workspace?: string;
             };
             header?: never;
             path?: never;
@@ -1712,7 +2269,9 @@ export interface operations {
     };
     listPolicies: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1733,7 +2292,9 @@ export interface operations {
     };
     createPolicy: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1866,7 +2427,9 @@ export interface operations {
     };
     listSecrets: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1889,7 +2452,9 @@ export interface operations {
     };
     createSecret: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2085,4 +2650,5 @@ export const aPIErrorCodeValues: ReadonlyArray<FlattenedDeepRequired<components>
 export const fieldTypeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["FieldType"]> = ["int", "bool", "string", "string_list", "string_map"];
 export const authKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AuthKind"]> = ["session", "api_key", "anonymous"];
 export const artifactPreviewKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ArtifactPreview"]["kind"]> = ["text", "csv", "json", "html"];
+export const memberRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MemberRole"]> = ["viewer", "editor", "owner"];
 export const policyKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Policy"]["kind"]> = ["builtin", "rego"];

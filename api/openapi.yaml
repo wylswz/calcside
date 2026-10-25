@@ -149,6 +149,10 @@ paths:
       operationId: listKeys
       tags: [keys]
       description: Session or anonymous (dev) auth only — API keys get 403.
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
       responses:
         '200':
           description: the user's API keys
@@ -161,6 +165,10 @@ paths:
     post:
       operationId: createKey
       tags: [keys]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
       description: Session or anonymous (dev) auth only — API keys get 403.
       requestBody:
         required: true
@@ -202,6 +210,12 @@ paths:
         - name: status
           in: query
           schema: { $ref: '#/components/schemas/InstanceStatus' }
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
+        - name: shared
+          in: query
+          schema: { type: boolean, description: list instances shared with you instead (sessions only) }
       responses:
         '200':
           description: the user's instances
@@ -214,6 +228,10 @@ paths:
     post:
       operationId: createInstance
       tags: [instances]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
       requestBody:
         required: true
         content:
@@ -507,6 +525,255 @@ paths:
                 $ref: '#/components/schemas/ExecutionDetail'
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
+  /api/v1/workspaces:
+    post:
+      operationId: createWorkspace
+      tags: [workspaces]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        '201':
+          description: created workspace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+    get:
+      operationId: listWorkspaces
+      tags: [workspaces]
+      description: the caller's workspaces (sessions list all memberships; keys get their one workspace)
+      responses:
+        '200':
+          description: workspaces
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspacesResponse'
+        '401': { $ref: '#/components/responses/Error' }
+
+  /api/v1/workspaces/{id}:
+    patch:
+      operationId: updateWorkspace
+      tags: [workspaces]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        '200':
+          description: renamed workspace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deleteWorkspace
+      tags: [workspaces]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /api/v1/workspaces/{id}/members:
+    get:
+      operationId: listMembers
+      tags: [workspaces]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: members
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MembersResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    post:
+      operationId: addMember
+      tags: [workspaces]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string }
+                role: { $ref: '#/components/schemas/MemberRole' }
+      responses:
+        '201':
+          description: added member
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /api/v1/workspaces/{id}/members/{user_id}:
+    put:
+      operationId: setMemberRole
+      tags: [workspaces]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { $ref: '#/components/schemas/MemberRole' }
+      responses:
+        '200':
+          description: updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: removeMember
+      tags: [workspaces]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: removed (the member's keys in this workspace are revoked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /api/v1/workspaces/{id}/changes:
+    get:
+      operationId: listChanges
+      tags: [workspaces]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: change log, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangesResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /api/v1/instances/{id}/shares:
+    get:
+      operationId: listShares
+      tags: [instances]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: shares
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharesResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    put:
+      operationId: putShare
+      tags: [instances]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string }
+                role: { $ref: '#/components/schemas/MemberRole' }
+      responses:
+        '200':
+          description: upserted share
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /api/v1/instances/{id}/shares/{user_id}:
+    delete:
+      operationId: deleteShare
+      tags: [instances]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
   /api/v1/audit:
     get:
       operationId: listAudit
@@ -524,6 +791,9 @@ paths:
         - name: before
           in: query
           schema: { type: string, format: date-time }
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
       responses:
         '200':
           description: audit events
@@ -536,6 +806,10 @@ paths:
     get:
       operationId: listPolicies
       tags: [policies]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
       responses:
         '200':
           description: Built-in policies and the user's Rego policies
@@ -547,6 +821,10 @@ paths:
     post:
       operationId: createPolicy
       tags: [policies]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
       requestBody:
         required: true
         content:
@@ -636,6 +914,10 @@ paths:
     get:
       operationId: listSecrets
       tags: [secrets]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
       description: Session or anonymous (dev) auth only — API keys get 403. Never returns values.
       responses:
         '200':
@@ -650,6 +932,10 @@ paths:
     post:
       operationId: createSecret
       tags: [secrets]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
       description: Session or anonymous (dev) auth only — API keys get 403. Value is write-only.
       requestBody:
         required: true
@@ -1024,12 +1310,116 @@ components:
         last_used_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
         revoked_at: { type: string, format: date-time }
+        restricted: { type: boolean, description: true when the key carries an instance spec }
+        spec:
+          $ref: '#/components/schemas/InstanceSpec'
+          description: the instance spec a restricted key may create (absent = full access)
+        max_instances: { type: integer, description: live-instance bound for a restricted key }
+        view_only: { type: boolean, description: ceiling capped at view — cannot run code }
+        instance_id: { type: string, description: when set the key can only reach this instance }
     CreateKeyRequest:
       type: object
       required: [name]
       properties:
         name: { type: string }
         expires_in_seconds: { type: integer, format: int64 }
+        spec:
+          $ref: '#/components/schemas/InstanceSpec'
+          description: present = restricted key; absent = full access
+        max_instances:
+          type: integer
+          description: required 1..maxPerUser when spec is set; must be absent for full access
+        view_only:
+          type: boolean
+          description: view-only key — sees the workspace's instances, runs and files; cannot run code
+        instance_id:
+          type: string
+          description: bind the key to this instance only; mutually exclusive with spec and view_only
+    MemberRole:
+      type: string
+      enum: [viewer, editor, owner]
+    Member:
+      type: object
+      required: [user_id, email, role]
+      properties:
+        user_id: { type: string }
+        email: { type: string }
+        name: { type: string }
+        role: { type: string }
+    MembersResponse:
+      type: object
+      properties:
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/Member' }
+    MemberResponse:
+      type: object
+      properties:
+        member: { $ref: '#/components/schemas/Member' }
+    WorkspaceChange:
+      type: object
+      required: [id, workspace_id, by_user_id, change, created_at]
+      properties:
+        id: { type: string }
+        workspace_id: { type: string }
+        by_user_id: { type: string }
+        change: { type: string }
+        user_id: { type: string }
+        instance_id: { type: string }
+        role: { type: string }
+        created_at: { type: string, format: date-time }
+    ChangesResponse:
+      type: object
+      properties:
+        changes:
+          type: array
+          items: { $ref: '#/components/schemas/WorkspaceChange' }
+    Share:
+      type: object
+      required: [instance_id, user_id, role, created_at]
+      properties:
+        instance_id: { type: string }
+        user_id: { type: string }
+        email: { type: string }
+        name: { type: string }
+        role: { type: string }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+    SharesResponse:
+      type: object
+      properties:
+        shares:
+          type: array
+          items: { $ref: '#/components/schemas/Share' }
+    ShareResponse:
+      type: object
+      properties:
+        share: { $ref: '#/components/schemas/Share' }
+    WorkspaceResponse:
+      type: object
+      properties:
+        workspace: { $ref: '#/components/schemas/Workspace' }
+    SharedInstance:
+      type: object
+      required: [instance, role]
+      properties:
+        instance: { $ref: '#/components/schemas/Instance' }
+        role: { type: string }
+        workspace_name: { type: string }
+    Workspace:
+      type: object
+      required: [id, name, personal, role]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        personal: { type: boolean }
+        role: { type: string }
+    WorkspacesResponse:
+      type: object
+      properties:
+        workspaces:
+          type: array
+          items: { $ref: '#/components/schemas/Workspace' }
     CreatedKey:
       type: object
       properties:
@@ -1086,12 +1476,24 @@ components:
           uniqueItems: true
           maxItems: 32
           items: { $ref: '#/components/schemas/PolicyName' }
+    ExecActivity:
+      type: object
+      properties:
+        runs: { type: integer }
+        denied_runs: { type: integer }
+        failed_runs: { type: integer }
+        last_run_at: { type: string, format: date-time }
+        last_status: { type: string }
     Instance:
       type: object
       required: [id, user_id, spec, labels, status, created_at, last_active_at, expires_at]
       properties:
         id: { type: string }
         user_id: { type: string }
+        workspace_id: { type: string }
+        activity:
+          $ref: '#/components/schemas/ExecActivity'
+          description: run summary — populated on list responses
         spec: { $ref: '#/components/schemas/InstanceSpec' }
         labels:
           type: object
@@ -1201,6 +1603,9 @@ components:
         duration_ms: { type: integer, format: int64 }
         steps: { type: integer, format: int64 }
         output_bytes: { type: integer, format: int64 }
+        via:
+          $ref: '#/components/schemas/AuthKind'
+          description: how the run was authenticated (absent for executions recorded before this field existed)
         created_at: { type: string, format: date-time }
     ExecutionsResponse:
       type: object
@@ -1210,10 +1615,16 @@ components:
           items: { $ref: '#/components/schemas/Execution' }
     ExecutionDetail:
       type: object
-      required: [execution, code]
+      required: [execution, code, output, output_truncated, error]
       properties:
         execution: { $ref: '#/components/schemas/Execution' }
         code: { type: string, description: full submitted code (empty for executions recorded before this field existed) }
+        output: { type: string, description: secret-scrubbed run output, capped at 64 KiB }
+        output_truncated: { type: boolean, description: true when output was capped }
+        error:
+          $ref: '#/components/schemas/ExecError'
+          nullable: true
+          description: structured failure; null when the run completed without error
     AuditEvent:
       type: object
       required: [id, ts, user_id, instance_id, exec_id, capability, op, args, phase, decision, reason, error, duration_ms]

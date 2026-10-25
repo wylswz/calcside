@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"calcside/cmd/calcside/internal/service"
 	"calcside/internal/store"
 	"calcside/internal/types"
 )
@@ -24,14 +25,37 @@ var _ = fmt.Sprintf
 
 // Principal is an authenticated user.
 type Principal struct {
-	User    *store.User
-	Kind    types.AuthKind // session | api_key
-	KeyID   string         // set when Kind == api_key
-	Session string         // raw session token when cookie-auth
+	User            *store.User
+	Kind            types.AuthKind  // session | api_key
+	KeyID           string          // set when Kind == api_key
+	KeySpec         json.RawMessage // restricted key's instance spec; nil = full access
+	KeyMaxInstances int
+	KeyViewOnly     bool
+	KeyInstanceID   string
+	KeyWorkspaceID  string // the workspace the key belongs to
+	Session         string // raw session token when cookie-auth
 }
 
 // ViaKey reports whether the principal authenticated by API key.
 func (p *Principal) ViaKey() bool { return p.Kind == types.AuthAPIKey }
+
+// Restricted reports whether the principal is an API key carrying an
+// instance spec.
+func (p *Principal) Restricted() bool { return len(p.KeySpec) > 0 }
+
+// Actor maps the transport principal onto the service-layer actor — the
+// single mapping used by the REST handlers and the MCP endpoint.
+func (p *Principal) Actor() service.Actor {
+	ws := p.KeyWorkspaceID
+	if !p.ViaKey() {
+		ws = store.PersonalWorkspaceID(p.User.ID)
+	}
+	return service.Actor{
+		UserID: p.User.ID, Email: p.User.Email, Kind: p.Kind,
+		KeyID: p.KeyID, KeySpec: p.KeySpec, KeyMaxInstances: p.KeyMaxInstances, KeyViewOnly: p.KeyViewOnly, KeyInstanceID: p.KeyInstanceID,
+		WorkspaceID: ws,
+	}
+}
 
 type ctxKey int
 
@@ -181,7 +205,7 @@ func (s *Service) Resolve(ctx context.Context, r *http.Request) (*Principal, err
 			return nil, errors.New("key owner missing")
 		}
 		_ = s.st.TouchAPIKey(ctx, k.ID, now)
-		return &Principal{User: u, Kind: types.AuthAPIKey, KeyID: k.ID}, nil
+		return &Principal{User: u, Kind: types.AuthAPIKey, KeyID: k.ID, KeySpec: k.Spec, KeyMaxInstances: k.MaxInstances, KeyViewOnly: k.ViewOnly, KeyInstanceID: k.InstanceID, KeyWorkspaceID: k.WorkspaceID}, nil
 	}
 	if c, err := r.Cookie(sessionCookie); err == nil && c.Value != "" {
 		sess, err := s.st.GetSession(ctx, hashToken(c.Value))

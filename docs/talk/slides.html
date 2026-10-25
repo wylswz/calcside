@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>calcside — Capabilities Are the Boundary</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #FFFFFF; --surface: #F7F8FA; --code: #F2F4F7;
+    --ink: #000000; --body: #333333; --sec: #666666; --mute: #919196;
+    --line: #E5EAFF; --line-strong: #D0D5DD;
+    --accent: #0033FF; --danger: #E1251B; --warn: #FFC700;
+    --f-en: 'Söhne Buch', 'Söhne', Inter, 'DM Sans', sans-serif;
+    --f-en-b: 'Söhne Kräftig', 'Söhne', Inter, 'DM Sans', sans-serif;
+    --f-mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #E9EBEF; color: var(--body); font-family: var(--f-en); -webkit-font-smoothing: antialiased; }
+  .deck { position: fixed; inset: 0; display: grid; place-items: center; }
+  .slide { position: absolute; width: 1280px; height: 720px; background: var(--paper); display: none; flex-direction: column; padding: 0 72px; transform-origin: center; box-shadow: 0 0 0 1px var(--line); }
+  .slide.on { display: flex; }
+
+  /* Header mirrors the console: Bauhaus mark + wordmark + numbered nav, hairline underneath */
+  .hdr { display: flex; align-items: center; height: 72px; margin: 0 -72px; padding: 0 72px; border-bottom: 1px solid var(--ink); flex-shrink: 0; }
+  .brand { display: inline-flex; align-items: center; gap: 12px; font: 600 19px var(--f-en-b); color: var(--ink); letter-spacing: -0.01em; margin-right: 56px; }
+  .brand svg { height: 13px; width: auto; display: block; }
+  .nav { display: flex; gap: 30px; font-size: 15px; color: var(--sec); }
+  .nav span { display: inline-flex; align-items: baseline; gap: 6px; padding: 25px 0 22px; border-bottom: 3px solid transparent; }
+  .nav b { font: 400 11px var(--f-mono); color: var(--mute); }
+  .nav .cur { color: var(--ink); border-bottom-color: var(--accent); }
+  .hdr .meta { margin-left: auto; font: 400 12px var(--f-mono); color: var(--mute); }
+
+  .body { flex: 1; display: flex; flex-direction: column; padding: 44px 0 0; min-height: 0; }
+  .eyebrow { font: 500 11px var(--f-en); letter-spacing: 0.08em; text-transform: uppercase; color: var(--mute); }
+  h1 { font: 600 40px/1.2 var(--f-en-b); color: var(--ink); letter-spacing: -0.01em; margin: 10px 0 32px; }
+  h1 em { font-style: normal; color: var(--accent); }
+  h2 { font: 600 20px/1.3 var(--f-en-b); color: var(--ink); letter-spacing: -0.01em; }
+  p { font-size: 16px; line-height: 1.6; }
+  .sec { color: var(--sec); }
+  code { font: 400 0.9em var(--f-mono); color: var(--ink); background: var(--code); padding: 1px 5px; border-radius: 4px; }
+  .num { font: 600 28px/1 var(--f-en-b); color: var(--accent); letter-spacing: -0.01em; }
+
+  .foot { height: 44px; margin: auto -72px 0; padding: 0 72px; display: flex; align-items: center; justify-content: space-between; background: var(--surface); font: 400 12px var(--f-mono); color: var(--mute); flex-shrink: 0; }
+  .foot a { color: var(--mute); text-decoration: none; }
+
+  /* 01 timeline */
+  .tl { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 2px solid var(--ink); }
+  .tl > div { padding: 18px 24px 0 0; }
+  .tl > div + div { padding-left: 24px; border-left: 1px solid var(--line); }
+  .tl .yr { font: 500 13px var(--f-mono); color: var(--ink); margin-bottom: 8px; }
+  .tl p { font-size: 16px; color: var(--sec); }
+  .claim { margin-top: 44px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; }
+  .claim div { padding-right: 32px; }
+  .claim h2 { margin: 12px 0 6px; }
+
+  /* 02 comparison table (console .tbl style) */
+  .tbl { width: 100%; table-layout: fixed; border-collapse: collapse; border-top: 2px solid var(--ink); font-size: 15px; }
+  .tbl th { text-align: left; font: 500 11px var(--f-en); letter-spacing: 0.08em; text-transform: uppercase; color: var(--mute); padding: 12px 16px 10px; border-bottom: 1px solid var(--ink); }
+  .tbl th:first-child, .tbl td:first-child { padding-left: 0; width: 120px; }
+  .tbl td { padding: 11px 16px; border-bottom: 1px solid var(--line); vertical-align: middle; line-height: 1.5; color: var(--body); }
+  .tbl td:first-child { font: 500 11px var(--f-en); letter-spacing: 0.08em; text-transform: uppercase; color: var(--mute); }
+  .tbl .school { font: 600 18px var(--f-en-b); color: var(--ink); letter-spacing: -0.01em; text-transform: none; }
+  .tbl .us { background: var(--surface); }
+  .tbl th.us { color: var(--accent); border-bottom: 3px solid var(--accent); }
+  .bar { display: flex; gap: 3px; }
+  .bar i { width: 22px; height: 8px; background: var(--code); }
+  .bar i.f { background: var(--ink); }
+  .us .bar i.f { background: var(--accent); }
+
+  /* 03 flow + 2x2 */
+  .flow { display: flex; align-items: center; font: 400 14px var(--f-mono); color: var(--ink); margin: -8px 0 30px; }
+  .flow span { padding: 9px 14px; background: var(--code); }
+  .flow span.g { background: var(--accent); color: #FFF; }
+  .flow i { width: 28px; height: 1px; background: var(--ink); position: relative; flex-shrink: 0; }
+  .flow i::after { content: ""; position: absolute; right: 0; top: -3px; border-left: 6px solid var(--ink); border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; }
+  .quad { display: grid; grid-template-columns: 1fr 1fr; column-gap: 56px; border-top: 2px solid var(--ink); }
+  .quad > div { display: grid; grid-template-columns: 52px 1fr; padding: 18px 0 16px; border-bottom: 1px solid var(--line); }
+  .quad h2 { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }
+  .quad h2 small { font: 400 13px var(--f-mono); color: var(--mute); }
+  .quad p { font-size: 15px; color: var(--sec); line-height: 1.55; }
+
+  /* 04 isolation scale */
+  .scale { position: relative; margin: 6px 0 0; }
+  .axis { display: grid; grid-template-columns: repeat(5, 1fr); border-top: 2px solid var(--ink); }
+  .axis div { padding: 12px 0 0; font: 500 15px var(--f-en-b); color: var(--ink); position: relative; }
+  .axis div::before { content: ""; position: absolute; top: -7px; left: 0; width: 12px; height: 12px; background: var(--paper); box-shadow: 0 0 0 2px var(--ink); border-radius: 50%; }
+  .axis small { display: block; font: 400 12px var(--f-mono); color: var(--mute); margin-top: 2px; }
+  .pins { display: grid; grid-template-columns: repeat(5, 1fr); height: 70px; margin-bottom: 0; }
+  .pin { align-self: end; padding: 0 12px 12px 0; font-size: 14px; line-height: 1.4; border-left: 2px solid var(--line-strong); padding-left: 10px; }
+  .pin b { display: block; font: 500 11px var(--f-en); letter-spacing: 0.08em; text-transform: uppercase; color: var(--mute); }
+  .pin.ideal { border-left-color: var(--line-strong); color: var(--sec); }
+  .pin.real { border-left-color: var(--accent); color: var(--ink); }
+  .pin.real b { color: var(--accent); }
+  .axis { position: relative; }
+  .axis::after { content: ""; position: absolute; top: -2px; left: 0; width: 40%; height: 2px; background: var(--accent); }
+  .axis div.hit::before { background: var(--accent); box-shadow: 0 0 0 2px var(--accent); z-index: 1; }
+  .axis div.hit { color: var(--accent); }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; column-gap: 56px; margin-top: 34px; }
+  .cols h2 { padding-bottom: 10px; border-bottom: 2px solid var(--ink); margin-bottom: 4px; }
+  .li { display: grid; grid-template-columns: 30px 1fr; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 15px; line-height: 1.55; }
+  .li b { font: 500 12px var(--f-mono); color: var(--mute); padding-top: 3px; }
+
+  /* 05 demo */
+  .demo { display: grid; grid-template-columns: 0.82fr 1.18fr; column-gap: 24px; flex: 1; min-height: 0; margin-bottom: 24px; }
+  .pane { display: flex; flex-direction: column; box-shadow: 0 0 0 1px var(--ink); }
+  .pane .bar2 { display: flex; justify-content: space-between; align-items: center; height: 38px; padding: 0 14px; border-bottom: 1px solid var(--ink); font: 500 11px var(--f-en); letter-spacing: 0.08em; text-transform: uppercase; color: var(--mute); }
+  .pane .bar2 span:last-child { font-family: var(--f-mono); letter-spacing: 0; text-transform: none; }
+  pre { flex: 1; font: 400 13.5px/1.6 var(--f-mono); color: var(--ink); padding: 14px 16px; white-space: pre; overflow: hidden; }
+  .k { color: var(--accent); } .s { color: var(--danger); } .c { color: var(--mute); font-style: italic; } .fn { font-weight: 600; }
+  .out { display: inline-flex; align-items: center; gap: 8px; color: var(--sec); }
+  .dot { width: 8px; height: 8px; display: inline-block; flex-shrink: 0; }
+  .dot.ok { background: var(--accent); border-radius: 50%; }
+  .dot.no { background: var(--danger); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="mark" viewBox="0 0 34 10"><circle cx="5" cy="5" r="5" fill="#0033FF"/><rect x="12" y="0" width="10" height="10" fill="#E1251B"/><polygon points="29,0 34,10 24,10" fill="#FFC700"/></symbol>
+</svg>
+<div class="deck">
+
+<!-- 01 -->
+<section class="slide" data-n="1">
+  <div class="body">
+    <div class="eyebrow">Background</div>
+    <h1>Agents got hands. Now they need <em>boundaries</em>.</h1>
+    <div class="tl">
+      <div><div class="yr">2025 H1</div><p>Code interpreters and computer use move from demos to defaults</p></div>
+      <div><div class="yr">2025</div><p>MCP and coding agents make tool calls the norm</p></div>
+      <div><div class="yr">2025 H2</div><p>Sandbox products and open-source runtimes appear everywhere</p></div>
+      <div><div class="yr">2026</div><p>Agents write code, call APIs, touch files, and hold secrets</p></div>
+    </div>
+    <div class="claim">
+      <div><span class="num">01</span><h2>Every call is a real side effect</h2><p class="sec">Files get written, requests get sent, money gets spent. There is no undo.</p></div>
+      <div><span class="num">02</span><h2>Intent can't be trusted</h2><p class="sec">Prompt injection makes "wanted to" indistinguishable from "was told to".</p></div>
+      <div><span class="num">03</span><h2>The question is where</h2><p class="sec">Not whether to isolate, but at which layer, and at what cost.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 02 -->
+<section class="slide" data-n="2">
+  <div class="body">
+    <div class="eyebrow">Three approaches</div>
+    <h1>Where do you draw the <em>line</em>?</h1>
+    <table class="tbl">
+      <thead><tr><th></th><th>Approach 1</th><th>Approach 2</th><th class="us">Approach 3 · calcside</th></tr></thead>
+      <tbody>
+        <tr><td></td><td class="school">Open OS</td><td class="school">Capability tracking</td><td class="school us">Policies + closed action space</td></tr>
+        <tr><td>Boundary</td><td>Kernel: namespaces, seccomp, cgroups</td><td>Type system: Scala 3 capture checking, proven statically</td><td class="us">Language: the Gate separates guest from host; every side effect crosses it</td></tr>
+        <tr><td>Rules</td><td>Syscall-level, vast surface</td><td>A handful, mathematically sound</td><td class="us">A moderate set of policies</td></tr>
+        <tr><td>Capability</td><td><div class="bar"><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i></div></td><td><div class="bar"><i class="f"></i><i class="f"></i><i class="f"></i><i></i><i></i></div></td><td class="us"><div class="bar"><i class="f"></i><i class="f"></i><i class="f"></i><i></i><i></i></div></td></tr>
+        <tr><td>Cost of safety</td><td><div class="bar"><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i></div></td><td><div class="bar"><i class="f"></i><i class="f"></i><i></i><i></i><i></i></div></td><td class="us"><div class="bar"><i class="f"></i><i class="f"></i><i class="f"></i><i></i><i></i></div></td></tr>
+        <tr><td>Instance weight</td><td>Container / microVM</td><td>Thread (ideal)</td><td class="us">Thread (ideal)</td></tr>
+        <tr><td>Trade-off</td><td>Can be made safe, but the attack surface is large and hardening is hacky; e.g. credential injection needs a rewriting proxy</td><td>Limited, but covers most tasks; tied to one language</td><td class="us">Same capability as approach 2, just less elegant</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 03 -->
+<section class="slide" data-n="3">
+  <div class="body">
+    <div class="eyebrow">calcside · no containers, no VMs</div>
+    <h1><em>Capabilities</em> are the boundary</h1>
+    <div class="flow"><span>Agent writes Starlark</span><i></i><span>Sees only granted globals</span><i></i><span class="g">Gate · guest ↔ host</span><i></i><span>Policy before / after</span><i></i><span>Audit</span></div>
+    <div class="quad">
+      <div><span class="num">01</span><div><h2>Capability <small>fs · net · io</small></h2><p>The only way to cause side effects. fs is a quota-bound VFS; net has a host allowlist and injects secrets at send time, so scripts can reference them but never read them.</p></div></div>
+      <div><span class="num">02</span><div><h2>Ext <small>ext.tavily.search()</small></h2><p>Pure Starlark, never native binaries. Extensions compose base capabilities, and every inner call crosses the Gate again, inheriting allowlists, secrets, and audit.</p></div></div>
+      <div><span class="num">03</span><div><h2>Policy <small>Rego · builtin.*</small></h2><p>Veto any op before or after it runs. Server policies always apply; user policies are chosen per instance and snapshotted at creation. Private networks are blocked at dial time by default.</p></div></div>
+      <div><span class="num">04</span><div><h2>Instance <small>spec · TTL · limits</small></h2><p>One spec = capabilities + policies + limits. Globals and the VFS persist across executions; runs in-process or as one OS process per instance.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 04 -->
+<section class="slide" data-n="4">
+  <div class="body">
+    <div class="eyebrow">Limitation</div>
+    <h1>Memory breaks the <em>thread-level</em> promise</h1>
+    <div class="scale">
+      <div class="pins">
+        <div class="pin ideal"><b>Ideal · approach 2 / 3</b>No memory boundary<br>calcside inproc</div>
+        <div></div>
+        <div class="pin real"><b>Reality · memory cap</b>calcside process<br>+ cgroup v2</div>
+        <div class="pin ideal"><b>Approach 1</b>Open OS</div>
+        <div></div>
+      </div>
+      <div class="axis">
+        <div>Thread<small>goroutine</small></div>
+        <div>Process<small>re-exec</small></div>
+        <div class="hit">Process + cgroup<small>sub-container</small></div>
+        <div>Container<small>namespaces</small></div>
+        <div>microVM<small>own kernel</small></div>
+      </div>
+    </div>
+    <div class="cols">
+      <div>
+        <h2>Why memory leaks through</h2>
+        <div class="li"><b>01</b><span>Guest and host interoperate; guest values live on the host's GC heap</span></div>
+        <div class="li"><b>02</b><span>A GC can't attribute bytes to instances: no per-guest accounting</span></div>
+        <div class="li"><b>03</b><span><code>max_steps</code> bounds CPU, but not <code>"x" * 10**9</code></span></div>
+        <div class="li"><b>04</b><span>Approach 2 too: capture checking tracks capabilities, not bytes</span></div>
+      </div>
+      <div>
+        <h2>calcside's trade-off</h2>
+        <div class="li"><b>01</b><span>One process per instance, capped by cgroup v2; OOM kills only it</span></div>
+        <div class="li"><b>02</b><span>Lighter than a container: no image, no rootfs, no network namespace</span></div>
+        <div class="li"><b>03</b><span>Bound before rendering; output, files, and artifacts are all capped</span></div>
+        <div class="li"><b>04</b><span>Resource accounting falls back to the OS, not capabilities</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 05 -->
+<section class="slide" data-n="5">
+  <div class="body">
+    <div class="eyebrow">Demo</div>
+    <h1>One instance, <em>three</em> calls</h1>
+    <div class="demo">
+      <div class="pane">
+        <div class="bar2"><span>Instance spec</span><span>POST /api/v1/instances</span></div>
+<pre>{
+  <span class="s">"capabilities"</span>: {
+    <span class="s">"fs"</span>:  {<span class="s">"quota_bytes"</span>: 67108864},
+    <span class="s">"net"</span>: {<span class="s">"allow_hosts"</span>: [<span class="s">"api.tavily.com"</span>]},
+    <span class="s">"ext"</span>: {<span class="s">"tavily"</span>: {
+      <span class="s">"source"</span>: <span class="s">"contrib/tavily"</span>}}
+  },
+  <span class="s">"policies"</span>: [
+    <span class="s">"builtin.block_private_network"</span>,
+    <span class="s">"deny_secret_writes"</span>
+  ],
+  <span class="s">"limits"</span>: {<span class="s">"max_steps"</span>: 10000000},
+  <span class="s">"ttl_seconds"</span>: 900
+}</pre>
+      </div>
+      <div class="pane">
+        <div class="bar2"><span>Starlark</span><span>⌘ + Enter</span></div>
+<pre><span class="c"># 01 Extension: one call = one audited op</span>
+rs = ext.tavily.<span class="fn">search</span>(<span class="s">"capability-safe agents"</span>, 3)
+fs.<span class="fn">write</span>(<span class="s">"notes.md"</span>, <span class="s">"\n"</span>.<span class="fn">join</span>([r[<span class="s">"url"</span>] <span class="k">for</span> r <span class="k">in</span> rs]))
+<span class="out"><i class="dot ok"></i>ok · ext.tavily.search → net.post, secret injected</span>
+
+<span class="c"># 02 Outside the allowlist: if it isn't granted, it doesn't exist</span>
+net.<span class="fn">get</span>(<span class="s">"http://169.254.169.254/latest/meta-data"</span>)
+<span class="out"><i class="dot no"></i>denied · host not in allow_hosts</span>
+
+<span class="c"># 03 Vetoed by a Rego policy</span>
+fs.<span class="fn">write</span>(<span class="s">"/work/secrets/key"</span>, <span class="s">"..."</span>)
+<span class="out"><i class="dot no"></i>denied · deny_secret_writes</span>
+
+<span class="c"># Console: Audit · VFS · Inspect · Artifact preview</span></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+</div>
+<script>
+  const titles = ['Background', 'Approaches', 'calcside', 'Limitation', 'Demo'];
+  const slides = [...document.querySelectorAll('.slide')];
+  slides.forEach((s, k) => {
+    const hdr = document.createElement('header');
+    hdr.className = 'hdr';
+    hdr.innerHTML = `<span class="brand"><svg viewBox="0 0 34 10"><use href="#mark"/></svg>calcside</span>
+      <nav class="nav">${titles.map((t, j) => `<span class="${j === k ? 'cur' : ''}"><b>0${j + 1}</b>${t}</span>`).join('')}</nav>
+      <span class="meta">capability is the boundary</span>`;
+    s.prepend(hdr);
+    const foot = document.createElement('footer');
+    foot.className = 'foot';
+    foot.innerHTML = `<a href="https://arxiv.org/abs/2603.00991">ref · Tracking Capabilities for Safer Agents</a><span>0${k + 1} / 0${slides.length}</span>`;
+    s.append(foot);
+  });
+  let i = Math.max(0, Math.min(slides.length - 1, (parseInt(location.hash.slice(1)) || 1) - 1));
+  const fit = () => slides.forEach(s => s.style.transform = `scale(${Math.min(innerWidth / 1280, innerHeight / 720) * 0.98})`);
+  const show = n => { i = Math.max(0, Math.min(slides.length - 1, n)); slides.forEach((s, k) => s.classList.toggle('on', k === i)); history.replaceState(null, '', '#' + (i + 1)); };
+  addEventListener('keydown', e => {
+    if (['ArrowRight', 'ArrowDown', 'PageDown', ' '].includes(e.key)) show(i + 1);
+    if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(e.key)) show(i - 1);
+    if (e.key === 'f') document.documentElement.requestFullscreen?.();
+  });
+  addEventListener('click', e => { if (!e.target.closest('a')) show(i + (e.clientX > innerWidth / 2 ? 1 : -1)); });
+  addEventListener('resize', fit);
+  fit(); show(i);
+</script>
+</body>
+</html>

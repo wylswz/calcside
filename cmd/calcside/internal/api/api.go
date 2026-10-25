@@ -21,12 +21,15 @@ import (
 	"calcside/cmd/calcside/internal/api/gen"
 	"calcside/cmd/calcside/internal/artifact"
 	"calcside/cmd/calcside/internal/auth"
+	mcpapi "calcside/cmd/calcside/internal/mcp"
+	"calcside/cmd/calcside/internal/service/access"
 	auditsvc "calcside/cmd/calcside/internal/service/audit"
 	"calcside/cmd/calcside/internal/service/catalog"
 	"calcside/cmd/calcside/internal/service/iam"
 	policysvc "calcside/cmd/calcside/internal/service/policy"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/vault"
+	workspacesvc "calcside/cmd/calcside/internal/service/workspace"
 	"calcside/internal/store"
 	"calcside/internal/types"
 )
@@ -35,13 +38,15 @@ const maxBodyBytes = 1 << 20
 
 // Deps wires the API.
 type Deps struct {
-	IAM      *iam.Service
-	Vault    *vault.Service
-	Policy   *policysvc.Service
-	Audit    *auditsvc.Service
-	Catalog  *catalog.Service
-	Sandbox  *sandbox.Service
-	Previews *ArtifactPreviews
+	IAM       *iam.Service
+	Vault     *vault.Service
+	Policy    *policysvc.Service
+	Audit     *auditsvc.Service
+	Catalog   *catalog.Service
+	Sandbox   *sandbox.Service
+	Workspace *workspacesvc.Service
+	Access    *access.Checker
+	Previews  *ArtifactPreviews
 
 	Auth          *auth.Service
 	Basic         *auth.BasicLogin
@@ -146,6 +151,8 @@ func Handler(d Deps) http.Handler {
 		{"Audit", d.Audit != nil},
 		{"Catalog", d.Catalog != nil},
 		{"Sandbox", d.Sandbox != nil},
+		{"Access", d.Access != nil},
+		{"Workspace", d.Workspace != nil},
 		{"Auth", d.Auth != nil},
 	} {
 		if !dep.ok {
@@ -192,6 +199,19 @@ func Handler(d Deps) http.Handler {
 	if d.Basic != nil {
 		raw.POST("/basic/login", gin.WrapH(d.Basic))
 	}
+
+	// MCP: resolve the principal without rejecting (the handler maps
+	// 401/403); no session middleware means no CSRF surface.
+	mcpGroup := r.Group("/mcp")
+	mcpGroup.Use(d.resolveOnly())
+	// Explicit routes only: gin rejects /*path alongside /instances/:id.
+	// Empty and single-slash cover the workspace endpoint; deeper paths
+	// 404 — streamable HTTP has no subpaths.
+	mcpGroup.Any("/instances/:id", func(c *gin.Context) {
+		mcpapi.InstanceHandler(d.Sandbox, d.Access, c.Param("id")).ServeHTTP(c.Writer, c.Request)
+	})
+	mcpGroup.Any("", gin.WrapH(mcpapi.Handler(d.Sandbox)))
+	mcpGroup.Any("/", gin.WrapH(mcpapi.Handler(d.Sandbox)))
 
 	r.NoRoute(d.noRoute())
 	return d.Previews.Wrap(r)

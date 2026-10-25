@@ -12,7 +12,9 @@ import (
 	"calcside/cmd/calcside/internal/api/gen"
 	"calcside/cmd/calcside/internal/auth"
 	"calcside/cmd/calcside/internal/service"
+	"calcside/cmd/calcside/internal/service/access"
 	auditsvc "calcside/cmd/calcside/internal/service/audit"
+	"calcside/internal/store"
 	"calcside/internal/types"
 )
 
@@ -65,9 +67,34 @@ func needAuth(ctx context.Context) (*auth.Principal, *rawJSON) {
 	return nil, &e
 }
 
+func optStr(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
+}
+
 // actorOf maps the transport principal onto the service-layer actor.
 func actorOf(p *auth.Principal) service.Actor {
-	return service.Actor{UserID: p.User.ID, Email: p.User.Email, Kind: p.Kind}
+	return p.Actor()
+}
+
+// actor resolves the actor for a request that accepts a workspace
+// parameter: sessions may act in any workspace they belong to; a key is
+// fixed to its own workspace.
+func (s *strictImpl) actor(ctx context.Context, p *auth.Principal, ws *string) (service.Actor, error) {
+	a := p.Actor()
+	if ws == nil || *ws == "" || *ws == a.WorkspaceID {
+		return a, nil
+	}
+	if a.ViaKey() {
+		return a, service.Forbidden("a key belongs to one workspace")
+	}
+	a.WorkspaceID = *ws
+	if err := s.d.Access.Workspace(ctx, a, *ws, access.View); err != nil {
+		return a, err
+	}
+	return a, nil
 }
 
 // Per-operation response wrappers (generated files are never edited).
@@ -299,15 +326,280 @@ func (s *strictImpl) ListExtensions(ctx context.Context, _ gen.ListExtensionsReq
 	return listExtensionsResp{rawJSON{http.StatusOK, dto.ExtensionsEnvelope(s.d.Catalog.Extensions())}}, nil
 }
 
+// --- workspaces ---
+
+type listWorkspacesResp struct{ rawJSON }
+
+func (r listWorkspacesResp) VisitListWorkspacesResponse(w http.ResponseWriter) error {
+	return r.write(w)
+}
+
+func (s *strictImpl) ListWorkspaces(ctx context.Context, _ gen.ListWorkspacesRequestObject) (gen.ListWorkspacesResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return listWorkspacesResp{*e}, nil
+	}
+	ms, err := s.d.Access.Memberships(ctx, actorOf(p))
+	if err != nil {
+		return listWorkspacesResp{fail(err)}, nil
+	}
+	out := make([]gen.Workspace, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, gen.Workspace{Id: m.Workspace.ID, Name: m.Workspace.Name, Personal: m.Workspace.Personal, Role: string(m.Role)})
+	}
+	return listWorkspacesResp{rawJSON{200, gen.WorkspacesResponse{Workspaces: &out}}}, nil
+}
+
+// --- workspace management ---
+
+type createWorkspaceResp struct{ rawJSON }
+
+func (r createWorkspaceResp) VisitCreateWorkspaceResponse(w http.ResponseWriter) error {
+	return r.write(w)
+}
+
+func (s *strictImpl) CreateWorkspace(ctx context.Context, req gen.CreateWorkspaceRequestObject) (gen.CreateWorkspaceResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return createWorkspaceResp{*e}, nil
+	}
+	var name string
+	if req.Body != nil {
+		name = req.Body.Name
+	}
+	w, err := s.d.Workspace.Create(ctx, actorOf(p), name)
+	if err != nil {
+		return createWorkspaceResp{fail(err)}, nil
+	}
+	return createWorkspaceResp{rawJSON{201, gen.WorkspaceResponse{
+		Workspace: &gen.Workspace{Id: w.ID, Name: w.Name, Personal: w.Personal, Role: string(store.RoleOwner)},
+	}}}, nil
+}
+
+type updateWorkspaceResp struct{ rawJSON }
+
+func (r updateWorkspaceResp) VisitUpdateWorkspaceResponse(w http.ResponseWriter) error {
+	return r.write(w)
+}
+
+func (s *strictImpl) UpdateWorkspace(ctx context.Context, req gen.UpdateWorkspaceRequestObject) (gen.UpdateWorkspaceResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return updateWorkspaceResp{*e}, nil
+	}
+	var name string
+	if req.Body != nil {
+		name = req.Body.Name
+	}
+	w, err := s.d.Workspace.Rename(ctx, actorOf(p), req.Id, name)
+	if err != nil {
+		return updateWorkspaceResp{fail(err)}, nil
+	}
+	return updateWorkspaceResp{rawJSON{200, gen.WorkspaceResponse{
+		Workspace: &gen.Workspace{Id: w.ID, Name: w.Name, Personal: w.Personal},
+	}}}, nil
+}
+
+type deleteWorkspaceResp struct{ rawJSON }
+
+func (r deleteWorkspaceResp) VisitDeleteWorkspaceResponse(w http.ResponseWriter) error {
+	return r.write(w)
+}
+
+func (s *strictImpl) DeleteWorkspace(ctx context.Context, req gen.DeleteWorkspaceRequestObject) (gen.DeleteWorkspaceResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return deleteWorkspaceResp{*e}, nil
+	}
+	if err := s.d.Workspace.Delete(ctx, actorOf(p), req.Id); err != nil {
+		return deleteWorkspaceResp{fail(err)}, nil
+	}
+	return deleteWorkspaceResp{rawJSON{200, map[string]any{"ok": true}}}, nil
+}
+
+type listMembersResp struct{ rawJSON }
+
+func (r listMembersResp) VisitListMembersResponse(w http.ResponseWriter) error { return r.write(w) }
+
+func (s *strictImpl) ListMembers(ctx context.Context, req gen.ListMembersRequestObject) (gen.ListMembersResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return listMembersResp{*e}, nil
+	}
+	ms, err := s.d.Workspace.Members(ctx, actorOf(p), req.Id)
+	if err != nil {
+		return listMembersResp{fail(err)}, nil
+	}
+	out := make([]gen.Member, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, gen.Member{UserId: m.UserID, Email: m.Email, Name: optStr(m.Name), Role: string(m.Role)})
+	}
+	return listMembersResp{rawJSON{200, gen.MembersResponse{Members: &out}}}, nil
+}
+
+type addMemberResp struct{ rawJSON }
+
+func (r addMemberResp) VisitAddMemberResponse(w http.ResponseWriter) error { return r.write(w) }
+
+func (s *strictImpl) AddMember(ctx context.Context, req gen.AddMemberRequestObject) (gen.AddMemberResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return addMemberResp{*e}, nil
+	}
+	if req.Body == nil {
+		return addMemberResp{fail(service.Errf(types.ErrCodeBadRequest, "body required"))}, nil
+	}
+	m, err := s.d.Workspace.AddMember(ctx, actorOf(p), req.Id, req.Body.Email, types.Role(string(req.Body.Role)))
+	if err != nil {
+		return addMemberResp{fail(err)}, nil
+	}
+	return addMemberResp{rawJSON{201, gen.MemberResponse{Member: &gen.Member{
+		UserId: m.UserID, Email: m.Email, Name: optStr(m.Name), Role: string(m.Role)}}}}, nil
+}
+
+type setMemberRoleResp struct{ rawJSON }
+
+func (r setMemberRoleResp) VisitSetMemberRoleResponse(w http.ResponseWriter) error { return r.write(w) }
+
+func (s *strictImpl) SetMemberRole(ctx context.Context, req gen.SetMemberRoleRequestObject) (gen.SetMemberRoleResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return setMemberRoleResp{*e}, nil
+	}
+	if req.Body == nil {
+		return setMemberRoleResp{fail(service.Errf(types.ErrCodeBadRequest, "body required"))}, nil
+	}
+	if err := s.d.Workspace.SetRole(ctx, actorOf(p), req.Id, req.UserId, types.Role(string(req.Body.Role))); err != nil {
+		return setMemberRoleResp{fail(err)}, nil
+	}
+	return setMemberRoleResp{rawJSON{200, map[string]any{"ok": true}}}, nil
+}
+
+type removeMemberResp struct{ rawJSON }
+
+func (r removeMemberResp) VisitRemoveMemberResponse(w http.ResponseWriter) error { return r.write(w) }
+
+func (s *strictImpl) RemoveMember(ctx context.Context, req gen.RemoveMemberRequestObject) (gen.RemoveMemberResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return removeMemberResp{*e}, nil
+	}
+	if err := s.d.Workspace.RemoveMember(ctx, actorOf(p), req.Id, req.UserId); err != nil {
+		return removeMemberResp{fail(err)}, nil
+	}
+	return removeMemberResp{rawJSON{200, map[string]any{"ok": true}}}, nil
+}
+
+type listChangesResp struct{ rawJSON }
+
+func (r listChangesResp) VisitListChangesResponse(w http.ResponseWriter) error { return r.write(w) }
+
+func (s *strictImpl) ListChanges(ctx context.Context, req gen.ListChangesRequestObject) (gen.ListChangesResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return listChangesResp{*e}, nil
+	}
+	cs, err := s.d.Workspace.Changes(ctx, actorOf(p), req.Id)
+	if err != nil {
+		return listChangesResp{fail(err)}, nil
+	}
+	out := make([]gen.WorkspaceChange, 0, len(cs))
+	for _, c := range cs {
+		out = append(out, gen.WorkspaceChange{
+			Id: c.ID, WorkspaceId: c.WorkspaceID, ByUserId: c.ByUserID,
+			Change: string(c.Change), CreatedAt: c.CreatedAt,
+			UserId: optStr(c.UserID), InstanceId: optStr(c.InstanceID), Role: optStr(string(c.Role)),
+		})
+	}
+	return listChangesResp{rawJSON{200, gen.ChangesResponse{Changes: &out}}}, nil
+}
+
+// --- instance shares ---
+
+type listSharesResp struct{ rawJSON }
+
+func (r listSharesResp) VisitListSharesResponse(w http.ResponseWriter) error { return r.write(w) }
+
+func (s *strictImpl) ListShares(ctx context.Context, req gen.ListSharesRequestObject) (gen.ListSharesResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return listSharesResp{*e}, nil
+	}
+	shs, err := s.d.Workspace.Shares(ctx, actorOf(p), req.Id)
+	if err != nil {
+		return listSharesResp{fail(err)}, nil
+	}
+	out := make([]gen.Share, 0, len(shs))
+	for _, sh := range shs {
+		out = append(out, gen.Share{InstanceId: sh.InstanceID, UserId: sh.UserID,
+			Email: optStr(sh.Email), Name: optStr(sh.Name), Role: string(sh.Role),
+			CreatedBy: optStr(sh.CreatedBy), CreatedAt: sh.CreatedAt})
+	}
+	return listSharesResp{rawJSON{200, gen.SharesResponse{Shares: &out}}}, nil
+}
+
+type putShareResp struct{ rawJSON }
+
+func (r putShareResp) VisitPutShareResponse(w http.ResponseWriter) error { return r.write(w) }
+
+func (s *strictImpl) PutShare(ctx context.Context, req gen.PutShareRequestObject) (gen.PutShareResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return putShareResp{*e}, nil
+	}
+	if req.Body == nil {
+		return putShareResp{fail(service.Errf(types.ErrCodeBadRequest, "body required"))}, nil
+	}
+	sh, err := s.d.Workspace.PutShare(ctx, actorOf(p), req.Id, req.Body.Email, types.Role(string(req.Body.Role)))
+	if err != nil {
+		return putShareResp{fail(err)}, nil
+	}
+	return putShareResp{rawJSON{200, gen.ShareResponse{Share: &gen.Share{
+		InstanceId: sh.InstanceID, UserId: sh.UserID, Email: optStr(sh.Email),
+		Name: optStr(sh.Name), Role: string(sh.Role), CreatedBy: optStr(sh.CreatedBy),
+		CreatedAt: sh.CreatedAt}}}}, nil
+}
+
+type deleteShareResp struct{ rawJSON }
+
+func (r deleteShareResp) VisitDeleteShareResponse(w http.ResponseWriter) error { return r.write(w) }
+
+func (s *strictImpl) DeleteShare(ctx context.Context, req gen.DeleteShareRequestObject) (gen.DeleteShareResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return deleteShareResp{*e}, nil
+	}
+	if err := s.d.Workspace.DeleteShare(ctx, actorOf(p), req.Id, req.UserId); err != nil {
+		return deleteShareResp{fail(err)}, nil
+	}
+	return deleteShareResp{rawJSON{200, map[string]any{"ok": true}}}, nil
+}
+
 // --- api keys (session only) ---
 
-func (s *strictImpl) ListKeys(ctx context.Context, _ gen.ListKeysRequestObject) (gen.ListKeysResponseObject, error) {
+func (s *strictImpl) ListKeys(ctx context.Context, req gen.ListKeysRequestObject) (gen.ListKeysResponseObject, error) {
 	ctx = realCtx(ctx)
 	p, e := needAuth(ctx)
 	if e != nil {
 		return listKeysResp{*e}, nil
 	}
-	keys, err := s.d.IAM.ListKeys(ctx, actorOf(p))
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return listKeysResp{fail(err)}, nil
+	}
+	keys, err := s.d.IAM.ListKeys(ctx, a)
 	if err != nil {
 		return listKeysResp{fail(err)}, nil
 	}
@@ -322,13 +614,35 @@ func (s *strictImpl) CreateKey(ctx context.Context, req gen.CreateKeyRequestObje
 	}
 	var name string
 	var expiresIn int64
+	var spec json.RawMessage
+	var maxInstances int
+	var viewOnly bool
+	var instanceID string
 	if req.Body != nil {
 		name = req.Body.Name
 		if req.Body.ExpiresInSeconds != nil {
 			expiresIn = *req.Body.ExpiresInSeconds
 		}
+		if req.Body.Spec != nil {
+			if b, err := json.Marshal(req.Body.Spec); err == nil {
+				spec = b
+			}
+		}
+		if req.Body.MaxInstances != nil {
+			maxInstances = *req.Body.MaxInstances
+		}
+		if req.Body.ViewOnly != nil {
+			viewOnly = *req.Body.ViewOnly
+		}
+		if req.Body.InstanceId != nil {
+			instanceID = *req.Body.InstanceId
+		}
 	}
-	key, secret, err := s.d.IAM.CreateKey(ctx, actorOf(p), name, expiresIn)
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return createKeyResp{fail(err)}, nil
+	}
+	key, secret, err := s.d.IAM.CreateKey(ctx, a, name, expiresIn, spec, maxInstances, viewOnly, instanceID)
 	if err != nil {
 		return createKeyResp{fail(err)}, nil
 	}
@@ -362,11 +676,52 @@ func (s *strictImpl) ListInstances(ctx context.Context, req gen.ListInstancesReq
 			return listInstancesResp{fail(service.BadRequest("invalid status filter"))}, nil
 		}
 	}
-	lst, err := s.d.Sandbox.List(ctx, actorOf(p), status)
+	if req.Params.Shared != nil && *req.Params.Shared {
+		shs, err := s.d.Access.SharedInstances(ctx, actorOf(p))
+		if err != nil {
+			return listInstancesResp{fail(err)}, nil
+		}
+		out := make([]dto.SharedInstance, 0, len(shs))
+		for _, sh := range shs {
+			in, ierr := s.d.Sandbox.Get(ctx, actorOf(p), sh.InstanceID)
+			if ierr != nil {
+				continue // unshared or gone since
+			}
+			w, _ := s.d.Workspace.Get(ctx, actorOf(p), in.WorkspaceID)
+			entry := dto.SharedInstance{Instance: dto.NewInstance(in), Role: string(sh.Role)}
+			if w != nil {
+				entry.WorkspaceName = w.Name
+			}
+			out = append(out, entry)
+		}
+		return listInstancesResp{rawJSON{200, dto.SharedInstancesEnvelope{Instances: out}}}, nil
+	}
+	a, err := s.actor(ctx, p, req.Params.Workspace)
 	if err != nil {
 		return listInstancesResp{fail(err)}, nil
 	}
-	return listInstancesResp{rawJSON{200, dto.InstancesEnvelope{Instances: dto.NewInstances(lst)}}}, nil
+	lst, err := s.d.Sandbox.List(ctx, a, status)
+	if err != nil {
+		return listInstancesResp{fail(err)}, nil
+	}
+	ids := make([]string, 0, len(lst))
+	for _, in := range lst {
+		ids = append(ids, in.ID)
+	}
+	acts, err := s.d.Sandbox.Activity(ctx, ids)
+	if err != nil {
+		return listInstancesResp{fail(err)}, nil
+	}
+	out := dto.NewInstances(lst)
+	for i := range out {
+		if a := acts[out[i].ID]; a != nil {
+			out[i].Activity = &dto.ExecActivity{
+				Runs: a.Runs, DeniedRuns: a.DeniedRuns, FailedRuns: a.FailedRuns,
+				LastRunAt: a.LastRunAt, LastStatus: a.LastStatus,
+			}
+		}
+	}
+	return listInstancesResp{rawJSON{200, dto.InstancesEnvelope{Instances: out}}}, nil
 }
 
 func (s *strictImpl) CreateInstance(ctx context.Context, req gen.CreateInstanceRequestObject) (gen.CreateInstanceResponseObject, error) {
@@ -383,7 +738,11 @@ func (s *strictImpl) CreateInstance(ctx context.Context, req gen.CreateInstanceR
 		}
 		raw = b
 	}
-	meta, err := s.d.Sandbox.Create(ctx, actorOf(p), raw)
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return createInstanceResp{fail(err)}, nil
+	}
+	meta, err := s.d.Sandbox.Create(ctx, a, raw)
 	if err != nil {
 		return createInstanceResp{fail(err)}, nil
 	}
@@ -537,7 +896,7 @@ func (s *strictImpl) GetExecution(ctx context.Context, req gen.GetExecutionReque
 	if err != nil {
 		return getExecutionResp{fail(err)}, nil
 	}
-	return getExecutionResp{rawJSON{200, dto.ExecutionDetail{Execution: dto.NewExecution(ex), Code: ex.Code}}}, nil
+	return getExecutionResp{rawJSON{200, dto.NewExecutionDetail(ex)}}, nil
 }
 
 // --- audit ---
@@ -562,7 +921,11 @@ func (s *strictImpl) ListAudit(ctx context.Context, req gen.ListAuditRequestObje
 		b := req.Params.Before.UTC()
 		f.Before = &b
 	}
-	lst, err := s.d.Audit.List(ctx, actorOf(p), f)
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return listAuditResp{fail(err)}, nil
+	}
+	lst, err := s.d.Audit.List(ctx, a, f)
 	if err != nil {
 		return listAuditResp{fail(err)}, nil
 	}
@@ -571,13 +934,17 @@ func (s *strictImpl) ListAudit(ctx context.Context, req gen.ListAuditRequestObje
 
 // --- policies ---
 
-func (s *strictImpl) ListPolicies(ctx context.Context, _ gen.ListPoliciesRequestObject) (gen.ListPoliciesResponseObject, error) {
+func (s *strictImpl) ListPolicies(ctx context.Context, req gen.ListPoliciesRequestObject) (gen.ListPoliciesResponseObject, error) {
 	ctx = realCtx(ctx)
 	p, e := needAuth(ctx)
 	if e != nil {
 		return listPoliciesResp{*e}, nil
 	}
-	lst, err := s.d.Policy.List(ctx, actorOf(p))
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return listPoliciesResp{fail(err)}, nil
+	}
+	lst, err := s.d.Policy.List(ctx, a)
 	if err != nil {
 		return listPoliciesResp{fail(err)}, nil
 	}
@@ -594,7 +961,11 @@ func (s *strictImpl) CreatePolicy(ctx context.Context, req gen.CreatePolicyReque
 	if req.Body != nil {
 		name, rego = req.Body.Name, req.Body.Rego
 	}
-	pol, err := s.d.Policy.Create(ctx, actorOf(p), name, rego)
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return createPolicyResp{fail(err)}, nil
+	}
+	pol, err := s.d.Policy.Create(ctx, a, name, rego)
 	if err != nil {
 		return createPolicyResp{fail(err)}, nil
 	}
@@ -660,13 +1031,17 @@ func (s *strictImpl) DeletePolicy(ctx context.Context, req gen.DeletePolicyReque
 
 // --- secrets vault (session only) ---
 
-func (s *strictImpl) ListSecrets(ctx context.Context, _ gen.ListSecretsRequestObject) (gen.ListSecretsResponseObject, error) {
+func (s *strictImpl) ListSecrets(ctx context.Context, req gen.ListSecretsRequestObject) (gen.ListSecretsResponseObject, error) {
 	ctx = realCtx(ctx)
 	p, e := needAuth(ctx)
 	if e != nil {
 		return listSecretsResp{*e}, nil
 	}
-	lst, err := s.d.Vault.List(ctx, actorOf(p))
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return listSecretsResp{fail(err)}, nil
+	}
+	lst, err := s.d.Vault.List(ctx, a)
 	if err != nil {
 		return listSecretsResp{fail(err)}, nil
 	}
@@ -687,7 +1062,11 @@ func (s *strictImpl) CreateSecret(ctx context.Context, req gen.CreateSecretReque
 			domains = *req.Body.AllowedDomains
 		}
 	}
-	sec, err := s.d.Vault.Create(ctx, actorOf(p), name, value, domains)
+	a, err := s.actor(ctx, p, req.Params.Workspace)
+	if err != nil {
+		return createSecretResp{fail(err)}, nil
+	}
+	sec, err := s.d.Vault.Create(ctx, a, name, value, domains)
 	if err != nil {
 		return createSecretResp{fail(err)}, nil
 	}

@@ -2,6 +2,7 @@ package stdlib
 
 import (
 	"context"
+	"math"
 	"strconv"
 	"strings"
 	"testing"
@@ -47,6 +48,59 @@ func TestUtilities(t *testing.T) {
 		{`datetime.format_rfc3339(123)`, `"1970-01-01T00:00:00.123Z"`},
 		{`datetime.format_date(datetime.parse_date("2024-02-29"))`, `"2024-02-29"`},
 		{`datetime.format_date(-1)`, `"1969-12-31"`},
+		{`stats.sum([1, 2, 3.5])`, `6.5`},
+		{`stats.mean((1, 2, 3, 4))`, `2.5`},
+		{`stats.variance([2, 4, 4, 4, 5, 5, 7, 9], sample=False)`, `4.0`},
+		{`stats.stddev([2, 4, 4, 4, 5, 5, 7, 9], sample=False)`, `2.0`},
+		{`stats.variance([1, 2, 3, 4])`, `1.6666666666666667`},
+		{`stats.median([3, 1, 4, 2])`, `2.5`},
+		{`stats.quantile([5, 1, 4, 2, 3], 0.25)`, `2.0`},
+		{`stats.quantile([1, 2], 1)`, `2.0`},
+		{`stats.describe([5])`, `{"count": 1, "mean": 5.0, "stddev": None, "min": 5.0, "q25": 5.0, "median": 5.0, "q75": 5.0, "max": 5.0}`},
+		{`stats.describe([1, 2, 3, 4, 5])["q75"]`, `4.0`},
+		{`stats.covariance([1, 2, 3], [2, 4, 6])`, `2.0`},
+		{`int(math.round(stats.correlation([1, 2, 3], [3, 2, 1]) * 1e9))`, `-1000000000`},
+		{`stats.linear_regression([0, 1, 2], [1, 3, 5])`, `{"slope": 2.0, "intercept": 1.0, "r_squared": 1.0}`},
+		{`linalg.matmul([[1, 2], [3, 4]], [[5], [6]])`, `[[17.0], [39.0]]`},
+		{`linalg.solve([[2, 0], [0, 4]], [2, 8])`, `[1.0, 2.0]`},
+		{`linalg.solve([[2, 0], [0, 4]], [[2], [8]])`, `[[1.0], [2.0]]`},
+		{`[int(math.round(v * 1e9)) for v in linalg.lstsq([[1, 0], [1, 1], [1, 2]], [1, 3, 5])]`, `[1000000000, 2000000000]`},
+		{`linalg.inv([[2, 0], [0, 4]])`, `[[0.5, 0.0], [0.0, 0.25]]`},
+		{`int(math.round(linalg.det([[1, 2], [3, 4]]) * 1e9))`, `-2000000000`},
+		{`dist.cdf(distribution="normal", x=0)`, `0.5`},
+		{`dist.cdf("uniform", 0.25, low=0, high=2)`, `0.125`},
+		{`dist.pdf("binomial", 1.5, n=3, p=0.5)`, `0.0`},
+		{`series.diff([1, 4, 9])`, `[None, 3.0, 5.0]`},
+		{`series.diff([])`, `[]`},
+		{`series.diff([1, 2], periods=5)`, `[None, None]`},
+		{`series.pct_change([100, 125, 0, 5])`, `[None, 0.25, -1.0, None]`},
+		{`series.shift([1, 2, 3], periods=-1)`, `[2.0, 3.0, None]`},
+		{`series.log_return([2, 2])`, `[None, 0.0]`},
+		{`series.cumsum([1, 2, 3])`, `[1.0, 3.0, 6.0]`},
+		{`series.cumprod((1, 2, 3))`, `[1.0, 2.0, 6.0]`},
+		{`series.drawdown([100, 120, 90, 130])`, `[0.0, 0.0, -0.25, 0.0]`},
+		{`series.rolling([1, 2, 3, 4], 2)`, `[None, 1.5, 2.5, 3.5]`},
+		{`series.rolling([3, 1, 2], 2, fn="max")`, `[None, 3.0, 2.0]`},
+		{`series.rolling([3, 1, 2, 8], 3, fn="median")`, `[None, None, 2.0, 2.0]`},
+		{`series.ewma([1, 3], alpha=0.5)`, `[1.0, 2.0]`},
+		{`decimal.add("0.1", "0.2")`, `"0.3"`},
+		{`decimal.sub("1", "0.01")`, `"0.99"`},
+		{`decimal.mul("1.5", "-2.25")`, `"-3.375"`},
+		{`decimal.div("1", "3", 4)`, `"0.3333"`},
+		{`decimal.div("2.5", 1, 0)`, `"2"`},
+		{`decimal.div("2.5", 1, 0, rounding="half_up")`, `"3"`},
+		{`decimal.div("-2.5", 1, 0, rounding="floor")`, `"-3"`},
+		{`decimal.div("-2.5", 1, 0, rounding="ceiling")`, `"-2"`},
+		{`decimal.div("1", "-8", 2, rounding="half_down")`, `"-0.12"`},
+		{`decimal.round("1.005", 2, rounding="half_up")`, `"1.01"`},
+		{`decimal.round("1.2", 3)`, `"1.200"`},
+		{`decimal.round("-0.004", 2)`, `"0.00"`},
+		{`decimal.compare("1.0", "1")`, `0`},
+		{`decimal.compare("-1", "0.5")`, `-1`},
+		{`decimal.sum(["0.10", "0.20", 3])`, `"3.30"`},
+		{`decimal.to_minor("12.3", 2)`, `1230`},
+		{`decimal.to_minor("-12.340", 2)`, `-1234`},
+		{`decimal.from_minor(-5, 2)`, `"-0.05"`},
 	} {
 		t.Run(tc.code, func(t *testing.T) {
 			v, err := starlark.Eval(&starlark.Thread{}, "test", tc.code, Modules())
@@ -100,6 +154,93 @@ func TestUtilityLimitsAndErrors(t *testing.T) {
 		`datetime.parse_rfc3339("2024-01-01T00:00:00,123Z")`,
 		`datetime.parse_rfc3339("2024-01-01T00:00:00+01:60")`,
 		`datetime.format_date(253402300800000)`,
+		`stats.mean([])`,
+		`stats.mean(["secret-value"])`,
+		`stats.mean([True])`,
+		`stats.mean([float("nan")])`,
+		`stats.mean([1] * 100001)`,
+		`stats.mean({"secret-value": 1})`,
+		`stats.variance([1])`,
+		`stats.sum([1e308, 1e308])`,
+		`stats.quantile([1], 1.5)`,
+		`stats.correlation([1, 1, 1], [1, 2, 3])`,
+		`stats.covariance([1, 2], [1, 2, 3])`,
+		`stats.linear_regression([1, 1], [1, 2])`,
+		`linalg.inv([[1, 2], [2, 4]])`,
+		`linalg.inv([[1, 2]])`,
+		`linalg.solve([[1, 2], [2, 4]], [1, 2])`,
+		`linalg.solve([[1, 2, 3], [4, 5, 6]], [1, 2])`,
+		`linalg.solve([[1, 0], [0, 1]], [1, 2, 3])`,
+		`linalg.solve([[1, 0], [0, 1]], [])`,
+		`linalg.lstsq([[1, 1], [1, 1], [1, 1]], [1, 2, 3])`,
+		`linalg.matmul([[1, 2]], [[1, 2]])`,
+		`linalg.matmul([[1e308, 1e308]], [[10], [10]])`,
+		`linalg.det([[1, 2], [3]])`,
+		`linalg.det([[1] * 257])`,
+		`linalg.det([[1]] * 257)`,
+		`linalg.det([])`,
+		`linalg.det([1, 2])`,
+		`dist.cdf("cauchy", 1)`,
+		`dist.cdf("secret-value", 1)`,
+		`dist.cdf("normal", "secret-value")`,
+		`dist.cdf("normal")`,
+		`dist.cdf("normal", 1, 2)`,
+		`dist.cdf("normal", 1, x=2)`,
+		`dist.cdf("normal", 1, stddev=0)`,
+		`dist.cdf("normal", 1, foo=1)`,
+		`dist.cdf("t", 1)`,
+		`dist.cdf("uniform", 0.5, low=1, high=1)`,
+		`dist.cdf("binomial", 1, n=2.5, p=0.5)`,
+		`dist.ppf("normal", 1.5)`,
+		`dist.ppf("normal", 1)`,
+		`dist.ppf("binomial", 0.5, n=10, p=0.5)`,
+		`stats.ttest_1samp([1, 1, 1])`,
+		`stats.ttest_1samp([1, 2, 3], alternative="secret-value")`,
+		`stats.ttest_rel([1, 2, 3], [1, 2])`,
+		`stats.mann_whitney([], [1])`,
+		`stats.pearson([1, 2], [1, 2])`,
+		`stats.spearman([1, 1, 1], [1, 2, 3])`,
+		`stats.chi2_contingency([[1, 2]])`,
+		`stats.chi2_contingency([[0, 0], [1, 2]])`,
+		`stats.chi2_contingency([[-1, 2], [1, 2]])`,
+		`stats.chi2_contingency([[1, 2], [1]])`,
+		`stats.fisher_exact([[1, 2, 3], [1, 2, 3]])`,
+		`stats.fisher_exact([[1.5, 2], [1, 2]])`,
+		`stats.fisher_exact([[600000, 0], [0, 600000]])`,
+		`stats.anova_oneway([[1, 2]])`,
+		`stats.anova_oneway([[1], [2]])`,
+		`stats.anova_oneway([[1, 1], [1, 1]])`,
+		`stats.mean_ci([1, 2, 3], level=1)`,
+		`stats.proportion_ci(5, 3)`,
+		`stats.ols([1, 2], [1, 2])`,
+		`stats.ols([[1, 1], [2, 2], [3, 3], [4, 4]], [1, 2, 3, 5])`,
+		`stats.ols([[1], [1, 2], [3]], [1, 2, 3])`,
+		`stats.ols([[1] * 65] * 100, [1] * 100)`,
+		`stats.ols([1, 2, 3], [1, 2])`,
+		`stats.logit([1, 2, 3, 4], [0, 0, 1, 1])`,
+		`stats.logit([1, 2, 3, 4], [0, 2, 1, 1])`,
+		`series.diff([1, 2], periods=0)`,
+		`series.log_return([1, -1])`,
+		`series.drawdown([0, 1])`,
+		`series.rolling([1, 2], 0)`,
+		`series.rolling([1, 2], 1, fn="std")`,
+		`series.rolling([1, 2], 2, fn="secret-value")`,
+		`series.rolling([1] * 100000, 101)`,
+		`series.ewma([1], alpha=0)`,
+		`series.cumprod([1e200, 1e200])`,
+		`decimal.add(0.1, "1")`,
+		`decimal.add("1e5", "1")`,
+		`decimal.add("secret-value", "1")`,
+		`decimal.add(".", "1")`,
+		`decimal.add("1.2.3", "1")`,
+		`decimal.add("1" * 129, "1")`,
+		`decimal.div("1", "0", 2)`,
+		`decimal.div("1", "3", 101)`,
+		`decimal.round("1", 2, rounding="banker")`,
+		`decimal.to_minor("1.234", 2)`,
+		`decimal.from_minor(1, -1)`,
+		`decimal.from_minor(int("1" * 200), 0)`,
+		`decimal.sum(["1", 1.5])`,
 	} {
 		t.Run(code, func(t *testing.T) {
 			_, err := starlark.Eval(&starlark.Thread{}, "test", code, Modules())
@@ -110,6 +251,100 @@ func TestUtilityLimitsAndErrors(t *testing.T) {
 				t.Fatalf("input leaked in error: %v", err)
 			}
 		})
+	}
+}
+
+// TestStatisticalReferences compares against SciPy 1.16 / statsmodels 0.14.
+func TestStatisticalReferences(t *testing.T) {
+	const x, y = `[2.1, 3.4, 1.9, 5.6, 4.4, 3.8, 2.7, 4.9]`, `[1.8, 2.9, 2.5, 4.1, 3.6, 3.9, 2.2, 3.0]`
+	const ox, oy = `[[1, 2], [2, 1], [3, 4], [4, 3], [5, 6], [6, 4], [7, 8]]`, `[3.1, 3.9, 7.2, 7.8, 11.1, 10.2, 15.3]`
+	const lx, ly = `[0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]`, `[0, 0, 1, 0, 0, 1, 1, 0, 1, 1]`
+	for _, tc := range []struct {
+		code string
+		want map[string][]float64
+	}{
+		{`stats.ttest_1samp(` + x + `, mean=3)`, map[string][]float64{"statistic": {1.277132710866435}, "p_value": {0.24228308628118986}, "df": {7}}},
+		{`stats.ttest_1samp(` + x + `, mean=3, alternative="less")`, map[string][]float64{"p_value": {0.8788584568594051}}},
+		{`stats.ttest_ind(` + x + `, ` + y + `)`, map[string][]float64{"statistic": {1.0864289525102226}, "p_value": {0.2992282251505803}, "df": {11.665856222293312}}},
+		{`stats.ttest_ind(` + x + `, ` + y + `, equal_var=True)`, map[string][]float64{"p_value": {0.2956417169095876}, "df": {14}}},
+		{`stats.ttest_rel(` + x + `, ` + y + `)`, map[string][]float64{"statistic": {2.098034014235906}, "p_value": {0.07408594944866745}}},
+		{`stats.mann_whitney(` + x + `, ` + y + `)`, map[string][]float64{"statistic": {40}, "p_value": {0.43089704373626736}}},
+		{`stats.mann_whitney(` + x + `, ` + y + `, alternative="greater")`, map[string][]float64{"p_value": {0.21544852186813368}}},
+		{`stats.pearson(` + x + `, ` + y + `)`, map[string][]float64{"statistic": {0.8182759418292694}, "p_value": {0.013032488880075972}}},
+		{`stats.spearman(` + x + `, ` + y + `)`, map[string][]float64{"statistic": {0.8333333333333335}, "p_value": {0.010175540123456757}}},
+		{`stats.chi2_contingency([[10, 20], [30, 25]])`, map[string][]float64{"statistic": {2.706155303030302}, "p_value": {0.0999616438735348}, "df": {1}}},
+		{`stats.chi2_contingency([[10, 20, 5], [30, 25, 12]])`, map[string][]float64{"statistic": {3.769722814498934}, "p_value": {0.15185010329461768}, "df": {2}}},
+		{`stats.fisher_exact([[8, 2], [1, 5]])`, map[string][]float64{"odds_ratio": {20}, "p_value": {0.034965034965034975}}},
+		{`stats.fisher_exact([[8, 2], [1, 5]], alternative="less")`, map[string][]float64{"p_value": {0.9991258741258742}}},
+		{`stats.fisher_exact([[8, 2], [1, 5]], alternative="greater")`, map[string][]float64{"p_value": {0.024475524475524483}}},
+		{`stats.anova_oneway([[1, 2, 3, 4], [2, 4, 6, 5], [7, 8, 6]])`, map[string][]float64{"statistic": {8.836940836940837}, "p_value": {0.009427440645678995}, "df_between": {2}, "df_within": {8}}},
+		{`stats.mean_ci(` + x + `)`, map[string][]float64{"estimate": {3.6}, "low": {2.489093874987242}, "high": {4.710906125012758}}},
+		{`stats.proportion_ci(7, 20)`, map[string][]float64{"estimate": {0.35}, "low": {0.18119182410108203}, "high": {0.5671457233147638}}},
+		{`stats.ols(` + ox + `, ` + oy + `)`, map[string][]float64{
+			"coefficients":  {0.54244306, 1.1057971, 0.85144928},
+			"std_errors":    {0.27800208, 0.11478729, 0.10416777},
+			"t_values":      {1.95121948, 9.63344539, 8.17382652},
+			"p_values":      {0.12278521, 0.00064931, 0.00121986},
+			"r_squared":     {0.9960485868264939},
+			"adj_r_squared": {0.9940728802397408},
+			"df_resid":      {4},
+			"n":             {7},
+		}},
+		{`stats.logit(` + lx + `, ` + ly + `)`, map[string][]float64{
+			"coefficients":   {-2.44128795, 0.88774107},
+			"std_errors":     {1.79977434, 0.59617233},
+			"p_values":       {0.17495885, 0.1364695},
+			"log_likelihood": {-5.433365008574438},
+		}},
+		{`{"v": [dist.cdf("normal", 1.96), dist.cdf("t", 2, df=5), dist.sf("chi2", 3.84, df=1), dist.sf("f", 4, df1=2, df2=10), dist.pdf("binomial", 3, n=10, p=0.5), dist.cdf("binomial", 3, n=10, p=0.5), dist.pdf("poisson", 2, rate=3)]}`,
+			map[string][]float64{"v": {0.9750021048517795, 0.9490302605850709, 0.050043521248705085, 0.052922149401344654, 0.1171875, 0.171875, 0.22404180765538775}}},
+		{`{"v": [dist.ppf("normal", 0.975), dist.ppf("t", 0.975, df=10), dist.ppf("gamma", 0.5, shape=2, rate=3), dist.cdf("beta", 0.3, alpha=2, beta=5), dist.cdf("lognormal", 1.5, sigma=0.5), dist.sf("exponential", 2, rate=2)]}`,
+			map[string][]float64{"v": {1.959963984540054, 2.228138851986274, 0.5594489966722204, 0.579825, 0.7912971266155286, 0.01831563888873418}}},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			v, err := starlark.Eval(&starlark.Thread{}, "test", tc.code, Modules())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for key, want := range tc.want {
+				field, _, _ := v.(*starlark.Dict).Get(starlark.String(key))
+				got := []starlark.Value{field}
+				if list, ok := field.(*starlark.List); ok {
+					got = got[:0]
+					for i := 0; i < list.Len(); i++ {
+						got = append(got, list.Index(i))
+					}
+				}
+				if len(got) != len(want) {
+					t.Fatalf("%s: got %v, want %v", key, field, want)
+				}
+				for i, w := range want {
+					f, ok := starlark.AsFloat(got[i])
+					// statsmodels values above are printed to 8 significant digits.
+					if !ok || math.Abs(f-w) > 1e-7*math.Max(1, math.Abs(w)) {
+						t.Fatalf("%s: got %v, want %v", key, field, want)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestLinalgMaxDimensions(t *testing.T) {
+	code := `
+n = 256
+a = [[float(i == j) * 2 + (i + j) % 7 * 0.001 for j in range(n)] for i in range(n)]
+x = linalg.solve(a, [1] * n)
+inv = linalg.inv(a)
+p = linalg.matmul(a, inv)
+out = (len(x), len(inv), len(p[0]), linalg.det(a) != 0, linalg.lstsq(a, a)[0][0] > 0.99)
+`
+	globals, err := starlark.ExecFile(&starlark.Thread{}, "test", code, Modules())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := globals["out"].String(); got != "(256, 256, 256, True, True)" {
+		t.Fatalf("got %s", got)
 	}
 }
 
@@ -132,7 +367,7 @@ func TestUtilityMetadataAndCancellation(t *testing.T) {
 	if _, err := starlark.Eval(thread, "test", `csv.parse("a,b\n")`, modules); err == nil {
 		t.Fatal("ignored cancellation")
 	}
-	for _, module := range []string{"datetime", "url", "csv", "base64", "hashlib", "regex"} {
+	for _, module := range []string{"datetime", "url", "csv", "base64", "hashlib", "regex", "stats", "linalg", "dist", "series", "decimal"} {
 		m := modules[module].(*starlarkstruct.Module)
 		for _, name := range []string{"now", "open", "getenv", "sleep", "random"} {
 			if m.Members[name] != nil {
@@ -165,4 +400,50 @@ func FuzzCSV(f *testing.F) {
 			t.Fatalf("CSV roundtrip differs: %v", err)
 		}
 	})
+}
+
+func TestHelp(t *testing.T) {
+	mods := Modules()
+	h := mods["help"]
+	if h == nil {
+		t.Fatal("help builtin missing")
+	}
+	call := func(args ...string) (string, error) {
+		var a starlark.Tuple
+		for _, s := range args {
+			a = append(a, starlark.String(s))
+		}
+		v, err := starlark.Call(&starlark.Thread{}, h, a, nil)
+		if err != nil {
+			return "", err
+		}
+		return string(v.(starlark.String)), nil
+	}
+	out, err := call()
+	if err != nil || !strings.Contains(out, "stats —") || !strings.Contains(out, "csv —") {
+		t.Fatalf("help(): %v %q", err, out)
+	}
+	out, err = call("stats")
+	if err != nil || !strings.Contains(out, "stats.ols(x, y, intercept)") {
+		t.Fatalf("help(stats): %v %q", err, out)
+	}
+	out, err = call("stats.ols")
+	if err != nil || !strings.Contains(out, "Multiple OLS") {
+		t.Fatalf("help(stats.ols): %v %q", err, out)
+	}
+	if _, err = call("sttats"); err == nil || !strings.Contains(err.Error(), "stats") {
+		t.Fatalf("help(sttats) should suggest stats: %v", err)
+	}
+	if _, err = call("fs"); err == nil {
+		t.Fatal("help(fs) should fail — capabilities are not utility modules")
+	}
+}
+
+func TestEveryModuleDocumented(t *testing.T) {
+	for _, f := range functions {
+		m, _, _ := strings.Cut(f.name, ".")
+		if moduleDocs[m] == "" {
+			t.Fatalf("module %q has no moduleDocs entry", m)
+		}
+	}
 }

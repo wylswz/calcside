@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"calcside/cmd/calcside/internal/service"
+	"calcside/cmd/calcside/internal/service/access"
 	"calcside/internal/completion"
 	"calcside/internal/runtime"
 )
@@ -21,12 +22,12 @@ type InspectView struct {
 // a console read cannot observe the globals dict mid-mutation; values
 // come back as reprs with the instance's secrets already scrubbed.
 func (s *Service) Inspect(ctx context.Context, a service.Actor, id string) (*InspectView, error) {
-	in, err := s.running(ctx, a, id)
+	in, err := s.running(ctx, a, id, access.View)
 	if err != nil {
 		return nil, err
 	}
 	resp, err := s.rt.Inspect(ctx, &runtime.InspectRequest{
-		InstanceID: in.ID, Owner: owner(a), Epoch: in.LeaseEpoch,
+		InstanceID: in.ID, Owner: runtime.Owner{UserID: in.UserID}, Actor: actorOwner(a), Epoch: in.LeaseEpoch,
 	})
 	if err != nil {
 		return nil, fail(err)
@@ -42,12 +43,12 @@ func (s *Service) Inspect(ctx context.Context, a service.Actor, id string) (*Ins
 }
 
 func (s *Service) Completions(ctx context.Context, a service.Actor, id string) (*completion.Context, error) {
-	in, err := s.running(ctx, a, id)
+	in, err := s.running(ctx, a, id, access.View)
 	if err != nil {
 		return nil, err
 	}
 	resp, err := s.rt.Inspect(ctx, &runtime.InspectRequest{
-		InstanceID: in.ID, Owner: owner(a), Epoch: in.LeaseEpoch, CompletionsOnly: true,
+		InstanceID: in.ID, Owner: runtime.Owner{UserID: in.UserID}, Actor: actorOwner(a), Epoch: in.LeaseEpoch, CompletionsOnly: true,
 	})
 	if err != nil {
 		return nil, fail(err)

@@ -34,7 +34,7 @@ print(base64.encode("hello"))`, time.Second, 100000, session.Out.String)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"url.query_encode", "csv.parse_dicts", "base64.decode", "hashlib.sha256", "regex.search", "datetime.parse_date"} {
+	for _, name := range []string{"url.query_encode", "csv.parse_dicts", "base64.decode", "hashlib.sha256", "regex.search", "datetime.parse_date", "stats.describe", "linalg.solve", "stats.ttest_ind", "dist.cdf", "series.rolling", "decimal.div"} {
 		found := false
 		for _, symbol := range completion.Symbols {
 			if symbol.Name == name {

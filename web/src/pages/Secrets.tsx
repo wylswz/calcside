@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, ApiError, Secret } from '../api'
-import { Button, EmptyRow, Field, Modal, Notice, PageHeader, Tag, fmtTime, inputCls } from '../components/ui'
+import { api, ApiError, Secret, wsPath } from '../api'
+import { Button, Confirm, EmptyRow, Field, Modal, Notice, PageHeader, Tag, inputCls } from '../components/ui'
+import { fmtTime } from '../format'
 
 function SecretForm({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient()
@@ -11,7 +12,7 @@ function SecretForm({ onClose }: { onClose: () => void }) {
   const [err, setErr] = useState('')
   const create = useMutation({
     mutationFn: () =>
-      api.post<{ secret: Secret }>('/api/v1/secrets', {
+      api.post<{ secret: Secret }>(wsPath('/api/v1/secrets'), {
         name, value,
         allowed_domains: domains.split('\n').map((s) => s.trim()).filter(Boolean),
       }),
@@ -32,7 +33,7 @@ function SecretForm({ onClose }: { onClose: () => void }) {
           <textarea className={inputCls + ' font-mono text-xs'} rows={3} value={domains}
             onChange={(e) => setDomains(e.target.value)} placeholder="api.github.com" />
         </Field>
-        {err && <p className="text-xs text-danger">{err}</p>}
+        {err && <p className="text-xs text-warn-text">{err}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="primary" disabled={!name || !value || create.isPending} onClick={() => create.mutate()}>Create</Button>
@@ -65,7 +66,7 @@ function EditDomains({ s, onClose }: { s: Secret; onClose: () => void }) {
         <Field label="Rotate value (optional — write-only)">
           <input type="password" className={inputCls + ' font-mono'} value={rotate} onChange={(e) => setRotate(e.target.value)} placeholder="leave blank to keep current value" autoComplete="new-password" />
         </Field>
-        {err && <p className="text-xs text-danger">{err}</p>}
+        {err && <p className="text-xs text-warn-text">{err}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>Save</Button>
@@ -75,13 +76,14 @@ function EditDomains({ s, onClose }: { s: Secret; onClose: () => void }) {
   )
 }
 
-export default function Secrets() {
+export default function Secrets({ bare }: { bare?: boolean }) {
   const qc = useQueryClient()
   const [showNew, setShowNew] = useState(false)
   const [editing, setEditing] = useState<Secret | null>(null)
+  const [deleting, setDeleting] = useState<Secret | null>(null)
   const { data, error } = useQuery({
     queryKey: ['secrets'],
-    queryFn: () => api.get<{ secrets: Secret[] }>('/api/v1/secrets'),
+    queryFn: () => api.get<{ secrets: Secret[] }>(wsPath('/api/v1/secrets')),
     retry: false,
   })
   const del = useMutation({
@@ -93,12 +95,13 @@ export default function Secrets() {
 
   return (
     <div>
-      <PageHeader index="04" section="Vault" title="Secrets"
+      {bare && <div className="mb-4 flex items-center justify-between"><p className="text-xs text-sec" /><Button variant="primary" onClick={() => setShowNew(true)}>New secret</Button></div>}
+{!bare && <PageHeader title="Secrets"
         actions={!disabled && <Button variant="primary" onClick={() => setShowNew(true)}>New secret</Button>}>
         Values are write-only. Use <code className="font-mono text-ink">{'{{secrets.NAME}}'}</code> in net.get/post URL, headers or body — the server injects the value at send time and scrubs it from responses.
-      </PageHeader>
+      </PageHeader>}
       {disabled && (
-        <Notice tone="yellow">
+        <Notice tone="warning">
           Secrets vault is disabled on this server (no <code>--secret-key</code>). Inline per-instance secrets still work.
         </Notice>
       )}
@@ -120,7 +123,7 @@ export default function Secrets() {
                   <td className="whitespace-nowrap text-xs text-sec">{fmtTime(s.updated_at)}</td>
                   <td className="space-x-2 whitespace-nowrap text-right">
                     <Button size="sm" onClick={() => setEditing(s)}>Edit</Button>
-                    <Button variant="danger" size="sm" onClick={() => del.mutate(s.id)}>Delete</Button>
+                    <Button size="sm" onClick={() => setDeleting(s)}>Delete</Button>
                   </td>
                 </tr>
               ))}
@@ -131,6 +134,12 @@ export default function Secrets() {
       )}
       {showNew && <SecretForm onClose={() => setShowNew(false)} />}
       {editing && <EditDomains s={editing} onClose={() => setEditing(null)} />}
+      {deleting && (
+        <Confirm title={`Delete secret ${deleting.name}?`} confirm="Delete" pending="Deleting…"
+          action={() => del.mutateAsync(deleting.id)} onClose={() => setDeleting(null)}>
+          <p className="text-sm text-body">The stored value of <code className="font-mono text-ink">{deleting.name}</code> is erased. This cannot be undone.</p>
+        </Confirm>
+      )}
     </div>
   )
 }

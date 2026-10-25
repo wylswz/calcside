@@ -113,7 +113,8 @@ func (c *client) authorize(method, rawURL string) (host, effPort string, err err
 		}
 	}
 	if !ok {
-		return "", "", fmt.Errorf("net: method %s not in methods %v", m, c.cfg.Methods)
+		return "", "", &capability.DeniedError{Hook: "net", Phase: types.PhaseBefore,
+			Reason: fmt.Sprintf("net: method %s not in methods %v", m, c.cfg.Methods)}
 	}
 	// Empty allow_hosts = unrestricted at the host-name layer; the dialer
 	// still enforces the instance's selected network policy.
@@ -125,7 +126,8 @@ func (c *client) authorize(method, rawURL string) (host, effPort string, err err
 			return host, effPort, nil
 		}
 	}
-	return "", "", fmt.Errorf("net: host %q (port %s) not in allow_hosts", host, effPort)
+	return "", "", &capability.DeniedError{Hook: "net", Phase: types.PhaseBefore,
+		Reason: fmt.Sprintf("net: host %q (port %s) not in allow_hosts", host, effPort)}
 }
 
 // blockedCIDRs are IPv4 ranges never dialed unless explicitly allowed.
@@ -403,10 +405,12 @@ func (c *client) expand(rawURL string, headers map[string]string, body string) (
 			return "", nil, "", nil, fmt.Errorf("net: unknown secret %q", n)
 		}
 		if !sec.Allows(host, effPort) {
-			return "", nil, "", nil, fmt.Errorf("net: secret %s not allowed for host %s", n, host)
+			return "", nil, "", nil, &capability.DeniedError{Hook: "net", Phase: types.PhaseBefore,
+				Reason: fmt.Sprintf("net: secret %s not allowed for host %s", n, host)}
 		}
 		if eu.Scheme != "https" && !c.allowHTTP {
-			return "", nil, "", nil, fmt.Errorf("net: secret %s requires https (http URL)", n)
+			return "", nil, "", nil, &capability.DeniedError{Hook: "net", Phase: types.PhaseBefore,
+				Reason: fmt.Sprintf("net: secret %s requires https (http URL)", n)}
 		}
 	}
 	return expURL, expHeaders, expBody, names, nil

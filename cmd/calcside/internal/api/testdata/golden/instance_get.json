@@ -31,7 +31,8 @@
         "ttl_seconds": 900
       },
       "status": "running",
-      "user_id": "\u003cid:usr\u003e"
+      "user_id": "\u003cid:usr\u003e",
+      "workspace_id": "\u003cid:ws_\u003e"
     }
   },
   "status": 200

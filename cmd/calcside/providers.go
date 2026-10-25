@@ -14,6 +14,7 @@ import (
 	"calcside/cmd/calcside/internal/config"
 	"calcside/cmd/calcside/internal/extensions"
 	_ "calcside/cmd/calcside/internal/gormstore"
+	"calcside/cmd/calcside/internal/service/access"
 	policysvc "calcside/cmd/calcside/internal/service/policy"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/vaultcipher"
@@ -145,7 +146,7 @@ func provideGlobalPolicies(cfg config.Config) (map[string]string, error) {
 	return globalPolicies, nil
 }
 
-func provideSandboxOptions(ctx context.Context, cfg config.Config, st store.Store, rt runtime.Runtime, vaultSvc sandbox.SecretResolver, rec sandbox.AuditSink, reg *capability.Registry, limits capability.ServerLimits, globalPolicies map[string]string) (sandbox.Options, error) {
+func provideSandboxOptions(ctx context.Context, cfg config.Config, st store.Store, rt runtime.Runtime, vaultSvc sandbox.SecretResolver, rec sandbox.AuditSink, reg *capability.Registry, limits capability.ServerLimits, globalPolicies map[string]string, ac *access.Checker) (sandbox.Options, error) {
 	// Instances a previous incarnation of this node owned cannot be
 	// recovered: their Starlark globals lived in that process's memory.
 	if n, err := st.MarkRunningAsLostForNode(ctx, cfg.NodeID); err != nil {
@@ -162,6 +163,7 @@ func provideSandboxOptions(ctx context.Context, cfg config.Config, st store.Stor
 		Registry:            reg,
 		Limits:              limits,
 		GlobalPolicies:      globalPolicies,
+		Access:              ac,
 		MaxInstancesPerUser: cfg.MaxInstancesPerUser,
 	}, nil
 }

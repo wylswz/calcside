@@ -23,7 +23,7 @@ import (
 // Unlike the CRUD methods, Resolve takes no Actor and does not require a
 // session: creating an instance that references vault secrets is allowed
 // from an API key, it just cannot read them back.
-func (s *Service) Resolve(ctx context.Context, userID string, in map[string]runtime.SecretSpec) ([]runtime.Secret, map[string]runtime.SecretSpec, error) {
+func (s *Service) Resolve(ctx context.Context, workspaceID string, in map[string]runtime.SecretSpec) ([]runtime.Secret, map[string]runtime.SecretSpec, error) {
 	var out []runtime.Secret
 	sanitized := map[string]runtime.SecretSpec{}
 	for name, ss := range in {
@@ -41,7 +41,7 @@ func (s *Service) Resolve(ctx context.Context, userID string, in map[string]runt
 		}
 		switch {
 		case ss.Ref != "":
-			value, domains, err := s.resolveRef(ctx, userID, name, ss)
+			value, domains, err := s.resolveRef(ctx, workspaceID, name, ss)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -72,15 +72,15 @@ func (s *Service) Resolve(ctx context.Context, userID string, in map[string]runt
 // resolveRef decrypts a vault secret and returns its plaintext plus the
 // effective allowlist: the vault's own, or the spec's if the spec
 // narrowed it. Widening is rejected.
-func (s *Service) resolveRef(ctx context.Context, userID, name string, ss runtime.SecretSpec) ([]byte, []string, error) {
+func (s *Service) resolveRef(ctx context.Context, workspaceID, name string, ss runtime.SecretSpec) ([]byte, []string, error) {
 	if s.cipher == nil {
 		return nil, nil, fmt.Errorf("secret %s: vault secrets disabled (no --secret-key)", name)
 	}
-	rec, err := s.st.GetSecretByName(ctx, userID, ss.Ref)
+	rec, err := s.st.GetSecretByName(ctx, workspaceID, ss.Ref)
 	if err != nil {
 		return nil, nil, fmt.Errorf("secret %s: unknown vault ref %q", name, ss.Ref)
 	}
-	value, err := s.cipher.Open(rec.Ciphertext, userID+"/"+rec.Name)
+	value, err := s.cipher.Open(rec.Ciphertext, rec.UserID+"/"+rec.Name)
 	if err != nil {
 		return nil, nil, fmt.Errorf("secret %s: vault decrypt failed", name)
 	}

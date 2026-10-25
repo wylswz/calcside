@@ -16,6 +16,8 @@ import (
 type Instance struct {
 	ID           string               `json:"id"`
 	UserID       string               `json:"user_id"`
+	WorkspaceID  string               `json:"workspace_id"`
+	Activity     *ExecActivity        `json:"activity,omitempty"`
 	Spec         json.RawMessage      `json:"spec"`
 	Labels       map[string]string    `json:"labels"`
 	Status       types.InstanceStatus `json:"status"`
@@ -27,7 +29,7 @@ type Instance struct {
 
 func NewInstance(in *store.Instance) Instance {
 	return Instance{
-		ID: in.ID, UserID: in.UserID, Spec: in.Spec, Labels: in.Labels,
+		ID: in.ID, UserID: in.UserID, WorkspaceID: in.WorkspaceID, Spec: in.Spec, Labels: in.Labels,
 		Status: in.Status, CreatedAt: in.CreatedAt, LastActiveAt: in.LastActiveAt,
 		ExpiresAt: in.ExpiresAt, EndedAt: in.EndedAt,
 	}
@@ -40,6 +42,27 @@ func NewInstances(lst []*store.Instance) []Instance {
 		out[i] = NewInstance(in)
 	}
 	return out
+}
+
+// ExecActivity is the per-instance run summary on list responses.
+type ExecActivity struct {
+	Runs       int        `json:"runs"`
+	DeniedRuns int        `json:"denied_runs"`
+	FailedRuns int        `json:"failed_runs"`
+	LastRunAt  *time.Time `json:"last_run_at,omitempty"`
+	LastStatus string     `json:"last_status,omitempty"`
+}
+
+// SharedInstance is an instance reached via a share, with the share
+// role and owning workspace name.
+type SharedInstance struct {
+	Instance      `json:",inline"`
+	Role          string `json:"role"`
+	WorkspaceName string `json:"workspace_name"`
+}
+
+type SharedInstancesEnvelope struct {
+	Instances []SharedInstance `json:"instances"`
 }
 
 type InstanceEnvelope struct {
@@ -63,6 +86,7 @@ type Execution struct {
 	DurationMs  int64               `json:"duration_ms"`
 	Steps       uint64              `json:"steps"`
 	OutputBytes int64               `json:"output_bytes"`
+	Via         types.AuthKind      `json:"via,omitempty"`
 	CreatedAt   time.Time           `json:"created_at"`
 }
 
@@ -71,7 +95,7 @@ func NewExecution(e *store.Execution) Execution {
 		ID: e.ID, InstanceID: e.InstanceID, UserID: e.UserID,
 		CodeSHA256: e.CodeSHA256, CodeSnippet: e.CodeSnippet,
 		Status: e.Status, ErrorType: e.ErrorType, DurationMs: e.DurationMs,
-		Steps: e.Steps, OutputBytes: e.OutputBytes, CreatedAt: e.CreatedAt,
+		Steps: e.Steps, OutputBytes: e.OutputBytes, Via: e.Via, CreatedAt: e.CreatedAt,
 	}
 }
 
@@ -88,10 +112,26 @@ type ExecutionsEnvelope struct {
 }
 
 // ExecutionDetail is the GET /executions/{id} body: the record plus the
-// full code.
+// detail-only fields (full code, output, error).
 type ExecutionDetail struct {
-	Execution Execution `json:"execution"`
-	Code      string    `json:"code"`
+	Execution       Execution  `json:"execution"`
+	Code            string     `json:"code"`
+	Output          string     `json:"output"`
+	OutputTruncated bool       `json:"output_truncated"`
+	Error           *ExecError `json:"error"`
+}
+
+// NewExecutionDetail builds the detail body; Error is null for runs that
+// completed without an error (status ok).
+func NewExecutionDetail(e *store.Execution) ExecutionDetail {
+	d := ExecutionDetail{
+		Execution: NewExecution(e), Code: e.Code,
+		Output: e.Output, OutputTruncated: e.OutputTruncated,
+	}
+	if e.Status != types.ExecOK {
+		d.Error = &ExecError{Type: e.ErrorType, Message: e.ErrorMessage, Backtrace: e.ErrorBacktrace}
+	}
+	return d
 }
 
 // ExecResult is the exec response body; Error is a pointer without

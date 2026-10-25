@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"calcside/cmd/calcside/internal/service"
+	"calcside/cmd/calcside/internal/service/access"
 	"calcside/internal/runtime"
 	"calcside/internal/types"
 )
@@ -30,14 +31,14 @@ func (s *Service) Preview(ctx context.Context, a service.Actor, id, path, mode s
 func (s *Service) export(ctx context.Context, a service.Actor, id string, req runtime.ExportRequest) (*ArtifactSnapshot, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	in, err := s.running(ctx, a, id)
+	in, err := s.running(ctx, a, id, access.View)
 	if err != nil {
 		return nil, err
 	}
 	if !in.ExpiresAt.After(s.now()) {
 		return nil, service.Errf(types.ErrCodeNotRunning, "instance expired")
 	}
-	req.InstanceID, req.Owner, req.Epoch = id, owner(a), in.LeaseEpoch
+	req.InstanceID, req.Owner, req.Actor, req.Epoch = id, runtime.Owner{UserID: in.UserID}, actorOwner(a), in.LeaseEpoch
 	resp, err := s.rt.Export(ctx, &req)
 	if resp != nil {
 		s.audit.Record(resp.Audit)
@@ -55,7 +56,7 @@ func (s *Service) export(ctx context.Context, a service.Actor, id string, req ru
 }
 
 func (s *Service) ArtifactAlive(ctx context.Context, userID, id string, epoch int64) error {
-	in, err := s.running(ctx, service.Actor{UserID: userID}, id)
+	in, err := s.running(ctx, service.Actor{UserID: userID}, id, access.View)
 	if err != nil {
 		return err
 	}

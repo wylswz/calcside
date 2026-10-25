@@ -54,6 +54,7 @@ func TestOpenAPIEnumsInSync(t *testing.T) {
 		"APIErrorCode":   strs(AllAPIErrorCodes()),
 		"FieldType":      strs(AllFieldTypes()),
 		"AuthKind":       strs(AllAuthKinds()),
+		"MemberRole":     strs(AllRoles()),
 	}
 	for name, w := range want {
 		got, ok := found[name]

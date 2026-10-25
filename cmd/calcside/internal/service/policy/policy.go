@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"calcside/cmd/calcside/internal/service"
+	"calcside/cmd/calcside/internal/service/access"
 	rego "calcside/internal/policy"
 	"calcside/internal/runtime"
 	"calcside/internal/store"
@@ -35,15 +36,16 @@ func builtinPolicy(name string) *Policy {
 }
 
 type Service struct {
-	st store.Store
+	st     store.Store
+	access *access.Checker
 }
 
-func New(st store.Store) *Service {
-	return &Service{st: st}
+func New(st store.Store, ac *access.Checker) *Service {
+	return &Service{st: st, access: ac}
 }
 
 func (s *Service) List(ctx context.Context, a service.Actor) ([]*Policy, error) {
-	lst, err := s.st.ListPolicies(ctx, a.UserID)
+	lst, err := s.st.ListPolicies(ctx, a.WorkspaceID)
 	if err != nil {
 		return nil, service.Internal(err)
 	}
@@ -75,6 +77,9 @@ func writeErr(err error) error {
 }
 
 func (s *Service) Create(ctx context.Context, a service.Actor, name, src string) (*Policy, error) {
+	if err := s.access.Workspace(ctx, a, a.WorkspaceID, access.Configure); err != nil {
+		return nil, err
+	}
 	if name == "" || src == "" {
 		return nil, service.BadRequest("name and rego required")
 	}
@@ -84,7 +89,7 @@ func (s *Service) Create(ctx context.Context, a service.Actor, name, src string)
 	if err := rego.Validate(src); err != nil {
 		return nil, service.Errf(types.ErrCodeBadPolicy, "%s", err.Error())
 	}
-	pol := &store.Policy{UserID: a.UserID, Name: name, Rego: src}
+	pol := &store.Policy{UserID: a.UserID, WorkspaceID: a.WorkspaceID, Name: name, Rego: src}
 	if err := s.st.CreatePolicy(ctx, pol); err != nil {
 		return nil, writeErr(err)
 	}
@@ -104,18 +109,22 @@ func (s *Service) Get(ctx context.Context, a service.Actor, id string) (*Policy,
 	if p := builtinPolicy(id); p != nil {
 		return p, nil
 	}
-	pol, err := s.st.GetPolicy(ctx, id)
-	if err != nil || pol.UserID != a.UserID {
-		return nil, service.NotFound("policy not found")
+	pol, err := s.access.Policy(ctx, a, id, access.View)
+	if err != nil {
+		return nil, err
 	}
 	return regoPolicy(pol), nil
 }
 
 func (s *Service) Update(ctx context.Context, a service.Actor, id string, name, src *string) (*Policy, error) {
-	pol, err := s.Get(ctx, a, id)
+	if builtinPolicy(id) != nil {
+		return nil, service.Forbidden("built-in policies are read-only")
+	}
+	stored, err := s.access.Policy(ctx, a, id, access.Configure)
 	if err != nil {
 		return nil, err
 	}
+	pol := regoPolicy(stored)
 	if pol.Kind == "builtin" {
 		return nil, service.Forbidden("built-in policies are read-only")
 	}
@@ -138,12 +147,12 @@ func (s *Service) Update(ctx context.Context, a service.Actor, id string, name, 
 }
 
 func (s *Service) Delete(ctx context.Context, a service.Actor, id string) error {
-	pol, err := s.Get(ctx, a, id)
+	if builtinPolicy(id) != nil {
+		return service.Forbidden("built-in policies are read-only")
+	}
+	pol, err := s.access.Policy(ctx, a, id, access.Configure)
 	if err != nil {
 		return err
-	}
-	if pol.Kind == "builtin" {
-		return service.Forbidden("built-in policies are read-only")
 	}
 	if err := s.st.DeletePolicy(ctx, pol.ID); err != nil {
 		return service.Internal(err)

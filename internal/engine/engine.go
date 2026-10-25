@@ -49,19 +49,33 @@ type Session struct {
 	Capabilities map[string]any
 	// Closers indexes capability closers by name, for host-side access
 	// (console file browse) without starlark types.
-	Closers map[types.CapabilityName]io.Closer
-	closers []io.Closer // build order, for Close
+	actorID    string
+	actorEmail string
+	Closers    map[types.CapabilityName]io.Closer
+	closers    []io.Closer // build order, for Close
 }
 
-// execContext builds the gate's ExecContext for one exec.
+// execContext builds the gate's ExecContext for one exec. The actor —
+// the user who made this call — overrides the instance creator when set
+// (shared workspaces); audit and policy input name the actor.
 func (s *Session) execContext(execID string) capability.ExecContext {
+	uid, mail := s.UserID, s.UserEmail
+	if s.actorID != "" {
+		uid, mail = s.actorID, s.actorEmail
+	}
 	return capability.ExecContext{
 		ExecID:     execID,
 		InstanceID: s.InstanceID,
-		UserID:     s.UserID,
-		UserEmail:  s.UserEmail,
+		UserID:     uid,
+		UserEmail:  mail,
 		Labels:     s.Labels,
 	}
+}
+
+// SetActor names the user acting for the next armed gate contexts; an
+// empty id restores the instance creator. Callers hold ExecMu.
+func (s *Session) SetActor(userID, email string) {
+	s.actorID, s.actorEmail = userID, email
 }
 
 // Inspect snapshots the session globals: variable name to its Starlark

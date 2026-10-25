@@ -12,12 +12,14 @@ import (
 	"calcside/cmd/calcside/internal/audit"
 	"calcside/cmd/calcside/internal/auth"
 	_ "calcside/cmd/calcside/internal/gormstore"
+	"calcside/cmd/calcside/internal/service/access"
 	auditsvc "calcside/cmd/calcside/internal/service/audit"
 	"calcside/cmd/calcside/internal/service/catalog"
 	"calcside/cmd/calcside/internal/service/iam"
 	policysvc "calcside/cmd/calcside/internal/service/policy"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/vault"
+	workspacesvc "calcside/cmd/calcside/internal/service/workspace"
 	"calcside/cmd/calcside/internal/vaultcipher"
 	"calcside/internal/capability"
 	capfs "calcside/internal/capability/fs"
@@ -55,10 +57,11 @@ func newDevEnv(t *testing.T, cipher *vaultcipher.Cipher) *env {
 		EvalTimeout: time.Second, ReapInterval: time.Hour,
 	})
 	e.mgr = mgr
-	vaultSvc := vault.New(st, cipher)
+	ac := access.New(st)
+	vaultSvc := vault.New(st, cipher, ac)
 	e.sbx = sandbox.New(sandbox.Options{
 		Store: st, Runtime: mgr, Secrets: vaultSvc, Audit: rec,
-		Registry: reg, Limits: limits, MaxInstancesPerUser: 10,
+		Registry: reg, Limits: limits, Access: ac, MaxInstancesPerUser: 10,
 	})
 	svc := auth.NewService(st, false)
 	anon, err := st.UpsertUserByEmail(context.Background(), "anonymous@localhost", "anonymous", "")
@@ -66,9 +69,9 @@ func newDevEnv(t *testing.T, cipher *vaultcipher.Cipher) *env {
 		t.Fatal(err)
 	}
 	h := Handler(Deps{
-		IAM: iam.New(st, nil), Vault: vaultSvc,
-		Policy: policysvc.New(st), Audit: auditsvc.New(st),
-		Catalog: catalog.New(reg, nil), Sandbox: e.sbx,
+		IAM: iam.New(st, ac, e.sbx, 10, nil), Vault: vaultSvc,
+		Policy: policysvc.New(st, ac), Audit: auditsvc.New(st, ac),
+		Catalog: catalog.New(reg, nil), Sandbox: e.sbx, Access: ac, Workspace: workspacesvc.New(st, ac),
 		Auth: svc, Dev: true, Anonymous: anon,
 	})
 	e.srv = httptest.NewServer(h)
@@ -191,6 +194,7 @@ func TestBearerBeatsAnonymous(t *testing.T) {
 		t.Fatal(err)
 	}
 	secret, k := auth.NewAPIKey(u.ID, "k", nil)
+	k.WorkspaceID = store.PersonalWorkspaceID(u.ID)
 	if err := e.st.CreateAPIKey(context.Background(), k); err != nil {
 		t.Fatal(err)
 	}

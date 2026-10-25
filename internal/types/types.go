@@ -341,3 +341,35 @@ func AllAuthKinds() []AuthKind { return []AuthKind{AuthSession, AuthAPIKey, Auth
 func (k AuthKind) Valid() bool { return valid(k, AllAuthKinds()) }
 
 func (k AuthKind) MarshalText() ([]byte, error) { return []byte(k), nil }
+
+// Role is a workspace membership or share role, weakest to strongest.
+type Role string
+
+const (
+	RoleViewer Role = "viewer"
+	RoleEditor Role = "editor"
+	RoleOwner  Role = "owner"
+)
+
+func AllRoles() []Role     { return []Role{RoleViewer, RoleEditor, RoleOwner} }
+func (r Role) Valid() bool { return valid(r, AllRoles()) }
+
+// ValidForShare reports whether r is an allowed share role (never owner).
+func (r Role) ValidForShare() bool { return r == RoleViewer || r == RoleEditor }
+
+// ChangeKind is a workspace change-log entry kind.
+type ChangeKind string
+
+const (
+	ChangeMemberAdded   ChangeKind = "member_added"
+	ChangeRoleChanged   ChangeKind = "role_changed"
+	ChangeMemberRemoved ChangeKind = "member_removed"
+	ChangeShareAdded    ChangeKind = "share_added"
+	ChangeShareRemoved  ChangeKind = "share_removed"
+	ChangeRenamed       ChangeKind = "renamed"
+)
+
+func AllChangeKinds() []ChangeKind {
+	return []ChangeKind{ChangeMemberAdded, ChangeRoleChanged, ChangeMemberRemoved,
+		ChangeShareAdded, ChangeShareRemoved, ChangeRenamed}
+}

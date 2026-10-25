@@ -103,6 +103,10 @@ type CreateResponse struct {
 type ExecRequest struct {
 	InstanceID string `json:"instance_id"`
 	Owner      Owner  `json:"owner"`
+	// Actor is the user who made the call (may differ from Owner in a
+	// shared workspace); empty = the owner acted. Audit and policy
+	// input name the actor.
+	Actor Owner `json:"actor,omitempty"`
 	// ExecID is minted by the API tier and doubles as the idempotency
 	// key: a node that has already run this ExecID must return the
 	// recorded result rather than run the code again. Exec has external
@@ -196,6 +200,7 @@ type BrowseRequest struct {
 	ListOnly   bool   `json:"list_only,omitempty"`
 	InstanceID string `json:"instance_id"`
 	Owner      Owner  `json:"owner"`
+	Actor      Owner  `json:"actor,omitempty"`
 	Path       string `json:"path"`
 	Epoch      int64  `json:"epoch,omitempty"`
 }
@@ -222,6 +227,7 @@ type BrowseResponse struct {
 type PromptRequest struct {
 	InstanceID string `json:"instance_id"`
 	Owner      Owner  `json:"owner"`
+	Actor      Owner  `json:"actor,omitempty"`
 	Epoch      int64  `json:"epoch,omitempty"`
 }
 
@@ -258,6 +264,7 @@ type InspectRequest struct {
 	CompletionsOnly bool   `json:"completions_only,omitempty"`
 	InstanceID      string `json:"instance_id"`
 	Owner           Owner  `json:"owner"`
+	Actor           Owner  `json:"actor,omitempty"`
 	Epoch           int64  `json:"epoch,omitempty"`
 }
 

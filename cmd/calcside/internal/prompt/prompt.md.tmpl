@@ -13,9 +13,10 @@ Large values (API responses, file contents, intermediate results) stay in instan
 
 ### Pure utilities
 These modules are available without capability grants, including inside extensions. They never fetch URLs, read files, expand secrets, or access the current clock. Inputs and outputs are bounded; limit failures do not silently return partial data. URL and CSV require UTF-8 strings, not arbitrary bytes. Optional arguments and their defaults are described below.
-{{range .Utilities}}{{if eq .Kind "function"}}
-- `{{.Name}}({{join .Params ", "}})` — {{.Doc}}
+{{range .Utilities}}{{if eq .Kind "namespace"}}
+- `{{.Name}}` — {{.Doc}}
 {{- end}}{{end}}
+Call `print(help("module"))` for signatures before first use; `print(help("module.function"))` for details.
 
 ### Tools
 - `{{.Prefix}}exec(code)` — run Starlark code; returns printed output (or an error).
@@ -43,7 +44,7 @@ Read env vars in Starlark via `env.get("NAME")`; available keys: {{join .EnvKeys
 {{- end}}
 
 ### Errors and limits
-- `policy_denied` — a security policy blocked the action. Do NOT retry the same action; explain to the user what was blocked.
+- `policy_denied` — the instance's settings (e.g. a host not in `allow_hosts`) or a security policy blocked the action. Do NOT retry the same action; explain to the user what was blocked.
 - `step_limit` / `timeout` — simplify the code or split the work.
 - `syntax` / `runtime` / `out_of_scope` / `memory_limit` — fix the code or reduce memory and try again.
 {{- if .LimitBits}}

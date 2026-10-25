@@ -13,12 +13,14 @@ import (
 	"calcside/cmd/calcside/internal/auth"
 	"calcside/cmd/calcside/internal/extensions"
 	_ "calcside/cmd/calcside/internal/gormstore"
+	"calcside/cmd/calcside/internal/service/access"
 	auditsvc "calcside/cmd/calcside/internal/service/audit"
 	"calcside/cmd/calcside/internal/service/catalog"
 	"calcside/cmd/calcside/internal/service/iam"
 	policysvc "calcside/cmd/calcside/internal/service/policy"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/vault"
+	workspacesvc "calcside/cmd/calcside/internal/service/workspace"
 	"calcside/internal/capability"
 	capext "calcside/internal/capability/ext"
 	capio "calcside/internal/capability/io"
@@ -52,15 +54,17 @@ func TestListExtensions(t *testing.T) {
 		Engine: engine.New(8), Registry: reg, Limits: limits,
 		EvalTimeout: time.Second, ReapInterval: time.Hour,
 	})
-	vaultSvc := vault.New(st, nil)
+	ac := access.New(st)
+	vaultSvc := vault.New(st, nil, ac)
 	svc := auth.NewService(st, false)
+	sbx := sandbox.New(sandbox.Options{
+		Store: st, Runtime: mgr, Secrets: vaultSvc,
+		Registry: reg, Limits: limits, Access: ac, MaxInstancesPerUser: 10,
+	})
 	h := Handler(Deps{
-		IAM: iam.New(st, nil), Vault: vaultSvc,
-		Policy: policysvc.New(st), Audit: auditsvc.New(st),
-		Catalog: catalog.New(reg, extensions.NewCatalog(extOptions)), Sandbox: sandbox.New(sandbox.Options{
-			Store: st, Runtime: mgr, Secrets: vaultSvc,
-			Registry: reg, Limits: limits, MaxInstancesPerUser: 10,
-		}),
+		IAM: iam.New(st, ac, sbx, 10, nil), Vault: vaultSvc,
+		Policy: policysvc.New(st, ac), Audit: auditsvc.New(st, ac),
+		Catalog: catalog.New(reg, extensions.NewCatalog(extOptions)), Sandbox: sbx, Access: ac, Workspace: workspacesvc.New(st, ac),
 		Auth: svc,
 	})
 	srv := httptest.NewServer(h)

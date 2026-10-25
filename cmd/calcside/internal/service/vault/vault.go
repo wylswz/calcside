@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"calcside/cmd/calcside/internal/service"
+	"calcside/cmd/calcside/internal/service/access"
 	"calcside/cmd/calcside/internal/vaultcipher"
 	"calcside/internal/secrets"
 	"calcside/internal/store"
@@ -18,18 +19,19 @@ import (
 type Service struct {
 	st     store.Store
 	cipher *vaultcipher.Cipher
+	access *access.Checker
 }
 
-func New(st store.Store, cipher *vaultcipher.Cipher) *Service {
-	return &Service{st: st, cipher: cipher}
+func New(st store.Store, cipher *vaultcipher.Cipher, ac *access.Checker) *Service {
+	return &Service{st: st, cipher: cipher, access: ac}
 }
 
 // Enabled reports whether the vault has a cipher (reported by
 // /api/v1/auth/config as "secrets").
 func (s *Service) Enabled() bool { return s.cipher != nil }
 
-func (s *Service) ready(a service.Actor) error {
-	if a.ViaKey() {
+func (s *Service) ready(ctx context.Context, a service.Actor) error {
+	if err := s.access.Workspace(ctx, a, a.WorkspaceID, access.Configure); err != nil {
 		// Same message as the API-keys gate: the wire contract reuses
 		// it for secrets even though the wording mentions keys.
 		return service.Forbidden("session required to manage API keys")
@@ -41,10 +43,10 @@ func (s *Service) ready(a service.Actor) error {
 }
 
 func (s *Service) List(ctx context.Context, a service.Actor) ([]*store.Secret, error) {
-	if err := s.ready(a); err != nil {
+	if err := s.ready(ctx, a); err != nil {
 		return nil, err
 	}
-	lst, err := s.st.ListSecrets(ctx, a.UserID)
+	lst, err := s.st.ListSecrets(ctx, a.WorkspaceID)
 	if err != nil {
 		return nil, service.Internal(err)
 	}
@@ -71,20 +73,20 @@ func validateSecretInput(name, value string, domains []string) error {
 }
 
 func (s *Service) Create(ctx context.Context, a service.Actor, name, value string, domains []string) (*store.Secret, error) {
-	if err := s.ready(a); err != nil {
+	if err := s.ready(ctx, a); err != nil {
 		return nil, err
 	}
 	if err := validateSecretInput(name, value, domains); err != nil {
 		return nil, service.Errf(types.ErrCodeBadSecret, "%s", err.Error())
 	}
-	ct, err := s.cipher.Seal([]byte(value), a.UserID+"/"+name)
+	ct, err := s.cipher.Seal([]byte(value), a.UserID+"/"+name) // AAD: creator id + name
 	if err != nil {
 		return nil, service.Internal(err)
 	}
 	if domains == nil {
 		domains = []string{} // unrestricted; responses always carry an array
 	}
-	sec := &store.Secret{UserID: a.UserID, Name: name, Ciphertext: ct, AllowedDomains: domains}
+	sec := &store.Secret{UserID: a.UserID, WorkspaceID: a.WorkspaceID, Name: name, Ciphertext: ct, AllowedDomains: domains}
 	if err := s.st.CreateSecret(ctx, sec); err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			return nil, service.Conflict("secret with that name already exists")
@@ -95,18 +97,18 @@ func (s *Service) Create(ctx context.Context, a service.Actor, name, value strin
 }
 
 func (s *Service) Update(ctx context.Context, a service.Actor, id string, value *string, domains *[]string) (*store.Secret, error) {
-	if err := s.ready(a); err != nil {
+	if err := s.ready(ctx, a); err != nil {
 		return nil, err
 	}
-	sec, err := s.st.GetSecret(ctx, id)
-	if err != nil || sec.UserID != a.UserID {
-		return nil, service.NotFound("secret not found")
+	sec, err := s.access.Secret(ctx, a, id, access.Configure)
+	if err != nil {
+		return nil, err
 	}
 	if value != nil {
 		if len(*value) == 0 || len(*value) > secrets.MaxValueBytes {
 			return nil, service.Errf(types.ErrCodeBadSecret, "value must be 1..16KiB")
 		}
-		ct, err := s.cipher.Seal([]byte(*value), a.UserID+"/"+sec.Name)
+		ct, err := s.cipher.Seal([]byte(*value), sec.UserID+"/"+sec.Name)
 		if err != nil {
 			return nil, service.Internal(err)
 		}
@@ -125,12 +127,12 @@ func (s *Service) Update(ctx context.Context, a service.Actor, id string, value 
 }
 
 func (s *Service) Delete(ctx context.Context, a service.Actor, id string) error {
-	if err := s.ready(a); err != nil {
+	if err := s.ready(ctx, a); err != nil {
 		return err
 	}
-	sec, err := s.st.GetSecret(ctx, id)
-	if err != nil || sec.UserID != a.UserID {
-		return service.NotFound("secret not found")
+	sec, err := s.access.Secret(ctx, a, id, access.Configure)
+	if err != nil {
+		return err
 	}
 	if err := s.st.DeleteSecret(ctx, sec.ID); err != nil {
 		return service.Internal(err)
