@@ -107,7 +107,7 @@ var functions = []function{
 }
 
 func Modules() starlark.StringDict {
-	out := starlark.StringDict{"json": starjson.Module, "math": starmath.Module, "help": starlark.NewBuiltin("help", help)}
+	out := starlark.StringDict{"json": starjson.Module, "math": starmath.Module, "help": starlark.NewBuiltin("help", help(nil))}
 	for _, f := range functions {
 		module, member, _ := strings.Cut(f.name, ".")
 		if out[module] == nil {
@@ -150,7 +150,7 @@ func Symbols() []completion.Symbol {
 		}
 		out = append(out, completion.Symbol{Name: f.name, Kind: "function", Params: append([]string(nil), f.params...), Detail: "(" + strings.Join(f.params, ", ") + ")", Doc: f.doc})
 	}
-	out = append(out, completion.Symbol{Name: "help", Kind: "function", Params: []string{"name"}, Detail: "(name)", Doc: "Module docs: help() lists modules; help(\"module\") lists functions; help(\"module.function\") shows signature and doc."})
+	out = append(out, completion.Symbol{Name: "help", Kind: "function", Params: []string{"name"}, Detail: "(name)", Doc: "Documentation: help() lists modules and capabilities; help(\"module\") lists functions; help(\"capability\") or help(\"ext.alias\") lists operations; help(\"module.function\") shows signature and doc."})
 	return out
 }
 

@@ -134,7 +134,8 @@ print(r[0]["title"])`)
 		t.Fatal("missing loaded extension signature")
 	}
 
-	// Prompt documents the op. Fragments are rendered on the node,
+	// The initial prompt declares the extension and its dependencies but
+	// leaves operation signatures to help(), which is rendered on the node
 	// because only it has the factories and the effective config.
 	pd, err := n.m.Prompt(ctx, &runtime.PromptRequest{InstanceID: id, Owner: n.owner})
 	if err != nil {
@@ -143,17 +144,32 @@ print(r[0]["title"])`)
 	found := false
 	for _, f := range pd.Fragments {
 		if f.Capability == types.CapExt {
-			if !strings.Contains(f.Text, "ext.tavily.search(query, max_results)") {
-				t.Fatalf("prompt missing op line:\n%s", f.Text)
+			if !strings.Contains(f.Text, "`ext.tavily` — Search the web") {
+				t.Fatalf("prompt missing extension declaration:\n%s", f.Text)
+			}
+			if !strings.Contains(f.Text, "Uses base capabilities: net") {
+				t.Fatalf("prompt missing dependency line:\n%s", f.Text)
 			}
 			if !strings.Contains(f.Text, "Secrets used: api_key ← TAVILY_API_KEY") {
 				t.Fatalf("prompt missing secrets line:\n%s", f.Text)
+			}
+			if strings.Contains(f.Text, "ext.tavily.search(") {
+				t.Fatalf("prompt should not inline extension ops:\n%s", f.Text)
 			}
 			found = true
 		}
 	}
 	if !found {
 		t.Fatal("ext not in prompt fragments")
+	}
+	help := n.mustExec(id, `print(help("ext.tavily"))`)
+	for _, want := range []string{"ext.tavily.search(query, max_results)", "Uses base capabilities: net", "Secrets used: api_key ← TAVILY_API_KEY"} {
+		if !strings.Contains(help.Output, want) {
+			t.Fatalf("help(ext.tavily) missing %q:\n%s", want, help.Output)
+		}
+	}
+	if out := n.mustExec(id, `print(help())`).Output; !strings.Contains(out, "ext — installed extensions") {
+		t.Fatalf("help() missing extension capability:\n%s", out)
 	}
 }
 

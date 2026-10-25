@@ -47,14 +47,14 @@ are recorded under `GET /api/v1/workspaces/{id}/changes`.
 
 ## Connect an agent over MCP
 
-`POST /mcp` speaks the Model Context Protocol over streamable HTTP to any MCP client (Claude Code, Cursor, VS Code, agent frameworks). It requires a **restricted** API key: create one in the console under API keys with the instance spec the agent needs.
+`POST /mcp` speaks the Model Context Protocol over streamable HTTP to any MCP client (Claude Code, Cursor, VS Code, Devin, agent frameworks). It requires a **restricted** API key: create one in the console under API keys with the instance spec the agent needs.
 
 ```sh
 claude mcp add --transport http calcside http://localhost:8787/mcp \
   --header "Authorization: Bearer cs_your_key"
 ```
 
-The server is stateless: `create_instance` returns an `instance_id` (plus `expires_at` and the agent prompt), and `exec`, `list_files`, `read_file` (fs-granted keys only), and `delete_instance` all name the instance. Inside the instance, `print(help())` lists the utility modules and `print(help("stats"))` their signatures.
+The server is stateless: `create_instance` returns an `instance_id` (plus `expires_at` and the agent prompt), and `exec`, `list_files`, `read_file` (fs-granted keys only), and `delete_instance` all name the instance. Inside the instance, `print(help())` lists utility modules and granted capabilities; `help("stats")`, `help("fs")`, and `help("ext.alias")` return signatures and operations on demand.
 
 Instance spec (`POST /api/v1/instances`):
 

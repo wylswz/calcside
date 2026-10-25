@@ -254,6 +254,24 @@ func OpLine(capName types.CapabilityName, op OpInfo) string {
 	return fmt.Sprintf("- `%s.%s(%s)`%s", capName, op.Name, params, doc)
 }
 
+// HelpEntry is one node in an instance's on-demand documentation. Name
+// is the full dotted path ("fs", "fs.read", "ext.tavily",
+// "ext.tavily.search"); Text is what help(Name) returns.
+type HelpEntry struct {
+	Name    string
+	Summary string
+	Text    string
+}
+
+// OpHelpEntry returns the help entry for one static capability operation.
+func OpHelpEntry(capName types.CapabilityName, op OpInfo) HelpEntry {
+	return HelpEntry{
+		Name:    string(capName) + "." + string(op.Name),
+		Summary: op.Doc,
+		Text:    OpLine(capName, op) + "\n",
+	}
+}
+
 // FieldDoc documents a capability config field.
 type FieldDoc struct {
 	Name    string          `json:"name"`
@@ -270,11 +288,14 @@ type Factory interface {
 	// Validate parses and validates raw JSON config, applying defaults and
 	// clamping against server limits. Returns the typed config for New.
 	Validate(cfg json.RawMessage, limits ServerLimits) (any, error)
-	// Prompt renders this capability's markdown section for the
-	// server-generated agent system prompt, from the validated config
-	// returned by Validate. Op signatures come from Ops() so docs never
-	// drift from the code.
+	// Prompt renders this capability's concise markdown section for the
+	// server-generated agent system prompt. Detailed operations live in
+	// Help so the initial prompt stays small.
 	Prompt(cfg any) string
+	// Help returns the on-demand documentation nodes for this capability:
+	// the capability, its operations, and any extension modules. Names are
+	// full dotted paths; help(Name) returns Text.
+	Help(cfg any) []HelpEntry
 	// New builds the starlark value bound to the instance environment
 	// (gate + resolved secrets). The returned io.Closer (may be nil) is
 	// closed when the instance ends.

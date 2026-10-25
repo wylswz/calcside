@@ -22,7 +22,7 @@ func TestRenderFSOnly(t *testing.T) {
 	for _, want := range []string{
 		"ins_1", "calcside_exec", "calcside_list_files", "fs.read(path)",
 		"Starlark is NOT Python", "policy_denied", "exec timeout 30000ms",
-		"instance TTL 900s",
+		"instance TTL 900s", `print(help("fs"))`, `print(help("ext.alias"))`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in:\n%s", want, out)

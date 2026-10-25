@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"go.starlark.net/starlark"
+
+	"calcside/internal/capability"
 )
 
 // moduleDocs is the one-line summary per utility module, kept next to
@@ -28,42 +30,94 @@ var moduleDocs = map[string]string{
 	"linalg":   "matrix matmul, solve, lstsq, inv, det",
 }
 
-// help returns module docs on demand: no argument lists modules, a
-// module name lists one signature line per function, module.function
-// gives the full signature and description. Unknown names suggest up
-// to three close matches.
-func help(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	var name string
-	if err := starlark.UnpackArgs("help", args, kwargs, "name?", &name); err != nil {
-		return nil, errors.New("usage: help() | help(\"module\") | help(\"module.function\")")
-	}
-	if name == "" {
-		var b strings.Builder
-		for _, m := range sortedModules() {
-			fmt.Fprintf(&b, "%s — %s\n", m, moduleDocs[m])
+// helpIndex is the per-instance documentation catalog: stdlib modules
+// plus the granted capabilities and extension modules installed in this
+// instance. It is immutable after construction.
+type helpIndex struct {
+	byName map[string]capability.HelpEntry
+	top    []capability.HelpEntry
+	names  []string
+}
+
+func newHelpIndex(extra []capability.HelpEntry) helpIndex {
+	idx := helpIndex{byName: map[string]capability.HelpEntry{}}
+	for _, e := range extra {
+		if e.Name == "" || e.Text == "" {
+			continue
 		}
-		b.WriteString("help(\"module\") lists functions; help(\"module.function\") shows signature and doc.\n")
-		return starlark.String(b.String()), nil
+		idx.byName[e.Name] = e
 	}
-	if strings.Contains(name, ".") {
-		for _, f := range functions {
-			if f.name == name {
-				return starlark.String(fmt.Sprintf("%s(%s) — %s\n", f.name, strings.Join(f.params, ", "), f.doc)), nil
+	for n := range idx.byName {
+		idx.names = append(idx.names, n)
+	}
+	sort.Strings(idx.names)
+	for _, n := range idx.names {
+		if !strings.Contains(n, ".") {
+			idx.top = append(idx.top, idx.byName[n])
+		}
+	}
+	return idx
+}
+
+// help returns documentation on demand: no argument lists utility
+// modules and granted capabilities, a module/capability name lists its
+// functions or operations, and a dotted name gives one signature and
+// description. Unknown names suggest up to three close matches.
+func help(extra []capability.HelpEntry) func(*starlark.Thread, *starlark.Builtin, starlark.Tuple, []starlark.Tuple) (starlark.Value, error) {
+	idx := newHelpIndex(extra)
+	return func(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		var name string
+		if err := starlark.UnpackArgs("help", args, kwargs, "name?", &name); err != nil {
+			return nil, errors.New("usage: help() | help(\"module\") | help(\"module.function\") | help(\"capability\")")
+		}
+		if name == "" {
+			var b strings.Builder
+			for _, m := range sortedModules() {
+				fmt.Fprintf(&b, "%s — %s\n", m, moduleDocs[m])
 			}
-		}
-		return nil, fmt.Errorf("no such function %q%s", name, suggest(name))
-	}
-	if _, ok := moduleDocs[name]; ok {
-		var b strings.Builder
-		fmt.Fprintf(&b, "%s — %s\n", name, moduleDocs[name])
-		for _, f := range functions {
-			if m, _, _ := strings.Cut(f.name, "."); m == name {
-				fmt.Fprintf(&b, "%s(%s)\n", f.name, strings.Join(f.params, ", "))
+			if len(idx.top) > 0 {
+				b.WriteString("\nCapabilities:\n")
+				for _, e := range idx.top {
+					if e.Summary != "" {
+						fmt.Fprintf(&b, "%s — %s\n", e.Name, e.Summary)
+					} else {
+						fmt.Fprintf(&b, "%s\n", e.Name)
+					}
+				}
+				b.WriteString("help(\"capability\") lists operations; help(\"ext.alias\") shows extension details.\n")
 			}
+			b.WriteString("help(\"module\") lists functions; help(\"module.function\") shows signature and doc.\n")
+			return starlark.String(b.String()), nil
 		}
-		return starlark.String(b.String()), nil
+		if e, ok := idx.byName[name]; ok {
+			return starlark.String(e.Text), nil
+		}
+		if strings.Contains(name, ".") {
+			for _, f := range functions {
+				if f.name == name {
+					return starlark.String(fmt.Sprintf("%s(%s) — %s\n", f.name, strings.Join(f.params, ", "), f.doc)), nil
+				}
+			}
+			return nil, fmt.Errorf("no such function %q%s", name, suggest(name, idx.names))
+		}
+		if _, ok := moduleDocs[name]; ok {
+			var b strings.Builder
+			fmt.Fprintf(&b, "%s — %s\n", name, moduleDocs[name])
+			for _, f := range functions {
+				if m, _, _ := strings.Cut(f.name, "."); m == name {
+					fmt.Fprintf(&b, "%s(%s)\n", f.name, strings.Join(f.params, ", "))
+				}
+			}
+			return starlark.String(b.String()), nil
+		}
+		return nil, fmt.Errorf("no such module or capability %q%s", name, suggest(name, idx.names))
 	}
-	return nil, fmt.Errorf("no such module %q%s", name, suggest(name))
+}
+
+// BindHelp replaces a predeclared dict's help builtin with one that also
+// documents the instance's granted capabilities and extension modules.
+func BindHelp(predeclared starlark.StringDict, extra []capability.HelpEntry) {
+	predeclared["help"] = starlark.NewBuiltin("help", help(extra))
 }
 
 func sortedModules() []string {
@@ -77,14 +131,25 @@ func sortedModules() []string {
 
 // suggest returns "did you mean ..." for the closest names, using a
 // bounded prefix/edit-distance scan over known names.
-func suggest(name string) string {
+func suggest(name string, extra []string) string {
+	seen := map[string]bool{}
 	var names []string
+	add := func(n string) {
+		if !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+		}
+	}
 	for m := range moduleDocs {
-		names = append(names, m)
+		add(m)
 	}
 	for _, f := range functions {
-		names = append(names, f.name)
+		add(f.name)
 	}
+	for _, n := range extra {
+		add(n)
+	}
+	sort.Strings(names)
 	var best []string
 	for _, n := range names {
 		if strings.HasPrefix(n, name) || strings.HasPrefix(name, n) || editDistance(name, n) <= 2 {

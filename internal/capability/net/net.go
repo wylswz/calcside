@@ -576,9 +576,32 @@ func (f factory) Prompt(cfgAny any) string {
 	cfg, _ := cfgAny.(validated)
 	var b strings.Builder
 	b.WriteString("#### `net`\n")
+	b.WriteString("- HTTP requests; responses are `{status, headers, body}` dicts (access via `r[\"body\"]`).\n")
+	b.WriteString(netConstraints(cfg))
+	return b.String()
+}
+
+func (f factory) Help(cfgAny any) []capability.HelpEntry {
+	cfg, _ := cfgAny.(validated)
+	var b strings.Builder
+	b.WriteString("#### `net`\n")
 	for _, op := range f.Ops() {
 		b.WriteString(capability.OpLine(types.CapNet, op) + "\n")
 	}
+	b.WriteString(netConstraints(cfg))
+	out := []capability.HelpEntry{{
+		Name:    string(types.CapNet),
+		Summary: "HTTP requests with policy-gated hosts and methods",
+		Text:    b.String(),
+	}}
+	for _, op := range f.Ops() {
+		out = append(out, capability.OpHelpEntry(types.CapNet, op))
+	}
+	return out
+}
+
+func netConstraints(cfg validated) string {
+	var b strings.Builder
 	if len(cfg.AllowHosts) > 0 {
 		fmt.Fprintf(&b, "- Allowed hosts: %s\n", strings.Join(cfg.AllowHosts, ", "))
 	} else {
@@ -591,7 +614,6 @@ func (f factory) Prompt(cfgAny any) string {
 		}
 		fmt.Fprintf(&b, "- Allowed methods: %s\n", strings.Join(methods, ", "))
 	}
-	b.WriteString("- Responses are `{status, headers, body}` dicts (access via `r[\"body\"]`).\n")
 	b.WriteString("- Secret placeholders: put the literal `{{secrets.NAME}}` inside the URL, " +
 		"a header value, or the body; the sandbox injects the real value for allowed " +
 		"domains and shows `[REDACTED:NAME]` in responses.\n")

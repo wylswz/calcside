@@ -16,6 +16,21 @@ export function cursorSnippet(url: string, key: string): string {
   }, null, 2)
 }
 
+// Devin cloud takes the same URL and bearer header through its
+// Customize → MCPs form; Devin CLI reads this mcpServers JSON from
+// .devin/mcp_config.json (or ~/.config/devin/mcp_config.json).
+export function devinSnippet(url: string, key: string): string {
+  return JSON.stringify({
+    mcpServers: {
+      calcside: {
+        url,
+        transport: 'http',
+        headers: { Authorization: `Bearer ${key}` },
+      },
+    },
+  }, null, 2)
+}
+
 export function headerSnippet(key: string): string {
   return `Authorization: Bearer ${key}`
 }

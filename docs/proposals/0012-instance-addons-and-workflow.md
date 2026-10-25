@@ -1,6 +1,6 @@
 # EP-0012: Instance add-ons and workflow
 
-- **Status:** Implemented; agent help follow-up deferred
+- **Status:** Implemented
 - **Scope:** Instance creation, boundary inspection, agent connection, supervision
 - **Related:** EP-0008, EP-0009, EP-0010, EP-0011
 
@@ -151,9 +151,9 @@ The existing Create-time capability bindings, policy snapshots, and worker
 context already match this lifecycle. Preserve them rather than adding an
 unnecessary update protocol. Serving and environments remain scoped to EP-0011.
 
-## Deferred: Agent Progressive Disclosure
+## Agent Progressive Disclosure
 
-Requested follow-up, **not implemented in this stage**:
+Implemented:
 
 - One discoverable `help` primitive for stdlib, installed capabilities, and
   extension modules/functions, extending the existing stdlib help surface.
@@ -163,6 +163,12 @@ Requested follow-up, **not implemented in this stage**:
   Discovery must not expose unavailable capabilities, secret values, private
   sources, host paths, or authority the instance does not possess.
 - Keep prompt, completion metadata, extension manifests, and help consistent.
+
+The prompt declares each granted capability and extension (including its base
+capability dependencies and secret names) without inlining operation
+signatures. `help()` lists modules and capabilities, `help("capability")`
+lists operations, and `help("ext.alias")` lists that extension's operations
+and dependencies.
 
 ## Verification
 

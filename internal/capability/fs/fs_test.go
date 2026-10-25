@@ -136,9 +136,19 @@ func TestPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := factory{}.Prompt(cfg)
-	for _, want := range []string{"`/work`", "1024 bytes", "5 files", "read-only", "fs.read", "fs.write"} {
+	for _, want := range []string{"`/work`", "1024 bytes", "5 files", "read-only"} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("missing %q in:\n%s", want, p)
 		}
+	}
+	if strings.Contains(p, "fs.read") {
+		t.Fatalf("prompt should not inline operations:\n%s", p)
+	}
+	help := factory{}.Help(cfg)
+	if len(help) < 2 || help[0].Name != "fs" || !strings.Contains(help[0].Text, "fs.read") {
+		t.Fatalf("help missing capability docs: %+v", help)
+	}
+	if help[1].Name != "fs.read" || !strings.Contains(help[1].Text, "fs.read(path)") {
+		t.Fatalf("help missing op entry: %+v", help[1])
 	}
 }

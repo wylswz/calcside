@@ -306,6 +306,15 @@ func NewSession(d SessionDeps, c SessionCreation) (*Session, error) {
 	if s.Out == nil {
 		s.Out = capio.NewBuffer(c.MaxOutputBytes)
 	}
+	var docs []capability.HelpEntry
+	for _, name := range names {
+		f, ok := d.Registry.Get(types.CapabilityName(name))
+		if !ok {
+			continue
+		}
+		docs = append(docs, f.Help(caps[name])...)
+	}
+	stdlib.BindHelp(predeclared, docs)
 	predeclared["print"] = capio.PrintBuiltin(s.Out, gate)
 
 	if err := ValidatePredeclared(predeclared); err != nil {

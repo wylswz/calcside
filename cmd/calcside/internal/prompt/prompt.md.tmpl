@@ -26,9 +26,11 @@ Call `print(help("module"))` for signatures before first use; `print(help("modul
 {{- end}}
 
 ### Capabilities
+These declarations are granted to this instance. Operation signatures are not inlined; fetch them on demand.
 {{range .Fragments}}
 {{.}}
 {{- end}}
+Call `print(help())` to list modules and capabilities, `print(help("fs"))` for a capability's operations, and `print(help("ext.alias"))` for an extension's operations and dependencies.
 {{- if .Secrets}}
 
 ### Secrets
