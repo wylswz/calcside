@@ -1,0 +1,18 @@
+{{- if .Values.worker.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "calcside.fullname" . }}-worker
+  labels:
+    {{- include "calcside.worker.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "calcside.worker.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: worker
+      port: 8090
+      targetPort: worker
+      protocol: TCP
+{{- end }}

@@ -1,0 +1,228 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deployment-tests:
+    name: Deployment release gates
+    uses: ./.github/workflows/deployment-tests.yml
+
+  verify:
+    name: Verify release source
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v3.19.0
+      - name: Install Atlas 1.2.2
+        run: |
+          curl -fsSL --retry 3 https://release.ariga.io/atlas/atlas-linux-amd64-v1.2.2 -o "$RUNNER_TEMP/atlas"
+          echo "db9ddcfeca89cb1183e362aab9c266bbb8ddc4faf17a4739b79db5f87fd0c2db  $RUNNER_TEMP/atlas" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/atlas"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./...
+      - run: helm lint charts/calcside
+      - name: Render chart (SQLite)
+        run: helm template calcside charts/calcside --namespace calcside >/dev/null
+      - name: Render chart (PostgreSQL)
+        run: |
+          helm template calcside charts/calcside --namespace calcside \
+            --set database.driver=postgres \
+            --set-string database.postgres.dsn='postgres://user:pass@postgres:5432/calcside?sslmode=disable&search_path=public' \
+            --set replicaCount=2 \
+            --set config.adminUsername=admin \
+            --set secrets.adminPassword=release-test-password >/dev/null
+
+  images:
+    name: Publish images
+    needs: [verify, deployment-tests]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      repository: ${{ steps.meta.outputs.repository }}
+      owner: ${{ steps.meta.outputs.owner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Resolve release metadata
+        id: meta
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${REF_NAME#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "tag ${REF_NAME} is not v<semver>" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "repository=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+      - name: Compute image tags
+        id: tags
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          REPOSITORY: ${{ steps.meta.outputs.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          short="${SHA:0:12}"
+          api="ghcr.io/${REPOSITORY}:${VERSION}"$'\n'"ghcr.io/${REPOSITORY}:sha-${short}"
+          migrate="ghcr.io/${REPOSITORY}-migrate:${VERSION}"$'\n'"ghcr.io/${REPOSITORY}-migrate:sha-${short}"
+          if [[ "$VERSION" != *-* ]]; then
+            api+=$'\n'"ghcr.io/${REPOSITORY}:latest"
+            migrate+=$'\n'"ghcr.io/${REPOSITORY}-migrate:latest"
+          fi
+          {
+            echo "api<<EOF"
+            echo "$api"
+            echo "EOF"
+            echo "migrate<<EOF"
+            echo "$migrate"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push API/worker image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.api }}
+          labels: |
+            org.opencontainers.image.title=calcside
+            org.opencontainers.image.description=Capability-based Starlark execution sandbox for AI agents
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha,scope=calcside
+          cache-to: type=gha,mode=max,scope=calcside
+          provenance: true
+          sbom: true
+      - name: Build and push migration image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: docker/Dockerfile.migrate
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.migrate }}
+          labels: |
+            org.opencontainers.image.title=calcside-migrate
+            org.opencontainers.image.description=Atlas migrations for calcside
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha,scope=calcside-migrate
+          cache-to: type=gha,mode=max,scope=calcside-migrate
+          provenance: true
+          sbom: true
+      - name: Write release summary
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          REPOSITORY: ${{ steps.meta.outputs.repository }}
+        run: |
+          {
+            echo "## Images"
+            echo
+            echo "- \`ghcr.io/${REPOSITORY}:${VERSION}\`"
+            echo "- \`ghcr.io/${REPOSITORY}-migrate:${VERSION}\`"
+            echo "- platforms: linux/amd64, linux/arm64"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  chart:
+    name: Publish Helm chart
+    needs: images
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v3.19.0
+      - name: Package chart
+        env:
+          VERSION: ${{ needs.images.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          helm package charts/calcside \
+            --version "$VERSION" \
+            --app-version "$VERSION" \
+            --destination dist
+          cd dist
+          sha256sum ./*.tgz > checksums.txt
+      - name: Push chart to GHCR
+        env:
+          VERSION: ${{ needs.images.outputs.version }}
+          OWNER: ${{ needs.images.outputs.owner }}
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+          if helm show chart "oci://ghcr.io/${OWNER}/charts/calcside" --version "$VERSION" >/dev/null 2>&1; then
+            echo "chart calcside:${VERSION} is already published; skipping push"
+          else
+            helm push "dist/calcside-${VERSION}.tgz" "oci://ghcr.io/${OWNER}/charts"
+          fi
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.images.outputs.version }}
+          TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ needs.images.outputs.repository }}
+          OWNER: ${{ needs.images.outputs.owner }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/calcside-*.tgz dist/checksums.txt --clobber
+          else
+            gh release create "$TAG" dist/calcside-*.tgz dist/checksums.txt \
+              --title "$TAG" \
+              --generate-notes
+          fi
+          {
+            echo "## Helm chart"
+            echo
+            echo "\`\`\`bash"
+            echo "helm install calcside oci://ghcr.io/${OWNER}/charts/calcside --version ${VERSION}"
+            echo "\`\`\`"
+            echo
+            echo "Images: \`ghcr.io/${REPOSITORY}:${VERSION}\` and \`ghcr.io/${REPOSITORY}-migrate:${VERSION}\`."
+          } >> "$GITHUB_STEP_SUMMARY"

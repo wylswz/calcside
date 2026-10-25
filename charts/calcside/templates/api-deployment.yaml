@@ -1,0 +1,249 @@
+{{- include "calcside.validate" . -}}
+{{- $rwoData := and .Values.persistence.enabled (not (has "ReadWriteMany" .Values.persistence.accessModes)) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "calcside.fullname" . }}
+  labels:
+    {{- include "calcside.api.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  {{- if or (eq .Values.database.driver "sqlite") $rwoData }}
+  strategy:
+    type: Recreate
+  {{- else }}
+  strategy:
+    type: RollingUpdate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "calcside.api.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "calcside.api.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ toYaml (dict "config" .Values.config "limits" .Values.limits "secrets" .Values.secrets "database" .Values.database) | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "calcside.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      {{- if .Values.migrations.enabled }}
+      initContainers:
+        - name: migrate
+          image: {{ include "calcside.migrationImage" . }}
+          imagePullPolicy: {{ .Values.migrations.image.pullPolicy }}
+          args:
+            - migrate
+            - apply
+            - --env
+            - {{ .Values.database.driver }}
+          workingDir: /
+          env:
+            - name: HOME
+              value: /tmp
+            - name: ATLAS_DB_URL
+              {{- if eq .Values.database.driver "sqlite" }}
+              value: {{ printf "sqlite://%s" .Values.database.sqlite.path | quote }}
+              {{- else }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "calcside.postgresSecretName" . }}
+                  key: {{ include "calcside.postgresSecretKey" . }}
+              {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          securityContext:
+            {{- toYaml .Values.migrations.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
+      {{- end }}
+      containers:
+        - name: calcside
+          image: {{ include "calcside.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: CALCSIDE_ADDR
+              value: ":8080"
+            - name: CALCSIDE_STORE
+              value: {{ .Values.database.driver | quote }}
+            - name: CALCSIDE_DSN
+              {{- if eq .Values.database.driver "sqlite" }}
+              value: {{ .Values.database.sqlite.path | quote }}
+              {{- else }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "calcside.postgresSecretName" . }}
+                  key: {{ include "calcside.postgresSecretKey" . }}
+              {{- end }}
+            - name: CALCSIDE_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: CALCSIDE_CONSOLE_ORIGIN
+              value: {{ .Values.config.consoleOrigin | quote }}
+            - name: CALCSIDE_COOKIE_SECURE
+              value: {{ .Values.config.cookieSecure | quote }}
+            - name: CALCSIDE_ARTIFACT_PREVIEW_BASE_URL
+              value: {{ .Values.config.artifactPreviewBaseURL | quote }}
+            - name: CALCSIDE_ARTIFACT_ALLOW_SCRIPTS
+              value: {{ .Values.config.artifactAllowScripts | quote }}
+            - name: CALCSIDE_ADMIN_USERNAME
+              value: {{ .Values.config.adminUsername | quote }}
+            - name: CALCSIDE_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "calcside.secretName" . }}
+                  key: admin-password
+                  optional: true
+            - name: CALCSIDE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "calcside.secretName" . }}
+                  key: secret-key
+                  optional: true
+            - name: CALCSIDE_GOOGLE_CLIENT_ID
+              value: {{ .Values.config.googleClientID | quote }}
+            - name: CALCSIDE_GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "calcside.secretName" . }}
+                  key: google-client-secret
+                  optional: true
+            - name: CALCSIDE_GOOGLE_ALLOWED_DOMAINS
+              value: {{ join "," .Values.config.googleAllowedDomains | quote }}
+            {{- if .Values.worker.enabled }}
+            - name: CALCSIDE_WORKER_SHARED_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "calcside.secretName" . }}
+                  key: worker-shared-key
+            - name: CALCSIDE_WORKERS
+              value: {{ include "calcside.workerNodes" . | quote }}
+            {{- end }}
+            - name: CALCSIDE_INSTANCE_ISOLATION
+              value: {{ .Values.config.apiInstanceIsolation | quote }}
+            - name: CALCSIDE_INSTANCE_MEMORY_MAX
+              value: {{ .Values.config.apiInstanceMemoryMax | int64 | quote }}
+            - name: CALCSIDE_MAX_INSTANCES_PER_USER
+              value: {{ .Values.limits.maxInstancesPerUser | int64 | quote }}
+            - name: CALCSIDE_MAX_INSTANCES_PER_NODE
+              value: {{ .Values.limits.maxInstancesPerNode | int64 | quote }}
+            - name: CALCSIDE_DEFAULT_TTL
+              value: {{ .Values.limits.defaultTTL | quote }}
+            - name: CALCSIDE_MAX_TTL
+              value: {{ .Values.limits.maxTTL | quote }}
+            - name: CALCSIDE_MAX_EXEC_TIMEOUT
+              value: {{ .Values.limits.maxExecTimeout | quote }}
+            - name: CALCSIDE_MAX_CONCURRENT_EXECS
+              value: {{ .Values.limits.maxConcurrentExecs | int64 | quote }}
+            - name: CALCSIDE_REAPER_INTERVAL
+              value: {{ .Values.limits.reaperInterval | quote }}
+            - name: CALCSIDE_POLICY_EVAL_TIMEOUT
+              value: {{ .Values.limits.policyEvalTimeout | quote }}
+            - name: CALCSIDE_MAX_STEPS
+              value: {{ .Values.limits.maxSteps | int64 | quote }}
+            - name: CALCSIDE_MAX_OUTPUT_BYTES
+              value: {{ .Values.limits.maxOutputBytes | int64 | quote }}
+            - name: CALCSIDE_EXEC_MEMORY_LIMIT
+              value: {{ .Values.limits.execMemoryLimit | int64 | quote }}
+            - name: CALCSIDE_NET_ALLOW_CIDRS
+              value: {{ join "," .Values.limits.netAllowCIDRs | quote }}
+            - name: CALCSIDE_MAX_NET_RESPONSE_BYTES
+              value: {{ .Values.limits.maxNetResponseBytes | int64 | quote }}
+            - name: CALCSIDE_SECRETS_ALLOW_HTTP
+              value: {{ .Values.limits.secretsAllowHTTP | quote }}
+            - name: CALCSIDE_POLICY_DIR
+              value: {{ .Values.config.policyDir | quote }}
+            - name: CALCSIDE_EXT_LOCAL_ROOTS
+              value: {{ join "," .Values.config.extLocalRoots | quote }}
+            - name: CALCSIDE_EXT_ALLOW_SOURCES
+              value: {{ join "," .Values.config.extAllowSources | quote }}
+            - name: CALCSIDE_EXT_CACHE_DIR
+              value: {{ .Values.config.extCacheDir | quote }}
+            - name: CALCSIDE_EXT_FETCH_TIMEOUT
+              value: {{ .Values.config.extFetchTimeout | quote }}
+            {{- with .Values.config.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-data" (include "calcside.fullname" .)) .Values.persistence.existingClaim }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

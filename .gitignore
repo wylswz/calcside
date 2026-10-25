@@ -17,3 +17,4 @@ __pycache__/
 web/test-results/
 web/playwright-report/
 .env
+test-results/

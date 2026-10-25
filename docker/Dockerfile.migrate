@@ -1,0 +1,12 @@
+# syntax=docker/dockerfile:1
+
+# Minimal migration runner: the pinned Atlas image plus the hand-written
+# SQLite/PostgreSQL migrations from this repository. The API and worker
+# images deliberately do not ship Atlas; Kubernetes runs this image as an
+# init container before the API starts.
+FROM arigaio/atlas:1.2.2@sha256:dce85fd3f83c9c28f343c73236c8917f802d526f1fe921e150b720077a83c5ae
+
+COPY docker/atlas-release.hcl /atlas.hcl
+COPY cmd/calcside/internal/gormstore/migrations /migrations
+
+WORKDIR /

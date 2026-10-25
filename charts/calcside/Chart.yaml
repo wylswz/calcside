@@ -1,0 +1,15 @@
+apiVersion: v2
+name: calcside
+description: Capability-based Starlark execution sandbox for AI agents
+type: application
+version: 0.0.1
+appVersion: "0.0.1"
+kubeVersion: ">=1.25.0-0"
+home: https://github.com/wylswz/calcside
+sources:
+  - https://github.com/wylswz/calcside
+keywords:
+  - sandbox
+  - starlark
+  - agents
+  - code-execution

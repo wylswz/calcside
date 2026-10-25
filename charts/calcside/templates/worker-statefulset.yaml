@@ -1,0 +1,194 @@
+{{- if .Values.worker.enabled }}
+{{- include "calcside.validate" . -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "calcside.fullname" . }}-worker
+  labels:
+    {{- include "calcside.worker.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "calcside.fullname" . }}-worker
+  replicas: {{ .Values.worker.replicaCount }}
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "calcside.worker.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "calcside.worker.labels" . | nindent 8 }}
+        {{- with .Values.worker.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ toYaml (dict "limits" .Values.limits "worker" .Values.worker "config" .Values.config "secrets" .Values.secrets) | sha256sum }}
+        {{- with .Values.worker.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "calcside.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.worker.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds }}
+      containers:
+        - name: calcside-worker
+          image: {{ include "calcside.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.worker.useEntrypoint }}
+          command:
+            - worker-entrypoint
+            - calcside-worker
+          {{- else }}
+          command:
+            - calcside-worker
+          {{- end }}
+          args:
+            - serve
+          securityContext:
+            {{- toYaml .Values.worker.securityContext | nindent 12 }}
+          ports:
+            - name: worker
+              containerPort: 8090
+              protocol: TCP
+          env:
+            - name: CALCSIDE_WORKER_LISTEN
+              value: ":8090"
+            - name: CALCSIDE_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: CALCSIDE_WORKER_SHARED_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "calcside.secretName" . }}
+                  key: worker-shared-key
+            - name: CALCSIDE_API_ADDR
+              value: {{ printf "http://%s:%v" (include "calcside.fullname" .) .Values.service.port | quote }}
+            - name: CALCSIDE_INSTANCE_ISOLATION
+              value: {{ .Values.worker.instanceIsolation | quote }}
+            - name: CALCSIDE_INSTANCE_MEMORY_MAX
+              value: {{ .Values.worker.instanceMemoryMax | int64 | quote }}
+            {{- with .Values.worker.instanceCgroupParent }}
+            - name: CALCSIDE_INSTANCE_CGROUP_PARENT
+              value: {{ . | quote }}
+            {{- end }}
+            - name: CALCSIDE_MAX_INSTANCES_PER_NODE
+              value: {{ .Values.worker.maxInstancesPerNode | int64 | quote }}
+            - name: CALCSIDE_DEFAULT_TTL
+              value: {{ .Values.limits.defaultTTL | quote }}
+            - name: CALCSIDE_MAX_TTL
+              value: {{ .Values.limits.maxTTL | quote }}
+            - name: CALCSIDE_MAX_EXEC_TIMEOUT
+              value: {{ .Values.limits.maxExecTimeout | quote }}
+            - name: CALCSIDE_MAX_CONCURRENT_EXECS
+              value: {{ .Values.limits.maxConcurrentExecs | int64 | quote }}
+            - name: CALCSIDE_REAPER_INTERVAL
+              value: {{ .Values.limits.reaperInterval | quote }}
+            - name: CALCSIDE_POLICY_EVAL_TIMEOUT
+              value: {{ .Values.limits.policyEvalTimeout | quote }}
+            - name: CALCSIDE_MAX_STEPS
+              value: {{ .Values.limits.maxSteps | int64 | quote }}
+            - name: CALCSIDE_MAX_OUTPUT_BYTES
+              value: {{ .Values.limits.maxOutputBytes | int64 | quote }}
+            - name: CALCSIDE_EXEC_MEMORY_LIMIT
+              value: {{ .Values.limits.execMemoryLimit | int64 | quote }}
+            - name: CALCSIDE_NET_ALLOW_CIDRS
+              value: {{ join "," .Values.limits.netAllowCIDRs | quote }}
+            - name: CALCSIDE_MAX_NET_RESPONSE_BYTES
+              value: {{ .Values.limits.maxNetResponseBytes | int64 | quote }}
+            - name: CALCSIDE_SECRETS_ALLOW_HTTP
+              value: {{ .Values.limits.secretsAllowHTTP | quote }}
+            # The API resolves local extension roots; the worker has no /data mount.
+            - name: CALCSIDE_EXT_LOCAL_ROOTS
+              value: ""
+            - name: CALCSIDE_EXT_ALLOW_SOURCES
+              value: {{ join "," .Values.config.extAllowSources | quote }}
+            - name: CALCSIDE_EXT_CACHE_DIR
+              value: "/cache/ext"
+            - name: CALCSIDE_EXT_FETCH_TIMEOUT
+              value: {{ .Values.config.extFetchTimeout | quote }}
+            {{- with .Values.worker.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: worker
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: worker
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: worker
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          volumeMounts:
+            - name: cache
+              mountPath: /cache
+            - name: tmp
+              mountPath: /tmp
+            {{- with .Values.worker.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if not .Values.worker.cache.persistence.enabled }}
+        - name: cache
+          emptyDir: {}
+        {{- end }}
+        {{- with .Values.worker.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.worker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if .Values.worker.cache.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: cache
+        labels:
+          {{- include "calcside.worker.labels" . | nindent 10 }}
+      spec:
+        accessModes:
+          {{- toYaml .Values.worker.cache.persistence.accessModes | nindent 10 }}
+        {{- if .Values.worker.cache.persistence.storageClass }}
+        storageClassName: {{ .Values.worker.cache.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.worker.cache.persistence.size }}
+  {{- end }}
+{{- end }}

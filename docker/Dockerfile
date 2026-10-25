@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1
 
 # ---- Stage 1: build the web console (web/dist is embedded into the Go binary) ----
-FROM node:22-alpine AS web
+# Build-only stages run on the native build platform; Go is cross-compiled
+# below from TARGETOS/TARGETARCH so multi-arch publishes do not run pnpm or
+# the full Go toolchain under QEMU.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS web
 ARG PNPM_VERSION=10.33.0
 RUN npm install -g "pnpm@${PNPM_VERSION}"
 WORKDIR /src/web
@@ -11,7 +14,9 @@ COPY web/ ./
 RUN pnpm build
 
 # ---- Stage 2: build the Go binaries (pure-Go sqlite, no CGO) ----
-FROM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
@@ -20,8 +25,8 @@ COPY . .
 COPY --from=web /src/web/dist ./web/dist
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/calcside ./cmd/calcside && \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/calcside-worker ./cmd/calcside-worker
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/calcside ./cmd/calcside && \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/calcside-worker ./cmd/calcside-worker
 
 # ---- Stage 3: runtime ----
 # git is required at runtime by the ext capability's remote-source fetches;

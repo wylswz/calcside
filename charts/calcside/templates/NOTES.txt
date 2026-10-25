@@ -1,0 +1,61 @@
+calcside {{ .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }}.
+
+Console origin: {{ .Values.config.consoleOrigin }}
+{{- if .Values.ingress.enabled }}
+Ingress host:    {{ .Values.ingress.host }}
+{{- else }}
+Reach the console locally:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "calcside.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+{{- end }}
+
+Database:        {{ .Values.database.driver }}
+Migrations:      {{ if .Values.migrations.enabled }}Atlas init container on the API pod{{ else }}disabled (apply them yourself before rollout){{ end }}
+API replicas:    {{ .Values.replicaCount }}
+Worker replicas: {{ if .Values.worker.enabled }}{{ .Values.worker.replicaCount }} (StatefulSet){{ else }}none (execution runs inside the API){{ end }}
+Data volume:     {{ if .Values.persistence.enabled }}{{ default (printf "%s-data" (include "calcside.fullname" .)) .Values.persistence.existingClaim }}{{ else }}emptyDir (data is lost when the API pod is replaced){{ end }}
+
+{{- if and (eq .Values.database.driver "sqlite") (not .Values.persistence.enabled) }}
+
+WARNING: SQLite is ephemeral without persistence.enabled=true. Enable a data
+volume or switch to PostgreSQL before using this in production.
+{{- end }}
+{{- if and (gt (int .Values.replicaCount) 1) .Values.persistence.enabled }}
+
+WARNING: multiple API replicas share one data volume. Use a ReadWriteMany
+storage class, or set persistence.enabled=false when you only need the database.
+{{- end }}
+{{- if .Values.worker.enabled }}
+
+Workers are addressed by stable StatefulSet pod name. Scaling the StatefulSet
+down deletes the instances bound to the removed pod; their TTL will clean up
+the database records. Scaling up changes the API worker list and rolls the API.
+{{- end }}
+
+{{- if not .Values.config.adminUsername }}
+
+No local administrator is bootstrapped. Either set config.adminUsername and
+secrets.adminPassword, or configure Google SSO, then log in through the console.
+{{- end }}
+
+{{- if not .Values.secrets.existingSecret }}
+
+Chart-managed secrets live in Secret/{{ include "calcside.fullname" . }}-secrets.
+The worker shared key is generated on first install and preserved on upgrade.
+Set secrets.existingSecret to manage it yourself (for GitOps / sealed secrets).
+{{- end }}
+
+{{- if and (eq .Values.database.driver "sqlite") .Values.migrations.enabled }}
+
+The migration init container mounts the same data volume as the API. If the
+PVC uses a node-local or zone-bound storage class, the job may need the same
+node/zone; for multi-node clusters prefer PostgreSQL.
+{{- end }}
+
+{{- if and .Values.worker.enabled (gt (int .Values.worker.instanceMemoryMax) 0) }}
+
+WARNING: worker.instanceMemoryMax requires a writable cgroup v2 filesystem.
+Unprivileged Kubernetes pods normally mount /sys/fs/cgroup read-only, so the
+cap is not applied (the worker logs a warning). The pod memory limit and the
+heap watchdog still apply. Leave it at 0 unless your platform grants a
+writable cgroup subtree.
+{{- end }}
