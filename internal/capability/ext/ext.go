@@ -245,42 +245,87 @@ func (f factory) Prompt(cfgAny any) string {
 	v, _ := cfgAny.(validated)
 	var b strings.Builder
 	b.WriteString("#### `ext`\n")
+	for _, alias := range sortedAliases(v) {
+		ac := v[alias]
+		writeExtAlias(&b, alias, ac, false)
+	}
+	return b.String()
+}
+
+func (f factory) Help(cfgAny any) []capability.HelpEntry {
+	v, _ := cfgAny.(validated)
+	out := []capability.HelpEntry{{
+		Name:    string(types.CapExt),
+		Summary: "installed extensions and their operations",
+		Text:    f.Prompt(cfgAny),
+	}}
+	for _, alias := range sortedAliases(v) {
+		ac := v[alias]
+		name := string(types.CapExt) + "." + alias
+		var b strings.Builder
+		writeExtAlias(&b, alias, ac, true)
+		out = append(out, capability.HelpEntry{
+			Name:    name,
+			Summary: extAliasSummary(ac),
+			Text:    b.String(),
+		})
+		for _, op := range ac.mod.Manifest.Ops {
+			out = append(out, capability.OpHelpEntry(types.CapabilityName(name),
+				capability.OpInfo{Name: types.Op(op.Name), Doc: op.Doc, Params: op.Params}))
+		}
+	}
+	return out
+}
+
+func sortedAliases(v validated) []string {
 	aliases := make([]string, 0, len(v))
 	for a := range v {
 		aliases = append(aliases, a)
 	}
 	sort.Strings(aliases)
-	for _, alias := range aliases {
-		ac := v[alias]
-		if ac.mod.Manifest.Description != "" {
-			fmt.Fprintf(&b, "- `ext.%s` — %s\n", alias, ac.mod.Manifest.Description)
-		} else {
-			fmt.Fprintf(&b, "- `ext.%s` (%s)\n", alias, ac.source)
-		}
+	return aliases
+}
+
+func extAliasSummary(ac aliasCfg) string {
+	if ac.mod.Manifest.Description != "" {
+		return ac.mod.Manifest.Description
+	}
+	return "extension module"
+}
+
+// writeExtAlias writes one extension alias declaration. With ops=false it
+// omits the operation catalog (the initial prompt), and with ops=true it
+// includes it (help(alias)).
+func writeExtAlias(b *strings.Builder, alias string, ac aliasCfg, ops bool) {
+	if ac.mod.Manifest.Description != "" {
+		fmt.Fprintf(b, "#### `ext.%s` — %s\n", alias, ac.mod.Manifest.Description)
+	} else {
+		fmt.Fprintf(b, "#### `ext.%s`\n", alias)
+	}
+	if ops {
 		for _, op := range ac.mod.Manifest.Ops {
 			b.WriteString("  " + capability.OpLine(types.CapabilityName("ext."+alias),
 				capability.OpInfo{Name: types.Op(op.Name), Doc: op.Doc, Params: op.Params}) + "\n")
 		}
-		if len(ac.mod.Manifest.Dependencies) > 0 {
-			deps := make([]string, len(ac.mod.Manifest.Dependencies))
-			for i, d := range ac.mod.Manifest.Dependencies {
-				deps[i] = string(d)
-			}
-			fmt.Fprintf(&b, "  - Uses base capabilities: %s\n", strings.Join(deps, ", "))
+	}
+	if len(ac.mod.Manifest.Dependencies) > 0 {
+		deps := make([]string, len(ac.mod.Manifest.Dependencies))
+		for i, d := range ac.mod.Manifest.Dependencies {
+			deps[i] = string(d)
 		}
-		var used []string
-		for _, cf := range ac.mod.Manifest.Config {
-			if cf.Type == "secret" {
-				if n := secretRefName(ac.config[cf.Name]); n != "" {
-					used = append(used, cf.Name+" ← "+n)
-				}
+		fmt.Fprintf(b, "  - Uses base capabilities: %s\n", strings.Join(deps, ", "))
+	}
+	var used []string
+	for _, cf := range ac.mod.Manifest.Config {
+		if cf.Type == "secret" {
+			if n := secretRefName(ac.config[cf.Name]); n != "" {
+				used = append(used, cf.Name+" ← "+n)
 			}
-		}
-		if len(used) > 0 {
-			fmt.Fprintf(&b, "  - Secrets used: %s\n", strings.Join(used, ", "))
 		}
 	}
-	return b.String()
+	if len(used) > 0 {
+		fmt.Fprintf(b, "  - Secrets used: %s\n", strings.Join(used, ", "))
+	}
 }
 
 // New executes each extension's module init and binds ext.<alias>.<op>

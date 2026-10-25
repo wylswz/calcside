@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { claudeCodeSnippet, cursorSnippet, headerSnippet, mcpURL } from './mcpSnippets.ts'
+import { claudeCodeSnippet, cursorSnippet, devinSnippet, headerSnippet, mcpURL } from './mcpSnippets.ts'
 
 test('mcpURL appends /mcp', () => {
   assert.equal(mcpURL('http://localhost:5173'), 'http://localhost:5173/mcp')
@@ -16,6 +16,14 @@ test('cursor snippet is valid JSON with the key', () => {
   const s = cursorSnippet('https://x.example/mcp', 'cs_abc')
   const o = JSON.parse(s)
   assert.equal(o.mcpServers.calcside.url, 'https://x.example/mcp')
+  assert.equal(o.mcpServers.calcside.headers.Authorization, 'Bearer cs_abc')
+})
+
+test('devin snippet targets Streamable HTTP with the key', () => {
+  const s = devinSnippet('https://x.example/mcp', 'cs_abc')
+  const o = JSON.parse(s)
+  assert.equal(o.mcpServers.calcside.url, 'https://x.example/mcp')
+  assert.equal(o.mcpServers.calcside.transport, 'http')
   assert.equal(o.mcpServers.calcside.headers.Authorization, 'Bearer cs_abc')
 })
 

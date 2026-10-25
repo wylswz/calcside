@@ -14,9 +14,11 @@
    streamable HTTP, authenticated with a restricted API key. Its tools wrap
    the existing sandbox service, so MCP calls are checked, audited and
    recorded exactly like API calls.
-3. **On-demand utility docs.** The agent prompt lists utility modules with a
-   one-line summary each. Full signatures come from a pure Starlark builtin,
-   `help(name)`, available in every integration (MCP, SDK, LangChain).
+3. **On-demand docs.** The agent prompt lists utility modules and granted
+   capabilities with a one-line summary each. Full signatures come from a
+   pure Starlark builtin, `help(name)`, available in every integration (MCP,
+   SDK, LangChain); EP-0012 extends it to capability operations and
+   extension modules.
 4. **Setup guide.** After creating a key, the console shows the MCP URL and
    copy-ready client configurations.
 
@@ -161,17 +163,23 @@ in scripts and extensions):
 - `help("stats")` → that module's functions, one signature line each.
 - `help("stats.ols")` → full signature and description.
 
-It covers utility modules only. Capability ops stay fully listed in the
-prompt (short and instance-specific), and keeping them out means `help`
-needs no session state and lives entirely in `internal/stdlib`.
+The utility catalog stays pure and lives entirely in `internal/stdlib`; the
+per-instance capability catalog is bound at session creation.
 
 It returns a string (the agent prints it), output is bounded by the
 metadata size, and unknown names are an error listing close matches.
 
+EP-0012 extends this catalog to granted capabilities and extensions:
+`help("fs")` lists capability operations and `help("ext.alias")` lists an
+extension's operations with its dependencies. The index is built per
+instance from the granted, validated configs; it never reads secret values
+or private sources.
+
 **Prompt.** The "Pure utilities" section becomes one line per module plus:
-"Call `print(help("module"))` for signatures before first use." Golden files
-change accordingly. Capability sections stay complete: they are short and
-specific to the instance.
+"Call `print(help("module"))` for signatures before first use." Capability
+sections declare the granted capabilities concisely; operation signatures
+are fetched with `help("capability")` or `help("ext.alias")`. Golden files
+change accordingly.
 
 ### Console
 
@@ -183,7 +191,8 @@ specific to the instance.
   the allowed summary.
 - **After creation**, besides the secret shown once: the MCP URL
   (`{console origin}/mcp`) and tabs with configurations for Claude Code
-  (`claude mcp add --transport http …`), Cursor/VS Code JSON, and a generic
+  (`claude mcp add --transport http …`), Cursor/VS Code JSON, Devin
+  (Customize → MCPs form or CLI config), and a generic
   `Authorization: Bearer` header. Snippets use the real key, shown only in
   that dialog.
 - Runs made through MCP or the API by a restricted key appear as **agent**

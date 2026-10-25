@@ -127,12 +127,29 @@ func (f factory) Prompt(cfgAny any) string {
 	cfg, _ := cfgAny.(Config)
 	var b strings.Builder
 	b.WriteString("#### `io`\n")
+	b.WriteString("- `print(...)` and `io.println(...)` write to the exec output.\n")
+	fmt.Fprintf(&b, "- Output is capped at %d bytes per exec.\n", cfg.MaxOutputBytes)
+	return b.String()
+}
+
+func (f factory) Help(cfgAny any) []capability.HelpEntry {
+	cfg, _ := cfgAny.(Config)
+	var b strings.Builder
+	b.WriteString("#### `io`\n")
 	for _, op := range f.Ops() {
 		b.WriteString(capability.OpLine(types.CapIO, op) + "\n")
 	}
 	b.WriteString("- `print(...)` writes to the same output buffer.\n")
 	fmt.Fprintf(&b, "- Output is capped at %d bytes per exec.\n", cfg.MaxOutputBytes)
-	return b.String()
+	out := []capability.HelpEntry{{
+		Name:    string(types.CapIO),
+		Summary: "exec output and print",
+		Text:    b.String(),
+	}}
+	for _, op := range f.Ops() {
+		out = append(out, capability.OpHelpEntry(types.CapIO, op))
+	}
+	return out
 }
 
 func (factory) New(cfgAny any, env capability.InstanceEnv) (starlark.Value, io.Closer, error) {

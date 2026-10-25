@@ -439,6 +439,41 @@ func TestHelp(t *testing.T) {
 	}
 }
 
+func TestHelpCapabilities(t *testing.T) {
+	mods := Modules()
+	BindHelp(mods, []capability.HelpEntry{
+		{Name: "fs", Summary: "persistent files", Text: "fs operations\n"},
+		{Name: "fs.read", Summary: "read a file", Text: "fs.read(path)\n"},
+		{Name: "ext", Summary: "installed extensions", Text: "ext modules\n"},
+		{Name: "ext.tavily", Summary: "web search", Text: "ext.tavily operations\n"},
+	})
+	h := mods["help"]
+	call := func(args ...string) (string, error) {
+		var a starlark.Tuple
+		for _, s := range args {
+			a = append(a, starlark.String(s))
+		}
+		v, err := starlark.Call(&starlark.Thread{}, h, a, nil)
+		if err != nil {
+			return "", err
+		}
+		return string(v.(starlark.String)), nil
+	}
+	out, err := call()
+	if err != nil || !strings.Contains(out, "Capabilities:") || !strings.Contains(out, "fs — persistent files") || !strings.Contains(out, "ext — installed extensions") {
+		t.Fatalf("help() capabilities: %v %q", err, out)
+	}
+	for name, want := range map[string]string{"fs": "fs operations", "fs.read": "fs.read(path)", "ext.tavily": "ext.tavily operations"} {
+		out, err := call(name)
+		if err != nil || !strings.Contains(out, want) {
+			t.Fatalf("help(%s): %v %q", name, err, out)
+		}
+	}
+	if _, err := call("fs.reed"); err == nil || !strings.Contains(err.Error(), "fs.read") {
+		t.Fatalf("help(fs.reed) should suggest fs.read: %v", err)
+	}
+}
+
 func TestEveryModuleDocumented(t *testing.T) {
 	for _, f := range functions {
 		m, _, _ := strings.Cut(f.name, ".")

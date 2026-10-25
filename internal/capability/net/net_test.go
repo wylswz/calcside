@@ -337,10 +337,17 @@ func TestPrompt(t *testing.T) {
 	}
 	p := factory{}.Prompt(cfg)
 	for _, want := range []string{"a.com, b.com", "GET, POST", "{status, headers, body}", "{{secrets.NAME}}", "[REDACTED:NAME]",
-		"Accept-Encoding", "net.get(", "net.post(", "net.request("} {
+		"Accept-Encoding"} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("missing %q in:\n%s", want, p)
 		}
+	}
+	if strings.Contains(p, "net.get(") {
+		t.Fatalf("prompt should not inline operations:\n%s", p)
+	}
+	help := factory{}.Help(cfg)
+	if len(help) < 2 || help[0].Name != "net" || !strings.Contains(help[0].Text, "net.get(") {
+		t.Fatalf("help missing capability docs: %+v", help)
 	}
 }
 

@@ -421,10 +421,32 @@ func (f factory) Prompt(cfgAny any) string {
 	cfg, _ := cfgAny.(Config)
 	var b strings.Builder
 	b.WriteString("#### `fs`\n")
+	b.WriteString("- Persistent files rooted at `/work`.\n")
+	b.WriteString(fsConstraints(cfg))
+	return b.String()
+}
+
+func (f factory) Help(cfgAny any) []capability.HelpEntry {
+	cfg, _ := cfgAny.(Config)
+	var b strings.Builder
+	b.WriteString("#### `fs`\n")
 	for _, op := range f.Ops() {
 		b.WriteString(capability.OpLine(types.CapFS, op) + "\n")
 	}
-	b.WriteString("- Paths are rooted at `/work`.\n")
+	b.WriteString(fsConstraints(cfg))
+	out := []capability.HelpEntry{{
+		Name:    string(types.CapFS),
+		Summary: "persistent files rooted at /work",
+		Text:    b.String(),
+	}}
+	for _, op := range f.Ops() {
+		out = append(out, capability.OpHelpEntry(types.CapFS, op))
+	}
+	return out
+}
+
+func fsConstraints(cfg Config) string {
+	var b strings.Builder
 	fmt.Fprintf(&b, "- Quota: %d bytes, max %d files.\n", cfg.QuotaBytes, cfg.MaxFiles)
 	if cfg.ReadOnly {
 		b.WriteString("- The filesystem is read-only.\n")

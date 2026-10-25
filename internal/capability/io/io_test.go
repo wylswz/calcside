@@ -19,4 +19,8 @@ func TestPrompt(t *testing.T) {
 			t.Fatalf("missing %q in:\n%s", want, p)
 		}
 	}
+	help := factory{}.Help(cfg)
+	if len(help) < 2 || help[0].Name != "io" || !strings.Contains(help[0].Text, "io.println()") {
+		t.Fatalf("help missing capability docs: %+v", help)
+	}
 }
