@@ -1,0 +1,39 @@
+name: llm_openai
+version: 0.1.0
+description: OpenAI LLM provider — chat completions with native structured output.
+interface: llm
+icon: icon.png
+dependencies: [net]
+ops:
+  - name: respond
+    doc: Chat completion; returns {text, finish_reason, usage:{input_tokens,output_tokens}}
+    params: [messages, model, options]
+  - name: structured
+    doc: Completion parsed as JSON conforming to schema; returns the parsed value
+    params: [messages, schema, model]
+  - name: score
+    doc: Score content against criteria; returns {score, rationale}
+    params: [content, criteria, scale, model]
+  - name: choose
+    doc: Pick the best option for an instruction; returns {index, option, rationale}
+    params: [instruction, options, model]
+  - name: rank
+    doc: Rank items for an instruction; returns {order, rationale}
+    params: [instruction, items, model]
+config:
+  - name: base_url
+    type: string
+    doc: OpenAI-compatible API base URL
+    default: https://api.openai.com/v1
+  - name: api_key
+    type: secret
+    doc: OpenAI API key, sk-... (secret reference)
+    default: "{{secrets.OPENAI_API_KEY}}"
+  - name: model
+    type: string
+    doc: Default model
+    default: gpt-5-mini
+  - name: json_schema
+    type: bool
+    doc: Use response_format json_schema; false falls back to prompt-and-parse
+    default: true

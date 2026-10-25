@@ -176,3 +176,63 @@ curl -fsS -X DELETE "http://127.0.0.1:8787/api/v1/instances/$instance_id" \
 ```
 
 Local sources are re-read on each instance create, so iterate by editing files and recreating the instance — no server restart needed.
+
+## LLM providers (`interface: llm`)
+
+An extension may declare `interface: llm` to become an **LLM provider** —
+a uniform model backend that other extensions consume instead of calling a
+vendor API directly. Providers must export `respond`, `structured`,
+`score`, `choose`, and `rank`:
+
+```python
+llm.respond(messages, model=None, options=None)
+#   -> {text, finish_reason, usage: {input_tokens, output_tokens}}
+llm.structured(messages, schema, model=None)
+#   -> parsed value conforming to a JSON Schema dict
+llm.score(content, criteria, scale=1.0, model=None)   # -> {score, rationale}
+llm.choose(instruction, options, model=None)          # -> {index, option, rationale}
+llm.rank(instruction, items, model=None)              # -> {order, rationale}
+```
+
+Bundled providers: `contrib/llm-openai`, `contrib/llm-anthropic`,
+`contrib/llm-gemini`, `contrib/llm-openai-compat` (vLLM/Ollama/LiteLLM).
+Providers are pure Starlark like any extension — credentials are
+`type: secret` config fields, all egress goes through `net`.
+
+### Workspace provider registry
+
+`POST /api/v1/llm-providers` stores a named provider `{name, source,
+sum?, config}` per workspace (same name rules as policies). Creating or
+updating a record loads the source and validates `interface: llm` plus
+the config, so a stored provider is always usable.
+
+### Selecting a provider in an extension
+
+An ext alias may name a workspace provider via `llm`; the API tier
+resolves it to a `{name, source, sum, config}` snapshot at spec
+validation. Inside that extension the ops are available as `llm.*`:
+
+```json
+{
+  "capabilities": {
+    "ext": {
+      "grader": {"source": "contrib/grader", "llm": "my-openai"}
+    }
+  }
+}
+```
+
+```python
+# contrib/grader/main.star
+def grade(text):
+    return llm.score(text, "Is this a clear answer?")["score"]
+```
+
+- `llm` ops are gated too: audit shows `ext.llm.<provider>.respond`
+  records nested under the calling op, then the provider's own `net`
+  records.
+- Provider `net` calls inherit the same allowlists and secret injection —
+  the provider's `api_key` placeholder must reference a secret the
+  instance defines.
+- Unknown provider names and non-`llm` sources fail instance creation.
+- Scripts never see `llm` directly; it is a per-extension binding.

@@ -30,7 +30,7 @@ type boundModule struct {
 // with only the declared base capability bindings, a frozen `config`
 // dict, and json/math predeclared. The gate is not armed during init, so
 // any capability call at import time fails with ErrOutOfScope.
-func (m *Module) init(ctx context.Context, bindings map[types.CapabilityName]starlark.Value, cfg map[string]any, maxSteps uint64) (starlark.StringDict, error) {
+func (m *Module) init(ctx context.Context, bindings map[types.CapabilityName]starlark.Value, cfg map[string]any, maxSteps uint64, extra starlark.StringDict) (starlark.StringDict, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -42,6 +42,9 @@ func (m *Module) init(ctx context.Context, bindings map[types.CapabilityName]sta
 		return nil, fmt.Errorf("ext %s: config: %w", m.ID, err)
 	}
 	pre["config"] = cfgDict
+	for k, v := range extra {
+		pre[k] = v
+	}
 	for _, dep := range m.Manifest.Dependencies {
 		b, ok := bindings[dep]
 		if !ok {

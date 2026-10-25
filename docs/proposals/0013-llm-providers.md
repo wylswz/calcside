@@ -1,6 +1,6 @@
 # EP-0013: LLM providers with a unified response / structured / judge interface
 
-- **Status:** Draft
+- **Status:** Partially implemented (Starlark providers + workspace registry + ext `llm` binding); native `llm` capability remains future work
 - **Area:** New `llm` capability, instance spec, provider adapters, audit
 - **Related:** EP-0003 (extensions), EP-0008 (restricted keys, gate audit)
 

@@ -52,6 +52,16 @@ func validateManifest(m *CapabilityManifest) error {
 			}
 		}
 	}
+	if m.Interface != "" && m.Interface != InterfaceLLM {
+		return fmt.Errorf("ext: %s: invalid interface %q", m.Name, m.Interface)
+	}
+	if m.Interface == InterfaceLLM {
+		for _, req := range LLMProviderOps {
+			if !seen[req] {
+				return fmt.Errorf("ext: %s: interface llm requires op %q", m.Name, req)
+			}
+		}
+	}
 	for _, cf := range m.Config {
 		if !identRe.MatchString(cf.Name) {
 			return fmt.Errorf("ext: %s: invalid config name %q", m.Name, cf.Name)

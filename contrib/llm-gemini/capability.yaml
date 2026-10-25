@@ -1,0 +1,35 @@
+name: llm_gemini
+version: 0.1.0
+description: Gemini LLM provider — generateContent with responseSchema structured output.
+interface: llm
+icon: icon.png
+dependencies: [net]
+ops:
+  - name: respond
+    doc: Completion; returns {text, finish_reason, usage:{input_tokens,output_tokens}}
+    params: [messages, model, options]
+  - name: structured
+    doc: Completion parsed as JSON conforming to schema; returns the parsed value
+    params: [messages, schema, model]
+  - name: score
+    doc: Score content against criteria; returns {score, rationale}
+    params: [content, criteria, scale, model]
+  - name: choose
+    doc: Pick the best option for an instruction; returns {index, option, rationale}
+    params: [instruction, options, model]
+  - name: rank
+    doc: Rank items for an instruction; returns {order, rationale}
+    params: [instruction, items, model]
+config:
+  - name: base_url
+    type: string
+    doc: Gemini API base URL
+    default: https://generativelanguage.googleapis.com
+  - name: api_key
+    type: secret
+    doc: Gemini API key (secret reference)
+    default: "{{secrets.GEMINI_API_KEY}}"
+  - name: model
+    type: string
+    doc: Default model
+    default: gemini-2.5-flash

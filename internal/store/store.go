@@ -24,14 +24,15 @@ type IDPrefix string
 
 // ID prefixes.
 const (
-	PrefixUser      IDPrefix = "usr_"
-	PrefixWorkspace IDPrefix = "ws_"
-	PrefixAPIKey    IDPrefix = "key_"
-	PrefixInstance  IDPrefix = "ins_"
-	PrefixExecution IDPrefix = "exe_"
-	PrefixPolicy    IDPrefix = "pol_"
-	PrefixAudit     IDPrefix = "aud_"
-	PrefixSecret    IDPrefix = "sec_"
+	PrefixUser        IDPrefix = "usr_"
+	PrefixWorkspace   IDPrefix = "ws_"
+	PrefixAPIKey      IDPrefix = "key_"
+	PrefixInstance    IDPrefix = "ins_"
+	PrefixExecution   IDPrefix = "exe_"
+	PrefixPolicy      IDPrefix = "pol_"
+	PrefixLLMProvider IDPrefix = "llmp_"
+	PrefixAudit       IDPrefix = "aud_"
+	PrefixSecret      IDPrefix = "sec_"
 )
 
 const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -268,6 +269,21 @@ type Policy struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// LLMProvider is a workspace-level named LLM provider: an extension
+// source plus its effective config, snapshotted into instances whose
+// ext aliases select it by name.
+type LLMProvider struct {
+	ID          string          `json:"id"`
+	UserID      string          `json:"user_id"`
+	WorkspaceID string          `json:"-"`
+	Name        string          `json:"name"`
+	Source      string          `json:"source"`
+	Sum         string          `json:"sum,omitempty"`
+	Config      json.RawMessage `json:"config"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
 // Secret is a vault secret. Ciphertext is never serialized by the API.
 type Secret struct {
 	ID             string    `json:"id"`
@@ -336,6 +352,12 @@ type Store interface {
 	ListPolicies(ctx context.Context, workspaceID string) ([]*Policy, error)
 	UpdatePolicy(ctx context.Context, p *Policy) error
 	DeletePolicy(ctx context.Context, id string) error
+
+	CreateLLMProvider(ctx context.Context, p *LLMProvider) error
+	GetLLMProvider(ctx context.Context, id string) (*LLMProvider, error)
+	ListLLMProviders(ctx context.Context, workspaceID string) ([]*LLMProvider, error)
+	UpdateLLMProvider(ctx context.Context, p *LLMProvider) error
+	DeleteLLMProvider(ctx context.Context, id string) error
 
 	CreateSecret(ctx context.Context, s *Secret) error
 	GetSecret(ctx context.Context, id string) (*Secret, error)

@@ -4,6 +4,7 @@ package storetest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -569,8 +570,11 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		for name, fn := range map[string]func() error{
 			"instance": func() error { return s.CreateInstance(ctx, &store.Instance{UserID: u.ID}) },
 			"policy":   func() error { return s.CreatePolicy(ctx, &store.Policy{UserID: u.ID, Name: "p"}) },
-			"secret":   func() error { return s.CreateSecret(ctx, &store.Secret{UserID: u.ID, Name: "s"}) },
-			"key":      func() error { return s.CreateAPIKey(ctx, &store.APIKey{UserID: u.ID, Prefix: "cs_x", Hash: "h"}) },
+			"llm provider": func() error {
+				return s.CreateLLMProvider(ctx, &store.LLMProvider{UserID: u.ID, Name: "lp"})
+			},
+			"secret": func() error { return s.CreateSecret(ctx, &store.Secret{UserID: u.ID, Name: "s"}) },
+			"key":    func() error { return s.CreateAPIKey(ctx, &store.APIKey{UserID: u.ID, Prefix: "cs_x", Hash: "h"}) },
 		} {
 			if err := fn(); err == nil {
 				t.Fatalf("%s without workspace: expected error", name)
@@ -663,6 +667,49 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 			t.Fatal(err)
 		}
 		if _, err := s.GetPolicy(ctx, p.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("expected ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("llm providers", func(t *testing.T) {
+		s := newStore(t)
+		u, _ := s.UpsertUserByEmail(ctx, "lp@x.com", "", "")
+		p := &store.LLMProvider{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID),
+			Name: "main", Source: "contrib/llm-openai", Config: json.RawMessage(`{"model":"gpt-5-mini"}`)}
+		if err := s.CreateLLMProvider(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.GetLLMProvider(ctx, p.ID)
+		if err != nil || got.Name != "main" || string(got.Config) != `{"model":"gpt-5-mini"}` {
+			t.Fatalf("GetLLMProvider: %v %+v", err, got)
+		}
+		dup := &store.LLMProvider{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID),
+			Name: "main", Source: "contrib/llm-openai", Config: json.RawMessage(`{}`)}
+		if err := s.CreateLLMProvider(ctx, dup); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("duplicate name: want ErrConflict, got %v", err)
+		}
+		other, _ := s.UpsertUserByEmail(ctx, "lp2@x.com", "", "")
+		if err := s.CreateLLMProvider(ctx, &store.LLMProvider{UserID: other.ID,
+			WorkspaceID: store.PersonalWorkspaceID(other.ID), Name: "main",
+			Source: "contrib/llm-openai", Config: json.RawMessage(`{}`)}); err != nil {
+			t.Fatalf("same name for another user: %v", err)
+		}
+		p.Config = json.RawMessage(`{"model":"gpt-5"}`)
+		if err := s.UpdateLLMProvider(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+		got, _ = s.GetLLMProvider(ctx, p.ID)
+		if string(got.Config) != `{"model":"gpt-5"}` {
+			t.Fatalf("UpdateLLMProvider: %+v", got)
+		}
+		lst, _ := s.ListLLMProviders(ctx, store.PersonalWorkspaceID(u.ID))
+		if len(lst) != 1 {
+			t.Fatalf("ListLLMProviders: %d", len(lst))
+		}
+		if err := s.DeleteLLMProvider(ctx, p.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.GetLLMProvider(ctx, p.ID); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("expected ErrNotFound, got %v", err)
 		}
 	})

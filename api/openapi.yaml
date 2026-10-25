@@ -24,6 +24,7 @@ tags:
   - name: instances
   - name: audit
   - name: policies
+  - name: llm-providers
   - name: secrets
 paths:
   /healthz:
@@ -910,6 +911,95 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
+  /api/v1/llm-providers:
+    get:
+      operationId: listLLMProviders
+      tags: [llm-providers]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
+      responses:
+        '200':
+          description: workspace LLM providers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProvidersResponse'
+        '401': { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createLLMProvider
+      tags: [llm-providers]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LLMProviderRequest'
+      responses:
+        '201':
+          description: created provider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProviderResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/llm-providers/{id}:
+    get:
+      operationId: getLLMProvider
+      tags: [llm-providers]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: provider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProviderResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    put:
+      operationId: updateLLMProvider
+      tags: [llm-providers]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LLMProviderUpdateRequest'
+      responses:
+        '200':
+          description: updated provider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProviderResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deleteLLMProvider
+      tags: [llm-providers]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
   /api/v1/secrets:
     get:
       operationId: listSecrets
@@ -1690,6 +1780,58 @@ components:
         policies:
           type: array
           items: { $ref: '#/components/schemas/Policy' }
+    LLMProvider:
+      type: object
+      description: >-
+        A named LLM provider owned by a workspace: an interface-llm
+        extension source plus its effective config, snapshotted into
+        instances whose ext aliases select it via "llm": "<name>".
+      required: [id, name, source]
+      properties:
+        id: { type: string }
+        user_id: { type: string }
+        name: { $ref: '#/components/schemas/PolicyName' }
+        source:
+          type: string
+          description: 'extension source, e.g. contrib/llm-openai'
+        sum:
+          type: string
+          description: 'h1: integrity sum (remote sources only)'
+        config:
+          type: object
+          additionalProperties: true
+          description: provider config values; secrets stay as {{secrets.NAME}} references
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    LLMProviderRequest:
+      type: object
+      required: [name, source]
+      properties:
+        name: { $ref: '#/components/schemas/PolicyName' }
+        source: { type: string }
+        sum: { type: string }
+        config:
+          type: object
+          additionalProperties: true
+    LLMProviderUpdateRequest:
+      type: object
+      properties:
+        name: { $ref: '#/components/schemas/PolicyName' }
+        source: { type: string }
+        sum: { type: string }
+        config:
+          type: object
+          additionalProperties: true
+    LLMProviderResponse:
+      type: object
+      properties:
+        provider: { $ref: '#/components/schemas/LLMProvider' }
+    LLMProvidersResponse:
+      type: object
+      properties:
+        providers:
+          type: array
+          items: { $ref: '#/components/schemas/LLMProvider' }
     ValidatePolicyRequest:
       type: object
       required: [rego]

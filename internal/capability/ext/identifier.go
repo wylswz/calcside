@@ -82,15 +82,25 @@ func (id CapabilityIdentifier) IsRemote() bool {
 // it's uniquely defined by capability identifier and can depend on
 // other capabilities
 type CapabilityManifest struct {
-	Identifier   CapabilityIdentifier   `yaml:"-"` // source it was loaded under
-	Name         string                 `yaml:"name"`
-	Version      string                 `yaml:"version"`
-	Description  string                 `yaml:"description"`
-	Icon         string                 `yaml:"icon"`
+	Identifier  CapabilityIdentifier `yaml:"-"` // source it was loaded under
+	Name        string               `yaml:"name"`
+	Version     string               `yaml:"version"`
+	Description string               `yaml:"description"`
+	Icon        string               `yaml:"icon"`
+	// Interface marks a special contract the module satisfies. "llm"
+	// declares an LLM provider usable as an ext alias's llm binding.
+	Interface    string                 `yaml:"interface"`
 	Dependencies []types.CapabilityName `yaml:"dependencies"`
 	Ops          []OpSpec               `yaml:"ops"`
 	Config       []ConfigField          `yaml:"config"`
 }
+
+// InterfaceLLM is the manifest interface for LLM providers.
+const InterfaceLLM = "llm"
+
+// LLMProviderOps is the op set every interface: llm extension must
+// export: one uniform contract across providers.
+var LLMProviderOps = []string{"respond", "structured", "score", "choose", "rank"}
 
 // OpSpec declares one exported operation.
 type OpSpec struct {

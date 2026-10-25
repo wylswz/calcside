@@ -13,6 +13,7 @@ import (
 	"go.starlark.net/starlarkstruct"
 
 	"calcside/internal/capability"
+	"calcside/internal/runtime"
 	"calcside/internal/types"
 )
 
@@ -41,16 +42,40 @@ func (factory) ConfigFields() []capability.FieldDoc {
 	}
 }
 
-// aliasSpec is one entry of capabilities.ext: {source,sum,config}.
+// aliasSpec is one entry of capabilities.ext: {source,sum,config,llm}.
+// llm, when present, is a resolved LLM provider snapshot — the API tier
+// rewrites the provider's workspace name into {name,source,sum,config}
+// before normalization.
 type aliasSpec struct {
+	Source string         `json:"source"`
+	Sum    string         `json:"sum"`
+	Config map[string]any `json:"config"`
+	LLM    *llmSpec       `json:"llm"`
+}
+
+// llmSpec is the resolved LLM provider attached to an ext alias.
+type llmSpec struct {
+	Name   string         `json:"name,omitempty"`
 	Source string         `json:"source"`
 	Sum    string         `json:"sum"`
 	Config map[string]any `json:"config"`
 }
 
 // aliasCfg is a validated alias: loaded module plus effective config.
+// llm is the validated provider binding when the alias selected one.
 type aliasCfg struct {
 	mod    *Module
+	source string
+	sum    string
+	config map[string]any
+	llm    *llmCfg
+}
+
+// llmCfg is a validated provider: loaded module, effective config, and
+// the workspace name used in audit op names.
+type llmCfg struct {
+	mod    *Module
+	name   string
 	source string
 	sum    string
 	config map[string]any
@@ -75,17 +100,7 @@ func (f factory) Validate(raw json.RawMessage, limits capability.ServerLimits) (
 		if err := json.Unmarshal(rawAlias, &as); err != nil {
 			return nil, fmt.Errorf("ext %s: %w", alias, err)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), f.opts.FetchTimeout)
-		if f.opts.FetchTimeout <= 0 {
-			ctx, cancel = context.WithTimeout(context.Background(), defaultFetchTimeout)
-		}
-		mod, err := (&CapabilityLoader{
-			Identifier: CapabilityIdentifier(as.Source),
-			Sum:        as.Sum,
-			Options:    f.opts,
-			locks:      f.locks,
-		}).Load(ctx)
-		cancel()
+		mod, err := f.loadModule(as.Source, as.Sum)
 		if err != nil {
 			return nil, fmt.Errorf("ext %s: %w", alias, err)
 		}
@@ -93,9 +108,56 @@ func (f factory) Validate(raw json.RawMessage, limits capability.ServerLimits) (
 		if err != nil {
 			return nil, err
 		}
-		out[alias] = aliasCfg{mod: mod, source: as.Source, sum: as.Sum, config: cfg}
+		ac := aliasCfg{mod: mod, source: as.Source, sum: as.Sum, config: cfg}
+		if as.LLM != nil {
+			lc, err := f.validateLLM(alias, as.LLM)
+			if err != nil {
+				return nil, err
+			}
+			ac.llm = lc
+		}
+		out[alias] = ac
 	}
 	return out, nil
+}
+
+// loadModule resolves one extension tree through the factory's options.
+func (f factory) loadModule(source, sum string) (*Module, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), f.opts.FetchTimeout)
+	if f.opts.FetchTimeout <= 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), defaultFetchTimeout)
+	}
+	defer cancel()
+	return (&CapabilityLoader{
+		Identifier: CapabilityIdentifier(source),
+		Sum:        sum,
+		Options:    f.opts,
+		locks:      f.locks,
+	}).Load(ctx)
+}
+
+// validateLLM loads and checks a resolved provider snapshot: the tree
+// must declare interface: llm and its config must satisfy the manifest.
+func (f factory) validateLLM(alias string, spec *llmSpec) (*llmCfg, error) {
+	what := fmt.Sprintf("ext %s llm", alias)
+	if spec.Name != "" && !runtime.ValidPolicyName(spec.Name) {
+		return nil, fmt.Errorf("%s: invalid provider name %q", what, spec.Name)
+	}
+	if spec.Source == "" {
+		return nil, fmt.Errorf("%s: provider source is required", what)
+	}
+	mod, err := f.loadModule(spec.Source, spec.Sum)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", what, err)
+	}
+	if mod.Manifest.Interface != InterfaceLLM {
+		return nil, fmt.Errorf("%s: %s does not declare interface %q", what, spec.Source, InterfaceLLM)
+	}
+	cfg, err := validateConfig(what, mod.Manifest.Config, spec.Config)
+	if err != nil {
+		return nil, err
+	}
+	return &llmCfg{mod: mod, name: spec.Name, source: spec.Source, sum: spec.Sum, config: cfg}, nil
 }
 
 // validateConfig applies manifest defaults, rejects unknown keys and type
@@ -326,6 +388,13 @@ func writeExtAlias(b *strings.Builder, alias string, ac aliasCfg, ops bool) {
 	if len(used) > 0 {
 		fmt.Fprintf(b, "  - Secrets used: %s\n", strings.Join(used, ", "))
 	}
+	if ac.llm != nil {
+		name := ac.llm.name
+		if name == "" {
+			name = ac.llm.source
+		}
+		fmt.Fprintf(b, "  - LLM provider %s bound as `llm` (llm.respond/structured/score/choose/rank)\n", name)
+	}
 }
 
 // New executes each extension's module init and binds ext.<alias>.<op>
@@ -343,7 +412,15 @@ func (f factory) New(cfgAny any, env capability.InstanceEnv) (starlark.Value, io
 	extMembers := starlark.StringDict{}
 	for _, alias := range aliases {
 		ac := v[alias]
-		globals, err := ac.mod.init(env.Context, env.Bindings, ac.config, env.MaxSteps)
+		var extra starlark.StringDict
+		if ac.llm != nil {
+			llmVal, err := bindLLM(alias, ac.llm, env)
+			if err != nil {
+				return nil, nil, err
+			}
+			extra = starlark.StringDict{"llm": llmVal}
+		}
+		globals, err := ac.mod.init(env.Context, env.Bindings, ac.config, env.MaxSteps, extra)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -373,6 +450,41 @@ func (f factory) New(cfgAny any, env capability.InstanceEnv) (starlark.Value, io
 		extMembers[alias] = starlarkstruct.FromStringDict(starlarkstruct.Default, members)
 	}
 	return starlarkstruct.FromStringDict(starlarkstruct.Default, extMembers), nil, nil
+}
+
+// bindLLM initializes a resolved provider module and wraps its declared
+// ops as `llm.<op>` builtins routed through the same gate. The returned
+// struct becomes the `llm` global inside the consuming extension.
+func bindLLM(alias string, lc *llmCfg, env capability.InstanceEnv) (starlark.Value, error) {
+	for _, cf := range lc.mod.Manifest.Config {
+		if cf.Type != "secret" {
+			continue
+		}
+		name := secretRefName(lc.config[cf.Name])
+		if name == "" {
+			continue
+		}
+		if env.Secrets == nil || env.Secrets.Lookup(name) == nil {
+			return nil, fmt.Errorf("ext %s llm: config %s references secret %q which this instance does not define", alias, cf.Name, name)
+		}
+	}
+	globals, err := lc.mod.init(env.Context, env.Bindings, lc.config, env.MaxSteps, nil)
+	if err != nil {
+		return nil, err
+	}
+	label := "llm"
+	if lc.name != "" {
+		label = "llm." + lc.name
+	}
+	members := starlark.StringDict{}
+	for _, op := range lc.mod.Manifest.Ops {
+		fn := globals[op.Name]
+		if _, ok := fn.(starlark.Callable); !ok {
+			return nil, fmt.Errorf("ext %s llm: %q is not callable", alias, op.Name)
+		}
+		members[op.Name] = opBuiltin(label, op, fn, aliasCfg{mod: lc.mod, source: lc.source, sum: lc.sum}, env.Gate)
+	}
+	return starlarkstruct.FromStringDict(starlarkstruct.Default, members), nil
 }
 
 // opBuiltin builds the starlark builtin for ext.<alias>.<op>: args are
@@ -469,4 +581,24 @@ func (f factory) CompletionOps(cfg any) []capability.OpInfo {
 		}
 	}
 	return out
+}
+
+// ValidateProvider vets a stored LLM provider record: the source must
+// load under opts, declare interface: llm, and accept config.
+func ValidateProvider(opts *Options, source, sum string, config map[string]any) error {
+	f := factory{opts: opts, locks: &fetchLocks{}}
+	if source == "" {
+		return fmt.Errorf("llm provider: source is required")
+	}
+	mod, err := f.loadModule(source, sum)
+	if err != nil {
+		return fmt.Errorf("llm provider: %w", err)
+	}
+	if mod.Manifest.Interface != InterfaceLLM {
+		return fmt.Errorf("llm provider: %s does not declare interface %q", source, InterfaceLLM)
+	}
+	if _, err := validateConfig(source, mod.Manifest.Config, config); err != nil {
+		return err
+	}
+	return nil
 }

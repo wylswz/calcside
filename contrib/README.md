@@ -22,6 +22,20 @@ policies, and audit apply unchanged.
 | `neon` | Postgres via Neon HTTP SQL | `NEON_PASSWORD` | your `*.neon.tech` host |
 | `qdrant` | Qdrant vector search | `QDRANT_API_KEY` | your Qdrant host |
 
+### LLM providers (`interface: llm`)
+
+| Extension | Backend | Required secret |
+|---|---|---|
+| `llm-openai` | OpenAI chat completions | `OPENAI_API_KEY` |
+| `llm-anthropic` | Anthropic Messages | `ANTHROPIC_API_KEY` |
+| `llm-gemini` | Gemini generateContent | `GEMINI_API_KEY` |
+| `llm-openai-compat` | OpenAI-compatible (vLLM/Ollama/LiteLLM) | `LLM_API_KEY` |
+
+Providers expose `respond`/`structured`/`score`/`choose`/`rank` and are
+not used directly — a workspace registers them via
+`POST /api/v1/llm-providers`, and an ext alias selects one with
+`"llm": "<name>"`, gaining an `llm` global. See docs/extensions.md.
+
 ## Security conventions
 
 - Auth credentials are always `type: secret` config fields — never op

@@ -231,9 +231,91 @@ func (s *Service) ValidateSpec(ctx context.Context, a service.Actor, rawSpec []b
 	return spec.Sanitized(secs), nil
 }
 
+// resolveLLMProviders rewrites each ext alias's "llm" provider name
+// into a resolved {name,source,sum,config} snapshot before
+// normalization, so the node's ext factory sees only concrete sources.
+// Unknown names fail closed, like unknown policy names. An object form
+// (already-resolved spec) passes through untouched.
+func (s *Service) resolveLLMProviders(ctx context.Context, wsID string, raw []byte) ([]byte, error) {
+	if !bytes.Contains(raw, []byte(`"llm"`)) {
+		return raw, nil
+	}
+	var spec map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		return raw, nil // malformed JSON is reported by NormalizeSpec
+	}
+	var caps map[string]json.RawMessage
+	if err := json.Unmarshal(spec["capabilities"], &caps); err != nil || caps == nil {
+		return raw, nil
+	}
+	var aliases map[string]json.RawMessage
+	if err := json.Unmarshal(caps["ext"], &aliases); err != nil || aliases == nil {
+		return raw, nil
+	}
+	type slot struct {
+		obj  map[string]json.RawMessage
+		name string
+	}
+	slots := map[string]slot{}
+	for a, ra := range aliases {
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(ra, &obj); err != nil || obj == nil {
+			continue
+		}
+		lraw, ok := obj["llm"]
+		if !ok {
+			continue
+		}
+		var name string
+		if err := json.Unmarshal(lraw, &name); err != nil {
+			continue // object form or invalid JSON — left for validation
+		}
+		slots[a] = slot{obj: obj, name: name}
+	}
+	if len(slots) == 0 {
+		return raw, nil
+	}
+	provs, err := s.st.ListLLMProviders(ctx, wsID)
+	if err != nil {
+		return nil, service.Internal(err)
+	}
+	byName := make(map[string]*store.LLMProvider, len(provs))
+	for _, p := range provs {
+		byName[p.Name] = p
+	}
+	for a, sl := range slots {
+		p, ok := byName[sl.name]
+		if !ok {
+			return nil, service.Errf(types.ErrCodeBadSpec, "capabilities.ext.%s.llm: unknown llm provider %q", a, sl.name)
+		}
+		snap, err := json.Marshal(map[string]any{
+			"name": p.Name, "source": p.Source, "sum": p.Sum,
+			"config": json.RawMessage(p.Config),
+		})
+		if err != nil {
+			return nil, service.Internal(err)
+		}
+		sl.obj["llm"] = snap
+		if b, err := json.Marshal(sl.obj); err == nil {
+			aliases[a] = b
+		}
+	}
+	if b, err := json.Marshal(aliases); err == nil {
+		caps["ext"] = b
+	}
+	if b, err := json.Marshal(caps); err == nil {
+		spec["capabilities"] = b
+	}
+	return json.Marshal(spec)
+}
+
 // validateSpec runs normalization, secret resolution and policy
 // selection for a raw spec; no placement happens.
 func (s *Service) validateSpec(ctx context.Context, a service.Actor, rawSpec []byte, keySpec bool) (*runtime.Spec, []runtime.Secret, map[string]runtime.SecretSpec, error) {
+	rawSpec, err := s.resolveLLMProviders(ctx, a.WorkspaceID, rawSpec)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	spec, _, err := capability.NormalizeSpec(rawSpec, s.reg, s.limits)
 	if err != nil {
 		return nil, nil, nil, fail(err)
