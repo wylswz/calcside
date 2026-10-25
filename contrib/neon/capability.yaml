@@ -1,0 +1,18 @@
+name: neon
+version: 0.1.0
+description: Neon Postgres — SQL over HTTP via the serverless endpoint.
+icon: icon.png
+dependencies: [net]
+ops:
+  - name: query
+    doc: Run a parameterized SQL statement ($1..$n); returns {fields, rows, row_count}
+    params: [sql, params]
+config:
+  - name: host
+    type: string
+    doc: Neon project host, e.g. ep-cool-1234.us-east-2.aws.neon.tech (required)
+    default: ""
+  - name: password
+    type: secret
+    doc: Neon role password used as the bearer token (secret reference)
+    default: "{{secrets.NEON_PASSWORD}}"

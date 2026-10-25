@@ -1,0 +1,27 @@
+name: slack
+version: 0.1.0
+description: Slack messaging — post messages, list channels, read history, add reactions.
+icon: icon.png
+dependencies: [net]
+ops:
+  - name: post_message
+    doc: Post a message to a channel; returns {ts, channel}. thread_ts replies in a thread.
+    params: [channel, text, thread_ts]
+  - name: list_channels
+    doc: List public channels visible to the token; returns list of {id, name, is_member}
+    params: [limit]
+  - name: channel_history
+    doc: Read recent messages from a channel; returns list of {ts, user, text}
+    params: [channel, limit]
+  - name: add_reaction
+    doc: Add an emoji reaction to a message
+    params: [channel, timestamp, emoji]
+config:
+  - name: base_url
+    type: string
+    doc: Slack Web API base URL
+    default: https://slack.com/api
+  - name: bot_token
+    type: secret
+    doc: Slack bot token, xoxb-... (secret reference)
+    default: "{{secrets.SLACK_BOT_TOKEN}}"

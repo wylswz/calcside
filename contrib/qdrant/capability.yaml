@@ -1,0 +1,30 @@
+name: qdrant
+version: 0.1.0
+description: Qdrant vector database — collection info, vector search, scroll, and upsert.
+icon: icon.png
+dependencies: [net]
+ops:
+  - name: list_collections
+    doc: List collections; returns list of names
+    params: []
+  - name: describe_collection
+    doc: Collection config/status; returns {status, vectors_count, points_count}
+    params: [collection]
+  - name: search
+    doc: Nearest-neighbor search; returns list of {id, score, payload}
+    params: [collection, vector, limit, with_payload]
+  - name: scroll
+    doc: Page through points; returns {points, next_page_offset}
+    params: [collection, limit, offset, with_payload]
+  - name: upsert
+    doc: Upsert points [{id, vector, payload}]; requires PUT in net methods; returns status
+    params: [collection, points]
+config:
+  - name: host
+    type: string
+    doc: Qdrant host, e.g. xyz.us-east-1.aws.cloud.qdrant.io (required)
+    default: ""
+  - name: api_key
+    type: secret
+    doc: Qdrant API key (secret reference)
+    default: "{{secrets.QDRANT_API_KEY}}"

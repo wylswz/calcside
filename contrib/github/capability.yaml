@@ -1,0 +1,37 @@
+name: github
+version: 0.1.0
+description: GitHub — repositories, issues, pull requests, and file contents.
+icon: icon.png
+dependencies: [net]
+ops:
+  - name: get_repo
+    doc: Get repository metadata; returns {full_name, description, default_branch, stars, private}
+    params: [owner, repo]
+  - name: list_issues
+    doc: List issues (open by default); returns list of {number, title, state, user, labels}
+    params: [owner, repo, state, limit]
+  - name: create_issue
+    doc: Create an issue; returns {number, html_url}
+    params: [owner, repo, title, body, labels]
+  - name: create_comment
+    doc: Comment on an issue or pull request; returns {id, html_url}
+    params: [owner, repo, number, body]
+  - name: list_pull_requests
+    doc: List pull requests; returns list of {number, title, state, user, head}
+    params: [owner, repo, state, limit]
+  - name: get_file
+    doc: Read a UTF-8 file from the default branch; returns {path, size, content}
+    params: [owner, repo, path]
+config:
+  - name: base_url
+    type: string
+    doc: GitHub REST API base URL
+    default: https://api.github.com
+  - name: token
+    type: secret
+    doc: GitHub personal access token or app token (secret reference)
+    default: "{{secrets.GITHUB_TOKEN}}"
+  - name: max_file_bytes
+    type: int
+    doc: Maximum file size returned by get_file
+    default: 262144

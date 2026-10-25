@@ -1,0 +1,27 @@
+name: linear
+version: 0.1.0
+description: Linear issue tracking — GraphQL queries plus issue and team helpers.
+icon: icon.png
+dependencies: [net]
+ops:
+  - name: graphql
+    doc: Run a GraphQL query against api.linear.app; returns the data field
+    params: [query, variables]
+  - name: list_teams
+    doc: List teams; returns list of {id, key, name}
+    params: []
+  - name: create_issue
+    doc: Create an issue in a team; returns {id, identifier, url}
+    params: [team_id, title, description]
+  - name: list_issues
+    doc: Recent issues; returns list of {id, identifier, title, state, assignee}
+    params: [limit]
+config:
+  - name: base_url
+    type: string
+    doc: Linear GraphQL endpoint
+    default: https://api.linear.app/graphql
+  - name: api_key
+    type: secret
+    doc: Linear personal API key, lin_api_... (secret reference)
+    default: "{{secrets.LINEAR_API_KEY}}"
