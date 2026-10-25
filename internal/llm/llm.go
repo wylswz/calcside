@@ -12,6 +12,9 @@ import (
 // Interface is the provider extension interface (capability.yaml).
 const Interface = "llm"
 
+// Capability marks the capability extension that consumes providers.
+const Capability = "llm"
+
 // ProviderOps are the ops every provider extension must export. The
 // consumer also exposes list_models, synthesized from the provider
 // manifest's models metadata.

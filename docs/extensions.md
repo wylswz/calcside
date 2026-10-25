@@ -228,6 +228,10 @@ instances only add the `llm` capability ext.
 
 ### Provider protocol
 
+The capability consumer declares `capability: llm` in `capability.yaml`;
+the API uses that metadata (never the source path) to decide which ext
+aliases receive the workspace provider snapshot.
+
 A provider extension must declare:
 
 ```yaml

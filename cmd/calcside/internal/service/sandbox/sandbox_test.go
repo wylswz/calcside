@@ -3,11 +3,13 @@ package sandbox
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
 	_ "calcside/cmd/calcside/internal/gormstore"
+	capext "calcside/internal/capability/ext"
 	"calcside/internal/store"
 	"calcside/internal/store/storetest"
 )
@@ -54,7 +56,7 @@ func TestResolveLLMProvider(t *testing.T) {
 	if err := st.CreateLLMProvider(ctx, p); err != nil {
 		t.Fatal(err)
 	}
-	s := &Service{st: st}
+	s := &Service{st: st, ext: capext.NewInspector(&capext.Options{LocalRoots: []string{filepath.Join("..", "..", "..", "..", "..", "contrib")}})}
 	raw := []byte(`{"capabilities":{"ext":{"ai":{"source":"contrib/llm"}}}}`)
 	out, err := s.resolveLLMProviders(ctx, ws, raw)
 	if err != nil {

@@ -65,6 +65,7 @@ type Options struct {
 	Secrets  SecretResolver
 	Audit    AuditSink
 	Registry *capability.Registry
+	Ext      *capext.Options
 	Limits   capability.ServerLimits
 	Access   *access.Checker
 	// GlobalPolicies is the --policy-dir snapshot, loaded once at
@@ -83,6 +84,7 @@ type Service struct {
 	secrets    SecretResolver
 	audit      AuditSink
 	reg        *capability.Registry
+	ext        *capext.Inspector
 	limits     capability.ServerLimits
 	access     *access.Checker
 	globalPols map[string]string
@@ -106,7 +108,8 @@ func New(o Options) *Service {
 	}
 	return &Service{
 		st: o.Store, rt: o.Runtime, secrets: o.Secrets, audit: o.Audit,
-		reg: o.Registry, limits: o.Limits, access: o.Access, globalPols: o.GlobalPolicies,
+		reg: o.Registry, ext: capext.NewInspector(o.Ext), limits: o.Limits,
+		access: o.Access, globalPols: o.GlobalPolicies,
 		maxPerUser: o.MaxInstancesPerUser, now: o.Now,
 	}
 }
@@ -257,9 +260,16 @@ func (s *Service) resolveLLMProviders(ctx context.Context, wsID string, raw []by
 		if err := json.Unmarshal(ra, &obj); err != nil || obj == nil {
 			continue
 		}
-		var source string
-		if err := json.Unmarshal(obj["source"], &source); err != nil || !capext.IsLLMExtSource(source) {
+		var source, sum string
+		if err := json.Unmarshal(obj["source"], &source); err != nil || source == "" {
 			continue
+		}
+		if rawSum, ok := obj["sum"]; ok {
+			_ = json.Unmarshal(rawSum, &sum)
+		}
+		kind, err := s.ext.Capability(source, sum)
+		if err != nil || kind != llm.Capability {
+			continue // normal extension (or invalid source reported later)
 		}
 		if _, resolved := obj["llm"]; resolved {
 			continue // already-resolved spec

@@ -20,6 +20,9 @@ import (
 
 const maxArgLen = 256
 
+// this is used by llm extension to select provider by input
+const providerRegistryProp = "provider_registry"
+
 // Factory returns the capability.Factory for "ext" bound to opts.
 func Factory(opts Options) capability.Factory {
 	return factory{opts: &opts, locks: &fetchLocks{}}
@@ -113,7 +116,7 @@ func (f factory) Validate(raw json.RawMessage, limits capability.ServerLimits) (
 		if err != nil {
 			return nil, err
 		}
-		ac := aliasCfg{mod: mod, source: as.Source, sum: as.Sum, config: cfg, llmExt: IsLLMExtSource(as.Source)}
+		ac := aliasCfg{mod: mod, source: as.Source, sum: as.Sum, config: cfg, llmExt: mod.Manifest.Capability == llm.Capability}
 		if !ac.llmExt && as.LLM != nil {
 			return nil, fmt.Errorf("ext %s: llm provider snapshot is only valid for the llm ext", alias)
 		}
@@ -443,7 +446,7 @@ func (f factory) New(cfgAny any, env capability.InstanceEnv) (starlark.Value, io
 			if err != nil {
 				return nil, nil, err
 			}
-			extra = starlark.StringDict{"provider_registry": pv}
+			extra = starlark.StringDict{providerRegistryProp: pv}
 		}
 		globals, err := ac.mod.init(env.Context, env.Bindings, ac.config, env.MaxSteps, extra)
 		if err != nil {
