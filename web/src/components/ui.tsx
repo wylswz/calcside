@@ -113,6 +113,21 @@ export function SwapLabel({ show, options }: { show: string; options: readonly s
   return <span className="swap-label">{options.map((o) => <span key={o} data-on={o === show}>{o}</span>)}</span>
 }
 
+// RevealNew offers the rows a held list is keeping back (S5) in a slot
+// wide enough for every count, so appearing never moves the filters or
+// the primary action beside it (S3/S4). Counts stop at 999+ so the width
+// stays bounded.
+export function RevealNew({ count, moved, onClick }: { count: number; moved: boolean; onClick: () => void }) {
+  const label = count > 0 ? `Show ${count > 999 ? '999+' : count} new` : 'Show latest'
+  const options = ['Show latest', 'Show 999+ new']
+  if (!options.includes(label)) options.push(label)
+  return (
+    <button className="whitespace-nowrap text-btn tabular-nums" style={{ visibility: count || moved ? 'visible' : 'hidden' }} onClick={onClick}>
+      <SwapLabel show={label} options={options} />
+    </button>
+  )
+}
+
 // Button forwards its ref so headless primitives (menu triggers) can
 // position against it and return focus to it.
 export const Button = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary'; size?: 'sm' }>(
@@ -184,39 +199,142 @@ export function EmptyRow({ cols, children }: { cols: number; children: React.Rea
 export function Loading({ label = 'loading' }: { label?: string }) {
   return (
     <div className="flex items-center gap-3 text-sm text-mute">
-      <span className="inline-block h-3 w-3 animate-spin border-2 border-mute border-t-transparent rounded-full" aria-hidden />
+      <span className="inline-block h-3 w-3 motion-safe:animate-spin border-2 border-mute border-t-transparent rounded-full" aria-hidden />
       {label}
     </div>
   )
 }
 
-// Modal is a Radix dialog: focus is trapped and restored, Escape and an
-// outside click close it, and the title labels it. Callers mount it
-// conditionally rather than through a Dialog.Trigger, so the element that
-// opened it is remembered here and focused again on close.
-export function Modal({ title, onClose, children, footer, wide }: {
+const focusable = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+// returnFocus remembers where focus came from (C1 in
+// docs/interaction-stability.md). If the opener is gone by the time the
+// dialog closes (its row was removed), focus moves to the nearest control
+// after it, then before it, then to the page, never to <body>.
+function returnFocus(): () => void {
+  const active = document.activeElement
+  const opener = active instanceof HTMLElement && active !== document.body ? active : null
+  if (!opener) return () => document.querySelector<HTMLElement>('main')?.focus()
+  const scope = opener.closest<HTMLElement>('tbody, ul, ol, section, main') ?? document.body
+  const all = Array.from(scope.querySelectorAll<HTMLElement>(focusable))
+  const i = all.indexOf(opener)
+  const near = i < 0 ? [] : [...all.slice(i + 1), ...all.slice(0, i).reverse()]
+  return () => {
+    const target = opener.isConnected ? opener : near.find((el) => el.isConnected && !el.matches(':disabled')) ?? document.querySelector<HTMLElement>('main')
+    target?.focus()
+  }
+}
+
+// Modal is a Radix dialog: focus is trapped and returned (C1), the title
+// labels it, and it is anchored at the top so content changes grow it
+// downwards without moving what is above (S3). Escape and an outside click
+// close it, except once the user has typed or chosen anything in it: then
+// they ask first, in place over the dialog (C2). dirty overrides the
+// detection: true for content that cannot be had again (a one-time
+// secret, with a discardPrompt saying what would be lost), false where
+// nothing is lost.
+export function Modal({ title, onClose, children, footer, wide, dirty: dirtyProp, discardPrompt = 'Discard unsaved changes?' }: {
   title: string
   onClose: () => void
   children: React.ReactNode
   footer?: React.ReactNode
   wide?: boolean
+  dirty?: boolean
+  discardPrompt?: string
 }) {
-  const [opener] = React.useState(() => document.activeElement as HTMLElement | null)
+  const [restore] = React.useState(returnFocus)
+  const [edited, setEdited] = React.useState(false)
+  const dirty = dirtyProp ?? edited
+  const [discarding, setDiscarding] = React.useState(false)
+  const resume = React.useRef<HTMLElement | null>(null)
+  const lastFocused = React.useRef<HTMLElement | null>(null)
+  const asking = React.useRef(false)
+  // An outside click reports both the pointer and the focus leaving; only
+  // the first may ask, and the field to resume is the last one edited in
+  // the dialog, not whatever holds focus after the click.
+  const ask = () => {
+    if (asking.current) return
+    asking.current = true
+    const active = document.activeElement
+    resume.current = lastFocused.current?.isConnected ? lastFocused.current
+      : active instanceof HTMLElement ? active : null
+    setDiscarding(true)
+  }
+  const keep = () => {
+    asking.current = false
+    setDiscarding(false)
+    window.setTimeout(() => resume.current?.focus(), 0)
+  }
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open) onClose() }}>
       <Dialog.Portal>
         <Dialog.Overlay data-ui="dialog-overlay" />
         <Dialog.Content data-ui="dialog-surface" aria-describedby={undefined} className={wide ? 'max-w-5xl' : 'max-w-xl'}
-          onCloseAutoFocus={(e) => { e.preventDefault(); if (opener?.isConnected) opener.focus() }}>
+          onEscapeKeyDown={(e) => { if (!dirty) return; e.preventDefault(); if (asking.current) keep(); else ask() }}
+          onInteractOutside={(e) => { if (!dirty) return; e.preventDefault(); ask() }}
+          onCloseAutoFocus={(e) => { e.preventDefault(); restore() }}>
           <div className="flex items-center justify-between border-b border-line px-6 py-4">
             <Dialog.Title className="text-lg font-semibold tracking-tight text-ink">{title}</Dialog.Title>
-            <Dialog.Close data-ui="dialog-close" aria-label="Close">&times;</Dialog.Close>
+            <button data-ui="dialog-close" aria-label="Close" onClick={() => { if (dirty) ask(); else onClose() }}>&times;</button>
           </div>
-          <div className="overflow-y-auto px-6 py-5">{children}</div>
-          {footer && <div className="flex items-center gap-2 border-t border-line px-6 py-4">{footer}</div>}
+          <div className="flex min-h-0 flex-col" onInputCapture={() => setEdited(true)}
+            onFocusCapture={(e) => { if (e.target instanceof HTMLElement) lastFocused.current = e.target }}
+            {...(discarding ? { inert: '' } : {})}>
+            <div className="overflow-y-auto px-6 py-5">{children}</div>
+            {footer && <div className="flex items-center gap-2 border-t border-line px-6 py-4">{footer}</div>}
+          </div>
+          {discarding && (
+            <div data-ui="dialog-discard" role="alertdialog" aria-label={discardPrompt}>
+              <div className="flex w-full flex-wrap items-center gap-3 border-t border-line px-6 py-4">
+                <p className="mr-auto text-sm font-medium text-ink">{discardPrompt}</p>
+                <Button onClick={onClose}>Discard</Button>
+                <Button variant="primary" autoFocus onClick={keep}>Keep editing</Button>
+              </div>
+            </div>
+          )}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  )
+}
+
+// Confirm asks before an irreversible action (F2) and runs it from the
+// dialog, so a double click on the opener cannot act twice (F1). It stays
+// open and pending until the action settles, refetch included (P1), so by
+// the time focus returns the removed row is gone and focus lands on its
+// neighbour (C1). A failure is shown in the footer, where nothing above it
+// moves, and the dialog stays open (P5).
+export function Confirm({ title, children, confirm, pending, action, onClose }: {
+  title: string
+  children?: React.ReactNode
+  confirm: string
+  pending: string
+  action: () => Promise<unknown>
+  onClose: () => void
+}) {
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState('')
+  const run = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      await action()
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+  return (
+    <Modal title={title} dirty={false} onClose={() => { if (!busy) onClose() }} footer={
+      <div className="flex w-full items-start gap-2">
+        <p role="alert" className="mr-auto min-w-0 flex-1 self-center text-xs text-warn-text">{error}</p>
+        <Button onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button variant="primary" onClick={run} disabled={busy}><SwapLabel show={busy ? pending : confirm} options={[confirm, pending]} /></Button>
+      </div>
+    }>
+      {children}
+    </Modal>
   )
 }
 
@@ -250,6 +368,10 @@ export function Menu({ trigger, children }: { trigger: React.ReactNode; children
 export function MenuItem({ onSelect, disabled, tone, children }: { onSelect: () => void; disabled?: boolean; tone?: 'danger'; children: React.ReactNode }) {
   const queue = React.useContext(MenuAction)
   return <DropdownMenu.Item data-ui="menu-item" data-tone={tone} disabled={disabled} onSelect={() => queue(onSelect)}>{children}</DropdownMenu.Item>
+}
+
+export function MenuSeparator() {
+  return <DropdownMenu.Separator data-ui="menu-separator" />
 }
 
 // InstanceStatus is the one status display: dot + label. Live (green)

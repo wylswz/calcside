@@ -3,10 +3,11 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api, SharedInstance, Instance, wsPath } from '../api'
 import { useRole } from '../workspace'
-import { Button, Loading, PageHeader, InstanceStatus } from '../components/ui'
+import { Button, Loading, PageHeader, InstanceStatus, RevealNew } from '../components/ui'
 import { attentionText, expiringSoon } from '../nextStep'
 import { allowedSummary, instanceName } from '../activity'
 import { fmtTime, relTime } from '../format'
+import { useHeldOrder } from '../stableList'
 
 
 const toneCls = { danger: 'text-danger', warn: 'text-warn-text', mute: 'text-mute', sec: 'text-sec' } as const
@@ -39,12 +40,19 @@ export default function Instances() {
   const needsAttention = all.filter(attn)
   const live = all.filter((i) => i.status === 'running' && !attn(i))
   const ended = all.filter((i) => i.status !== 'running')
-  const groups: [string, Instance[]][] = [['Needs attention', needsAttention], ['Live', live], ['Ended', ended]]
+  const fresh: [string, Instance[]][] = [['Needs attention', needsAttention], ['Live', live], ['Ended', ended]]
+  // Polling updates rows in place but never moves them between groups or
+  // inserts new ones under the user (S5); "Show latest" re-sorts.
+  const held = useHeldOrder(data ? fresh.flatMap(([slot, g]) => g.map((i) => ({ i, slot }))) : undefined, ({ i, slot }) => ({ key: i.id, slot }))
+  const groups: [string, Instance[]][] = fresh.map(([label]) => [label, held.rows.filter((r) => r.slot === label).map((r) => r.item.i)])
 
   return (
     <div>
       <PageHeader title="Instances"
-        actions={role != null && role !== 'viewer' ? <Button variant="primary" onClick={() => nav('/instances/new')}>New instance</Button> : undefined}>
+        actions={<>
+          <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />
+          {role != null && role !== 'viewer' && <Button variant="primary" onClick={() => nav('/instances/new')}>New instance</Button>}
+        </>}>
         Set the boundary, connect an agent, and follow its work.
       </PageHeader>
       {isLoading && <Loading />}

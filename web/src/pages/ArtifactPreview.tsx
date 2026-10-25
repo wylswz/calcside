@@ -98,7 +98,7 @@ function Preview({ id, path, dev }: { id: string; path: string; dev: boolean }) 
             <button className={`artifact-action ${!mobile ? '!bg-ink !text-paper' : ''}`} title="Fit to window" aria-label="Fit to window" aria-pressed={!mobile} onClick={() => setMobile(false)}><Icon name="desktop" /></button>
             <button className={`artifact-action ${mobile ? '!bg-ink !text-paper' : ''}`} title="Mobile width" aria-label="Mobile width" aria-pressed={mobile} onClick={() => setMobile(true)}><Icon name="mobile" /></button>
           </div>
-          {config.data?.interactive_enabled && <Button size="sm" disabled={preparing} onClick={() => scripts ? setScripts(false) : setConfirmScripts(true)}><Icon name={scripts ? 'stop' : 'play'} className="!h-3 !w-3" />{scripts ? 'Stop JavaScript' : 'Enable JavaScript'}</Button>}
+          {config.data?.interactive_enabled && <Button size="sm" disabled={preparing} onClick={() => scripts ? setScripts(false) : setConfirmScripts(true)}><Icon name={scripts ? 'stop' : 'play'} className="!h-3 !w-3" /><SwapLabel show={scripts ? 'Stop JavaScript' : 'Enable JavaScript'} options={['Enable JavaScript', 'Stop JavaScript']} /></Button>}
         </>}
         {csv && showPreview && <label className="flex items-center gap-2 text-xs text-sec"><input type="checkbox" checked={firstRowHeader} disabled={!preview?.csv_rows?.length} onChange={(event) => setFirstRowHeader(event.target.checked)} />First row is header</label>}
       </div>

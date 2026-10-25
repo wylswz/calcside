@@ -25,7 +25,7 @@ export default function ConnectAgent({ id, workspaceId, onClose }: { id: string;
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
   return (
-    <Modal title="Connect agent" onClose={onClose} footer={
+    <Modal title="Connect agent" onClose={onClose} dirty={secret ? true : undefined} discardPrompt={secret ? 'Close? The key secret is not shown again.' : undefined} footer={
       secret ? <Button variant="primary" onClick={onClose}>Done</Button>
         : <><Button onClick={onClose}>Cancel</Button><Button variant="primary" onClick={create} disabled={!name.trim() || busy}><SwapLabel show={busy ? 'Creating…' : 'Create key'} options={['Create key', 'Creating…']} /></Button></>
     }>

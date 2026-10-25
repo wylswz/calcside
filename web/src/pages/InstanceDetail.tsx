@@ -5,7 +5,7 @@ import { api, Instance, Execution, APIKey, SharedInstance, workspaces } from '..
 import { instanceName } from '../activity'
 import { nextStep } from '../nextStep'
 import { useRole } from '../workspace'
-import { Button, Loading, Menu, MenuItem, SectionTitle, InstanceStatus, Modal, Notice, SwapLabel } from '../components/ui'
+import { Button, Confirm, Loading, Menu, MenuItem, SectionTitle, InstanceStatus, Modal, Notice, SwapLabel } from '../components/ui'
 import ShareDialog from '../components/ShareDialog'
 import ConnectAgent from '../components/ConnectAgent'
 import { Allowed } from '../components/Allowed'
@@ -96,7 +96,8 @@ export default function InstanceDetail() {
   })
 
   const [actErr, setActErr] = useState('')
-  const [pending, setPending] = useState<'extend' | 'end' | null>(null)
+  const [pending, setPending] = useState<'extend' | null>(null)
+  const [ending, setEnding] = useState(false)
   const keepalive = async () => {
     setActErr(''); setPending('extend')
     try {
@@ -105,13 +106,9 @@ export default function InstanceDetail() {
     } catch (e: any) { setActErr(e.message) } finally { setPending(null) }
   }
   const end = async () => {
-    if (!window.confirm(`End instance ${instanceName(inst!)}?`)) return
-    setActErr(''); setPending('end')
-    try {
-      await api.del(`/api/v1/instances/${id}`)
-      qc.invalidateQueries({ queryKey: ['instances'] })
-      navigate('/')
-    } catch (e: any) { setActErr(e.message) } finally { setPending(null) }
+    await api.del(`/api/v1/instances/${id}`)
+    await qc.invalidateQueries({ queryKey: ['instances'] })
+    navigate('/')
   }
 
   if (instErr) return <Notice tone="warning">Could not load this instance — it may be gone or you may not have access.</Notice>
@@ -145,7 +142,7 @@ export default function InstanceDetail() {
           <Menu trigger={<Button>More ▾</Button>}>
             {isOwner && <MenuItem onSelect={() => setShare(true)}>Share…</MenuItem>}
             <MenuItem onSelect={() => setPrompt(true)}>Copy agent prompt</MenuItem>
-            {effRun && inst.status !== 'deleted' && <MenuItem tone="danger" disabled={pending === 'end'} onSelect={end}>End instance</MenuItem>}
+            {effRun && inst.status !== 'deleted' && <MenuItem tone="danger" onSelect={() => setEnding(true)}>End instance</MenuItem>}
           </Menu>
         </div>
       </div>
@@ -204,6 +201,11 @@ export default function InstanceDetail() {
         </div>
       )}
 
+      {ending && (
+        <Confirm title={`End instance ${name}?`} confirm="End instance" pending="Ending…" action={end} onClose={() => setEnding(false)}>
+          <p className="text-sm text-body">Running code stops and the instance's files and variables are discarded. Its run history stays. This cannot be undone.</p>
+        </Confirm>
+      )}
       {share && <ShareDialog instanceId={id!} workspaceId={inst.workspace_id ?? ''} onClose={() => setShare(false)} />}
       {agent && <ConnectAgent id={id!} workspaceId={inst?.workspace_id} onClose={() => setAgent(false)} />}
 
@@ -224,27 +226,22 @@ export default function InstanceDetail() {
             <h2 className="sr-only">Work</h2>
             <Activity id={id} focusId={focusId}
               aside={effRun && live ? <Button size="sm" aria-expanded={code} aria-controls="run-code" onClick={() => setCode(!code)}>Run code</Button> : undefined}
-              editor={code && effRun && live ? <div id="run-code" className="mb-6"><RunCode inst={inst} running={running} setRunning={setRunning} onClose={() => setCode(false)} /></div> : undefined} />
+              editor={code && effRun && live ? <div id="run-code" className="mb-6"><RunCode inst={inst} running={running} setRunning={setRunning} /></div> : undefined} />
           </section>
-          <section aria-label="Results" className="results-block">
-            <h2 className="mb-4 text-lg font-semibold text-ink">Results</h2>
-            <div className="results-content">
-              {inst.spec?.capabilities?.fs != null && (
+          {inst.spec?.capabilities?.fs != null && (
+            <section aria-label="Results" className="results-block">
+              <h2 className="mb-4 text-lg font-semibold text-ink">Results</h2>
+              <div className="results-content">
                 <div>
                   <SectionTitle>Files</SectionTitle>
                   <ArtifactBrowser key={id} id={id} running={live} busy={running} />
                 </div>
-              )}
-              <details className="detail-state-disclosure">
-                <summary>State <span className="state-hint">Variables and resources</span></summary>
-                <div className="state-body">
-                  <StatePanel key={`state-${id}`} id={id} running={live} busy={running} capNames={Object.keys(inst.spec?.capabilities ?? {})} />
-                </div>
-              </details>
-            </div>
-          </section>
+              </div>
+            </section>
+          )}
         </div>
         <aside className="side-col">
+          <StatePanel key={`state-${id}`} id={id} running={live} busy={running} capNames={Object.keys(inst.spec?.capabilities ?? {})} />
           <section aria-label="Boundary">
             <h2>Boundary</h2>
             <p className="side-text mb-3">Fixed at creation.</p>

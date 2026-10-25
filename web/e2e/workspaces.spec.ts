@@ -1,4 +1,4 @@
-import { test, expect, request, type APIRequestContext } from '@playwright/test'
+import { test, expect, request, chromium, type APIRequestContext, type Page } from '@playwright/test'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -33,7 +33,9 @@ test.beforeAll(async () => {
   const listenPort = await port()
   consoleURL = `http://console.localhost:${listenPort}`
   const transportURL = `http://127.0.0.1:${listenPort}`
-  server = spawn(binary, ['serve', '--dev', '--store', 'sqlite', '--dsn', database, '--addr', `127.0.0.1:${listenPort}`, '--console-origin', consoleURL], { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] })
+  // The suite accumulates live instances across tests; the quota itself is
+  // covered by Go tests, so keep it out of the way here.
+  server = spawn(binary, ['serve', '--dev', '--store', 'sqlite', '--dsn', database, '--addr', `127.0.0.1:${listenPort}`, '--console-origin', consoleURL, '--max-instances-per-user', '100'], { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] })
   server.stdout?.on('data', (chunk) => { output = (output + String(chunk)).slice(-64_000) })
   server.stderr?.on('data', (chunk) => { output = (output + String(chunk)).slice(-64_000) })
   client = await request.newContext({ baseURL: transportURL, extraHTTPHeaders: { 'X-Requested-With': 'calcside' } })
@@ -53,6 +55,34 @@ test.afterAll(async () => {
   if (directory) await rm(directory, { recursive: true })
 })
 
+// Records every distinct box each selector occupies, frame by frame, until
+// the returned stop() is called. Frames where the element runs a keyframe
+// entrance animation are skipped; transitions are not, so a hover or press
+// that moves or resizes the element shows up as a second box.
+async function watchGeometry(page: Page, selectors: string[]) {
+  await page.evaluate((selectors) => {
+    const seen: Record<string, string[]> = Object.fromEntries(selectors.map((s) => [s, []]))
+    const state = { seen, on: true }
+    ;(window as any).__geometry = state
+    const tick = () => {
+      for (const s of selectors) {
+        const el = document.querySelector(s)
+        if (!el || el.getAnimations().some((a) => 'animationName' in a && a.playState === 'running')) continue
+        const b = el.getBoundingClientRect()
+        const key = [b.x, b.y, b.width, b.height].map((n) => n.toFixed(2)).join(' ')
+        if (!seen[s].includes(key)) seen[s].push(key)
+      }
+      if (state.on) requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  }, selectors)
+  return () => page.evaluate(() => {
+    const state = (window as any).__geometry
+    state.on = false
+    return state.seen as Record<string, string[]>
+  })
+}
+
 // Create a team workspace via API, switch to it in the header: the
 // instance list scopes to it (a personal-workspace instance is not
 // shown), and the settings page renders members.
@@ -66,7 +96,7 @@ test('workspace switcher scopes the instance list', async ({ page }) => {
   await page.goto(`${consoleURL}/`)
   await expect(page.getByRole('button', { name: /▾/ })).toBeVisible({ timeout: 15_000 })
   await page.getByRole('button', { name: /▾/ }).click()
-  await page.getByRole('button', { name: /e2e team/ }).click()
+  await page.getByRole('menuitem', { name: /e2e team/ }).click()
   await page.waitForLoadState('networkidle')
   // scoped: the personal-workspace instance row is absent
   await expect(page.locator('tbody tr')).toHaveCount(0, { timeout: 5000 }).catch(() => {})
@@ -258,7 +288,7 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   // title comes from labels.name, not 'name=…'
   await expect(page.getByRole('heading', { name: 'Research session' })).toBeVisible()
   await expect(page.getByText('The latest run was denied')).toBeVisible()
-  for (const h of ['Boundary', 'Results', 'Agent']) {
+  for (const h of ['Boundary', 'Results', 'Agent', 'State']) {
     await expect(page.getByRole('heading', { name: h })).toBeVisible()
   }
   // Work's h2 exists for a11y but is visually hidden by design
@@ -267,20 +297,16 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   const wh = await workH2.evaluate((el) => ({ h: el.getBoundingClientRect().height, clip: getComputedStyle(el).clipPath }))
   expect(wh.h).toBeLessThan(4)
   expect(wh.clip).not.toBe('none')
-  // State disclosure defaults collapsed; toolbar appears after opening
-  const stateDisclosure = page.locator('.detail-state-disclosure')
-  await expect(stateDisclosure).not.toHaveAttribute('open', '')
-  await expect(page.locator('.state-variable-tools')).not.toBeVisible()
-  await stateDisclosure.locator('summary').first().click()
-  await expect(stateDisclosure).toHaveAttribute('open', '')
+  // inspect (State) lives in the right rail and is visible by default
+  const state = page.locator('[aria-label="State"]')
+  await expect(state).toBeVisible()
+  expect(await state.evaluate((el) => !!el.closest('.side-col'))).toBe(true)
   await expect(page.locator('.state-variable-tools')).toBeVisible()
   const variableFilter = page.getByRole('textbox', { name: 'Filter variables' })
   await variableFilter.fill('__no_such_variable__')
   await expect(page.getByText('no matching variables', { exact: true })).toBeVisible()
   await variableFilter.clear()
   await expect(page.getByText('no matching variables', { exact: true })).toHaveCount(0)
-  await stateDisclosure.locator(':scope > summary').click()
-  await expect(stateDisclosure).not.toHaveAttribute('open', '')
   const tableType = await page.locator('[aria-label="Activity"] table').evaluate((table) => {
     const header = getComputedStyle(table.querySelector('th')!)
     const source = getComputedStyle(table.querySelector('.detail-code')!)
@@ -323,7 +349,7 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   expect(pb.bg).toBe('rgb(37, 99, 235)')
   expect(pb.fg).toBe('rgb(255, 255, 255)')
 
-  // initial collapsed screenshot (scrollTop 0, full page)
+  // initial screenshot (scrollTop 0, full page)
   await page.screenshot({ path: testInfo.outputPath('detail-denied-desktop.png'), fullPage: true })
 
   // Review run expands the run and shows its calls
@@ -378,24 +404,30 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
     toggle: await runToggle.evaluate((el) => { const b = el.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y + scrollY), Math.round(b.width)] }),
     filter: await filterAll.evaluate((el) => { const b = el.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y + scrollY), Math.round(b.width)] }),
   })
+  // Run code sits after the filters, against the right edge of the header
+  const runBox = (await runToggle.boundingBox())!
+  const filtersBox = (await page.locator('.seg-filters').boundingBox())!
+  expect(runBox.x).toBeGreaterThan(filtersBox.x + filtersBox.width)
   await page.mouse.move(1, 1)
   await page.waitForTimeout(400)
   const closedAt = await at()
   await runToggle.click()
   await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 8000 })
   await expect(runToggle).toHaveAttribute('aria-expanded', 'true')
-  await page.mouse.move(1, 1)
+  // the editor's action is an icon; closing is the header toggle's job
+  const runAction = page.getByRole('button', { name: 'Run', exact: true })
+  await expect(runAction).toBeVisible()
+  await expect(runAction.locator('svg')).toHaveCount(1)
+  await expect(page.locator('#run-code').getByRole('button', { name: 'Close' })).toHaveCount(0)
   await page.waitForTimeout(400)
   expect(await at()).toEqual(closedAt)
   // switching the filter keeps both segments in place
   await page.locator('.seg-filters button').nth(1).click()
-  await page.mouse.move(1, 1)
   await page.waitForTimeout(400)
   expect(await at()).toEqual(closedAt)
   await filterAll.click()
 
   // mobile: Work precedes Boundary; ≥44px primary; no overflow
-  await stateDisclosure.locator(':scope > summary').click()
   await page.setViewportSize({ width: 390, height: 900 })
   await page.waitForTimeout(600)
   const mob = await page.evaluate(() => {
@@ -407,12 +439,12 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   expect(mob.sw).toBeLessThanOrEqual(mob.iw)
   const bb = await primary.boundingBox()
   expect(bb!.height).toBeGreaterThanOrEqual(44)
-  // state-variable toolbar stays inside the work surface at 390px
+  // state-variable toolbar stays inside the right rail at 390px
   const tools = await page.evaluate(() => {
     const t = document.querySelector('.state-variable-tools')
-    const ws = document.querySelector('.work-surface')
-    if (!t || !ws) return { inside: null }
-    const inner = ws.getBoundingClientRect().right - parseFloat(getComputedStyle(ws).paddingRight)
+    const rail = document.querySelector('.side-col')
+    if (!t || !rail) return { inside: null }
+    const inner = rail.getBoundingClientRect().right
     const children = Array.from(t.children).every((c) => c.getBoundingClientRect().right <= inner + 1)
     return { inside: t.scrollWidth <= t.clientWidth && children }
   })
@@ -625,9 +657,9 @@ test('new instance: palette controls stay put while adding and removing', async 
       const b = el.getBoundingClientRect()
       return { x: Math.round(b.x + window.scrollX), y: Math.round(b.y + window.scrollY), w: Math.round(b.width), h: Math.round(b.height) }
     })
-    // Hover lift is intentional motion, not layout: measure at rest.
+    // Measured with the pointer still on the control just clicked: hover
+    // and press feedback are paint-only, so nothing may move under it.
     const snapshot = async () => {
-      await page.mouse.move(1, 1)
       await page.waitForTimeout(400)
       const out: Record<string, { x: number; y: number; w: number; h: number }> = {}
       for (const [k, l] of Object.entries(targets)) out[k] = await box(l)
@@ -712,6 +744,285 @@ test('console primitives: keyboard tabs and dialog focus', async ({ page }) => {
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
   await expect(open).toBeFocused()
+})
+
+// A floating menu never chases its anchor: pressing the trigger (the menu
+// opens on pointerdown), resting on its edge and moving across the items
+// leave both the trigger and the menu exactly where they were.
+test('instance detail: the More menu stays where it opened', async ({ page }) => {
+  const created = await client.post('/api/v1/instances', { data: { ttl_seconds: 600 } })
+  const inst = (await created.json()).instance
+  await page.goto(`${consoleURL}/instances/${inst.id}`)
+  const more = page.getByRole('button', { name: 'More ▾' })
+  await expect(more).toBeVisible()
+  const t = (await more.boundingBox())!
+  const stop = await watchGeometry(page, ['[data-ui="menu"]', '.instance-detail [aria-haspopup="menu"]'])
+  await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2, { steps: 4 })
+  await page.mouse.down()
+  await expect(page.getByRole('menu')).toBeVisible()
+  await page.waitForTimeout(450)
+  await page.mouse.up()
+  await page.waitForTimeout(450)
+  await page.mouse.move(t.x + t.width / 2, t.y + t.height - 1, { steps: 4 })
+  await page.waitForTimeout(450)
+  for (const item of await page.getByRole('menuitem').all()) {
+    const b = (await item.boundingBox())!
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 4 })
+    await page.waitForTimeout(150)
+  }
+  await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2, { steps: 8 })
+  await page.waitForTimeout(450)
+  await expect(page.getByRole('menu')).toBeVisible()
+  const seen = await stop()
+  expect(seen['[data-ui="menu"]']).toHaveLength(1)
+  expect(seen['.instance-detail [aria-haspopup="menu"]']).toHaveLength(1)
+})
+
+// Hover and press are paint-only: every kind of control keeps its box
+// while the pointer rests on it and while it is held down.
+test('console controls keep their box under hover and press', async ({ page }) => {
+  await page.route('**/api/v1/extensions**', (r) => r.fulfill({ json: {
+    extensions: [{ source: 'contrib/steady', name: 'steady', description: 'fixture', dependencies: [], ops: [], config: [] }],
+    local_enabled: true, remote_enabled: false,
+  } }))
+  await page.goto(`${consoleURL}/instances/new`)
+  await expect(page.locator('.ext-card')).toHaveCount(1)
+  // tabs last: a pressed tab activates and swaps the panel
+  const controls = ['[data-ui="button"][data-variant="primary"]', '[data-ui="button"][data-variant="default"]', '.ability-choice', '.ext-card', '.input', '.segmented [role="tab"]:not([aria-selected="true"])']
+  for (const sel of controls) {
+    const control = page.locator(sel).first()
+    await control.scrollIntoViewIfNeeded()
+    await page.evaluate(() => document.querySelector('[data-probe]')?.removeAttribute('data-probe'))
+    await control.evaluate((el) => el.setAttribute('data-probe', ''))
+    const b = (await control.boundingBox())!
+    await page.mouse.move(1, 1)
+    const stop = await watchGeometry(page, ['[data-probe]'])
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 4 })
+    await page.waitForTimeout(450)
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height - 1, { steps: 2 })
+    await page.waitForTimeout(450)
+    await page.mouse.down()
+    await page.waitForTimeout(250)
+    // leave before releasing so nothing is activated
+    await page.mouse.move(1, 1)
+    await page.mouse.up()
+    expect((await stop())['[data-probe]'], sel).toHaveLength(1)
+  }
+})
+
+// The tests below check invariants from docs/interaction-stability.md on
+// the rendered console; the IDs in their names refer to that document.
+
+test('removal asks first, cannot act twice and hands focus on (F1 F2 P1 C1)', async ({ page }) => {
+  const rego = 'package calcside.hooks\ndeny contains "x" if { input.op == "never" }'
+  for (const name of ['stab_a', 'stab_b', 'stab_c']) {
+    expect((await client.post('/api/v1/policies', { data: { name, rego } })).status()).toBe(201)
+  }
+  await page.goto(`${consoleURL}/workspace/policies`)
+  const row = (name: string) => page.locator('tbody tr', { hasText: name })
+  await expect(row('stab_c')).toHaveCount(1)
+  const del = row('stab_a').getByRole('button', { name: 'Delete' })
+  // a double click opens the question at most once and removes nothing
+  await del.dblclick()
+  await page.waitForTimeout(300)
+  const asked = await page.getByRole('dialog').count()
+  expect(asked).toBeLessThanOrEqual(1)
+  if (asked) await page.keyboard.press('Escape')
+  for (const name of ['stab_a', 'stab_b', 'stab_c']) await expect(row(name)).toHaveCount(1)
+  // Escape cancels and returns focus to the control that asked
+  await del.click()
+  const confirm = page.getByRole('dialog', { name: 'Delete policy stab_a?' })
+  await expect(confirm).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(confirm).toHaveCount(0)
+  await expect(del).toBeFocused()
+  // confirming removes exactly that row, then focus moves to a neighbour
+  await del.click()
+  await confirm.getByRole('button', { name: 'Delete' }).click()
+  await expect(confirm).toHaveCount(0)
+  await expect(row('stab_a')).toHaveCount(0)
+  await expect(row('stab_b')).toHaveCount(1)
+  await expect(row('stab_c')).toHaveCount(1)
+  expect(await page.evaluate(() => {
+    const el = document.activeElement
+    return el !== document.body && el?.tagName === 'BUTTON' && !!el.closest('tbody')
+  })).toBe(true)
+})
+
+test('a dialog with unsaved input asks before Escape, close or an outside click discards it (C2)', async ({ page }) => {
+  await page.goto(`${consoleURL}/workspace/policies`)
+  const open = page.getByRole('button', { name: 'New policy' })
+  const dialog = page.getByRole('dialog', { name: 'New policy' })
+  const ask = page.getByRole('alertdialog', { name: 'Discard unsaved changes?' })
+  // nothing typed yet: Escape just closes
+  await open.click()
+  await expect(dialog).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  // typed: an outside click asks, Keep editing returns to the field intact
+  await open.click()
+  const field = dialog.getByPlaceholder('deny_net_hosts')
+  await field.fill('draft_name')
+  await dialog.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)))
+  const box = (await dialog.boundingBox())!
+  await page.mouse.click(Math.max(4, box.x - 8), box.y + 40)
+  await expect(ask).toBeVisible()
+  expect(await dialog.boundingBox()).toEqual(box)
+  await page.getByRole('button', { name: 'Keep editing' }).click()
+  await expect(ask).toHaveCount(0)
+  await expect(field).toHaveValue('draft_name')
+  await expect(field).toBeFocused()
+  // the close control asks too, not just Escape and the backdrop
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(ask).toBeVisible()
+  await page.getByRole('button', { name: 'Keep editing' }).click()
+  await expect(ask).toHaveCount(0)
+  await expect(field).toBeFocused()
+  // Escape asks; Escape again keeps editing; Discard closes for real
+  await page.keyboard.press('Escape')
+  await expect(ask).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(ask).toHaveCount(0)
+  await expect(dialog).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Discard' }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(open).toBeFocused()
+})
+
+test('policy editor reports validation and save outcomes beside its buttons (P5)', async ({ page }) => {
+  // the laptop-sized viewport where the old messages scrolled out of sight
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await page.goto(`${consoleURL}/workspace/policies`)
+  await page.getByRole('button', { name: 'New policy' }).click()
+  let dialog = page.getByRole('dialog', { name: 'New policy' })
+  const name = dialog.getByPlaceholder('deny_net_hosts')
+  const save = dialog.getByRole('button', { name: 'Save' })
+  // a disabled save says why it is disabled, in the footer
+  await expect(dialog.getByRole('status')).toHaveText('Enter a name to save.')
+  await name.fill('bad name')
+  await expect(save).toBeDisabled()
+  await expect(dialog.getByRole('status')).toContainText('Name allows letters')
+  // a valid policy reports validation, then saves and closes
+  await name.fill('feedback_policy')
+  await expect(save).toBeEnabled()
+  await dialog.getByRole('button', { name: 'Validate' }).click()
+  await expect(dialog.getByRole('status')).toHaveText('Policy is valid.')
+  await save.click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page.locator('tbody tr', { hasText: 'feedback_policy' })).toHaveCount(1)
+  // a rejected save stays open with the reason in the footer
+  expect((await client.post('/api/v1/policies', { data: { name: 'feedback_other', rego: 'package calcside.hooks\n\n' } })).status()).toBe(201)
+  await page.locator('tbody tr', { hasText: 'feedback_policy' }).getByRole('button', { name: 'Edit' }).click()
+  dialog = page.getByRole('dialog', { name: 'Edit feedback_policy' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByPlaceholder('deny_net_hosts').fill('feedback_other')
+  await dialog.getByRole('button', { name: 'Save' }).click()
+  await expect(dialog.getByRole('status')).toContainText('Save failed: policy with that name already exists')
+  await expect(dialog).toBeVisible()
+})
+
+test('share dialog: the role menu matches the email field (P2)', async ({ page }) => {
+  const inst = (await (await client.post('/api/v1/instances', { data: { ttl_seconds: 600 } })).json()).instance
+  await page.goto(`${consoleURL}/instances/${inst.id}`)
+  await page.getByRole('button', { name: 'More ▾' }).click()
+  await page.getByRole('menuitem', { name: 'Share…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Share instance' })
+  await expect(dialog).toBeVisible()
+  await dialog.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)))
+  const style = (locator: ReturnType<typeof dialog.locator>) => locator.evaluate((el) => {
+    const s = getComputedStyle(el)
+    const b = el.getBoundingClientRect()
+    return { height: b.height, radius: s.borderTopLeftRadius, border: s.borderTopWidth, bg: s.backgroundColor }
+  })
+  const email = dialog.getByPlaceholder('user@example.com')
+  const role = dialog.getByRole('combobox', { name: 'Role' })
+  expect(await style(role)).toEqual(await style(email))
+  await expect(role).toHaveValue('viewer')
+  await role.selectOption('editor')
+  await expect(role).toHaveValue('editor')
+  await dialog.getByRole('button', { name: 'Done' }).click()
+  await expect(dialog).toHaveCount(0)
+})
+
+test('agent runs wait behind "Show N new"; your own runs appear at once (S5)', async ({ page }) => {
+  test.setTimeout(60_000)
+  const inst = (await (await client.post('/api/v1/instances', { data: { ttl_seconds: 600 } })).json()).instance
+  const key = await client.post('/api/v1/keys', { data: { name: 'stability agent', expires_in_seconds: 3600 } })
+  expect(key.status()).toBe(201)
+  const agent = { Authorization: `Bearer ${(await key.json()).secret}` }
+  const exec = (code: string, headers?: Record<string, string>) => client.post(`/api/v1/instances/${inst.id}/exec`, { data: { code }, headers })
+  expect((await exec('print("first")', agent)).status()).toBe(200)
+  await page.goto(`${consoleURL}/instances/${inst.id}`)
+  const rows = page.locator('[aria-label="Activity"] tbody tr[id^="run-"]')
+  await expect(rows).toHaveCount(1)
+  const first = await rows.first().evaluate((el) => { const b = el.getBoundingClientRect(); return [b.x, b.y + scrollY] })
+  const filters = page.locator('[aria-label="Activity"] .seg-filters')
+  const filtersAt = (await filters.boundingBox())!
+  expect((await exec('print("second")', agent)).status()).toBe(200)
+  const more = page.getByRole('button', { name: 'Show 1 new' })
+  await expect(more).toBeVisible({ timeout: 15_000 })
+  await expect(rows).toHaveCount(1)
+  expect(await rows.first().evaluate((el) => { const b = el.getBoundingClientRect(); return [b.x, b.y + scrollY] })).toEqual(first)
+  // the reveal slot is always as wide as its longest label (S3/S4)
+  expect(await filters.boundingBox()).toEqual(filtersAt)
+  await more.click()
+  await expect(rows).toHaveCount(2)
+  await expect(more).toBeHidden()
+  expect(await filters.boundingBox()).toEqual(filtersAt)
+  // a run you started is the outcome you are waiting for: no button
+  expect((await exec('print("mine")')).status()).toBe(200)
+  await expect(rows).toHaveCount(3, { timeout: 15_000 })
+  await expect(page.getByRole('button', { name: /^Show \d+ new$/ })).toBeHidden()
+  expect(await filters.boundingBox()).toEqual(filtersAt)
+})
+
+test('new instances wait behind "Show latest" without moving the primary action (S5)', async ({ page }) => {
+  test.setTimeout(60_000)
+  await page.goto(`${consoleURL}/`)
+  const newInstance = page.getByRole('button', { name: 'New instance' }).first()
+  await expect(newInstance).toBeVisible()
+  const newAt = (await newInstance.boundingBox())!
+  const rows = page.locator('tbody tr')
+  const before = await rows.count()
+  const created = await client.post('/api/v1/instances', { data: { ttl_seconds: 600, labels: { name: 'held-list' } } })
+  expect(created.status()).toBe(201)
+  const more = page.getByRole('button', { name: /^Show \d+ new$/ })
+  await expect(more).toBeVisible({ timeout: 25_000 })
+  await expect(rows).toHaveCount(before)
+  expect(await newInstance.boundingBox()).toEqual(newAt)
+  await more.click()
+  await expect(rows).toHaveCount(before + 1)
+  await expect(page.getByRole('link', { name: 'name=held-list' })).toBeVisible()
+  await expect(more).toBeHidden()
+  expect(await newInstance.boundingBox()).toEqual(newAt)
+})
+
+// Classic (space-taking) scrollbars, as on Windows/Linux or with "always
+// show scrollbars": the case where scroll locking can shift the page.
+// Headless Chromium hides them unless launched without that flag, and
+// macOS Chrome overlays them unless that feature is disabled.
+test('opening a dialog does not shift the page under it (S6)', async () => {
+  const browser = await chromium.launch({
+    channel: process.env.PLAYWRIGHT_CHANNEL,
+    ignoreDefaultArgs: ['--hide-scrollbars'],
+    args: ['--disable-features=OverlayScrollbar'],
+  })
+  const page = await browser.newPage({ viewport: { width: 1280, height: 500 } })
+  await page.goto(`${consoleURL}/workspace/policies`)
+  await page.addStyleTag({ content: '::-webkit-scrollbar { width: 15px; height: 15px } ::-webkit-scrollbar-thumb { background: #999 } body { min-height: 200vh }' })
+  expect(await page.evaluate(() => window.innerWidth - document.documentElement.clientWidth)).toBeGreaterThan(0)
+  const where = () => page.evaluate(() => ['main', '.console-header-inner', 'h1, [role="tablist"], .workspace-tabs'].map((s) => {
+    const b = document.querySelector(s)!.getBoundingClientRect()
+    return [s, Math.round(b.x), Math.round(b.width)]
+  }))
+  const before = await where()
+  await page.getByRole('button', { name: 'New policy' }).click()
+  await expect(page.getByRole('dialog', { name: 'New policy' })).toBeVisible()
+  expect(await where()).toEqual(before)
+  await page.keyboard.press('Escape')
+  expect(await where()).toEqual(before)
+  await browser.close()
 })
 
 // The material is real CSS, not a screenshot impression: raised faces are

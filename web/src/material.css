@@ -9,9 +9,14 @@
    - shadows are neutral (black at low alpha): a tight contact shadow plus
      a soft ambient one;
    - frosted translucency only on what floats above the page.
-   Motion is damped: controls lift slowly, settle quickly when pressed,
-   and ease back on release. Colour stays functional (blue = act,
-   green = live, rose = denied, orange = attention). */
+   Interaction feedback is paint-only (docs/interaction-stability.md, S1/S2):
+   hover, press, focus, open and selected states change light, shadow and
+   colour, never a control's box (no transform, size, spacing, border width
+   or font metrics). Nothing moves under the pointer, and floating layers
+   anchored to a control (menus) stay exactly where they opened. Only
+   entrances move, once (P4). src/interactionStability.test.ts enforces
+   this. Colour stays
+   functional (blue = act, green = live, rose = denied, orange = attention). */
 
 :root {
   --desk: 255 255 255;
@@ -113,7 +118,9 @@ body { background-color: rgb(var(--desk)); }
   box-shadow: var(--shadow-inset);
 }
 
-/* ---- controls ---- */
+/* ---- controls ----
+   Every control owns a 1px border in all states; states only recolour it. */
+[data-ui='button'], .ability-choice, .ext-card { border: 1px solid transparent; }
 [data-ui='button'],
 .ability-choice,
 .ext-card,
@@ -123,7 +130,7 @@ body { background-color: rgb(var(--desk)); }
 .instance-detail .seg-filters button[aria-pressed='true'] {
   background-color: rgb(var(--paper));
   background-image: var(--dome);
-  border: 1px solid var(--edge);
+  border-color: var(--edge);
   box-shadow: var(--shadow-control);
 }
 [data-ui='button'],
@@ -135,23 +142,21 @@ body { background-color: rgb(var(--desk)); }
 .instance-detail .seg-filters button,
 .input {
   transition:
-    transform 320ms var(--ease-damped),
     box-shadow 320ms var(--ease-damped),
     background-color 240ms var(--ease-damped),
     border-color 240ms var(--ease-damped),
     color 240ms var(--ease-damped);
 }
 [data-ui='button'] { border-radius: var(--radius-control); color: rgb(var(--ink)); min-height: 32px; height: auto; }
-[data-ui='button']:hover:not(:disabled),
+/* hover lifts the light, not the control; an open toggle stays held */
+[data-ui='button']:hover:not(:disabled):not([aria-expanded='true']),
 .ability-choice:hover,
 .ext-card:hover {
   box-shadow: var(--shadow-control-hover);
-  transform: translateY(-1px);
 }
 [data-ui='button']:active:not(:disabled), .ability-choice:active {
   background-image: var(--dome-pressed);
   box-shadow: var(--shadow-pressed);
-  transform: translateY(0) scale(0.98);
   transition-duration: 90ms;
   transition-timing-function: var(--ease-press);
 }
@@ -214,14 +219,26 @@ select.input { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://ww
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
 }
+/* anchored at the top: a dialog whose content grows extends downwards and
+   never moves its title or anything above the change (S3) */
 [data-ui='dialog-surface'] {
-  position: fixed; left: 50%; top: 50%; z-index: 51;
+  --dialog-top: min(12vh, 96px);
+  position: fixed; left: 50%; top: var(--dialog-top); z-index: 51;
   display: flex; flex-direction: column;
-  width: calc(100% - 32px); max-height: 90vh;
-  transform: translate(-50%, -50%);
+  width: calc(100% - 32px); max-height: calc(100vh - 2 * var(--dialog-top));
+  transform: translateX(-50%);
   border-radius: var(--radius-surface);
   overflow: hidden;
 }
+/* the discard question covers the dialog in place instead of resizing it */
+[data-ui='dialog-discard'] {
+  position: absolute; inset: 0;
+  display: flex; align-items: flex-end;
+  background: rgb(var(--paper) / 0.72);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+[data-ui='dialog-discard'] > div { background: var(--glass-strong); }
 [data-ui='dialog-close'] {
   display: inline-flex; align-items: center; justify-content: center;
   width: 32px; height: 32px; margin-right: -8px;
@@ -243,6 +260,7 @@ select.input { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://ww
 [data-ui='menu-item'][data-disabled] { opacity: 0.5; cursor: default; }
 [data-ui='menu-item'][data-tone='danger'] { color: rgb(var(--danger)); }
 [data-ui='menu-item'][data-tone='danger'][data-highlighted] { background: rgb(var(--danger) / 0.08); }
+[data-ui='menu-separator'] { height: 1px; margin: 6px -6px; background: var(--edge); }
 
 /* ---- motion: damped entrances, none when reduced motion is asked ---- */
 @media (prefers-reduced-motion: no-preference) {
@@ -253,11 +271,9 @@ select.input { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://ww
 }
 @media (prefers-reduced-motion: reduce) {
   [data-ui='button'], .ability-choice, .ext-card, .selected-row, .segmented [role='tab'], .workspace-tabs a, .input { transition: none; }
-  [data-ui='button']:hover:not(:disabled), .ability-choice:hover, .ext-card:hover,
-  [data-ui='button']:active:not(:disabled), .ability-choice:active { transform: none; }
 }
 @keyframes material-fade { from { opacity: 0; } }
-@keyframes material-rise { from { opacity: 0; transform: translate(-50%, calc(-50% + 12px)) scale(0.98); } }
+@keyframes material-rise { from { opacity: 0; transform: translate(-50%, 12px) scale(0.98); } }
 @keyframes material-drop { from { opacity: 0; transform: translateY(-6px) scale(0.98); } }
 @keyframes material-settle { from { opacity: 0; transform: translateY(6px); } }
 

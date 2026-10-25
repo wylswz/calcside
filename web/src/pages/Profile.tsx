@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { api, User } from '../api'
-import { Button, Field, Notice, PageHeader, SectionTitle, inputCls } from '../components/ui'
+import { Button, Field, Notice, PageHeader, SectionTitle, SwapLabel, inputCls } from '../components/ui'
 
 export default function Profile({ user }: { user: User }) {
   const [currentPassword, setCurrentPassword] = useState('')
@@ -58,7 +58,7 @@ export default function Profile({ user }: { user: User }) {
           </Field>
           {error && <div role="alert"><Notice tone="warning">{error}</Notice></div>}
           <Button type="submit" variant="primary" disabled={changePassword.isPending}>
-            {changePassword.isPending ? 'Changing password…' : 'Change password'}
+            <SwapLabel show={changePassword.isPending ? 'Changing password…' : 'Change password'} options={['Change password', 'Changing password…']} />
           </Button>
         </form>
       ) : (

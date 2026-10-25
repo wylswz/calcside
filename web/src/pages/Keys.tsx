@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, APIKey, CreateKeyRequest, wsPath } from '../api'
-import { Button, EmptyRow, Field, Modal, Notice, PageHeader, inputCls } from '../components/ui'
+import { Button, Confirm, EmptyRow, Field, Modal, Notice, PageHeader, inputCls } from '../components/ui'
 import { SpecForm, type SpecFormHandle } from '../components/SpecForm'
 import { CopyBlock, MCPGuide } from '../components/MCP'
 import { mcpURL } from '../mcpSnippets'
@@ -25,6 +25,7 @@ export default function Keys({ bare }: { bare?: boolean }) {
   const [secret, setSecret] = useState('')
   const [secretRestricted, setSecretRestricted] = useState(false)
   const [err, setErr] = useState('')
+  const [revoking, setRevoking] = useState<APIKey | null>(null)
   const startNew = () => { setShowNew(true); setSecret(''); setName(''); setErr(''); setAccess('restricted') }
 
   const { data } = useQuery({
@@ -88,7 +89,7 @@ export default function Keys({ bare }: { bare?: boolean }) {
                 <td className="whitespace-nowrap text-xs text-sec">{k.expires_at ? fmtTime(k.expires_at) : 'never'}</td>
                 <td className="text-xs">{k.revoked_at ? <span className="text-mute">revoked</span> : <span className="text-sec">active</span>}</td>
                 <td className="text-right">
-                  {!k.revoked_at && <Button size="sm" onClick={() => revoke.mutate(k.id)}>Revoke</Button>}
+                  {!k.revoked_at && <Button size="sm" onClick={() => setRevoking(k)}>Revoke</Button>}
                 </td>
               </tr>
             ))}
@@ -98,7 +99,8 @@ export default function Keys({ bare }: { bare?: boolean }) {
       </div>
 
       {showNew && (
-        <Modal title="New API key" onClose={() => setShowNew(false)} wide={!secret && access === 'restricted'}>
+        <Modal title="New API key" onClose={() => setShowNew(false)} wide={!secret && access === 'restricted'}
+          dirty={secret ? true : undefined} discardPrompt={secret ? 'Close? The key secret is not shown again.' : undefined}>
           {!secret ? (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
@@ -158,6 +160,12 @@ export default function Keys({ bare }: { bare?: boolean }) {
             </div>
           )}
         </Modal>
+      )}
+      {revoking && (
+        <Confirm title={`Revoke key ${revoking.name}?`} confirm="Revoke" pending="Revoking…"
+          action={() => revoke.mutateAsync(revoking.id)} onClose={() => setRevoking(null)}>
+          <p className="text-sm text-body">Agents using this key lose access immediately. This cannot be undone.</p>
+        </Confirm>
       )}
     </div>
   )

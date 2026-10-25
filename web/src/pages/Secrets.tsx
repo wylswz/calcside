@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError, Secret, wsPath } from '../api'
-import { Button, EmptyRow, Field, Modal, Notice, PageHeader, Tag, inputCls } from '../components/ui'
+import { Button, Confirm, EmptyRow, Field, Modal, Notice, PageHeader, Tag, inputCls } from '../components/ui'
 import { fmtTime } from '../format'
 
 function SecretForm({ onClose }: { onClose: () => void }) {
@@ -80,6 +80,7 @@ export default function Secrets({ bare }: { bare?: boolean }) {
   const qc = useQueryClient()
   const [showNew, setShowNew] = useState(false)
   const [editing, setEditing] = useState<Secret | null>(null)
+  const [deleting, setDeleting] = useState<Secret | null>(null)
   const { data, error } = useQuery({
     queryKey: ['secrets'],
     queryFn: () => api.get<{ secrets: Secret[] }>(wsPath('/api/v1/secrets')),
@@ -122,7 +123,7 @@ export default function Secrets({ bare }: { bare?: boolean }) {
                   <td className="whitespace-nowrap text-xs text-sec">{fmtTime(s.updated_at)}</td>
                   <td className="space-x-2 whitespace-nowrap text-right">
                     <Button size="sm" onClick={() => setEditing(s)}>Edit</Button>
-                    <Button size="sm" onClick={() => del.mutate(s.id)}>Delete</Button>
+                    <Button size="sm" onClick={() => setDeleting(s)}>Delete</Button>
                   </td>
                 </tr>
               ))}
@@ -133,6 +134,12 @@ export default function Secrets({ bare }: { bare?: boolean }) {
       )}
       {showNew && <SecretForm onClose={() => setShowNew(false)} />}
       {editing && <EditDomains s={editing} onClose={() => setEditing(null)} />}
+      {deleting && (
+        <Confirm title={`Delete secret ${deleting.name}?`} confirm="Delete" pending="Deleting…"
+          action={() => del.mutateAsync(deleting.id)} onClose={() => setDeleting(null)}>
+          <p className="text-sm text-body">The stored value of <code className="font-mono text-ink">{deleting.name}</code> is erased. This cannot be undone.</p>
+        </Confirm>
+      )}
     </div>
   )
 }

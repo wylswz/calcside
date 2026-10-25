@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, workspaces, ApiError } from '../api'
-import { PageHeader, SectionTitle, Button, inputCls, Loading, EmptyRow, Notice } from '../components/ui'
+import { PageHeader, SectionTitle, Button, Confirm, inputCls, Loading, EmptyRow, Notice } from '../components/ui'
 
 interface Member { user_id: string; email: string; name?: string; role: string }
 interface Change { id: string; by_user_id: string; change: string; user_id?: string; instance_id?: string; role?: string; created_at: string }
@@ -20,6 +20,7 @@ export default function WorkspacePage() {
   const [email, setEmail] = useState('')
   const [role, setRole] = useState('viewer')
   const [confirmDel, setConfirmDel] = useState(false)
+  const [removing, setRemoving] = useState<Member | null>(null)
 
   const wsQ = useQuery({ queryKey: ['workspaces'], queryFn: workspaces })
   const ws = (wsQ.data ?? []).find((w) => w.id === id)
@@ -37,11 +38,11 @@ export default function WorkspacePage() {
   })
   const isOwner = ws?.role === 'owner'
 
-  const bump = () => {
-    qc.invalidateQueries({ queryKey: ['members', id] })
-    qc.invalidateQueries({ queryKey: ['changes', id] })
-    qc.invalidateQueries({ queryKey: ['workspaces'] })
-  }
+  const bump = () => Promise.all([
+    qc.invalidateQueries({ queryKey: ['members', id] }),
+    qc.invalidateQueries({ queryKey: ['changes', id] }),
+    qc.invalidateQueries({ queryKey: ['workspaces'] }),
+  ])
   const useMut = <T,>(fn: (x: T) => Promise<unknown>) => useMutation({ mutationFn: fn, onSuccess: bump })
   const rename = useMut<void>(() => api.patch(`/api/v1/workspaces/${id}`, { name }))
   const add = useMut<void>(() => api.post(`/api/v1/workspaces/${id}/members`, { email, role }))
@@ -56,11 +57,11 @@ export default function WorkspacePage() {
       <Notice>Your personal workspace has exactly one member — you. Use a shared workspace to work with other people.</Notice>
     </div>
   )
-  const err = (rename.error || add.error || setRoleM.error || remove.error) as ApiError | null
+  const err = (rename.error || add.error || setRoleM.error) as ApiError | null
 
   return (
     <div>
-      <PageHeader title={ws.name} actions={<span className="text-xs text-faint">you are {isOwner ? 'an' : 'a'} {ws.role}</span>} />
+      <PageHeader title={ws.name} actions={<span className="text-xs text-mute">you are {isOwner ? 'an' : 'a'} {ws.role}</span>} />
       {err && <Notice tone="warning">{err.message}</Notice>}
 
       <SectionTitle>name</SectionTitle>
@@ -73,7 +74,7 @@ export default function WorkspacePage() {
 
       <SectionTitle>members</SectionTitle>
       <table className="mb-4 w-full text-left text-sm">
-        <thead><tr className="text-xs text-faint"><th className="pb-2">member</th><th className="pb-2">role</th><th /></tr></thead>
+        <thead><tr className="text-xs text-mute"><th className="pb-2">member</th><th className="pb-2">role</th><th /></tr></thead>
         <tbody>
           {(membersQ.data?.members ?? []).map((m) => (
             <tr key={m.user_id} className="border-t border-line">
@@ -88,7 +89,7 @@ export default function WorkspacePage() {
               </td>
               <td className="py-2 text-right">
                 {(isOwner || m.user_id === myID) && (
-                  <Button size="sm" onClick={() => remove.mutate(m.user_id)}>{m.user_id === myID ? 'leave' : 'remove'}</Button>
+                  <Button size="sm" onClick={() => setRemoving(m)}>{m.user_id === myID ? 'leave' : 'remove'}</Button>
                 )}
               </td>
             </tr>
@@ -107,6 +108,16 @@ export default function WorkspacePage() {
         </div>
       )}
 
+      {removing && (
+        <Confirm title={removing.user_id === myID ? `Leave ${ws.name}?` : `Remove ${removing.name || removing.email}?`}
+          confirm={removing.user_id === myID ? 'Leave' : 'Remove'} pending={removing.user_id === myID ? 'Leaving…' : 'Removing…'}
+          action={() => remove.mutateAsync(removing.user_id)} onClose={() => setRemoving(null)}>
+          <p className="text-sm text-body">{removing.user_id === myID
+            ? 'You lose access to its instances, policies, secrets and keys until an owner adds you again.'
+            : 'They lose access to this workspace until an owner adds them again.'}</p>
+        </Confirm>
+      )}
+
       {isOwner && (changesQ.data?.changes.length ?? 0) > 0 && (
         <>
           <SectionTitle>changes</SectionTitle>
@@ -114,7 +125,7 @@ export default function WorkspacePage() {
             {changesQ.data!.changes.map((c) => (
               <div key={c.id} className="flex justify-between">
                 <span>{CHANGE_LABEL[c.change] ?? c.change}{c.role ? ` · ${c.role}` : ''}</span>
-                <span className="text-faint">{new Date(c.created_at).toLocaleString()}</span>
+                <span className="text-mute">{new Date(c.created_at).toLocaleString()}</span>
               </div>
             ))}
           </div>
@@ -124,13 +135,13 @@ export default function WorkspacePage() {
       {isOwner && (
         <>
           <SectionTitle>delete workspace</SectionTitle>
-          {!confirmDel
-            ? <Button size="sm" onClick={() => setConfirmDel(true)}>Delete workspace</Button>
-            : <div className="flex items-center gap-3">
-                <span className="text-sm text-warn-text">Delete {ws.name} and its policies, secrets and keys? Stop running instances first.</span>
-                <Button size="sm" onClick={async () => { try { await api.del(`/api/v1/workspaces/${id}`); nav('/') } catch (e: any) { alert(e.message) } }}>Confirm</Button>
-                <Button size="sm" onClick={() => setConfirmDel(false)}>Cancel</Button>
-              </div>}
+          <Button size="sm" onClick={() => setConfirmDel(true)}>Delete workspace</Button>
+          {confirmDel && (
+            <Confirm title={`Delete ${ws.name}?`} confirm="Delete workspace" pending="Deleting…"
+              action={async () => { await api.del(`/api/v1/workspaces/${id}`); nav('/') }} onClose={() => setConfirmDel(false)}>
+              <p className="text-sm text-body">Its policies, secrets and keys are deleted. Stop running instances first. This cannot be undone.</p>
+            </Confirm>
+          )}
         </>
       )}
     </div>

@@ -74,7 +74,7 @@ body:has(.instance-detail) .console-profile { font-size: 13px; color: rgb(var(--
 .instance-detail .next-links button { min-height: 44px; }
 
 /* main column (Work then Results) + right sidebar */
-.instance-detail .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 32px; align-items: start; }
+.instance-detail .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 32px; align-items: start; }
 .instance-detail .work-surface {
   background: var(--detail-work); border: 1px solid var(--detail-edge);
   border-radius: var(--detail-radius-surface); box-shadow: var(--detail-shadow-surface); padding: 24px;
@@ -142,26 +142,16 @@ body:has(.instance-detail) .console-profile { font-size: 13px; color: rgb(var(--
 .instance-detail :is(input, select, textarea):focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }
 
 
-/* State — a quiet disclosure inside Results */
-.instance-detail .detail-state-disclosure { margin-top: 0; }
-.instance-detail .detail-state-disclosure > summary {
-  cursor: pointer; font-size: 14px; font-weight: 600; color: rgb(var(--ink));
-  list-style: none; display: flex; align-items: baseline; gap: 8px;
-}
-.instance-detail .detail-state-disclosure > summary::before {
-  content: '▸'; font-size: 12px; color: rgb(var(--sec)); transition: transform 0.15s;
-}
-.instance-detail .detail-state-disclosure[open] > summary::before { transform: rotate(90deg); }
-.instance-detail .detail-state-disclosure .state-hint {
-  font-size: 13px; font-weight: 400; color: rgb(var(--sec));
-}
-.instance-detail .detail-state-disclosure > .state-body { margin-top: 16px; }
+/* State lives in the right rail (inspect is visible by default) */
+.instance-detail .side-col [data-ui='section-title'] h3 { font-size: 16px; line-height: 22px; }
 
-/* state-variable toolbar wraps cleanly inside the surface */
+/* state-variable toolbar wraps cleanly; in the right rail the filter
+   takes its own full-width row instead of floating to the right */
 .instance-detail .state-variable-tools { flex-wrap: wrap; gap: 8px; }
 .instance-detail .state-variable-tools > span, .instance-detail .state-variable-tools > label,
 .instance-detail .state-variable-tools > button { flex-shrink: 0; white-space: nowrap; }
 .instance-detail .state-variable-tools input { max-width: 100%; min-width: 0; }
+.instance-detail .side-col .state-variable-tools input { flex-basis: 100%; width: auto; margin-left: 0; }
 
 /* run-detail expanded row shares the sheet, error header toned not washed */
 .instance-detail .run-detail { background: rgb(var(--surface) / 0.5); border-radius: var(--detail-radius-inset); }

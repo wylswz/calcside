@@ -6,8 +6,9 @@ import { api, AuditEvent, Execution, ExecutionDetail } from '../api'
 import { callOutcome, groupCalls, runBy, runOutcome } from '../activity'
 import { fmtMs, fmtTime, relTime } from '../format'
 import { CallRows } from './CallTable'
-import { EmptyRow, Loading, Notice, OutcomeBadge, RunByBadge, SectionTitle } from './ui'
+import { EmptyRow, Loading, Notice, OutcomeBadge, RevealNew, RunByBadge, SectionTitle } from './ui'
 import { cmTheme } from './codemirror'
+import { useHeldOrder } from '../stableList'
 
 // firstCodeLine picks the first meaningful line of a run's code — the
 // first non-empty line that is not a comment.
@@ -117,12 +118,17 @@ export function Activity({ id, aside, editor, focusId }: { id: string; aside?: R
     return { x, denied, failed, outcome, attention: outcome !== 'ok' || denied > 0 || failed > 0 }
   }), [execs, callsByExec])
 
-  const shown = attentionOnly ? runs.filter((r) => r.attention) : runs
+  // Polling never inserts rows above the user (S5): agent runs wait behind
+  // "Show N new"; runs started here, and switching the filter, show at once.
+  const held = useHeldOrder(execs ? (attentionOnly ? runs.filter((r) => r.attention) : runs) : undefined,
+    (r) => ({ key: r.x.id, slot: '' }), { reset: attentionOnly, mine: (r) => runBy(r.x) === 'you' })
+  const shown = held.rows.map((r) => r.item)
 
   return (
     <section aria-label="Activity">
       <SectionTitle className="activity-heading" aside={
-        <>{aside}<div className="seg-filters flex gap-1 text-xs">
+        <><RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />
+        <div className="seg-filters flex gap-1 text-xs">
           {(['all', 'needs attention'] as const).map((f) => {
             const on = (f === 'needs attention') === attentionOnly
             return (
@@ -132,7 +138,8 @@ export function Activity({ id, aside, editor, focusId }: { id: string; aside?: R
               </button>
             )
           })}
-        </div></>
+        </div>
+        {aside}</>
       }>Activity</SectionTitle>
       {editor}
 

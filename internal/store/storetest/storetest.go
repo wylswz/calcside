@@ -375,7 +375,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		}
 		// The fixture exec above already sits at time.Now(); keep the
 		// error exec newest.
-		t1 := time.Now().UTC().Add(3 * time.Minute)
+		t1 := time.Now().UTC().Add(3 * time.Minute).Truncate(time.Microsecond)
 		t2 := t1.Add(time.Minute)
 		t3 := t1.Add(2 * time.Minute)
 		for i, e := range []*store.Execution{

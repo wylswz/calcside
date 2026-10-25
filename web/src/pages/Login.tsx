@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { api, AuthConfig } from '../api'
-import { Button, Field, inputCls, Loading, Notice } from '../components/ui'
+import { Button, Field, inputCls, Loading, Notice, SwapLabel } from '../components/ui'
 
 export default function Login() {
   const [username, setUsername] = useState('')
@@ -76,7 +76,7 @@ export default function Login() {
                     </Field>
                     {login.error && <div role="alert"><Notice tone="warning">{login.error.message}</Notice></div>}
                     <Button type="submit" variant="primary" className="h-11 w-full" disabled={login.isPending}>
-                      {login.isPending ? 'Signing in…' : 'Sign in'}
+                      <SwapLabel show={login.isPending ? 'Signing in…' : 'Sign in'} options={['Sign in', 'Signing in…']} />
                     </Button>
                   </form>
                 )}

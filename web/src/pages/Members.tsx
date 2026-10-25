@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, Workspace } from '../api'
-import { Button, inputCls, Notice, Loading } from '../components/ui'
+import { Button, Confirm, inputCls, Notice, Loading } from '../components/ui'
 
 interface Member { user_id: string; email: string; name?: string; role: string }
 interface Change { id: string; by_user_id: string; change: string; user_id?: string; instance_id?: string; role?: string; created_at: string }
@@ -15,6 +15,7 @@ export default function Members({ ws }: { ws: Workspace }) {
   const qc = useQueryClient()
   const [email, setEmail] = useState('')
   const [role, setRole] = useState('viewer')
+  const [removing, setRemoving] = useState<Member | null>(null)
   const isOwner = ws.role === 'owner'
   const meQ = useQuery({ queryKey: ['me'], queryFn: () => api.get<{ user: { id: string } }>('/api/v1/me') })
   const myID = meQ.data?.user.id
@@ -26,16 +27,16 @@ export default function Members({ ws }: { ws: Workspace }) {
     queryKey: ['changes', ws.id], enabled: isOwner && !ws.personal,
     queryFn: () => api.get<{ changes: Change[] }>(`/api/v1/workspaces/${ws.id}/changes`),
   })
-  const bump = () => {
-    qc.invalidateQueries({ queryKey: ['members', ws.id] })
-    qc.invalidateQueries({ queryKey: ['changes', ws.id] })
-  }
+  const bump = () => Promise.all([
+    qc.invalidateQueries({ queryKey: ['members', ws.id] }),
+    qc.invalidateQueries({ queryKey: ['changes', ws.id] }),
+  ])
   const add = useMutation({ mutationFn: () => api.post(`/api/v1/workspaces/${ws.id}/members`, { email, role }), onSuccess: bump })
   const setRoleM = useMutation({ mutationFn: (p: { uid: string; role: string }) => api.put(`/api/v1/workspaces/${ws.id}/members/${p.uid}`, { role: p.role }), onSuccess: bump })
   const remove = useMutation({ mutationFn: (uid: string) => api.del(`/api/v1/workspaces/${ws.id}/members/${uid}`), onSuccess: bump })
 
   if (ws.personal) return <Notice>Personal workspaces have exactly one member — you.</Notice>
-  const err = (add.error || setRoleM.error || remove.error) as Error | null
+  const err = (add.error || setRoleM.error) as Error | null
 
   return (
     <div>
@@ -56,20 +57,29 @@ export default function Members({ ws }: { ws: Workspace }) {
                   : <span className="text-sec">{m.role}</span>}
               </td>
               <td className="py-2 text-right">
-                {(isOwner || m.user_id === myID) && <Button size="sm" onClick={() => remove.mutate(m.user_id)}>{m.user_id === myID ? 'leave' : 'remove'}</Button>}
+                {(isOwner || m.user_id === myID) && <Button size="sm" onClick={() => setRemoving(m)}>{m.user_id === myID ? 'leave' : 'remove'}</Button>}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
       {isOwner && (
-        <div className="flex max-w-lg gap-2">
-          <input className={inputCls} placeholder="member email (must have signed in once)" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <select className="border border-line bg-paper px-1 py-1 text-xs text-ink" value={role} onChange={(e) => setRole(e.target.value)}>
+        <div className="flex max-w-lg items-center gap-2">
+          <input className={inputCls + ' min-w-0 flex-1'} placeholder="member email (must have signed in once)" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <select aria-label="Role" className={inputCls + ' w-24 shrink-0'} value={role} onChange={(e) => setRole(e.target.value)}>
             <option value="viewer">viewer</option><option value="editor">editor</option><option value="owner">owner</option>
           </select>
           <Button size="sm" onClick={() => add.mutate()} disabled={!email.trim() || add.isPending}>Add</Button>
         </div>
+      )}
+      {removing && (
+        <Confirm title={removing.user_id === myID ? `Leave ${ws.name}?` : `Remove ${removing.name || removing.email}?`}
+          confirm={removing.user_id === myID ? 'Leave' : 'Remove'} pending={removing.user_id === myID ? 'Leaving…' : 'Removing…'}
+          action={() => remove.mutateAsync(removing.user_id)} onClose={() => setRemoving(null)}>
+          <p className="text-sm text-body">{removing.user_id === myID
+            ? 'You lose access to its instances, policies, secrets and keys until an owner adds you again.'
+            : 'They lose access to this workspace until an owner adds them again.'}</p>
+        </Confirm>
       )}
       {isOwner && (changesQ.data?.changes.length ?? 0) > 0 && (
         <div className="mt-6 max-h-64 max-w-2xl space-y-1 overflow-y-auto text-xs text-sec">

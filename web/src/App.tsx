@@ -108,7 +108,7 @@ export default function App() {
           </div>
         </div>
       </header>
-      <main className="console-main mx-auto max-w-7xl px-6 py-10">
+      <main tabIndex={-1} className="console-main mx-auto max-w-7xl px-6 py-10 focus:outline-none">
         <Routes>
           <Route path="/" element={<Instances />} />
           <Route path="/instances/new" element={<NewInstance />} />

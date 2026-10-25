@@ -1,17 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, currentWorkspace, setWorkspace, workspaces, Workspace } from '../api'
-import { Button, Modal } from './ui'
+import { Button, Menu, MenuItem, MenuSeparator, Modal } from './ui'
 
 export default function WorkspaceSwitcher() {
   const nav = useNavigate()
   const qc = useQueryClient()
-  const [open, setOpen] = useState(false)
   const [showNew, setShowNew] = useState(false)
   const [name, setName] = useState('')
   const [err, setErr] = useState('')
-  const ref = useRef<HTMLDivElement>(null)
   const { data } = useQuery({ queryKey: ['workspaces'], queryFn: workspaces, staleTime: 30_000 })
   const list = useMemo(() => data ?? [], [data])
   const cur = currentWorkspace()
@@ -20,15 +18,11 @@ export default function WorkspaceSwitcher() {
   useEffect(() => {
     // Validate the stored selection; fall back to personal.
     if (list.length && !list.find((w) => w.id === cur)) setWorkspace(null)
-    const close = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
-    document.addEventListener('click', close)
-    return () => document.removeEventListener('click', close)
   }, [list, cur])
 
   if (!list.length) return null
   const pick = (id: string | null) => {
     setWorkspace(id)
-    setOpen(false)
     qc.clear()
     nav('/')
     window.location.reload()
@@ -43,30 +37,25 @@ export default function WorkspaceSwitcher() {
   }
 
   return (
-    <div className="relative flex items-center" ref={ref}>
+    <div className="flex items-center">
       {list.length > 1 ? (
-        <button className="border border-line px-2 py-1 text-xs text-ink hover:border-ink" onClick={() => setOpen(!open)}>
-          {active?.name ?? 'workspace'} {active?.personal ? '' : `· ${active?.role}`} ▾
-        </button>
-      ) : (
-        <span className="text-xs text-faint">{active?.name}</span>
-      )}
-      {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-56 border border-line-strong bg-paper shadow">
-          {list.map((w) => (
-            <button key={w.id} className="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-ink hover:bg-wash"
-              onClick={() => pick(w.personal ? null : w.id)}>
-              <span>{w.name}{w.personal ? ' (personal)' : ''}</span>
-              <span className="text-faint">{w.role}</span>
-            </button>
-          ))}
-          <button className="w-full border-t border-line px-3 py-2 text-left text-xs text-accent hover:bg-wash" onClick={() => { setOpen(false); setShowNew(true) }}>
-            + New workspace
+        <Menu trigger={
+          <button className="border border-line px-2 py-1 text-xs text-ink transition-colors hover:border-ink aria-expanded:border-ink">
+            {active?.name ?? 'workspace'} {active?.personal ? '' : `· ${active?.role}`} ▾
           </button>
-          {active && <button className="w-full border-t border-line px-3 py-2 text-left text-xs text-sec hover:bg-wash" onClick={() => { setOpen(false); nav(`/workspaces/${active.id}`) }}>
-            Workspace settings
-          </button>}
-        </div>
+        }>
+          {list.map((w) => (
+            <MenuItem key={w.id} onSelect={() => pick(w.personal ? null : w.id)}>
+              <span className="min-w-0 flex-1 truncate">{w.name}{w.personal ? ' (personal)' : ''}</span>
+              <span className="text-xs text-mute">{w.role}</span>
+            </MenuItem>
+          ))}
+          <MenuSeparator />
+          <MenuItem onSelect={() => setShowNew(true)}>New workspace…</MenuItem>
+          {active && <MenuItem onSelect={() => nav(`/workspaces/${active.id}`)}>Workspace settings</MenuItem>}
+        </Menu>
+      ) : (
+        <span className="text-xs text-mute">{active?.name}</span>
       )}
       {showNew && (
         <Modal title="New workspace" onClose={() => setShowNew(false)} footer={

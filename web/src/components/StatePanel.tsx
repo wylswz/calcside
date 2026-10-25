@@ -111,7 +111,7 @@ export function StatePanel({ id, running, busy, capNames = [] }: { id: string; r
               <span className="text-xs tabular-nums text-sec" title="Values are representations with known secrets redacted.">{names.length}</span>
               {builtinCount > 0 && (
                 <button className="text-btn" onClick={() => setShowBuiltins(!showBuiltins)}>
-                  {showBuiltins ? 'Hide' : 'Show'} built-ins ({builtinCount})
+                  <SwapLabel show={`${showBuiltins ? 'Hide' : 'Show'} built-ins (${builtinCount})`} options={[`Show built-ins (${builtinCount})`, `Hide built-ins (${builtinCount})`]} />
                 </button>
               )}
               <input className="input w-40 ml-auto" placeholder="Filter variables" aria-label="Filter variables" value={filter} onChange={(e) => setFilter(e.target.value)} />
