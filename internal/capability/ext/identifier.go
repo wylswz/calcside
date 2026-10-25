@@ -88,29 +88,11 @@ type CapabilityManifest struct {
 	Description  string                 `yaml:"description"`
 	Icon         string                 `yaml:"icon"`
 	Interface    string                 `yaml:"interface"`
+	Capability   string                 `yaml:"capability"`
 	Models       []string               `yaml:"models"`
 	Dependencies []types.CapabilityName `yaml:"dependencies"`
 	Ops          []OpSpec               `yaml:"ops"`
 	Config       []ConfigField          `yaml:"config"`
-}
-
-// LLMExtName is the reserved basename of the single extension that
-// exposes LLM ops. Ext aliases with this source select a workspace
-// provider through config.provider.
-const LLMExtName = "llm"
-
-// IsLLMExtSource reports whether source names the llm extension. A
-// trailing @version is ignored; only the path basename is compared.
-func IsLLMExtSource(source string) bool {
-	if i := strings.IndexByte(source, '@'); i >= 0 {
-		source = source[:i]
-	}
-	source = strings.TrimRight(source, "/")
-	if source == "" {
-		return false
-	}
-	i := strings.LastIndexByte(source, '/')
-	return source[i+1:] == LLMExtName
 }
 
 // OpSpec declares one exported operation.

@@ -34,6 +34,9 @@ func validateManifest(m *CapabilityManifest) error {
 	if m.Interface != "" && m.Interface != llm.Interface {
 		return fmt.Errorf("ext: %s: invalid interface %q", m.Name, m.Interface)
 	}
+	if m.Capability != "" && m.Capability != llm.Capability {
+		return fmt.Errorf("ext: %s: invalid capability %q", m.Name, m.Capability)
+	}
 	if m.Interface != llm.Interface && len(m.Models) > 0 {
 		return fmt.Errorf("ext: %s: models are only valid for interface %q", m.Name, llm.Interface)
 	}

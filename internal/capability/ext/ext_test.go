@@ -71,6 +71,7 @@ func TestSecretConfigValidate(t *testing.T) {
 func TestLLMProviderSnapshot(t *testing.T) {
 	dir := writeExt(t, map[string]string{
 		"llm/capability.yaml": `name: llm
+capability: llm
 ops: [{name: respond, params: [messages]}]
 config:
   - {name: provider, type: string, default: ""}

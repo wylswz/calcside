@@ -161,6 +161,7 @@ func provideSandboxOptions(ctx context.Context, cfg config.Config, st store.Stor
 		Secrets:             vaultSvc,
 		Audit:               rec,
 		Registry:            reg,
+		Ext:                 provideExtOptions(cfg),
 		Limits:              limits,
 		GlobalPolicies:      globalPolicies,
 		Access:              ac,

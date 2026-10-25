@@ -1,5 +1,6 @@
 name: llm
 version: 0.1.0
+capability: llm
 description: LLM capability — consumes workspace provider extensions through the provider protocol.
 icon: icon.png
 dependencies: [net]
