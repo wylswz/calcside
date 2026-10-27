@@ -3,6 +3,11 @@
 - **Status:** Draft
 - **Scope:** engine, runtime/worker protocol, API, store, console. Builds on
   EP-0010 (workspaces, access) and the single-instance MCP mode.
+- **Refined by:** EP-0014 (persistent instances) makes the endpoint role
+  concrete for the JSON request/response subset without requiring the
+  project/environment subsystem; the generic HTTP handler, dedicated
+  ingress, environments and endpoint-key access below remain the plan for
+  full serving and are not superseded.
 
 ## Problem
 
