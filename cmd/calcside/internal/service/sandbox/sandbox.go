@@ -17,6 +17,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"maps"
 	"time"
 	"unicode/utf8"
 
@@ -699,4 +700,31 @@ func (s *Service) ExpireDue(ctx context.Context, limit int) (int, error) {
 		n++
 	}
 	return n, nil
+}
+
+// ApplicationBoundary produces the sanitized spec + policy bundle +
+// resolved secrets for an application publish/test. Secrets are
+// resolved in memory only — never persisted. The caller performs
+// authorization first; a.WorkspaceID is set to the app's workspace
+// after the access load.
+func (s *Service) ApplicationBoundary(ctx context.Context, a service.Actor, rawSpec []byte) (json.RawMessage, runtime.PolicyBundle, []runtime.Secret, error) {
+	var draft runtime.Spec
+	if err := json.Unmarshal(rawSpec, &draft); err != nil {
+		return nil, runtime.PolicyBundle{}, nil, service.BadRequest("invalid application runtime settings")
+	}
+	if raw, ok := draft.Capabilities["ext"]; ok && string(raw) != "null" {
+		var aliases map[string]json.RawMessage
+		if json.Unmarshal(raw, &aliases) != nil || len(aliases) > 0 {
+			return nil, runtime.PolicyBundle{}, nil, service.BadRequest("application extension snapshots are not supported yet")
+		}
+	}
+	spec, resolved, secs, err := s.validateSpec(ctx, a, rawSpec, true)
+	if err != nil {
+		return nil, runtime.PolicyBundle{}, nil, err
+	}
+	userPols, err := s.selectedPolicies(ctx, a.WorkspaceID, spec.Policies)
+	if err != nil {
+		return nil, runtime.PolicyBundle{}, nil, err
+	}
+	return spec.Sanitized(secs), runtime.PolicyBundle{Global: maps.Clone(s.globalPols), User: maps.Clone(userPols)}, resolved, nil
 }

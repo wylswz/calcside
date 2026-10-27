@@ -55,6 +55,9 @@ func TestOpenAPIEnumsInSync(t *testing.T) {
 		"FieldType":      strs(AllFieldTypes()),
 		"AuthKind":       strs(AllAuthKinds()),
 		"MemberRole":     strs(AllRoles()),
+		// Service-layer status words (no domain type): draft /
+		// preparing / ready / degraded / disabled.
+		"ApplicationStatus": []string{"draft", "preparing", "ready", "degraded", "disabled"},
 	}
 	for name, w := range want {
 		got, ok := found[name]

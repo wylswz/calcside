@@ -514,3 +514,37 @@ func TestArtifactsUseConsoleOrigin(t *testing.T) {
 		t.Fatal("preview CSP did not use the console origin")
 	}
 }
+
+func TestServingWiring(t *testing.T) {
+	// Local: scheduler + in-process agent.
+	cfg := testConfig(t)
+	app, cleanup, err := initializeApp(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	if app.Serving == nil || app.Agent == nil {
+		t.Fatal("local serving topology incomplete")
+	}
+	// Remote: scheduler still present, agent stays nil — workers run
+	// their own.
+	cfg = testConfig(t)
+	cfg.Workers = "w1=127.0.0.1:1"
+	cfg.WorkerKey = "test-worker-key"
+	app, cleanup, err = initializeApp(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	if app.Serving == nil || app.Agent != nil {
+		t.Fatal("remote serving topology wrong")
+	}
+	// The api-callback surface is mounted and authenticated: an
+	// unsigned node register is 401, not 404.
+	w := httptest.NewRecorder()
+	app.Server.Handler.ServeHTTP(w, httptest.NewRequest("POST",
+		"/internal/v1/nodes/register", strings.NewReader(`{}`)))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("callback mount: %d", w.Code)
+	}
+}

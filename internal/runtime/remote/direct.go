@@ -21,6 +21,7 @@ type Direct struct {
 }
 
 var _ runtime.Runtime = (*Direct)(nil)
+var _ runtime.ServingRuntime = (*Direct)(nil)
 
 // NewDirect builds a Direct client for baseURL. hc carries the dialer
 // (e.g. a unix-socket transport); key and callerNode sign each request.
@@ -44,6 +45,22 @@ func (d *Direct) Create(ctx context.Context, req *runtime.CreateRequest) (*runti
 
 func (d *Direct) Exec(ctx context.Context, req *runtime.ExecRequest) (*runtime.ExecResponse, error) {
 	resp, err := d.cl.RuntimeExecWithResponse(ctx, *req)
+	if err != nil {
+		return nil, err
+	}
+	return UnwrapResponse(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
+}
+
+func (d *Direct) Prepare(ctx context.Context, req *runtime.PrepareRequest) (*runtime.PrepareResponse, error) {
+	resp, err := d.cl.RuntimePrepareWithResponse(ctx, *req)
+	if err != nil {
+		return nil, err
+	}
+	return UnwrapResponse(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
+}
+
+func (d *Direct) Invoke(ctx context.Context, req *runtime.InvokeRequest) (*runtime.InvokeResponse, error) {
+	resp, err := d.cl.RuntimeInvokeWithResponse(ctx, *req)
 	if err != nil {
 		return nil, err
 	}

@@ -768,4 +768,12 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 			t.Fatalf("expected ErrNotFound, got %v", err)
 		}
 	})
+
+	t.Run("serving", func(t *testing.T) {
+		serving(t, newStore(t))
+	})
+
+	t.Run("applications", func(t *testing.T) {
+		RunApplications(t, newStore(t))
+	})
 }

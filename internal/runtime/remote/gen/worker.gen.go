@@ -119,11 +119,41 @@ type InspectRequest = rt.InspectRequest
 // InspectResponse defines model for InspectResponse.
 type InspectResponse = rt.InspectResponse
 
+// InvokeRequest defines model for InvokeRequest.
+type InvokeRequest = rt.InvokeRequest
+
+// InvokeResponse defines model for InvokeResponse.
+type InvokeResponse = rt.InvokeResponse
+
 // KeepaliveRequest defines model for KeepaliveRequest.
 type KeepaliveRequest = rt.KeepaliveRequest
 
 // KeepaliveResponse defines model for KeepaliveResponse.
 type KeepaliveResponse = rt.KeepaliveResponse
+
+// NodePrepareRequest defines model for NodePrepareRequest.
+type NodePrepareRequest = rt.NodePrepareRequest
+
+// NodePrepareResult defines model for NodePrepareResult.
+type NodePrepareResult = rt.NodePrepareResponse
+
+// NodeRegisterRequest defines model for NodeRegisterRequest.
+type NodeRegisterRequest = rt.NodeRegisterRequest
+
+// NodeRegisterResult defines model for NodeRegisterResult.
+type NodeRegisterResult = rt.NodeRegisterResponse
+
+// NodeSyncRequest defines model for NodeSyncRequest.
+type NodeSyncRequest = rt.NodeSyncRequest
+
+// NodeSyncResult defines model for NodeSyncResult.
+type NodeSyncResult = rt.NodeSyncResponse
+
+// PrepareRequest defines model for PrepareRequest.
+type PrepareRequest = rt.PrepareRequest
+
+// PrepareResponse defines model for PrepareResponse.
+type PrepareResponse = rt.PrepareResponse
 
 // PromptRequest defines model for PromptRequest.
 type PromptRequest = rt.PromptRequest
@@ -152,8 +182,14 @@ type RuntimeExportJSONRequestBody = ExportRequest
 // RuntimeInspectJSONRequestBody defines body for RuntimeInspect for application/json ContentType.
 type RuntimeInspectJSONRequestBody = InspectRequest
 
+// RuntimeInvokeJSONRequestBody defines body for RuntimeInvoke for application/json ContentType.
+type RuntimeInvokeJSONRequestBody = InvokeRequest
+
 // RuntimeKeepaliveJSONRequestBody defines body for RuntimeKeepalive for application/json ContentType.
 type RuntimeKeepaliveJSONRequestBody = KeepaliveRequest
+
+// RuntimePrepareJSONRequestBody defines body for RuntimePrepare for application/json ContentType.
+type RuntimePrepareJSONRequestBody = PrepareRequest
 
 // RuntimePromptJSONRequestBody defines body for RuntimePrompt for application/json ContentType.
 type RuntimePromptJSONRequestBody = PromptRequest
@@ -336,6 +372,24 @@ type ClientInterface interface {
 	// Corresponds with POST /runtime/v1/inspect (the `RuntimeInspect` operationId).
 	RuntimeInspect(ctx context.Context, body RuntimeInspectJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// RuntimeInvokeWithBody Run one fenced call against a ready replica.
+	//
+	// Release id, generation and epoch must exactly match the prepared replica; owner must match exactly and be nonempty. Expired, not-ready, stopped or missing replicas reject before any capability runs. No transparent retries and no invoke dedup: the caller mints a fresh invoke_id per attempt.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /runtime/v1/invoke (the `RuntimeInvoke` operationId).
+	RuntimeInvokeWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RuntimeInvoke Run one fenced call against a ready replica.
+	//
+	// Release id, generation and epoch must exactly match the prepared replica; owner must match exactly and be nonempty. Expired, not-ready, stopped or missing replicas reject before any capability runs. No transparent retries and no invoke dedup: the caller mints a fresh invoke_id per attempt.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /runtime/v1/invoke (the `RuntimeInvoke` operationId).
+	RuntimeInvoke(ctx context.Context, body RuntimeInvokeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// RuntimeKeepaliveWithBody Renew the instance's sliding TTL deadline.
 	//
 	// Read-only with respect to script state; may be retried.
@@ -353,6 +407,24 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /runtime/v1/keepalive (the `RuntimeKeepalive` operationId).
 	RuntimeKeepalive(ctx context.Context, body RuntimeKeepaliveJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RuntimePrepareWithBody Compile and register an ephemeral serving replica on this node.
+	//
+	// The request is self-contained: resolved spec, policy snapshot, in-memory secret values, labels, owner, fencing epoch, finite lease expiry and the immutable program bundle. The replica id is an ephemeral identity in the shared namespace, not a development or persistent instance. A failed result means no usable replica; audit is returned on the 200 response for known engine failures. Never transparently retried by the caller.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /runtime/v1/prepare (the `RuntimePrepare` operationId).
+	RuntimePrepareWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RuntimePrepare Compile and register an ephemeral serving replica on this node.
+	//
+	// The request is self-contained: resolved spec, policy snapshot, in-memory secret values, labels, owner, fencing epoch, finite lease expiry and the immutable program bundle. The replica id is an ephemeral identity in the shared namespace, not a development or persistent instance. A failed result means no usable replica; audit is returned on the 200 response for known engine failures. Never transparently retried by the caller.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /runtime/v1/prepare (the `RuntimePrepare` operationId).
+	RuntimePrepare(ctx context.Context, body RuntimePrepareJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RuntimePromptWithBody Render the per-capability prompt fragments for an instance.
 	//
@@ -597,6 +669,44 @@ func (c *Client) RuntimeInspect(ctx context.Context, body RuntimeInspectJSONRequ
 	return c.Client.Do(req)
 }
 
+// RuntimeInvokeWithBody Run one fenced call against a ready replica.
+//
+// Release id, generation and epoch must exactly match the prepared replica; owner must match exactly and be nonempty. Expired, not-ready, stopped or missing replicas reject before any capability runs. No transparent retries and no invoke dedup: the caller mints a fresh invoke_id per attempt.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /runtime/v1/invoke (the `RuntimeInvoke` operationId).
+func (c *Client) RuntimeInvokeWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRuntimeInvokeRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RuntimeInvoke Run one fenced call against a ready replica.
+//
+// Release id, generation and epoch must exactly match the prepared replica; owner must match exactly and be nonempty. Expired, not-ready, stopped or missing replicas reject before any capability runs. No transparent retries and no invoke dedup: the caller mints a fresh invoke_id per attempt.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /runtime/v1/invoke (the `RuntimeInvoke` operationId).
+func (c *Client) RuntimeInvoke(ctx context.Context, body RuntimeInvokeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRuntimeInvokeRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // RuntimeKeepaliveWithBody Renew the instance's sliding TTL deadline.
 //
 // Read-only with respect to script state; may be retried.
@@ -625,6 +735,44 @@ func (c *Client) RuntimeKeepaliveWithBody(ctx context.Context, contentType strin
 // Corresponds with POST /runtime/v1/keepalive (the `RuntimeKeepalive` operationId).
 func (c *Client) RuntimeKeepalive(ctx context.Context, body RuntimeKeepaliveJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRuntimeKeepaliveRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RuntimePrepareWithBody Compile and register an ephemeral serving replica on this node.
+//
+// The request is self-contained: resolved spec, policy snapshot, in-memory secret values, labels, owner, fencing epoch, finite lease expiry and the immutable program bundle. The replica id is an ephemeral identity in the shared namespace, not a development or persistent instance. A failed result means no usable replica; audit is returned on the 200 response for known engine failures. Never transparently retried by the caller.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /runtime/v1/prepare (the `RuntimePrepare` operationId).
+func (c *Client) RuntimePrepareWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRuntimePrepareRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RuntimePrepare Compile and register an ephemeral serving replica on this node.
+//
+// The request is self-contained: resolved spec, policy snapshot, in-memory secret values, labels, owner, fencing epoch, finite lease expiry and the immutable program bundle. The replica id is an ephemeral identity in the shared namespace, not a development or persistent instance. A failed result means no usable replica; audit is returned on the 200 response for known engine failures. Never transparently retried by the caller.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /runtime/v1/prepare (the `RuntimePrepare` operationId).
+func (c *Client) RuntimePrepare(ctx context.Context, body RuntimePrepareJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRuntimePrepareRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -913,6 +1061,46 @@ func NewRuntimeInspectRequestWithBody(server string, contentType string, body io
 	return req, nil
 }
 
+// NewRuntimeInvokeRequest calls the generic RuntimeInvoke builder with application/json body
+func NewRuntimeInvokeRequest(server string, body RuntimeInvokeJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRuntimeInvokeRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewRuntimeInvokeRequestWithBody constructs an http.Request for the RuntimeInvoke method, with any body, and a specified content type
+func NewRuntimeInvokeRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/runtime/v1/invoke")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewRuntimeKeepaliveRequest calls the generic RuntimeKeepalive builder with application/json body
 func NewRuntimeKeepaliveRequest(server string, body RuntimeKeepaliveJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -934,6 +1122,46 @@ func NewRuntimeKeepaliveRequestWithBody(server string, contentType string, body 
 	}
 
 	operationPath := fmt.Sprintf("/runtime/v1/keepalive")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewRuntimePrepareRequest calls the generic RuntimePrepare builder with application/json body
+func NewRuntimePrepareRequest(server string, body RuntimePrepareJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRuntimePrepareRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewRuntimePrepareRequestWithBody constructs an http.Request for the RuntimePrepare method, with any body, and a specified content type
+func NewRuntimePrepareRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/runtime/v1/prepare")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -1141,6 +1369,24 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /runtime/v1/inspect (the `RuntimeInspect` operationId).
 	RuntimeInspectWithResponse(ctx context.Context, body RuntimeInspectJSONRequestBody, reqEditors ...RequestEditorFn) (*RuntimeInspectResponse, error)
 
+	// RuntimeInvokeWithBodyWithResponse Run one fenced call against a ready replica.
+	//
+	// Release id, generation and epoch must exactly match the prepared replica; owner must match exactly and be nonempty. Expired, not-ready, stopped or missing replicas reject before any capability runs. No transparent retries and no invoke dedup: the caller mints a fresh invoke_id per attempt.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /runtime/v1/invoke (the `RuntimeInvoke` operationId).
+	RuntimeInvokeWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RuntimeInvokeResponse, error)
+
+	// RuntimeInvokeWithResponse Run one fenced call against a ready replica.
+	//
+	// Release id, generation and epoch must exactly match the prepared replica; owner must match exactly and be nonempty. Expired, not-ready, stopped or missing replicas reject before any capability runs. No transparent retries and no invoke dedup: the caller mints a fresh invoke_id per attempt.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /runtime/v1/invoke (the `RuntimeInvoke` operationId).
+	RuntimeInvokeWithResponse(ctx context.Context, body RuntimeInvokeJSONRequestBody, reqEditors ...RequestEditorFn) (*RuntimeInvokeResponse, error)
+
 	// RuntimeKeepaliveWithBodyWithResponse Renew the instance's sliding TTL deadline.
 	//
 	// Read-only with respect to script state; may be retried.
@@ -1158,6 +1404,24 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /runtime/v1/keepalive (the `RuntimeKeepalive` operationId).
 	RuntimeKeepaliveWithResponse(ctx context.Context, body RuntimeKeepaliveJSONRequestBody, reqEditors ...RequestEditorFn) (*RuntimeKeepaliveResponse, error)
+
+	// RuntimePrepareWithBodyWithResponse Compile and register an ephemeral serving replica on this node.
+	//
+	// The request is self-contained: resolved spec, policy snapshot, in-memory secret values, labels, owner, fencing epoch, finite lease expiry and the immutable program bundle. The replica id is an ephemeral identity in the shared namespace, not a development or persistent instance. A failed result means no usable replica; audit is returned on the 200 response for known engine failures. Never transparently retried by the caller.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /runtime/v1/prepare (the `RuntimePrepare` operationId).
+	RuntimePrepareWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RuntimePrepareResponse, error)
+
+	// RuntimePrepareWithResponse Compile and register an ephemeral serving replica on this node.
+	//
+	// The request is self-contained: resolved spec, policy snapshot, in-memory secret values, labels, owner, fencing epoch, finite lease expiry and the immutable program bundle. The replica id is an ephemeral identity in the shared namespace, not a development or persistent instance. A failed result means no usable replica; audit is returned on the 200 response for known engine failures. Never transparently retried by the caller.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /runtime/v1/prepare (the `RuntimePrepare` operationId).
+	RuntimePrepareWithResponse(ctx context.Context, body RuntimePrepareJSONRequestBody, reqEditors ...RequestEditorFn) (*RuntimePrepareResponse, error)
 
 	// RuntimePromptWithBodyWithResponse Render the per-capability prompt fragments for an instance.
 	//
@@ -1466,6 +1730,54 @@ func (r RuntimeInspectResponse) ContentType() string {
 	return ""
 }
 
+type RuntimeInvokeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *InvokeResponse
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RuntimeInvokeResponse) GetJSON200() *InvokeResponse {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RuntimeInvokeResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RuntimeInvokeResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RuntimeInvokeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RuntimeInvokeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RuntimeInvokeResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type RuntimeKeepaliveResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -1508,6 +1820,54 @@ func (r RuntimeKeepaliveResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r RuntimeKeepaliveResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RuntimePrepareResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PrepareResponse
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RuntimePrepareResponse) GetJSON200() *PrepareResponse {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RuntimePrepareResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RuntimePrepareResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RuntimePrepareResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RuntimePrepareResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RuntimePrepareResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -1738,6 +2098,36 @@ func (c *ClientWithResponses) RuntimeInspectWithResponse(ctx context.Context, bo
 	return ParseRuntimeInspectResponse(rsp)
 }
 
+// RuntimeInvokeWithBodyWithResponse Run one fenced call against a ready replica.
+//
+// Release id, generation and epoch must exactly match the prepared replica; owner must match exactly and be nonempty. Expired, not-ready, stopped or missing replicas reject before any capability runs. No transparent retries and no invoke dedup: the caller mints a fresh invoke_id per attempt.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /runtime/v1/invoke (the `RuntimeInvoke` operationId).
+func (c *ClientWithResponses) RuntimeInvokeWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RuntimeInvokeResponse, error) {
+	rsp, err := c.RuntimeInvokeWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRuntimeInvokeResponse(rsp)
+}
+
+// RuntimeInvokeWithResponse Run one fenced call against a ready replica.
+//
+// Release id, generation and epoch must exactly match the prepared replica; owner must match exactly and be nonempty. Expired, not-ready, stopped or missing replicas reject before any capability runs. No transparent retries and no invoke dedup: the caller mints a fresh invoke_id per attempt.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /runtime/v1/invoke (the `RuntimeInvoke` operationId).
+func (c *ClientWithResponses) RuntimeInvokeWithResponse(ctx context.Context, body RuntimeInvokeJSONRequestBody, reqEditors ...RequestEditorFn) (*RuntimeInvokeResponse, error) {
+	rsp, err := c.RuntimeInvoke(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRuntimeInvokeResponse(rsp)
+}
+
 // RuntimeKeepaliveWithBodyWithResponse Renew the instance's sliding TTL deadline.
 //
 // Read-only with respect to script state; may be retried.
@@ -1766,6 +2156,36 @@ func (c *ClientWithResponses) RuntimeKeepaliveWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseRuntimeKeepaliveResponse(rsp)
+}
+
+// RuntimePrepareWithBodyWithResponse Compile and register an ephemeral serving replica on this node.
+//
+// The request is self-contained: resolved spec, policy snapshot, in-memory secret values, labels, owner, fencing epoch, finite lease expiry and the immutable program bundle. The replica id is an ephemeral identity in the shared namespace, not a development or persistent instance. A failed result means no usable replica; audit is returned on the 200 response for known engine failures. Never transparently retried by the caller.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /runtime/v1/prepare (the `RuntimePrepare` operationId).
+func (c *ClientWithResponses) RuntimePrepareWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RuntimePrepareResponse, error) {
+	rsp, err := c.RuntimePrepareWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRuntimePrepareResponse(rsp)
+}
+
+// RuntimePrepareWithResponse Compile and register an ephemeral serving replica on this node.
+//
+// The request is self-contained: resolved spec, policy snapshot, in-memory secret values, labels, owner, fencing epoch, finite lease expiry and the immutable program bundle. The replica id is an ephemeral identity in the shared namespace, not a development or persistent instance. A failed result means no usable replica; audit is returned on the 200 response for known engine failures. Never transparently retried by the caller.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /runtime/v1/prepare (the `RuntimePrepare` operationId).
+func (c *ClientWithResponses) RuntimePrepareWithResponse(ctx context.Context, body RuntimePrepareJSONRequestBody, reqEditors ...RequestEditorFn) (*RuntimePrepareResponse, error) {
+	rsp, err := c.RuntimePrepare(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRuntimePrepareResponse(rsp)
 }
 
 // RuntimePromptWithBodyWithResponse Render the per-capability prompt fragments for an instance.
@@ -1996,6 +2416,39 @@ func ParseRuntimeInspectResponse(rsp *http.Response) (*RuntimeInspectResponse, e
 	return response, nil
 }
 
+// ParseRuntimeInvokeResponse parses an HTTP response from a RuntimeInvokeWithResponse call
+func ParseRuntimeInvokeResponse(rsp *http.Response) (*RuntimeInvokeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RuntimeInvokeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InvokeResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseRuntimeKeepaliveResponse parses an HTTP response from a RuntimeKeepaliveWithResponse call
 func ParseRuntimeKeepaliveResponse(rsp *http.Response) (*RuntimeKeepaliveResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -2012,6 +2465,39 @@ func ParseRuntimeKeepaliveResponse(rsp *http.Response) (*RuntimeKeepaliveRespons
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest KeepaliveResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRuntimePrepareResponse parses an HTTP response from a RuntimePrepareWithResponse call
+func ParseRuntimePrepareResponse(rsp *http.Response) (*RuntimePrepareResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RuntimePrepareResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PrepareResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -2082,9 +2568,15 @@ type ServerInterface interface {
 	// RuntimeInspect Snapshot a live instance's globals or completion metadata.
 	// (POST /runtime/v1/inspect)
 	RuntimeInspect(c *gin.Context)
+	// RuntimeInvoke Run one fenced call against a ready replica.
+	// (POST /runtime/v1/invoke)
+	RuntimeInvoke(c *gin.Context)
 	// RuntimeKeepalive Renew the instance's sliding TTL deadline.
 	// (POST /runtime/v1/keepalive)
 	RuntimeKeepalive(c *gin.Context)
+	// RuntimePrepare Compile and register an ephemeral serving replica on this node.
+	// (POST /runtime/v1/prepare)
+	RuntimePrepare(c *gin.Context)
 	// RuntimePrompt Render the per-capability prompt fragments for an instance.
 	// (POST /runtime/v1/prompt)
 	RuntimePrompt(c *gin.Context)
@@ -2177,6 +2669,19 @@ func (siw *ServerInterfaceWrapper) RuntimeInspect(c *gin.Context) {
 	siw.Handler.RuntimeInspect(c)
 }
 
+// RuntimeInvoke operation middleware
+func (siw *ServerInterfaceWrapper) RuntimeInvoke(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RuntimeInvoke(c)
+}
+
 // RuntimeKeepalive operation middleware
 func (siw *ServerInterfaceWrapper) RuntimeKeepalive(c *gin.Context) {
 
@@ -2188,6 +2693,19 @@ func (siw *ServerInterfaceWrapper) RuntimeKeepalive(c *gin.Context) {
 	}
 
 	siw.Handler.RuntimeKeepalive(c)
+}
+
+// RuntimePrepare operation middleware
+func (siw *ServerInterfaceWrapper) RuntimePrepare(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RuntimePrepare(c)
 }
 
 // RuntimePrompt operation middleware
@@ -2232,6 +2750,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 
 	router.POST(options.BaseURL+"/runtime/v1/create", wrapper.RuntimeCreate)
 	router.POST(options.BaseURL+"/runtime/v1/exec", wrapper.RuntimeExec)
+	router.POST(options.BaseURL+"/runtime/v1/prepare", wrapper.RuntimePrepare)
+	router.POST(options.BaseURL+"/runtime/v1/invoke", wrapper.RuntimeInvoke)
 	router.POST(options.BaseURL+"/runtime/v1/keepalive", wrapper.RuntimeKeepalive)
 	router.POST(options.BaseURL+"/runtime/v1/delete", wrapper.RuntimeDelete)
 	router.POST(options.BaseURL+"/runtime/v1/browse", wrapper.RuntimeBrowse)
@@ -2476,6 +2996,45 @@ func (response RuntimeInspectdefaultJSONResponse) VisitRuntimeInspectResponse(w 
 	return err
 }
 
+type RuntimeInvokeRequestObject struct {
+	Body *RuntimeInvokeJSONRequestBody
+}
+
+type RuntimeInvokeResponseObject interface {
+	VisitRuntimeInvokeResponse(w http.ResponseWriter) error
+}
+
+type RuntimeInvoke200JSONResponse InvokeResponse
+
+func (response RuntimeInvoke200JSONResponse) VisitRuntimeInvokeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RuntimeInvokedefaultJSONResponse struct {
+	Body       ErrorEnvelope
+	StatusCode int
+}
+
+func (response RuntimeInvokedefaultJSONResponse) VisitRuntimeInvokeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RuntimeKeepaliveRequestObject struct {
 	Body *RuntimeKeepaliveJSONRequestBody
 }
@@ -2504,6 +3063,45 @@ type RuntimeKeepalivedefaultJSONResponse struct {
 }
 
 func (response RuntimeKeepalivedefaultJSONResponse) VisitRuntimeKeepaliveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RuntimePrepareRequestObject struct {
+	Body *RuntimePrepareJSONRequestBody
+}
+
+type RuntimePrepareResponseObject interface {
+	VisitRuntimePrepareResponse(w http.ResponseWriter) error
+}
+
+type RuntimePrepare200JSONResponse PrepareResponse
+
+func (response RuntimePrepare200JSONResponse) VisitRuntimePrepareResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RuntimePreparedefaultJSONResponse struct {
+	Body       ErrorEnvelope
+	StatusCode int
+}
+
+func (response RuntimePreparedefaultJSONResponse) VisitRuntimePrepareResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -2574,9 +3172,15 @@ type StrictServerInterface interface {
 	// RuntimeInspect Snapshot a live instance's globals or completion metadata.
 	// (POST /runtime/v1/inspect)
 	RuntimeInspect(ctx context.Context, request RuntimeInspectRequestObject) (RuntimeInspectResponseObject, error)
+	// RuntimeInvoke Run one fenced call against a ready replica.
+	// (POST /runtime/v1/invoke)
+	RuntimeInvoke(ctx context.Context, request RuntimeInvokeRequestObject) (RuntimeInvokeResponseObject, error)
 	// RuntimeKeepalive Renew the instance's sliding TTL deadline.
 	// (POST /runtime/v1/keepalive)
 	RuntimeKeepalive(ctx context.Context, request RuntimeKeepaliveRequestObject) (RuntimeKeepaliveResponseObject, error)
+	// RuntimePrepare Compile and register an ephemeral serving replica on this node.
+	// (POST /runtime/v1/prepare)
+	RuntimePrepare(ctx context.Context, request RuntimePrepareRequestObject) (RuntimePrepareResponseObject, error)
 	// RuntimePrompt Render the per-capability prompt fragments for an instance.
 	// (POST /runtime/v1/prompt)
 	RuntimePrompt(ctx context.Context, request RuntimePromptRequestObject) (RuntimePromptResponseObject, error)
@@ -2825,6 +3429,37 @@ func (sh *strictHandler) RuntimeInspect(ctx *gin.Context) {
 	}
 }
 
+// RuntimeInvoke operation middleware
+func (sh *strictHandler) RuntimeInvoke(ctx *gin.Context) {
+	var request RuntimeInvokeRequestObject
+
+	var body RuntimeInvokeJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.RuntimeInvoke(ctx, request.(RuntimeInvokeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RuntimeInvoke")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(RuntimeInvokeResponseObject); ok {
+		if err := validResponse.VisitRuntimeInvokeResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // RuntimeKeepalive operation middleware
 func (sh *strictHandler) RuntimeKeepalive(ctx *gin.Context) {
 	var request RuntimeKeepaliveRequestObject
@@ -2849,6 +3484,37 @@ func (sh *strictHandler) RuntimeKeepalive(ctx *gin.Context) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(RuntimeKeepaliveResponseObject); ok {
 		if err := validResponse.VisitRuntimeKeepaliveResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RuntimePrepare operation middleware
+func (sh *strictHandler) RuntimePrepare(ctx *gin.Context) {
+	var request RuntimePrepareRequestObject
+
+	var body RuntimePrepareJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.RuntimePrepare(ctx, request.(RuntimePrepareRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RuntimePrepare")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(RuntimePrepareResponseObject); ok {
+		if err := validResponse.VisitRuntimePrepareResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

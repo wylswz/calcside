@@ -106,6 +106,15 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		cleanup()
 		return nil, nil, err
 	}
+	applicationService, err := provideApplicationService(store, runtime, sandboxService, checker, recorder, cfg)
+	if err != nil {
+		cleanup5()
+		cleanup4()
+		cleanup3()
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
 	deps := api.Deps{
 		IAM:         iamService,
 		Vault:       service,
@@ -121,6 +130,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		Web:         fs,
 		Anonymous:   user,
 		Previews:    artifactPreviews,
+		Application: applicationService,
 	}
 	googleFlow, err := provideGoogle(ctx, cfg)
 	if err != nil {
@@ -131,10 +141,30 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		cleanup()
 		return nil, nil, err
 	}
-	server := provideServer(cfg, deps, googleFlow)
+	servingService, err := provideServingService(cfg, store, service, v)
+	if err != nil {
+		cleanup5()
+		cleanup4()
+		cleanup3()
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
+	server := provideServer(cfg, deps, googleFlow, servingService)
+	agent, err := provideServingAgent(cfg, servingService, runtime)
+	if err != nil {
+		cleanup5()
+		cleanup4()
+		cleanup3()
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
 	mainApplication := &application{
 		Server:  server,
 		Sandbox: sandboxService,
+		Serving: servingService,
+		Agent:   agent,
 	}
 	return mainApplication, func() {
 		cleanup5()

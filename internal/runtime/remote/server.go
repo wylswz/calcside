@@ -29,7 +29,9 @@ func NewHandler(rt runtime.Runtime, key []byte) http.Handler {
 		nil,
 		gen.StrictGinServerOptions{
 			RequestErrorHandlerFunc: func(ctx *gin.Context, err error) {
-				writeErrStatus(ctx, http.StatusBadRequest, "bad_spec", err.Error())
+				// Binding diagnostics can echo request payloads; emit a
+				// generic message for every worker request.
+				writeErrStatus(ctx, http.StatusBadRequest, "bad_spec", "request body invalid")
 			},
 			HandlerErrorFunc: func(ctx *gin.Context, err error) {
 				writeErr(ctx, err)
@@ -50,9 +52,22 @@ func AuthMiddleware(key []byte) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		body, err := io.ReadAll(io.LimitReader(c.Request.Body, 4<<20))
+		// Prepare bundles may carry up to 8MiB of assets (~12MiB
+		// base64); every other route stays at 4MiB. The +1 read detects
+		// oversize before binding or signature work ever sees a
+		// truncated body.
+		limit := int64(4 << 20)
+		if c.Request.URL.Path == "/runtime/v1/prepare" {
+			limit = 16 << 20
+		}
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, limit+1))
 		if err != nil {
 			writeErrStatus(c, http.StatusBadRequest, "internal", "read body")
+			c.Abort()
+			return
+		}
+		if int64(len(body)) > limit {
+			writeErrStatus(c, http.StatusRequestEntityTooLarge, "internal", "request body too large")
 			c.Abort()
 			return
 		}
@@ -136,6 +151,22 @@ func (s strict) RuntimePrompt(ctx context.Context, req gen.RuntimePromptRequestO
 		return gen.RuntimePromptdefaultJSONResponse{Body: envelope(err), StatusCode: statusOf(err)}, nil
 	}
 	return gen.RuntimePrompt200JSONResponse(*resp), nil
+}
+
+func (s strict) RuntimePrepare(ctx context.Context, req gen.RuntimePrepareRequestObject) (gen.RuntimePrepareResponseObject, error) {
+	resp, err := s.rt.Prepare(requestContext(ctx), req.Body)
+	if err != nil {
+		return gen.RuntimePreparedefaultJSONResponse{Body: envelope(err), StatusCode: statusOf(err)}, nil
+	}
+	return gen.RuntimePrepare200JSONResponse(*resp), nil
+}
+
+func (s strict) RuntimeInvoke(ctx context.Context, req gen.RuntimeInvokeRequestObject) (gen.RuntimeInvokeResponseObject, error) {
+	resp, err := s.rt.Invoke(requestContext(ctx), req.Body)
+	if err != nil {
+		return gen.RuntimeInvokedefaultJSONResponse{Body: envelope(err), StatusCode: statusOf(err)}, nil
+	}
+	return gen.RuntimeInvoke200JSONResponse(*resp), nil
 }
 
 func (s strict) RuntimeInspect(ctx context.Context, req gen.RuntimeInspectRequestObject) (gen.RuntimeInspectResponseObject, error) {

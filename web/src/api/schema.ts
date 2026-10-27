@@ -104,6 +104,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/editor/contracts/infer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Infer a JSON Schema from a raw JSON sample. */
+        post: operations["inferContract"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/editor/contracts/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Validate and canonicalize a JSON Schema draft. */
+        post: operations["validateContract"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/extensions": {
         parameters: {
             query?: never;
@@ -498,6 +532,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listApplications"];
+        put?: never;
+        post: operations["createApplication"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/applications/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getApplication"];
+        put: operations["updateApplication"];
+        post?: never;
+        delete: operations["deleteApplication"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/applications/{id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["publishApplication"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/applications/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["testApplication"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/applications/{id}/invoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["invokeApplication"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit": {
         parameters: {
             query?: never;
@@ -780,6 +894,18 @@ export interface components {
             symbols: components["schemas"]["CompletionSymbol"][];
             env_keys: string[];
             truncated: boolean;
+        };
+        ContractDocument: {
+            /** @description Canonical JSON schema text. */
+            schema: string;
+        };
+        InferContractRequest: {
+            /** @description Raw JSON text of the sample document. */
+            sample: string;
+        };
+        ValidateContractRequest: {
+            /** @description Raw JSON schema text to normalize. */
+            schema: string;
         };
         EditorMetadata: {
             utilities: components["schemas"]["CompletionSymbol"][];
@@ -1282,6 +1408,76 @@ export interface components {
         SecretsResponse: {
             secrets?: components["schemas"]["Secret"][];
         };
+        /** @description raw JSON preserved byte-for-byte; never re-parsed by the API tier */
+        RawJSON: unknown;
+        /** @enum {string} */
+        ApplicationStatus: "draft" | "preparing" | "ready" | "degraded" | "disabled";
+        Application: {
+            id: string;
+            workspace_id: string;
+            user_id: string;
+            name: string;
+            /** @description main.star source */
+            code: string;
+            /** @description normalized boundary spec (JSON object, refs only) */
+            spec: components["schemas"]["RawJSON"];
+            /** @description verbatim stored spec text — high-precision numbers stay exact; use this, never re-serialize spec */
+            spec_json?: string;
+            /** @description optional pinned JSON Schema text; null = default open object */
+            input_schema?: string | null;
+            output_schema?: string | null;
+            /** Format: int64 */
+            version: number;
+            /** Format: int64 */
+            published_version: number;
+            persistent_instance_id?: string;
+            status: components["schemas"]["ApplicationStatus"];
+            release_id?: string;
+            error_code?: string;
+            has_unpublished_changes: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ApplicationResponse: {
+            application?: components["schemas"]["Application"];
+        };
+        ApplicationsResponse: {
+            applications?: components["schemas"]["Application"][];
+        };
+        ApplicationCreateRequest: {
+            name?: string;
+            /** @description omitted/null = scaffold */
+            code?: string | null;
+            spec?: components["schemas"]["RawJSON"];
+            input_schema?: string | null;
+            output_schema?: string | null;
+        };
+        ApplicationUpdateRequest: {
+            /** Format: int64 */
+            version: number;
+            name: string;
+            code: string;
+            spec?: components["schemas"]["RawJSON"];
+            input_schema?: string | null;
+            output_schema?: string | null;
+        };
+        ApplicationPublishRequest: {
+            /** Format: int64 */
+            version: number;
+        };
+        ApplicationTestRequest: {
+            /** Format: int64 */
+            version: number;
+            /** @description raw JSON input for main(input) */
+            input?: components["schemas"]["RawJSON"];
+        };
+        ApplicationRunResponse: {
+            result: unknown;
+            /** @description exact raw JSON output text — UI renders this verbatim, never reparses */
+            output_json?: string;
+        };
     };
     responses: {
         /** @description error envelope */
@@ -1438,6 +1634,62 @@ export interface operations {
                 };
             };
             401: components["responses"]["Error"];
+        };
+    };
+    inferContract: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InferContractRequest"];
+            };
+        };
+        responses: {
+            /** @description Inferred canonical schema text. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractDocument"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+        };
+    };
+    validateContract: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidateContractRequest"];
+            };
+        };
+        responses: {
+            /** @description Canonicalized schema text. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractDocument"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            413: components["responses"]["Error"];
         };
     };
     listExtensions: {
@@ -2320,6 +2572,235 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
+    listApplications: {
+        parameters: {
+            query?: {
+                workspace?: string;
+                after?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description application drafts in the workspace */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationsResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+        };
+    };
+    createApplication: {
+        parameters: {
+            query?: {
+                workspace?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description created draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+        };
+    };
+    getApplication: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description application draft + live status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateApplication: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description updated draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+        };
+    };
+    deleteApplication: {
+        parameters: {
+            query: {
+                version: number;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    publishApplication: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationPublishRequest"];
+            };
+        };
+        responses: {
+            /** @description published; deployment proceeds asynchronously */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    testApplication: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationTestRequest"];
+            };
+        };
+        responses: {
+            /** @description ephemeral test run result; engine errors arrive in result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationRunResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+        };
+    };
+    invokeApplication: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        /** @description raw JSON object passed verbatim as main(input) */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RawJSON"];
+            };
+        };
+        responses: {
+            /** @description invocation result; engine errors arrive in result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationRunResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
     listAudit: {
         parameters: {
             query?: {
@@ -2864,3 +3345,4 @@ export const authKindValues: ReadonlyArray<FlattenedDeepRequired<components>["sc
 export const artifactPreviewKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ArtifactPreview"]["kind"]> = ["text", "csv", "json", "html"];
 export const memberRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MemberRole"]> = ["viewer", "editor", "owner"];
 export const policyKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Policy"]["kind"]> = ["builtin", "rego"];
+export const applicationStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ApplicationStatus"]> = ["draft", "preparing", "ready", "degraded", "disabled"];

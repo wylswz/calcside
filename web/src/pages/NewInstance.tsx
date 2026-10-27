@@ -1,8 +1,9 @@
 import { useCallback, useRef, useState } from 'react'
-import { useNavigate, useSearchParams, Link } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, wsPath, Instance, workspaces, currentWorkspace } from '../api'
-import { Button, Loading, Notice, PageHeader } from '../components/ui'
+import { Button, Confirm, Loading, Notice, PageHeader } from '../components/ui'
+import { KindSelect } from './NewApplication'
 
 import { SpecForm, type SpecFormHandle } from '../components/SpecForm'
 import type { InstanceDraft } from '../instanceDraft'
@@ -44,9 +45,15 @@ export default function NewInstance() {
   const wsq = useQuery({ queryKey: ['workspaces'], queryFn: workspaces })
   const dest = wsq.data?.find((w) => w.id === (currentWorkspace() ?? wsq.data?.find((x) => x.personal)?.id))
   const canCreate = dest != null && (dest.role === 'owner' || dest.role === 'editor')
-  const reviewCb = useCallback((_: InstanceDraft, errs?: { section: string; message: string }[]) => {
+  const [specDirty, setSpecDirty] = useState(false)
+  const baseline = useRef<{ from: string | null; value: string } | null>(null)
+  const [discard, setDiscard] = useState(false)
+  const reviewCb = useCallback((d: InstanceDraft, errs?: { section: string; message: string }[]) => {
     setErrors(errs ?? [])
-  }, [])
+    const value = JSON.stringify(d)
+    if (!baseline.current || baseline.current.from !== from) baseline.current = { from, value }
+    setSpecDirty(value !== baseline.current.value)
+  }, [from])
   if (wsq.isLoading || (from && src.isLoading)) return <Loading />
   if (wsq.isError) return <Notice tone="warning">Could not load workspaces — retry shortly.</Notice>
   if (!dest || !canCreate) return <Notice tone="warning">You need editor access to create instances in the current workspace.</Notice>
@@ -55,7 +62,8 @@ export default function NewInstance() {
   return (
     <div className="instance-builder">
       <PageHeader title={from ? 'Create similar' : 'New instance'}>
-        <Link to="/" className="link">← Instances</Link> · {from ? 'Copy configuration only. Files and state stay in the original instance.' : 'Choose what the agent can access. Connect it after creation.'}
+        <KindSelect current="instance" onDirty={() => (specDirty ? setDiscard(true) : nav('/applications/new'))} />
+        <span className="app-dim">{from ? 'Copy configuration only. Files and state stay in the original instance.' : 'Choose what the agent can access. Connect it after creation.'}</span>
       </PageHeader>
       <div className="builder-work-panel">
         <SpecForm key={from ?? 'new'} ref={form} initial={from ? src.data?.spec : undefined} onSpecChange={reviewCb} workspaceId={dest.id}
@@ -70,6 +78,13 @@ export default function NewInstance() {
             </div>
           } />
       </div>
+      {discard && (
+        <Confirm title="Discard draft" confirm="Discard" pending="Discarding…"
+          onClose={() => setDiscard(false)}
+          action={async () => { nav('/applications/new') }}>
+          The form has unsaved changes — leave anyway?
+        </Confirm>
+      )}
     </div>
   )
 }

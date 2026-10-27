@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 
 	"calcside/cmd/calcside/internal/api"
 	"calcside/cmd/calcside/internal/artifact"
@@ -15,8 +17,10 @@ import (
 	"calcside/cmd/calcside/internal/extensions"
 	_ "calcside/cmd/calcside/internal/gormstore"
 	"calcside/cmd/calcside/internal/service/access"
+	appsvc "calcside/cmd/calcside/internal/service/application"
 	policysvc "calcside/cmd/calcside/internal/service/policy"
 	"calcside/cmd/calcside/internal/service/sandbox"
+	"calcside/cmd/calcside/internal/service/serving"
 	"calcside/cmd/calcside/internal/vaultcipher"
 	"calcside/cmd/calcside/internal/worker"
 	"calcside/internal/capability"
@@ -24,9 +28,9 @@ import (
 	common "calcside/internal/config"
 	"calcside/internal/node"
 	"calcside/internal/node/subproc"
+	"calcside/internal/nodeagent"
 	"calcside/internal/placement"
 	"calcside/internal/runtime"
-	"calcside/internal/runtime/remote"
 	"calcside/internal/store"
 	webpkg "calcside/web"
 )
@@ -34,6 +38,10 @@ import (
 type application struct {
 	Server  *http.Server
 	Sandbox *sandbox.Service
+	// Serving is the persistent-instance scheduler; Agent runs it
+	// locally in single-node deployments (nil under --workers).
+	Serving *serving.Service
+	Agent   *nodeagent.Agent
 }
 
 func provideStore(ctx context.Context, cfg config.Config) (store.Store, func(), error) {
@@ -105,6 +113,36 @@ func provideRuntime(cfg config.Config, st store.Store, ncfg node.Config, nd *nod
 			cfg.NodeID,
 			func(context.Context) ([]placement.NodeRef, error) { return nodes, nil },
 			func(ctx context.Context, id string) (*placement.Binding, error) {
+				if strings.HasPrefix(id, string(store.PrefixServingReplica)) {
+					// Persistent replica: route only to the node that
+					// holds the live, current-generation ready lease.
+					rep, err := st.GetServingReplica(ctx, id)
+					if err != nil {
+						return nil, err
+					}
+					inst, err := st.GetPersistentInstance(ctx, rep.WorkspaceID, rep.InstanceID)
+					if err != nil {
+						return nil, err
+					}
+					live, err := st.ListServingNodes(ctx, time.Now())
+					if err != nil {
+						return nil, err
+					}
+					current := rep.State == store.ServingReplicaReady &&
+						rep.LeaseUntil.After(time.Now()) &&
+						inst.Enabled && inst.Generation == rep.Generation &&
+						inst.ReleaseID == rep.ReleaseID &&
+						inst.ActiveReplicaID == rep.ID
+					for _, n := range live {
+						if n.NodeID == rep.NodeID && n.BootID == rep.BootID &&
+							n.Incarnation == rep.NodeIncarnation && current {
+							return &placement.Binding{
+								InstanceID: rep.ID, NodeID: rep.NodeID, Epoch: rep.Epoch,
+							}, nil
+						}
+					}
+					return nil, placement.ErrNotBound
+				}
 				in, err := st.GetInstance(ctx, id)
 				if err != nil {
 					return nil, err
@@ -219,17 +257,57 @@ func provideWeb() fs.FS {
 	return nil
 }
 
-func provideServer(cfg config.Config, deps api.Deps, flow *auth.GoogleFlow) *http.Server {
+// provideServingService is the API-side persistent scheduler. It owns
+// SQL; workers never touch the database.
+func provideServingService(cfg config.Config, st store.Store, secrets sandbox.SecretResolver,
+	globalPolicies map[string]string) (*serving.Service, error) {
+	nodes := map[string]string{}
+	if cfg.Workers != "" {
+		refs, err := parseWorkers(cfg.Workers)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range refs {
+			nodes[r.NodeID] = r.Addr
+		}
+	} else {
+		nodes[cfg.NodeID] = "local"
+	}
+	return serving.New(serving.Options{
+		Store: st, Secrets: secrets, Nodes: nodes,
+		GlobalPolicies: globalPolicies,
+		LeaseDuration:  30 * time.Second, NodeTTL: 45 * time.Second,
+	})
+}
+
+// provideServingAgent runs the node agent in-process for local
+// topology; remote workers run their own agent and this stays nil.
+func provideServingAgent(cfg config.Config, svc *serving.Service, rt runtime.Runtime) (*nodeagent.Agent, error) {
+	if cfg.Workers != "" || svc == nil {
+		return nil, nil
+	}
+	cap := cfg.MaxInstancesPerNode
+	if cap <= 0 || cap > 128 {
+		cap = 128
+	}
+	boot := store.NewID("boot_")
+	slog.Info("serving node boot", "node_id", cfg.NodeID, "boot_id", boot)
+	return nodeagent.New(nodeagent.Options{
+		Control: svc, Runtime: rt, NodeID: cfg.NodeID, BootID: boot,
+		Capacity: cap,
+	})
+}
+
+func provideServer(cfg config.Config, deps api.Deps, flow *auth.GoogleFlow, sctl *serving.Service) *http.Server {
 	deps.Dev = cfg.Dev
 	deps.GoogleEnabled = flow != nil
 	svc := deps.Auth
 	mux := api.Handler(deps)
 	if cfg.Workers != "" {
-		// Workers resolve local extension sources through the API —
-		// they have no filesystem roots of their own. Signed with the
-		// same shared key as the runtime protocol.
+		// The api-callback surface (ext tree + node control) is signed
+		// with the same shared key as the runtime protocol.
 		mux2 := http.NewServeMux()
-		mux2.Handle(remote.ExtTreePath, extensions.ExtTreeHandler(cfg.ExtLocalRoots, []byte(cfg.WorkerKey)))
+		mux2.Handle("/internal/v1/", extensions.CallbackHandler(cfg.ExtLocalRoots, []byte(cfg.WorkerKey), sctl))
 		mux2.Handle("/", mux)
 		mux = mux2
 	}
@@ -264,4 +342,16 @@ func provideExtOptions(cfg config.Config) *capext.Options {
 
 func provideExtCatalog(opts *capext.Options) capext.CatalogProvider {
 	return extensions.NewCatalog(*opts)
+}
+
+// provideApplicationService wires the durable named-function service:
+// drafts + publish/test/invoke against the shared runtime and access
+// checker. The instance quota doubles as the application quota until a
+// dedicated flag exists.
+func provideApplicationService(st store.Store, rt runtime.Runtime, sb *sandbox.Service,
+	ac *access.Checker, rec sandbox.AuditSink, cfg config.Config) (*appsvc.Service, error) {
+	return appsvc.New(appsvc.Options{
+		Store: st, Runtime: rt, Sandbox: sb, Access: ac, Audit: rec,
+		MaxPerUser: cfg.MaxInstancesPerUser,
+	})
 }

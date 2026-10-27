@@ -52,7 +52,7 @@ func ParseWorker(args []string) (WorkerConfig, error) {
 	fs.StringVar(&c.NodeID, "node-id", common.EnvOr("NODE_ID", ""), "stable node identity; takes precedence over --node-id-file")
 	fs.StringVar(&c.NodeIDFile, "node-id-file", common.EnvOr("NODE_ID_FILE", ""), "file holding the stable node id; created on first boot")
 	fs.StringVar(&c.SharedKey, "shared-key", common.EnvOr("WORKER_SHARED_KEY", ""), "shared HMAC secret authenticating API-worker calls (required)")
-	fs.StringVar(&c.APIAddr, "api-addr", common.EnvOr("API_ADDR", ""), "API tier address (http://host:port) used to resolve local ext sources; empty disables local ext")
+	fs.StringVar(&c.APIAddr, "api-addr", common.EnvOr("API_ADDR", ""), "API tier address (http://host:port) for node control and local ext resolution; empty disables both")
 	fs.IntVar(&c.MaxInstances, "max-instances-per-node", common.EnvInt("MAX_INSTANCES_PER_NODE", 0), "max live instances on this node (0 = unlimited)")
 	fs.DurationVar(&c.ReaperInterval, "reaper-interval", common.EnvDur("REAPER_INTERVAL", 10*time.Second), "local memory-reclaim sweep interval")
 	fs.DurationVar(&c.PolicyEvalTimeout, "policy-eval-timeout", common.EnvDur("POLICY_EVAL_TIMEOUT", 100*time.Millisecond), "per-policy eval timeout")

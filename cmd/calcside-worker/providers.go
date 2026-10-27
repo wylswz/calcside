@@ -8,14 +8,17 @@ import (
 	"time"
 
 	"calcside/cmd/calcside-worker/internal/config"
+	"calcside/cmd/calcside-worker/internal/controlclient"
 	common "calcside/internal/config"
 	"calcside/internal/node"
 	"calcside/internal/node/subproc"
+	"calcside/internal/nodeagent"
 	"calcside/internal/runtime"
 	"calcside/internal/runtime/remote"
 )
 
 type workerApp struct {
+	Agent  *nodeagent.Agent
 	Server *http.Server
 	NodeID string
 }
@@ -28,7 +31,7 @@ func provideNodeID(cfg config.WorkerConfig) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	slog.Info("worker identity", "node_id", id, "boot_id", randHex(8))
+	slog.Info("worker identity", "node_id", id)
 	return id, nil
 }
 
@@ -80,6 +83,29 @@ func provideRuntime(cfg config.WorkerConfig, nodeID string, ncfg node.Config) (r
 	nd := node.Build(ncfg)
 	nd.Manager.StartReaper()
 	return nd.Manager, nd.Close, nil
+}
+
+// provideServingAgent runs the node agent against the API's control
+// plane; without --api-addr the worker keeps legacy execution only.
+func provideServingAgent(cfg config.WorkerConfig, nodeID string, rt runtime.Runtime) (*nodeagent.Agent, error) {
+	if cfg.APIAddr == "" {
+		slog.Info("persistent restoration disabled (no --api-addr)")
+		return nil, nil
+	}
+	ctl, err := controlclient.New(cfg.APIAddr, nodeID, []byte(cfg.SharedKey), nil)
+	if err != nil {
+		return nil, err
+	}
+	boot := "boot_" + randHex(16)
+	cap := cfg.MaxInstances
+	if cap <= 0 || cap > 128 {
+		cap = 128
+	}
+	slog.Info("serving node boot", "node_id", nodeID, "boot_id", boot)
+	return nodeagent.New(nodeagent.Options{
+		Control: ctl, Runtime: rt, NodeID: nodeID, BootID: boot,
+		Capacity: cap,
+	})
 }
 
 func provideServer(cfg config.WorkerConfig, rt runtime.Runtime) *http.Server {

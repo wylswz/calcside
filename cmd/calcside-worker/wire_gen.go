@@ -22,8 +22,14 @@ func initializeWorker(cfg config.WorkerConfig) (*workerApp, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	agent, err := provideServingAgent(cfg, string2, runtime)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
 	server := provideServer(cfg, runtime)
 	mainWorkerApp := &workerApp{
+		Agent:  agent,
 		Server: server,
 		NodeID: string2,
 	}

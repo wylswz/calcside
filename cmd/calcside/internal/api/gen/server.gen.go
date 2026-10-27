@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"time"
 
+	rt "calcside/internal/runtime"
+
 	"github.com/gin-gonic/gin"
 	"github.com/oapi-codegen/runtime"
 )
@@ -79,6 +81,33 @@ func (e APIErrorCode) Valid() bool {
 	case TooMany:
 		return true
 	case Unauthorized:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApplicationStatus.
+const (
+	Degraded  ApplicationStatus = "degraded"
+	Disabled  ApplicationStatus = "disabled"
+	Draft     ApplicationStatus = "draft"
+	Preparing ApplicationStatus = "preparing"
+	Ready     ApplicationStatus = "ready"
+)
+
+// Valid indicates whether the value is a known member of the ApplicationStatus enum.
+func (e ApplicationStatus) Valid() bool {
+	switch e {
+	case Degraded:
+		return true
+	case Disabled:
+		return true
+	case Draft:
+		return true
+	case Preparing:
+		return true
+	case Ready:
 		return true
 	default:
 		return false
@@ -419,6 +448,91 @@ type APIKey struct {
 	ViewOnly *bool `json:"view_only,omitempty"`
 }
 
+// Application defines model for Application.
+type Application struct {
+	// Code main.star source
+	Code                  string    `json:"code"`
+	CreatedAt             time.Time `json:"created_at"`
+	ErrorCode             *string   `json:"error_code,omitempty"`
+	HasUnpublishedChanges bool      `json:"has_unpublished_changes"`
+	Id                    string    `json:"id"`
+
+	// InputSchema optional pinned JSON Schema text; null = default open object
+	InputSchema          *string `json:"input_schema,omitempty"`
+	Name                 string  `json:"name"`
+	OutputSchema         *string `json:"output_schema,omitempty"`
+	PersistentInstanceId *string `json:"persistent_instance_id,omitempty"`
+	PublishedVersion     int64   `json:"published_version"`
+	ReleaseId            *string `json:"release_id,omitempty"`
+
+	// Spec raw JSON preserved byte-for-byte; never re-parsed by the API tier
+	Spec RawJSON `json:"spec"`
+
+	// SpecJson verbatim stored spec text — high-precision numbers stay exact; use this, never re-serialize spec
+	SpecJson    *string           `json:"spec_json,omitempty"`
+	Status      ApplicationStatus `json:"status"`
+	UpdatedAt   time.Time         `json:"updated_at"`
+	UserId      string            `json:"user_id"`
+	Version     int64             `json:"version"`
+	WorkspaceId string            `json:"workspace_id"`
+}
+
+// ApplicationCreateRequest defines model for ApplicationCreateRequest.
+type ApplicationCreateRequest struct {
+	// Code omitted/null = scaffold
+	Code         *string `json:"code,omitempty"`
+	InputSchema  *string `json:"input_schema,omitempty"`
+	Name         *string `json:"name,omitempty"`
+	OutputSchema *string `json:"output_schema,omitempty"`
+
+	// Spec raw JSON preserved byte-for-byte; never re-parsed by the API tier
+	Spec *RawJSON `json:"spec,omitempty"`
+}
+
+// ApplicationPublishRequest defines model for ApplicationPublishRequest.
+type ApplicationPublishRequest struct {
+	Version int64 `json:"version"`
+}
+
+// ApplicationResponse defines model for ApplicationResponse.
+type ApplicationResponse struct {
+	Application *Application `json:"application,omitempty"`
+}
+
+// ApplicationRunResponse defines model for ApplicationRunResponse.
+type ApplicationRunResponse struct {
+	// OutputJson exact raw JSON output text — UI renders this verbatim, never reparses
+	OutputJson *string          `json:"output_json,omitempty"`
+	Result     rt.ProgramResult `json:"result"`
+}
+
+// ApplicationStatus defines model for ApplicationStatus.
+type ApplicationStatus string
+
+// ApplicationTestRequest defines model for ApplicationTestRequest.
+type ApplicationTestRequest struct {
+	// Input raw JSON preserved byte-for-byte; never re-parsed by the API tier
+	Input   *RawJSON `json:"input,omitempty"`
+	Version int64    `json:"version"`
+}
+
+// ApplicationUpdateRequest defines model for ApplicationUpdateRequest.
+type ApplicationUpdateRequest struct {
+	Code         string  `json:"code"`
+	InputSchema  *string `json:"input_schema,omitempty"`
+	Name         string  `json:"name"`
+	OutputSchema *string `json:"output_schema,omitempty"`
+
+	// Spec raw JSON preserved byte-for-byte; never re-parsed by the API tier
+	Spec    *RawJSON `json:"spec,omitempty"`
+	Version int64    `json:"version"`
+}
+
+// ApplicationsResponse defines model for ApplicationsResponse.
+type ApplicationsResponse struct {
+	Applications *[]Application `json:"applications,omitempty"`
+}
+
 // ArtifactConfig defines model for ArtifactConfig.
 type ArtifactConfig struct {
 	HtmlEnabled        bool `json:"html_enabled"`
@@ -527,6 +641,12 @@ type CompletionSymbol struct {
 	Kind   string    `json:"kind"`
 	Name   string    `json:"name"`
 	Params *[]string `json:"params,omitempty"`
+}
+
+// ContractDocument defines model for ContractDocument.
+type ContractDocument struct {
+	// Schema Canonical JSON schema text.
+	Schema string `json:"schema"`
 }
 
 // CreateKeyRequest defines model for CreateKeyRequest.
@@ -719,6 +839,12 @@ type FilesResult struct {
 	Content *string      `json:"content,omitempty"`
 	Entries *[]FileEntry `json:"entries,omitempty"`
 	Path    *string      `json:"path,omitempty"`
+}
+
+// InferContractRequest defines model for InferContractRequest.
+type InferContractRequest struct {
+	// Sample Raw JSON text of the sample document.
+	Sample string `json:"sample"`
 }
 
 // Instance defines model for Instance.
@@ -945,6 +1071,9 @@ type PolicyUpdateRequest struct {
 	Rego *string     `json:"rego,omitempty"`
 }
 
+// RawJSON raw JSON preserved byte-for-byte; never re-parsed by the API tier
+type RawJSON = json.RawMessage
+
 // ResourceUsages The instance's own cgroup v2 accounting, in bytes. Absent when the instance has no group of its own (inproc isolation, or process isolation without --instance-memory-max).
 type ResourceUsages struct {
 	// MemoryMax memory.max; 0 means unlimited
@@ -1041,6 +1170,12 @@ type User struct {
 	Username *string `json:"username,omitempty"`
 }
 
+// ValidateContractRequest defines model for ValidateContractRequest.
+type ValidateContractRequest struct {
+	// Schema Raw JSON schema text to normalize.
+	Schema string `json:"schema"`
+}
+
 // ValidatePolicyRequest defines model for ValidatePolicyRequest.
 type ValidatePolicyRequest struct {
 	Rego string `json:"rego"`
@@ -1087,6 +1222,23 @@ type IdPath = string
 
 // Error defines model for Error.
 type Error = ErrorEnvelope
+
+// ListApplicationsParams defines parameters for ListApplications.
+type ListApplicationsParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+	After     *string `form:"after,omitempty" json:"after,omitempty"`
+	Limit     *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateApplicationParams defines parameters for CreateApplication.
+type CreateApplicationParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
+// DeleteApplicationParams defines parameters for DeleteApplication.
+type DeleteApplicationParams struct {
+	Version int64 `form:"version" json:"version"`
+}
 
 // ListAuditParams defines parameters for ListAudit.
 type ListAuditParams struct {
@@ -1221,6 +1373,27 @@ type SetMemberRoleJSONBody struct {
 	Role MemberRole `json:"role"`
 }
 
+// CreateApplicationJSONRequestBody defines body for CreateApplication for application/json ContentType.
+type CreateApplicationJSONRequestBody = ApplicationCreateRequest
+
+// UpdateApplicationJSONRequestBody defines body for UpdateApplication for application/json ContentType.
+type UpdateApplicationJSONRequestBody = ApplicationUpdateRequest
+
+// InvokeApplicationJSONRequestBody defines body for InvokeApplication for application/json ContentType.
+type InvokeApplicationJSONRequestBody = RawJSON
+
+// PublishApplicationJSONRequestBody defines body for PublishApplication for application/json ContentType.
+type PublishApplicationJSONRequestBody = ApplicationPublishRequest
+
+// TestApplicationJSONRequestBody defines body for TestApplication for application/json ContentType.
+type TestApplicationJSONRequestBody = ApplicationTestRequest
+
+// InferContractJSONRequestBody defines body for InferContract for application/json ContentType.
+type InferContractJSONRequestBody = InferContractRequest
+
+// ValidateContractJSONRequestBody defines body for ValidateContract for application/json ContentType.
+type ValidateContractJSONRequestBody = ValidateContractRequest
+
 // CreateInstanceJSONRequestBody defines body for CreateInstance for application/json ContentType.
 type CreateInstanceJSONRequestBody = InstanceSpec
 
@@ -1278,6 +1451,30 @@ type SetMemberRoleJSONRequestBody SetMemberRoleJSONBody
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 
+	// (GET /api/v1/applications)
+	ListApplications(c *gin.Context, params ListApplicationsParams)
+
+	// (POST /api/v1/applications)
+	CreateApplication(c *gin.Context, params CreateApplicationParams)
+
+	// (DELETE /api/v1/applications/{id})
+	DeleteApplication(c *gin.Context, id IdPath, params DeleteApplicationParams)
+
+	// (GET /api/v1/applications/{id})
+	GetApplication(c *gin.Context, id IdPath)
+
+	// (PUT /api/v1/applications/{id})
+	UpdateApplication(c *gin.Context, id IdPath)
+
+	// (POST /api/v1/applications/{id}/invoke)
+	InvokeApplication(c *gin.Context, id IdPath)
+
+	// (POST /api/v1/applications/{id}/publish)
+	PublishApplication(c *gin.Context, id IdPath)
+
+	// (POST /api/v1/applications/{id}/test)
+	TestApplication(c *gin.Context, id IdPath)
+
 	// (GET /api/v1/artifacts/config)
 	ArtifactConfig(c *gin.Context)
 
@@ -1289,6 +1486,12 @@ type ServerInterface interface {
 
 	// (GET /api/v1/capabilities)
 	Capabilities(c *gin.Context)
+	// InferContract Infer a JSON Schema from a raw JSON sample.
+	// (POST /api/v1/editor/contracts/infer)
+	InferContract(c *gin.Context)
+	// ValidateContract Validate and canonicalize a JSON Schema draft.
+	// (POST /api/v1/editor/contracts/validate)
+	ValidateContract(c *gin.Context)
 
 	// (GET /api/v1/editor/metadata)
 	EditorMetadata(c *gin.Context)
@@ -1450,6 +1653,237 @@ type ServerInterfaceWrapper struct {
 
 type MiddlewareFunc func(c *gin.Context)
 
+// ListApplications operation middleware
+func (siw *ServerInterfaceWrapper) ListApplications(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListApplicationsParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", c.Request.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter after: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListApplications(c, params)
+}
+
+// CreateApplication operation middleware
+func (siw *ServerInterfaceWrapper) CreateApplication(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateApplicationParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CreateApplication(c, params)
+}
+
+// DeleteApplication operation middleware
+func (siw *ServerInterfaceWrapper) DeleteApplication(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteApplicationParams
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", c.Request.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteApplication(c, id, params)
+}
+
+// GetApplication operation middleware
+func (siw *ServerInterfaceWrapper) GetApplication(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetApplication(c, id)
+}
+
+// UpdateApplication operation middleware
+func (siw *ServerInterfaceWrapper) UpdateApplication(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.UpdateApplication(c, id)
+}
+
+// InvokeApplication operation middleware
+func (siw *ServerInterfaceWrapper) InvokeApplication(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.InvokeApplication(c, id)
+}
+
+// PublishApplication operation middleware
+func (siw *ServerInterfaceWrapper) PublishApplication(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PublishApplication(c, id)
+}
+
+// TestApplication operation middleware
+func (siw *ServerInterfaceWrapper) TestApplication(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.TestApplication(c, id)
+}
+
 // ArtifactConfig operation middleware
 func (siw *ServerInterfaceWrapper) ArtifactConfig(c *gin.Context) {
 
@@ -1546,6 +1980,32 @@ func (siw *ServerInterfaceWrapper) Capabilities(c *gin.Context) {
 	}
 
 	siw.Handler.Capabilities(c)
+}
+
+// InferContract operation middleware
+func (siw *ServerInterfaceWrapper) InferContract(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.InferContract(c)
+}
+
+// ValidateContract operation middleware
+func (siw *ServerInterfaceWrapper) ValidateContract(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ValidateContract(c)
 }
 
 // EditorMetadata operation middleware
@@ -2839,6 +3299,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/api/v1/me/password", wrapper.ChangePassword)
 	router.GET(options.BaseURL+"/api/v1/capabilities", wrapper.Capabilities)
 	router.GET(options.BaseURL+"/api/v1/editor/metadata", wrapper.EditorMetadata)
+	router.POST(options.BaseURL+"/api/v1/editor/contracts/infer", wrapper.InferContract)
+	router.POST(options.BaseURL+"/api/v1/editor/contracts/validate", wrapper.ValidateContract)
 	router.GET(options.BaseURL+"/api/v1/extensions", wrapper.ListExtensions)
 	router.GET(options.BaseURL+"/api/v1/extensions/icons/:icon_id", wrapper.ExtensionIcon)
 	router.GET(options.BaseURL+"/api/v1/keys", wrapper.ListKeys)
@@ -2871,6 +3333,14 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/instances/:id/shares", wrapper.ListShares)
 	router.PUT(options.BaseURL+"/api/v1/instances/:id/shares", wrapper.PutShare)
 	router.DELETE(options.BaseURL+"/api/v1/instances/:id/shares/:user_id", wrapper.DeleteShare)
+	router.GET(options.BaseURL+"/api/v1/applications", wrapper.ListApplications)
+	router.POST(options.BaseURL+"/api/v1/applications", wrapper.CreateApplication)
+	router.DELETE(options.BaseURL+"/api/v1/applications/:id", wrapper.DeleteApplication)
+	router.GET(options.BaseURL+"/api/v1/applications/:id", wrapper.GetApplication)
+	router.PUT(options.BaseURL+"/api/v1/applications/:id", wrapper.UpdateApplication)
+	router.POST(options.BaseURL+"/api/v1/applications/:id/publish", wrapper.PublishApplication)
+	router.POST(options.BaseURL+"/api/v1/applications/:id/test", wrapper.TestApplication)
+	router.POST(options.BaseURL+"/api/v1/applications/:id/invoke", wrapper.InvokeApplication)
 	router.GET(options.BaseURL+"/api/v1/audit", wrapper.ListAudit)
 	router.GET(options.BaseURL+"/api/v1/policies", wrapper.ListPolicies)
 	router.POST(options.BaseURL+"/api/v1/policies", wrapper.CreatePolicy)
@@ -2890,6 +3360,602 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 }
 
 type ErrorJSONResponse ErrorEnvelope
+
+type ListApplicationsRequestObject struct {
+	Params ListApplicationsParams
+}
+
+type ListApplicationsResponseObject interface {
+	VisitListApplicationsResponse(w http.ResponseWriter) error
+}
+
+type ListApplications200JSONResponse ApplicationsResponse
+
+func (response ListApplications200JSONResponse) VisitListApplicationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListApplications400JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListApplications400JSONResponse) VisitListApplicationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListApplications401JSONResponse ErrorEnvelope
+
+func (response ListApplications401JSONResponse) VisitListApplicationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateApplicationRequestObject struct {
+	Params CreateApplicationParams
+	Body   *CreateApplicationJSONRequestBody
+}
+
+type CreateApplicationResponseObject interface {
+	VisitCreateApplicationResponse(w http.ResponseWriter) error
+}
+
+type CreateApplication200JSONResponse ApplicationResponse
+
+func (response CreateApplication200JSONResponse) VisitCreateApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateApplication400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateApplication400JSONResponse) VisitCreateApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateApplication401JSONResponse ErrorEnvelope
+
+func (response CreateApplication401JSONResponse) VisitCreateApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateApplication403JSONResponse ErrorEnvelope
+
+func (response CreateApplication403JSONResponse) VisitCreateApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateApplication413JSONResponse ErrorEnvelope
+
+func (response CreateApplication413JSONResponse) VisitCreateApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateApplication429JSONResponse ErrorEnvelope
+
+func (response CreateApplication429JSONResponse) VisitCreateApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteApplicationRequestObject struct {
+	Id     IdPath `json:"id"`
+	Params DeleteApplicationParams
+}
+
+type DeleteApplicationResponseObject interface {
+	VisitDeleteApplicationResponse(w http.ResponseWriter) error
+}
+
+type DeleteApplication204Response struct {
+}
+
+func (response DeleteApplication204Response) VisitDeleteApplicationResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteApplication401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteApplication401JSONResponse) VisitDeleteApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteApplication404JSONResponse ErrorEnvelope
+
+func (response DeleteApplication404JSONResponse) VisitDeleteApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteApplication409JSONResponse ErrorEnvelope
+
+func (response DeleteApplication409JSONResponse) VisitDeleteApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetApplicationRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type GetApplicationResponseObject interface {
+	VisitGetApplicationResponse(w http.ResponseWriter) error
+}
+
+type GetApplication200JSONResponse ApplicationResponse
+
+func (response GetApplication200JSONResponse) VisitGetApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetApplication401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetApplication401JSONResponse) VisitGetApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetApplication404JSONResponse ErrorEnvelope
+
+func (response GetApplication404JSONResponse) VisitGetApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateApplicationRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *UpdateApplicationJSONRequestBody
+}
+
+type UpdateApplicationResponseObject interface {
+	VisitUpdateApplicationResponse(w http.ResponseWriter) error
+}
+
+type UpdateApplication200JSONResponse ApplicationResponse
+
+func (response UpdateApplication200JSONResponse) VisitUpdateApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateApplication400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateApplication400JSONResponse) VisitUpdateApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateApplication401JSONResponse ErrorEnvelope
+
+func (response UpdateApplication401JSONResponse) VisitUpdateApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateApplication403JSONResponse ErrorEnvelope
+
+func (response UpdateApplication403JSONResponse) VisitUpdateApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateApplication404JSONResponse ErrorEnvelope
+
+func (response UpdateApplication404JSONResponse) VisitUpdateApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateApplication409JSONResponse ErrorEnvelope
+
+func (response UpdateApplication409JSONResponse) VisitUpdateApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateApplication413JSONResponse ErrorEnvelope
+
+func (response UpdateApplication413JSONResponse) VisitUpdateApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InvokeApplicationRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *InvokeApplicationJSONRequestBody
+}
+
+type InvokeApplicationResponseObject interface {
+	VisitInvokeApplicationResponse(w http.ResponseWriter) error
+}
+
+type InvokeApplication200JSONResponse ApplicationRunResponse
+
+func (response InvokeApplication200JSONResponse) VisitInvokeApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InvokeApplication401JSONResponse struct{ ErrorJSONResponse }
+
+func (response InvokeApplication401JSONResponse) VisitInvokeApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InvokeApplication404JSONResponse ErrorEnvelope
+
+func (response InvokeApplication404JSONResponse) VisitInvokeApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InvokeApplication503JSONResponse ErrorEnvelope
+
+func (response InvokeApplication503JSONResponse) VisitInvokeApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishApplicationRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *PublishApplicationJSONRequestBody
+}
+
+type PublishApplicationResponseObject interface {
+	VisitPublishApplicationResponse(w http.ResponseWriter) error
+}
+
+type PublishApplication202JSONResponse ApplicationResponse
+
+func (response PublishApplication202JSONResponse) VisitPublishApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishApplication400JSONResponse struct{ ErrorJSONResponse }
+
+func (response PublishApplication400JSONResponse) VisitPublishApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishApplication401JSONResponse ErrorEnvelope
+
+func (response PublishApplication401JSONResponse) VisitPublishApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishApplication404JSONResponse ErrorEnvelope
+
+func (response PublishApplication404JSONResponse) VisitPublishApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishApplication409JSONResponse ErrorEnvelope
+
+func (response PublishApplication409JSONResponse) VisitPublishApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestApplicationRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *TestApplicationJSONRequestBody
+}
+
+type TestApplicationResponseObject interface {
+	VisitTestApplicationResponse(w http.ResponseWriter) error
+}
+
+type TestApplication200JSONResponse ApplicationRunResponse
+
+func (response TestApplication200JSONResponse) VisitTestApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestApplication400JSONResponse struct{ ErrorJSONResponse }
+
+func (response TestApplication400JSONResponse) VisitTestApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestApplication401JSONResponse ErrorEnvelope
+
+func (response TestApplication401JSONResponse) VisitTestApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestApplication404JSONResponse ErrorEnvelope
+
+func (response TestApplication404JSONResponse) VisitTestApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestApplication409JSONResponse ErrorEnvelope
+
+func (response TestApplication409JSONResponse) VisitTestApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestApplication429JSONResponse ErrorEnvelope
+
+func (response TestApplication429JSONResponse) VisitTestApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
 
 type ArtifactConfigRequestObject struct {
 }
@@ -3014,6 +4080,162 @@ func (response Capabilities401JSONResponse) VisitCapabilitiesResponse(w http.Res
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InferContractRequestObject struct {
+	Body *InferContractJSONRequestBody
+}
+
+type InferContractResponseObject interface {
+	VisitInferContractResponse(w http.ResponseWriter) error
+}
+
+type InferContract200JSONResponse ContractDocument
+
+func (response InferContract200JSONResponse) VisitInferContractResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InferContract400JSONResponse struct{ ErrorJSONResponse }
+
+func (response InferContract400JSONResponse) VisitInferContractResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InferContract401JSONResponse ErrorEnvelope
+
+func (response InferContract401JSONResponse) VisitInferContractResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InferContract403JSONResponse ErrorEnvelope
+
+func (response InferContract403JSONResponse) VisitInferContractResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InferContract413JSONResponse ErrorEnvelope
+
+func (response InferContract413JSONResponse) VisitInferContractResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ValidateContractRequestObject struct {
+	Body *ValidateContractJSONRequestBody
+}
+
+type ValidateContractResponseObject interface {
+	VisitValidateContractResponse(w http.ResponseWriter) error
+}
+
+type ValidateContract200JSONResponse ContractDocument
+
+func (response ValidateContract200JSONResponse) VisitValidateContractResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ValidateContract400JSONResponse struct{ ErrorJSONResponse }
+
+func (response ValidateContract400JSONResponse) VisitValidateContractResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ValidateContract401JSONResponse ErrorEnvelope
+
+func (response ValidateContract401JSONResponse) VisitValidateContractResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ValidateContract403JSONResponse ErrorEnvelope
+
+func (response ValidateContract403JSONResponse) VisitValidateContractResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ValidateContract413JSONResponse ErrorEnvelope
+
+func (response ValidateContract413JSONResponse) VisitValidateContractResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -6389,6 +7611,30 @@ func (response Healthz200JSONResponse) VisitHealthzResponse(w http.ResponseWrite
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 
+	// (GET /api/v1/applications)
+	ListApplications(ctx context.Context, request ListApplicationsRequestObject) (ListApplicationsResponseObject, error)
+
+	// (POST /api/v1/applications)
+	CreateApplication(ctx context.Context, request CreateApplicationRequestObject) (CreateApplicationResponseObject, error)
+
+	// (DELETE /api/v1/applications/{id})
+	DeleteApplication(ctx context.Context, request DeleteApplicationRequestObject) (DeleteApplicationResponseObject, error)
+
+	// (GET /api/v1/applications/{id})
+	GetApplication(ctx context.Context, request GetApplicationRequestObject) (GetApplicationResponseObject, error)
+
+	// (PUT /api/v1/applications/{id})
+	UpdateApplication(ctx context.Context, request UpdateApplicationRequestObject) (UpdateApplicationResponseObject, error)
+
+	// (POST /api/v1/applications/{id}/invoke)
+	InvokeApplication(ctx context.Context, request InvokeApplicationRequestObject) (InvokeApplicationResponseObject, error)
+
+	// (POST /api/v1/applications/{id}/publish)
+	PublishApplication(ctx context.Context, request PublishApplicationRequestObject) (PublishApplicationResponseObject, error)
+
+	// (POST /api/v1/applications/{id}/test)
+	TestApplication(ctx context.Context, request TestApplicationRequestObject) (TestApplicationResponseObject, error)
+
 	// (GET /api/v1/artifacts/config)
 	ArtifactConfig(ctx context.Context, request ArtifactConfigRequestObject) (ArtifactConfigResponseObject, error)
 
@@ -6400,6 +7646,12 @@ type StrictServerInterface interface {
 
 	// (GET /api/v1/capabilities)
 	Capabilities(ctx context.Context, request CapabilitiesRequestObject) (CapabilitiesResponseObject, error)
+	// InferContract Infer a JSON Schema from a raw JSON sample.
+	// (POST /api/v1/editor/contracts/infer)
+	InferContract(ctx context.Context, request InferContractRequestObject) (InferContractResponseObject, error)
+	// ValidateContract Validate and canonicalize a JSON Schema draft.
+	// (POST /api/v1/editor/contracts/validate)
+	ValidateContract(ctx context.Context, request ValidateContractRequestObject) (ValidateContractResponseObject, error)
 
 	// (GET /api/v1/editor/metadata)
 	EditorMetadata(ctx context.Context, request EditorMetadataRequestObject) (EditorMetadataResponseObject, error)
@@ -6609,6 +7861,250 @@ type strictHandler struct {
 	options     StrictGinServerOptions
 }
 
+// ListApplications operation middleware
+func (sh *strictHandler) ListApplications(ctx *gin.Context, params ListApplicationsParams) {
+	var request ListApplicationsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListApplications(ctx, request.(ListApplicationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListApplications")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ListApplicationsResponseObject); ok {
+		if err := validResponse.VisitListApplicationsResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateApplication operation middleware
+func (sh *strictHandler) CreateApplication(ctx *gin.Context, params CreateApplicationParams) {
+	var request CreateApplicationRequestObject
+
+	request.Params = params
+
+	var body CreateApplicationJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateApplication(ctx, request.(CreateApplicationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateApplication")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(CreateApplicationResponseObject); ok {
+		if err := validResponse.VisitCreateApplicationResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteApplication operation middleware
+func (sh *strictHandler) DeleteApplication(ctx *gin.Context, id IdPath, params DeleteApplicationParams) {
+	var request DeleteApplicationRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteApplication(ctx, request.(DeleteApplicationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteApplication")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(DeleteApplicationResponseObject); ok {
+		if err := validResponse.VisitDeleteApplicationResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetApplication operation middleware
+func (sh *strictHandler) GetApplication(ctx *gin.Context, id IdPath) {
+	var request GetApplicationRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetApplication(ctx, request.(GetApplicationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetApplication")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(GetApplicationResponseObject); ok {
+		if err := validResponse.VisitGetApplicationResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateApplication operation middleware
+func (sh *strictHandler) UpdateApplication(ctx *gin.Context, id IdPath) {
+	var request UpdateApplicationRequestObject
+
+	request.Id = id
+
+	var body UpdateApplicationJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateApplication(ctx, request.(UpdateApplicationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateApplication")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(UpdateApplicationResponseObject); ok {
+		if err := validResponse.VisitUpdateApplicationResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// InvokeApplication operation middleware
+func (sh *strictHandler) InvokeApplication(ctx *gin.Context, id IdPath) {
+	var request InvokeApplicationRequestObject
+
+	request.Id = id
+
+	var body InvokeApplicationJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.InvokeApplication(ctx, request.(InvokeApplicationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InvokeApplication")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(InvokeApplicationResponseObject); ok {
+		if err := validResponse.VisitInvokeApplicationResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PublishApplication operation middleware
+func (sh *strictHandler) PublishApplication(ctx *gin.Context, id IdPath) {
+	var request PublishApplicationRequestObject
+
+	request.Id = id
+
+	var body PublishApplicationJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.PublishApplication(ctx, request.(PublishApplicationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PublishApplication")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(PublishApplicationResponseObject); ok {
+		if err := validResponse.VisitPublishApplicationResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// TestApplication operation middleware
+func (sh *strictHandler) TestApplication(ctx *gin.Context, id IdPath) {
+	var request TestApplicationRequestObject
+
+	request.Id = id
+
+	var body TestApplicationJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.TestApplication(ctx, request.(TestApplicationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "TestApplication")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(TestApplicationResponseObject); ok {
+		if err := validResponse.VisitTestApplicationResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ArtifactConfig operation middleware
 func (sh *strictHandler) ArtifactConfig(ctx *gin.Context) {
 	var request ArtifactConfigRequestObject
@@ -6700,6 +8196,68 @@ func (sh *strictHandler) Capabilities(ctx *gin.Context) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(CapabilitiesResponseObject); ok {
 		if err := validResponse.VisitCapabilitiesResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// InferContract operation middleware
+func (sh *strictHandler) InferContract(ctx *gin.Context) {
+	var request InferContractRequestObject
+
+	var body InferContractJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.InferContract(ctx, request.(InferContractRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InferContract")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(InferContractResponseObject); ok {
+		if err := validResponse.VisitInferContractResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ValidateContract operation middleware
+func (sh *strictHandler) ValidateContract(ctx *gin.Context) {
+	var request ValidateContractRequestObject
+
+	var body ValidateContractJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ValidateContract(ctx, request.(ValidateContractRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ValidateContract")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ValidateContractResponseObject); ok {
+		if err := validResponse.VisitValidateContractResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

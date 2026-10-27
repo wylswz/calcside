@@ -80,6 +80,47 @@ the `Manager`, which trusts no caller.
 
 ## Deployment modes
 
+### Persistent Replicas (EP-0014)
+
+Persistent serving adds a control path without giving workers database access:
+
+```
+API store -> serving.Service scheduler -> durable replica assignment
+worker nodeagent -> signed /internal/v1/nodes/register,sync,prepare callbacks
+worker nodeagent -> local Runtime.Prepare/Keepalive/Delete
+caller -> Runtime.Invoke -> fresh globals, modules and /work
+```
+
+The API scans at most 200 desired instances per scheduler pass. Claims use
+database CAS and a complete node/boot/incarnation/instance/release/generation/
+replica/epoch fence. One unexpired nonterminal replica blocks a replacement,
+even after the node boots again. New boot registration never shortens the
+old replica's lease; historical boot IDs cannot register again.
+
+The default replica lease is 30 seconds and node heartbeat TTL is 45 seconds.
+Nodes poll every five seconds; preparing replicas are not renewed until the
+node actually has a ready context. A slow prepare does not block heartbeat
+polling. Only a successful local keepalive extends the node's confirmed
+deadline. The node subtracts the full control-call round trip from the
+API-reported remaining lifetime, avoiding a shared wall-clock assumption.
+In-flight invokes remain pinned to the lease snapshot they started with.
+
+Preparation failures retain audit and trigger durable exponential backoff.
+An uncertain local delete reports audit only, without prematurely releasing
+the database lease. Report IDs stay fixed until acknowledgement so network
+replays do not duplicate stored audit events. Shutdown flushes reports only:
+it never applies new assignments or starts replacement replicas.
+
+Remote workers require `--api-addr` (or `CALCSIDE_API_ADDR`) in addition to
+their stable node ID and shared key. The API's `--workers` list is the node
+allowlist and trusted address source. Without `--api-addr`, a worker still
+serves legacy execution but does not restore persistent replicas. Local API
+topologies run the same agent directly against the control service.
+
+Release publishing, public persistent-instance invoke routes and the build
+schema editor remain separate follow-up work; database rows alone are not a
+public deployment API.
+
 `--instance-isolation=inproc|process` selects whether the innermost hop
 exists. The other hops are unchanged.
 

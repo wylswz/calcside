@@ -62,6 +62,12 @@ func serve(cfg config.Config) error {
 		<-expired
 	}()
 
+	waitServing := app.startServing(ctx)
+	defer func() {
+		stop()
+		waitServing()
+	}()
+
 	srv := app.Server
 	shutdownDone := make(chan struct{})
 	go func() {
@@ -85,11 +91,17 @@ func serve(cfg config.Config) error {
 // parseWorkers parses --workers entries of the form "nodeID=host:port".
 func parseWorkers(spec string) ([]placement.NodeRef, error) {
 	var out []placement.NodeRef
+	seen := make(map[string]bool)
 	for _, ent := range strings.Split(spec, ",") {
 		id, addr, ok := strings.Cut(strings.TrimSpace(ent), "=")
-		if !ok || id == "" || addr == "" {
+		id, addr = strings.TrimSpace(id), strings.TrimSpace(addr)
+		if !ok || id == "" || len(id) > 128 || addr == "" {
 			return nil, fmt.Errorf("--workers: bad entry %q, want nodeID=host:port", ent)
 		}
+		if seen[id] {
+			return nil, fmt.Errorf("--workers: duplicate node id")
+		}
+		seen[id] = true
 		out = append(out, placement.NodeRef{NodeID: id, Addr: addr})
 	}
 	return out, nil

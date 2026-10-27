@@ -76,6 +76,58 @@ paths:
                 $ref: '#/components/schemas/ExecResponse'
         default:
           $ref: '#/components/responses/Error'
+  /runtime/v1/prepare:
+    post:
+      operationId: runtimePrepare
+      summary: Compile and register an ephemeral serving replica on this node.
+      description: >
+        The request is self-contained: resolved spec, policy snapshot,
+        in-memory secret values, labels, owner, fencing epoch, finite
+        lease expiry and the immutable program bundle. The replica id is
+        an ephemeral identity in the shared namespace, not a development
+        or persistent instance. A failed result means no usable replica;
+        audit is returned on the 200 response for known engine failures.
+        Never transparently retried by the caller.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrepareRequest'
+      responses:
+        '200':
+          description: Prepare outcome; audit always carried.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrepareResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /runtime/v1/invoke:
+    post:
+      operationId: runtimeInvoke
+      summary: Run one fenced call against a ready replica.
+      description: >
+        Release id, generation and epoch must exactly match the prepared
+        replica; owner must match exactly and be nonempty. Expired,
+        not-ready, stopped or missing replicas reject before any
+        capability runs. No transparent retries and no invoke dedup: the
+        caller mints a fresh invoke_id per attempt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvokeRequest'
+      responses:
+        '200':
+          description: Invoke outcome; audit always carried.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvokeResponse'
+        default:
+          $ref: '#/components/responses/Error'
   /runtime/v1/keepalive:
     post:
       operationId: runtimeKeepalive
@@ -200,6 +252,78 @@ paths:
                 $ref: '#/components/schemas/InspectResponse'
         default:
           $ref: '#/components/responses/Error'
+  /internal/v1/nodes/register:
+    post:
+      operationId: nodeRegister
+      tags: [api-callback]
+      summary: Worker boot registration; returns the assigned incarnation.
+      description: >
+        Idempotent for the same boot id; a new boot bumps the node's
+        incarnation and invalidates every prior fence. ServerNow is the
+        API clock sampled at end of response for lease conversion.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NodeRegisterRequest'
+      responses:
+        '200':
+          description: Registration outcome.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeRegisterResult'
+        default:
+          $ref: '#/components/responses/Error'
+  /internal/v1/nodes/sync:
+    post:
+      operationId: nodeSync
+      tags: [api-callback]
+      summary: Heartbeat + reports + inventory; returns the full desired set.
+      description: >
+        Heartbeats the exact node tuple (stale boot -> 409), persists
+        report audit before state, renews locally-ready inventory, and
+        returns the authoritative assignment set on success only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NodeSyncRequest'
+      responses:
+        '200':
+          description: Authoritative assignments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeSyncResult'
+        default:
+          $ref: '#/components/responses/Error'
+  /internal/v1/nodes/prepare:
+    post:
+      operationId: nodePrepare
+      tags: [api-callback]
+      summary: Fetch the full self-contained prepare payload for one replica.
+      description: >
+        Exactly one fenced assignment per fetch; secrets are resolved in
+        memory, never persisted or logged. Lease expiry converts via
+        ServerNow minus round-trip time at the worker.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NodePrepareRequest'
+      responses:
+        '200':
+          description: Prepare payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodePrepareResult'
+        default:
+          $ref: '#/components/responses/Error'
   /internal/v1/ext/tree:
     get:
       operationId: extTree
@@ -307,6 +431,46 @@ components:
     DeleteResponse:
       type: object
       x-go-type: rt.DeleteResponse
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    PrepareRequest:
+      type: object
+      x-go-type: rt.PrepareRequest
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    PrepareResponse:
+      type: object
+      x-go-type: rt.PrepareResponse
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    InvokeRequest:
+      type: object
+      x-go-type: rt.InvokeRequest
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    InvokeResponse:
+      type: object
+      x-go-type: rt.InvokeResponse
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    NodeRegisterRequest:
+      type: object
+      x-go-type: rt.NodeRegisterRequest
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    NodeRegisterResult:
+      type: object
+      x-go-type: rt.NodeRegisterResponse
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    NodeSyncRequest:
+      type: object
+      x-go-type: rt.NodeSyncRequest
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    NodeSyncResult:
+      type: object
+      x-go-type: rt.NodeSyncResponse
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    NodePrepareRequest:
+      type: object
+      x-go-type: rt.NodePrepareRequest
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    NodePrepareResult:
+      type: object
+      x-go-type: rt.NodePrepareResponse
       x-go-type-import: {name: rt, path: calcside/internal/runtime}
     BrowseRequest:
       type: object

@@ -322,8 +322,9 @@ func (auditRow) TableName() string { return "audit_events" }
 func (r auditRow) toStore() *store.AuditEvent {
 	return &store.AuditEvent{
 		ID: r.ID, Ts: r.Ts.UTC(), UserID: r.UserID, InstanceID: r.InstanceID,
-		ExecID:     r.ExecID,
-		Capability: types.CapabilityName(r.Capability), Op: types.Op(r.Op),
+		WorkspaceID: r.WorkspaceID,
+		ExecID:      r.ExecID,
+		Capability:  types.CapabilityName(r.Capability), Op: types.Op(r.Op),
 		Args: r.Args, Phase: types.Phase(r.Phase),
 		Decision: types.Decision(r.Decision), Reason: r.Reason,
 		Error: r.Error, DurationMs: r.DurationMs,
@@ -1337,6 +1338,13 @@ func (d *sqlDB) UpdateWorkspace(ctx context.Context, w *store.Workspace) error {
 }
 
 func (d *sqlDB) LockWorkspace(ctx context.Context, id string) error {
+	// SQLite ignores FOR UPDATE. Acquire its writer lock before a caller
+	// reads quota state, so concurrent admissions cannot both pass the read.
+	if d.g.Dialector.Name() == "sqlite" {
+		if err := d.g.WithContext(ctx).Exec("UPDATE workspaces SET id = id WHERE id = ?", id).Error; err != nil {
+			return err
+		}
+	}
 	_, err := gorm.G[workspaceRow](d.g, clause.Locking{Strength: "UPDATE"}).
 		Where("id = ?", id).Take(ctx)
 	return mapNotFound(err)

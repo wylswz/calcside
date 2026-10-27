@@ -86,3 +86,40 @@ func TestInitializeWorkerRequiresKey(t *testing.T) {
 		t.Fatalf("app=%v cleanup=%t err=%v", app, cleanup != nil, err)
 	}
 }
+
+func TestWorkerAgentWiring(t *testing.T) {
+	base := config.WorkerConfig{
+		Addr: "127.0.0.1:0", SharedKey: "test-worker-key", NodeID: "worker-test",
+		DefaultTTL: time.Minute, MaxTTL: time.Hour, MaxExecTimeout: time.Minute,
+		ReaperInterval: time.Hour, MaxConcurrentExecs: 2, ExtCacheDir: t.TempDir(),
+		InstanceIsolation: common.IsolationInproc,
+	}
+	// No API addr: legacy execution only, no agent.
+	cfg := base
+	app, cleanup, err := initializeWorker(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	if app.Agent != nil {
+		t.Fatal("agent without api addr")
+	}
+	// Configured addr: agent constructs without touching the network
+	// (all contact happens inside Run).
+	cfg = base
+	cfg.APIAddr = "http://127.0.0.1:1"
+	app, cleanup, err = initializeWorker(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	if app.Agent == nil {
+		t.Fatal("missing agent with api addr")
+	}
+	// A malformed addr fails construction.
+	cfg = base
+	cfg.APIAddr = "not a url"
+	if _, _, err = initializeWorker(cfg); err == nil {
+		t.Fatal("bad api addr accepted")
+	}
+}

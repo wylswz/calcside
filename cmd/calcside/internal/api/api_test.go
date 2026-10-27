@@ -16,6 +16,7 @@ import (
 	"calcside/cmd/calcside/internal/auth"
 	_ "calcside/cmd/calcside/internal/gormstore"
 	"calcside/cmd/calcside/internal/service/access"
+	appsvc "calcside/cmd/calcside/internal/service/application"
 	auditsvc "calcside/cmd/calcside/internal/service/audit"
 	"calcside/cmd/calcside/internal/service/catalog"
 	"calcside/cmd/calcside/internal/service/iam"
@@ -122,9 +123,17 @@ func newArtifactEnv(t *testing.T, cipher *vaultcipher.Cipher, global map[string]
 	}
 	t.Cleanup(previews.Close)
 	svc := auth.NewService(st, false)
+	appSvc, err := appsvc.New(appsvc.Options{
+		Store: st, Runtime: mgr, Sandbox: e.sbx, Access: ac,
+		Audit: rec, MaxPerUser: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	h := Handler(Deps{
 		IAM: iam.New(st, ac, e.sbx, 10, nil), Vault: vaultSvc,
-		Policy: policysvc.New(st, ac), LLMProvider: llmprovidersvc.New(st, ac, &capext.Options{}),
+		Application: appSvc,
+		Policy:      policysvc.New(st, ac), LLMProvider: llmprovidersvc.New(st, ac, &capext.Options{}),
 		Audit:   auditsvc.New(st, ac),
 		Catalog: catalog.New(reg, nil), Sandbox: e.sbx, Access: ac, Workspace: workspacesvc.New(st, ac),
 		Auth: svc, Previews: previews,
