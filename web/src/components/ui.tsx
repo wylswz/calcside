@@ -395,6 +395,9 @@ export function InstanceStatus({ inst, now }: { inst: { status: string; created_
         : mins >= 1 ? `live · ${mins}m left`
           : `live · ${Math.max(0, Math.floor(left / 1000))}s left`
     }
+  } else if (inst.status === 'pending') {
+    dot = <span className="inline-block h-2 w-2 rounded-full bg-warn" />
+    label = 'pending · extensions'
   } else {
     dot = <span className="inline-block h-2 w-2 rounded-full border border-mute bg-transparent" />
     label = inst.status === 'lost' ? 'ended · lost' : 'ended'

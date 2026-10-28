@@ -96,20 +96,12 @@ func NewServingRelease(workspaceID, userID string, spec json.RawMessage, policie
 		}
 		_ = name
 	}
-	// Extension snapshots are not yet persisted; do not pretend
-	// local refs are immutable. A non-object capabilities map fails
-	// the typed decode above; a present non-empty ext is rejected.
-	if caps, ok := specMap["capabilities"]; ok && caps != nil {
-		cm, ok := caps.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("%w: spec", ErrInvalidServingRecord)
-		}
-		if ext, has := cm["ext"]; has && ext != nil {
-			em, ok := ext.(map[string]any)
-			if !ok || len(em) > 0 {
-				return nil, fmt.Errorf("%w: extension snapshots not supported", ErrInvalidServingRecord)
-			}
-		}
+	// Extensions are allowed only when every alias/provider ref is
+	// pinned to a valid h1 sum — the spec boundary (sandbox
+	// SpecPinner) is responsible for pinning before a release is
+	// built; here we enforce it defensively.
+	if _, err := runtime.ExtensionRequirements(spec); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidServingRecord, err.Error())
 	}
 	// Schemas must be JSON objects and compile under the pinned
 	// subset; the canonical marshal feeds both storage and the hash.

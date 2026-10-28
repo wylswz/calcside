@@ -25,6 +25,9 @@ import (
 	"calcside/cmd/calcside/internal/worker"
 	"calcside/internal/capability"
 	capext "calcside/internal/capability/ext"
+	capfs "calcside/internal/capability/fs"
+	capio "calcside/internal/capability/io"
+	capnet "calcside/internal/capability/net"
 	common "calcside/internal/config"
 	"calcside/internal/node"
 	"calcside/internal/node/subproc"
@@ -74,6 +77,28 @@ func provideLimits(cfg config.Config) capability.ServerLimits {
 		slog.Warn("net: private/reserved address blocking relaxed", "cidrs", cfg.NetAllowCIDRs)
 	}
 	return cfg.ExecLimits()
+}
+
+// provideExtRepo builds the API extension artifact repository: source
+// policy + captured immutable trees, resolved from cache.
+func provideExtRepo(cfg config.Config, st store.Store) (*extensions.Repository, error) {
+	return extensions.NewRepository(st, capext.Options{
+		AllowSources: cfg.ExtAllowSources,
+		LocalRoots:   cfg.ExtLocalRoots,
+		CacheDir:     cfg.ExtCacheDir,
+		FetchTimeout: cfg.ExtFetchTimeout,
+	})
+}
+
+// provideRegistry builds the capability registry directly from the
+// factories — spec validation uses the immutable artifact resolver.
+func provideRegistry(repo *extensions.Repository) *capability.Registry {
+	reg := capability.NewRegistry()
+	reg.Register(capfs.Factory())
+	reg.Register(capnet.Factory())
+	reg.Register(capio.Factory())
+	reg.Register(capext.Factory(repo.Options()))
+	return reg
 }
 
 func provideNodeConfig(cfg config.Config, limits capability.ServerLimits) node.Config {
@@ -184,7 +209,7 @@ func provideGlobalPolicies(cfg config.Config) (map[string]string, error) {
 	return globalPolicies, nil
 }
 
-func provideSandboxOptions(ctx context.Context, cfg config.Config, st store.Store, rt runtime.Runtime, vaultSvc sandbox.SecretResolver, rec sandbox.AuditSink, reg *capability.Registry, limits capability.ServerLimits, globalPolicies map[string]string, ac *access.Checker) (sandbox.Options, error) {
+func provideSandboxOptions(ctx context.Context, cfg config.Config, st store.Store, rt runtime.Runtime, vaultSvc sandbox.SecretResolver, rec sandbox.AuditSink, reg *capability.Registry, limits capability.ServerLimits, globalPolicies map[string]string, ac *access.Checker, repo *extensions.Repository) (sandbox.Options, error) {
 	// Instances a previous incarnation of this node owned cannot be
 	// recovered: their Starlark globals lived in that process's memory.
 	if n, err := st.MarkRunningAsLostForNode(ctx, cfg.NodeID); err != nil {
@@ -193,13 +218,15 @@ func provideSandboxOptions(ctx context.Context, cfg config.Config, st store.Stor
 		slog.Warn("marked lost instances", "count", n)
 	}
 
+	extOpts := repo.Options()
 	return sandbox.Options{
 		Store:               st,
 		Runtime:             rt,
 		Secrets:             vaultSvc,
 		Audit:               rec,
 		Registry:            reg,
-		Ext:                 provideExtOptions(cfg),
+		Ext:                 &extOpts,
+		SpecPinner:          repo,
 		Limits:              limits,
 		GlobalPolicies:      globalPolicies,
 		Access:              ac,
@@ -298,7 +325,7 @@ func provideServingAgent(cfg config.Config, svc *serving.Service, rt runtime.Run
 	})
 }
 
-func provideServer(cfg config.Config, deps api.Deps, flow *auth.GoogleFlow, sctl *serving.Service) *http.Server {
+func provideServer(cfg config.Config, st store.Store, deps api.Deps, flow *auth.GoogleFlow, sctl *serving.Service) *http.Server {
 	deps.Dev = cfg.Dev
 	deps.GoogleEnabled = flow != nil
 	svc := deps.Auth
@@ -307,7 +334,7 @@ func provideServer(cfg config.Config, deps api.Deps, flow *auth.GoogleFlow, sctl
 		// The api-callback surface (ext tree + node control) is signed
 		// with the same shared key as the runtime protocol.
 		mux2 := http.NewServeMux()
-		mux2.Handle("/internal/v1/", extensions.CallbackHandler(cfg.ExtLocalRoots, []byte(cfg.WorkerKey), sctl))
+		mux2.Handle("/internal/v1/", extensions.WithControl(st, []byte(cfg.WorkerKey), sctl))
 		mux2.Handle("/", mux)
 		mux = mux2
 	}

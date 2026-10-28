@@ -776,4 +776,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 	t.Run("applications", func(t *testing.T) {
 		RunApplications(t, newStore(t))
 	})
+	t.Run("extension_artifacts", func(t *testing.T) {
+		RunExtensionArtifacts(t, newStore(t))
+	})
 }

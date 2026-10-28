@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build && echo 'placeholder so `go build` works before `pnpm -C web build` generates the real assets' > dist/README.txt",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/components/completion.test.ts src/api.test.ts src/activity.test.ts src/mcpSnippets.test.ts src/nextStep.test.ts src/instanceDraft.test.ts src/buildDraft.test.ts src/builderCatalog.test.ts src/stableList.test.ts src/interactionStability.test.ts",
+    "test": "node --experimental-strip-types --test src/components/completion.test.ts src/api.test.ts src/activity.test.ts src/mcpSnippets.test.ts src/applicationSnippets.test.ts src/nextStep.test.ts src/instanceDraft.test.ts src/buildDraft.test.ts src/builderCatalog.test.ts src/stableList.test.ts src/interactionStability.test.ts",
     "lint": "eslint . && node --experimental-strip-types --test src/interactionStability.test.ts",
     "gen": "openapi-typescript ../api/openapi.yaml -o src/api/schema.ts --enum-values",
     "test:browser": "pnpm build && playwright test"

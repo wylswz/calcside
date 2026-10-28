@@ -22,9 +22,13 @@ const (
 )
 
 type LocalResolver func(ctx context.Context, p ParsedIdentifier) (dir string, err error)
+type SourceResolver func(ctx context.Context, source, sum string) (dir string, err error)
 
 // Options configures the ext capability server side.
 type Options struct {
+	// SourceResolver resolves immutable artifacts. Worker resolvers are
+	// cache-only; only the API repository may fetch source trees.
+	SourceResolver SourceResolver
 	// AllowSources lists remote identifier prefixes (e.g.
 	// "github.com/acme" or "github.com") the server permits; empty
 	// disables remote sources entirely.

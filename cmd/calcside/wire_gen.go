@@ -52,7 +52,15 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	}
 	service := vault.New(store, cipher, checker)
 	recorder, cleanup4 := provideRecorder(store)
-	registry := node.Registry
+	repository, err := provideExtRepo(cfg, store)
+	if err != nil {
+		cleanup4()
+		cleanup3()
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
+	registry := provideRegistry(repository)
 	v, err := provideGlobalPolicies(cfg)
 	if err != nil {
 		cleanup4()
@@ -61,7 +69,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		cleanup()
 		return nil, nil, err
 	}
-	options, err := provideSandboxOptions(ctx, cfg, store, runtime, service, recorder, registry, serverLimits, v, checker)
+	options, err := provideSandboxOptions(ctx, cfg, store, runtime, service, recorder, registry, serverLimits, v, checker, repository)
 	if err != nil {
 		cleanup4()
 		cleanup3()
@@ -150,7 +158,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		cleanup()
 		return nil, nil, err
 	}
-	server := provideServer(cfg, deps, googleFlow, servingService)
+	server := provideServer(cfg, store, deps, googleFlow, servingService)
 	agent, err := provideServingAgent(cfg, servingService, runtime)
 	if err != nil {
 		cleanup5()

@@ -38,7 +38,7 @@ export default function Instances() {
   const attn = (i: Instance) => i.status === 'running' && (
     (i.activity?.denied_runs ?? 0) > 0 || (i.activity?.failed_runs ?? 0) > 0 || rank(i) === 0)
   const needsAttention = all.filter(attn)
-  const live = all.filter((i) => i.status === 'running' && !attn(i))
+  const live = all.filter((i) => (i.status === 'running') && !attn(i))
   const ended = all.filter((i) => i.status !== 'running')
   const fresh: [string, Instance[]][] = [['Needs attention', needsAttention], ['Live', live], ['Ended', ended]]
   // Polling updates rows in place but never moves them between groups or

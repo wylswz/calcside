@@ -104,8 +104,11 @@ type Error = ErrorEnvelope
 
 // ExtTreeParams defines parameters for ExtTree.
 type ExtTreeParams struct {
-	// Path Server-local root-name/extension identifier to resolve, e.g. contrib/tavily.
+	// Path Extension source identifier (local root-name/extension or remote source).
 	Path string `form:"path" json:"path"`
+
+	// Sum Required h1 integrity sum the artifact must match.
+	Sum string `form:"sum" json:"sum"`
 }
 
 // NodePrepareJSONRequestBody defines body for NodePrepare for application/json ContentType.
@@ -119,7 +122,7 @@ type NodeSyncJSONRequestBody = NodeSyncRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
-	// ExtTree (worker → API) Fetch a local extension source tree.
+	// ExtTree (worker → API) Fetch a captured extension artifact tree.
 	// (GET /internal/v1/ext/tree)
 	ExtTree(c *gin.Context, params ExtTreeParams)
 	// NodePrepare Fetch the full self-contained prepare payload for one replica.
@@ -156,6 +159,14 @@ func (siw *ServerInterfaceWrapper) ExtTree(c *gin.Context) {
 	err = runtime.BindQueryParameterWithOptions("form", true, true, "path", c.Request.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter path: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required query parameter "sum" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "sum", c.Request.URL.Query(), &params.Sum, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sum: %w", err), http.StatusBadRequest)
 		return
 	}
 
@@ -401,7 +412,7 @@ func (response NodeSyncdefaultJSONResponse) VisitNodeSyncResponse(w http.Respons
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
-	// ExtTree (worker → API) Fetch a local extension source tree.
+	// ExtTree (worker → API) Fetch a captured extension artifact tree.
 	// (GET /internal/v1/ext/tree)
 	ExtTree(ctx context.Context, request ExtTreeRequestObject) (ExtTreeResponseObject, error)
 	// NodePrepare Fetch the full self-contained prepare payload for one replica.

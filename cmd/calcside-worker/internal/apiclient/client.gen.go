@@ -106,8 +106,11 @@ type Error = ErrorEnvelope
 
 // ExtTreeParams defines parameters for ExtTree.
 type ExtTreeParams struct {
-	// Path Server-local root-name/extension identifier to resolve, e.g. contrib/tavily.
+	// Path Extension source identifier (local root-name/extension or remote source).
 	Path string `form:"path" json:"path"`
+
+	// Sum Required h1 integrity sum the artifact must match.
+	Sum string `form:"sum" json:"sum"`
 }
 
 // NodePrepareJSONRequestBody defines body for NodePrepare for application/json ContentType.
@@ -193,9 +196,9 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 // The interface specification for the client above.
 type ClientInterface interface {
 
-	// ExtTree (worker → API) Fetch a local extension source tree.
+	// ExtTree (worker → API) Fetch a captured extension artifact tree.
 	//
-	// Reverse-direction call: the worker asks the API tier to read a local extension directory — workers carry no filesystem roots. The API enforces the same containment and size caps the filesystem path would, and returns the tree plus its h1 sum so the worker can cache it. Signed with the same HMAC scheme.
+	// Reverse-direction call: the worker asks the API tier for an immutable captured extension tree — workers carry no source roots and never fetch git/remote sources. The path is the source identifier and sum is the required h1 integrity pin; the API reads the stored artifact, never a mutable source. Signed with the same HMAC scheme.
 	//
 	// Corresponds with GET /internal/v1/ext/tree (the `ExtTree` operationId).
 	ExtTree(ctx context.Context, params *ExtTreeParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -255,9 +258,9 @@ type ClientInterface interface {
 	NodeSync(ctx context.Context, body NodeSyncJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
-// ExtTree (worker → API) Fetch a local extension source tree.
+// ExtTree (worker → API) Fetch a captured extension artifact tree.
 //
-// Reverse-direction call: the worker asks the API tier to read a local extension directory — workers carry no filesystem roots. The API enforces the same containment and size caps the filesystem path would, and returns the tree plus its h1 sum so the worker can cache it. Signed with the same HMAC scheme.
+// Reverse-direction call: the worker asks the API tier for an immutable captured extension tree — workers carry no source roots and never fetch git/remote sources. The path is the source identifier and sum is the required h1 integrity pin; the API reads the stored artifact, never a mutable source. Signed with the same HMAC scheme.
 //
 // Corresponds with GET /internal/v1/ext/tree (the `ExtTree` operationId).
 func (c *Client) ExtTree(ctx context.Context, params *ExtTreeParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -415,6 +418,14 @@ func NewExtTreeRequest(server string, params *ExtTreeParams) (*http.Request, err
 		var rawQueryFragments []string
 
 		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "path", params.Path, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			return nil, err
+		} else {
+			for _, qp := range strings.Split(queryFrag, "&") {
+				rawQueryFragments = append(rawQueryFragments, qp)
+			}
+		}
+
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "sum", params.Sum, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 			return nil, err
 		} else {
 			for _, qp := range strings.Split(queryFrag, "&") {
@@ -600,9 +611,9 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
-	// ExtTreeWithResponse (worker → API) Fetch a local extension source tree.
+	// ExtTreeWithResponse (worker → API) Fetch a captured extension artifact tree.
 	//
-	// Reverse-direction call: the worker asks the API tier to read a local extension directory — workers carry no filesystem roots. The API enforces the same containment and size caps the filesystem path would, and returns the tree plus its h1 sum so the worker can cache it. Signed with the same HMAC scheme.
+	// Reverse-direction call: the worker asks the API tier for an immutable captured extension tree — workers carry no source roots and never fetch git/remote sources. The path is the source identifier and sum is the required h1 integrity pin; the API reads the stored artifact, never a mutable source. Signed with the same HMAC scheme.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -856,9 +867,9 @@ func (r NodeSyncResponse) ContentType() string {
 	return ""
 }
 
-// ExtTreeWithResponse (worker → API) Fetch a local extension source tree.
+// ExtTreeWithResponse (worker → API) Fetch a captured extension artifact tree.
 //
-// Reverse-direction call: the worker asks the API tier to read a local extension directory — workers carry no filesystem roots. The API enforces the same containment and size caps the filesystem path would, and returns the tree plus its h1 sum so the worker can cache it. Signed with the same HMAC scheme.
+// Reverse-direction call: the worker asks the API tier for an immutable captured extension tree — workers carry no source roots and never fetch git/remote sources. The path is the source identifier and sum is the required h1 integrity pin; the API reads the stored artifact, never a mutable source. Signed with the same HMAC scheme.
 //
 // Returns a wrapper object for the known response body format(s).
 //

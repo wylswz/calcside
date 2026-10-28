@@ -53,3 +53,20 @@
 }
 .app-page .app-endpoint { font-size: 13px; margin: 8px 0 0 }
 .app-page .app-endpoint code { font-size: 12px }
+/* Request-examples tabs + pre — bounded height, horizontal scroll on
+   mobile so the page never overflows. */
+.app-page .app-capabilities { margin-top: 16px; min-width: 0 }
+.app-page .app-capabilities > div { margin-top: 12px }
+.app-page .app-examples { margin-top: 12px; min-width: 0 }
+.app-page .app-ex-tabs { display: flex; align-items: center; gap: 4px }
+.app-page .app-ex-tab {
+  padding: 3px 10px; font-size: 12px; border: 1px solid rgb(var(--line));
+  border-radius: 999px; color: rgb(var(--sec)); background: none; cursor: pointer;
+}
+.app-page .app-ex-tab[data-state="active"] { color: rgb(var(--accent)); border-color: rgb(var(--accent)) }
+.app-page .app-ex-panel { margin-top: 6px; min-width: 0 }
+.app-page .app-ex-pre {
+  margin: 0; padding: 10px; height: 220px; overflow: auto;
+  background: rgb(var(--paper)); border: 1px solid rgb(var(--line));
+  border-radius: 6px; font-size: 12px; white-space: pre; overflow-wrap: normal;
+}

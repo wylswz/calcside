@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"go.starlark.net/syntax"
+
+	"calcside/internal/extartifact"
 )
 
 // Module is a loaded extension: manifest, source tree, and provenance.
@@ -45,7 +47,12 @@ func (l *CapabilityLoader) Load(ctx context.Context) (*Module, error) {
 		return nil, err
 	}
 	var root, commit string
-	if p.Domain != "" {
+	if l.Options.SourceResolver != nil {
+		root, err = l.Options.SourceResolver(ctx, string(l.Identifier), l.Sum)
+		if err == nil {
+			err = checkTree(root)
+		}
+	} else if p.Domain != "" {
 		if l.locks == nil {
 			l.locks = &fetchLocks{}
 		}
@@ -66,6 +73,13 @@ func (l *CapabilityLoader) Load(ctx context.Context) (*Module, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ext: reading %s: %w", l.Identifier, err)
 	}
+	actualSum, err := extartifact.TreeHash(sources)
+	if err != nil || l.Sum != "" && actualSum != l.Sum {
+		return nil, fmt.Errorf("ext: invalid source tree or integrity sum")
+	}
+	if p.Domain != "" && l.Sum == "" {
+		return nil, fmt.Errorf("ext: remote sources require sum %s", actualSum)
+	}
 	manifest, err := parseManifest(sources[manifestFN])
 	if err != nil {
 		return nil, fmt.Errorf("ext %s: %w", l.Identifier, err)
@@ -76,7 +90,7 @@ func (l *CapabilityLoader) Load(ctx context.Context) (*Module, error) {
 	}
 	mod := &Module{
 		ID: l.Identifier, Root: root, Manifest: manifest,
-		Sources: sources, Commit: commit, Sum: l.Sum,
+		Sources: sources, Commit: commit, Sum: actualSum,
 		files: map[string]*syntax.File{},
 	}
 	for rel, src := range sources {

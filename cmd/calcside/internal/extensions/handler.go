@@ -8,23 +8,26 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"calcside/cmd/calcside/internal/api/intgen"
+	capext "calcside/internal/capability/ext"
+	"calcside/internal/extartifact"
 	"calcside/internal/runtime"
 	"calcside/internal/runtime/remote"
+	"calcside/internal/store"
 )
 
-// ExtTreeHandler serves local extension source trees to worker nodes,
+// ExtTreeHandler serves captured extension artifacts to worker nodes,
 // routed by the generated api-callback server and authenticated with
 // the same shared key as the runtime protocol.
-func ExtTreeHandler(localRoots []string, key []byte) http.Handler {
-	return CallbackHandler(localRoots, key, nil)
+func ExtTreeHandler(st store.ExtensionArtifactStore, key []byte) http.Handler {
+	return WithControl(st, key, nil)
 }
 
-// CallbackHandler serves the api-callback surface: local ext trees plus
-// the node-control ops when ctl is configured.
-func CallbackHandler(localRoots []string, key []byte, ctl runtime.NodeControl) http.Handler {
+// WithControl serves the api-callback surface: immutable ext artifacts
+// plus the node-control ops when ctl is configured.
+func WithControl(st store.ExtensionArtifactStore, key []byte, ctl runtime.NodeControl) http.Handler {
 	r := gin.New()
 	r.Use(gin.Recovery(), remote.AuthMiddleware(key))
-	intgen.RegisterHandlers(r, intgen.NewStrictHandlerWithOptions(extTrees{roots: localRoots, control: ctl},
+	intgen.RegisterHandlers(r, intgen.NewStrictHandlerWithOptions(extTrees{store: st, control: ctl},
 		nil,
 		intgen.StrictGinServerOptions{
 			RequestErrorHandlerFunc: func(ctx *gin.Context, err error) {
@@ -39,18 +42,52 @@ func CallbackHandler(localRoots []string, key []byte, ctl runtime.NodeControl) h
 
 // extTrees implements the generated strict interface.
 type extTrees struct {
-	roots   []string
+	store   store.ExtensionArtifactStore
 	control runtime.NodeControl
 }
 
 var _ intgen.StrictServerInterface = extTrees{}
 
-func (s extTrees) ExtTree(_ context.Context, req intgen.ExtTreeRequestObject) (intgen.ExtTreeResponseObject, error) {
-	files, sum, err := ReadLocalTree(s.roots, req.Params.Path)
-	if err != nil {
-		return intgen.ExtTreedefaultJSONResponse{Body: errEnv(err), StatusCode: http.StatusBadRequest}, nil
+// ExtTree returns the captured immutable artifact for a (source,sum)
+// pin — never a mutable source tree. A published pin stays retrievable
+// even if the source policy later changes; PinSpec/Capture enforce
+// source policy at pin time, not read time.
+func (s extTrees) ExtTree(ctx context.Context, req intgen.ExtTreeRequestObject) (intgen.ExtTreeResponseObject, error) {
+	fail := func(code, msg string, status int) (intgen.ExtTreeResponseObject, error) {
+		return intgen.ExtTreedefaultJSONResponse{Body: errorEnvelope(code, msg), StatusCode: status}, nil
 	}
-	return intgen.ExtTree200JSONResponse{Sum: sum, Files: files}, nil
+	// Unwrap the pooled gin context before touching the store — its
+	// lifetime is request-scoped and it carries pooled state.
+	if g, ok := ctx.(*gin.Context); ok {
+		ctx = g.Request.Context()
+	}
+	if s.store == nil {
+		return fail("internal", "extension artifact store unavailable", http.StatusInternalServerError)
+	}
+	if req.Params.Path == "" || len(req.Params.Path) > 512 ||
+		!runtime.ValidExtensionSum(req.Params.Sum) {
+		return fail("bad_spec", "source and a valid h1 sum are required", http.StatusBadRequest)
+	}
+	if _, err := capext.ParseIdentifier(req.Params.Path); err != nil {
+		return fail("bad_spec", "invalid extension source", http.StatusBadRequest)
+	}
+	a, err := s.store.GetExtensionArtifact(ctx, req.Params.Path, req.Params.Sum)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return fail("not_found", "extension artifact not found", http.StatusNotFound)
+		}
+		return fail("internal", "extension artifact lookup failed", http.StatusInternalServerError)
+	}
+	if a == nil || a.Source != req.Params.Path || a.Sum != req.Params.Sum {
+		return fail("internal", "extension artifact invalid", http.StatusInternalServerError)
+	}
+	if err := extartifact.Bounds(a.Files); err != nil {
+		return fail("internal", "extension artifact invalid", http.StatusInternalServerError)
+	}
+	if got, err := extartifact.TreeHash(a.Files); err != nil || got != a.Sum {
+		return fail("internal", "extension artifact integrity check failed", http.StatusInternalServerError)
+	}
+	return intgen.ExtTree200JSONResponse{Sum: a.Sum, Files: a.Files}, nil
 }
 
 func errEnv(err error) intgen.ErrorEnvelope {

@@ -7,6 +7,7 @@ import { api, ApiError, Application, workspaces } from '../api'
 import { Button, Confirm, Loading, Notice, PageHeader, SwapLabel } from '../components/ui'
 import { cmTheme } from '../components/codemirror'
 import './application.css'
+import { ApplicationCallExamples } from '../components/ApplicationCallExamples'
 
 type Draft = {
   name: string
@@ -292,15 +293,7 @@ function Editor({ app, role, userID, qc }: Props) {
         <Button onClick={onInvoke} disabled={busy !== '' || !ready || view === 'view' || corrupt}><SwapLabel show={busy === 'invoke' ? 'Invoking…' : 'Invoke published'} options={['Invoke published', 'Invoking…']} /></Button>
         {view === 'edit' && <button className="link-btn" onClick={() => setDelOpen(true)}>Delete</button>}
       </div>
-      {app.persistent_instance_id ? (
-        <p className="app-endpoint">
-          <span className="app-dim">Endpoint</span>{' '}
-          <code className="app-mono">{`POST ${window.location.origin}/api/v1/applications/${app.id}/invoke`}</code>{' '}
-          <button className="link-btn" onClick={() => {
-            void navigator.clipboard?.writeText(`${window.location.origin}/api/v1/applications/${app.id}/invoke`)
-          }}>Copy URL</button>
-        </p>
-      ) : null}
+      <ApplicationCallExamples appId={app.id} input={draft.input} status={app.status} />
       <div className="app-result" role="status" aria-live="polite">
         {warn && <Notice tone="warning">{warn}</Notice>}
         {storeFailed && <Notice tone="warning">Not saved to this tab.</Notice>}

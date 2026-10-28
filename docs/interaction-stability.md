@@ -167,3 +167,17 @@ live Vite dev server (React StrictMode) proxying a scratch dev API:
   `application-ui-{desktop,mobile}.png`.
 - Coverage is the 7-case browser suite plus static/unit geometry
   checks, not frame-level measurement.
+
+Application creation keeps the optional capability/extension form mounted
+when collapsed (C2). The kind-switch discard prompt covers structured
+configuration and invalid Advanced JSON, not only the name (C2/F2).
+Application-mode forms omit instance lifetime fields and allow only vault
+references. Raw Advanced JSON is submitted without a browser-number
+round trip.
+
+Invocation examples use Radix keyboard tabs and the shared `CopyBlock`
+with `SwapLabel` feedback (P2/S4). Their code panel has a fixed height
+and local horizontal scrolling (S1/S3). Copy failures are visible without
+discarding text (P5). Snippet unit tests capture the actual curl arguments,
+Python request bytes and JavaScript fetch body without network access;
+all preserve the exact JSON input, including large integers.

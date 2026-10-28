@@ -397,6 +397,7 @@ type Store interface {
 	// Tx runs fn against one store connection in a single transaction.
 	ServingStore
 	ApplicationStore
+	ExtensionArtifactStore
 
 	Tx(ctx context.Context, fn func(Store) error) error
 

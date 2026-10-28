@@ -18,7 +18,11 @@ func initializeWorker(cfg config.WorkerConfig) (*workerApp, func(), error) {
 		return nil, nil, err
 	}
 	nodeConfig := provideNodeConfig(cfg, string2)
-	runtime, cleanup, err := provideRuntime(cfg, string2, nodeConfig)
+	cache, err := provideExtCache(cfg, string2)
+	if err != nil {
+		return nil, nil, err
+	}
+	runtime, cleanup, err := provideRuntime(cfg, string2, nodeConfig, cache)
 	if err != nil {
 		return nil, nil, err
 	}

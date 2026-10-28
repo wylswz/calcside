@@ -20,14 +20,12 @@ import (
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/vault"
 	workspacesvc "calcside/cmd/calcside/internal/service/workspace"
-	"calcside/internal/node"
 )
 
 func initializeApp(ctx context.Context, cfg config.Config) (*application, func(), error) {
 	wire.Build(
 		provideStore, provideRecorder, provideCipher, provideLimits,
-		provideNodeConfig, provideNode, provideRuntime, provideGlobalPolicies,
-		wire.FieldsOf(new(*node.Node), "Registry"),
+		provideExtRepo, provideRegistry, provideNodeConfig, provideNode, provideRuntime, provideGlobalPolicies,
 		wire.Bind(new(sandbox.SecretResolver), new(*vault.Service)),
 		wire.Bind(new(sandbox.AuditSink), new(*audit.Recorder)),
 		provideSandboxOptions, sandbox.New, vault.New,
