@@ -1,66 +1,23 @@
-import type { CSSProperties } from 'react'
-import type { Policy, Secret } from '../api'
+import type { Secret } from '../api'
 import type { InstanceDraft } from '../instanceDraft'
-import { Button, Field, inputCls } from './ui'
+import { Field, inputCls } from './ui'
 
 type Patch = (patch: Partial<InstanceDraft>) => void
 
-// RulesSection edits policies and run limits. Rules constrain what the
-// capabilities may do; they never grant access.
-export function RulesSection({ draft, set, policies, policiesError, onRetry, selected }: {
+// LimitsSection edits run limits only; a blank field keeps the server
+// default. Policies moved to the capabilities palette — they are
+// add-ons, not settings.
+export function LimitsSection({ draft, set }: {
   draft: InstanceDraft
   set: Patch
-  policies: Policy[]
-  policiesError: boolean
-  onRetry: () => void
-  selected: string[]
 }) {
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-sec">Policies constrain capabilities; they do not grant access. Server policies always apply.</p>
-      {policiesError && <p className="text-sm text-danger">Could not load policies. <button className="underline" onClick={onRetry}>Retry policies</button></p>}
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="text-xs text-sec">{draft.policies === null ? 'Default selection' : 'Custom selection'}</p>
-        {draft.policies !== null && <button type="button" className="text-btn underline" onClick={() => set({ policies: null })}>Use default policies</button>}
-      </div>
-      <div className="ext-results" style={{ '--ext-rows': Math.max(1, Math.ceil(policies.length / 2)) } as CSSProperties}>
-        <ul className="ext-grid">
-          {policies.map((p) => {
-            const added = selected.includes(p.name)
-            return (
-              <li key={p.name} className={'ext-card' + (added ? ' ext-card-added' : '')}>
-                <div className="min-w-0 flex-1">
-                  <p className="ext-card-name">{p.name}</p>
-                  <p className="ext-card-desc" title={p.description}>{p.description || 'No description'}</p>
-                  <p className="ext-card-source">{p.kind === 'builtin' ? 'built-in' : 'workspace policy'}{p.default ? ' · default' : ''}</p>
-                </div>
-                <Button className="ext-card-action" aria-pressed={added}
-                  onClick={() => set({ policies: added ? selected.filter((name) => name !== p.name) : [...selected, p.name] })}>
-                  {added ? 'Added' : 'Add'}
-                </Button>
-              </li>
-            )
-          })}
-          {selected.filter((name) => !policies.some((p) => p.name === name)).map((name) => (
-            <li key={name} className="ext-card ext-card-added">
-              <div className="min-w-0 flex-1">
-                <p className="ext-card-name">{name}</p>
-                <p className="ext-card-desc">Not in the current policy catalog.</p>
-                <p className="ext-card-source">unknown</p>
-              </div>
-              <Button className="ext-card-action" onClick={() => set({ policies: selected.filter((p) => p !== name) })}>Remove</Button>
-            </li>
-          ))}
-        </ul>
-      </div>
-      {policies.length === 0 && !policiesError && <p className="text-xs text-sec">No policies are available in this workspace.</p>}
-      <div className="grid gap-3 sm:grid-cols-3">
-        {(['exec_timeout_ms', 'max_steps', 'max_output_bytes'] as const).map((key) => <Field key={key} label={key}>
-          <input className={inputCls} type="number" min="1" value={draft.limits[key] ?? ''} placeholder="Server default" onChange={(e) => {
-            const limits = { ...draft.limits }; if (e.target.value === '') delete limits[key]; else limits[key] = Number(e.target.value); set({ limits })
-          }} />
-        </Field>)}
-      </div>
+    <div className="grid gap-3 sm:grid-cols-3">
+      {(['exec_timeout_ms', 'max_steps', 'max_output_bytes'] as const).map((key) => <Field key={key} label={key}>
+        <input className={inputCls} type="number" min="1" value={draft.limits[key] ?? ''} placeholder="Server default" onChange={(e) => {
+          const limits = { ...draft.limits }; if (e.target.value === '') delete limits[key]; else limits[key] = Number(e.target.value); set({ limits })
+        }} />
+      </Field>)}
     </div>
   )
 }

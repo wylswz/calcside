@@ -1,5 +1,5 @@
 import type { Completion, CompletionContext, CompletionResult, CompletionSource } from '@codemirror/autocomplete'
-import type { CompletionContext as InstanceContext, CompletionSymbol, EditorMetadata, FileEntry } from '../api.ts'
+import type { CompletionContext as InstanceContext, CompletionSymbol, EditorMetadata, ExtensionInfo, FileEntry } from '../api.ts'
 
 const starKeywords = 'and break continue def elif else for if in lambda load not or pass return while True False None'.split(' ')
 const regoKeywords = 'package import as default else if contains in some every not with true false null'.split(' ')
@@ -134,6 +134,98 @@ export function starlarkCompletions(data?: InstanceContext, loadFiles?: LoadFile
     }
     return symbolOptions(context, c.code, symbols, starKeywords, true)
   }
+}
+
+// starUniverse mirrors go.starlark.net starlark.Universe plus the
+// session's `print` predeclare: callables are functions, the three
+// constants stay variables (keywords cover them too).
+const starUniverse: CompletionSymbol[] = [
+  ...'abs all any bool bytes chr dict dir enumerate fail float getattr hasattr hash int len list max min ord print range repr reversed set sorted str tuple type zip'.split(' ')
+    .map((name) => ({ name, kind: 'function' })),
+  ...['False', 'None', 'True'].map((name) => ({ name, kind: 'variable' })),
+]
+
+// functionParams renders a `def` signature like the server's
+// completion: a defaulted parameter is offered as `name?`.
+function docParams(raw: string): string[] {
+  return raw.split(',').map((p) => {
+    p = p.trim()
+    if (!p) return ''
+    const eq = p.indexOf('=')
+    return eq >= 0 ? p.slice(0, eq).trim() + '?' : p
+  }).filter(Boolean)
+}
+
+// docSymbols scans the current document for top-level definitions;
+// kept line-based and cheap so it can run on every completion query.
+export function docSymbols(doc: string): CompletionSymbol[] {
+  const out: CompletionSymbol[] = [{ name: 'input', kind: 'variable' }]
+  for (const line of doc.split('\n')) {
+    const def = /^def\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*:/.exec(line)
+    if (def) {
+      const params = docParams(def[2])
+      out.push({ name: def[1], kind: 'function', params, detail: `(${params.join(', ')})` })
+      continue
+    }
+    const assign = /^([A-Za-z_]\w*)\s*=/.exec(line)
+    if (assign) out.push({ name: assign[1], kind: 'variable' })
+  }
+  return out
+}
+
+// applicationSymbols builds the instance-style completion context for a
+// spec without a live session: universe + utilities + granted
+// capabilities (io is always granted — internal/engine/engine.go) +
+// ext aliases resolved against the catalog + the document's own
+// definitions.
+export function applicationSymbols(spec: unknown, metadata?: EditorMetadata, catalog?: ExtensionInfo[], doc = ''): InstanceContext {
+  const s = (spec && typeof spec === 'object' && !Array.isArray(spec) ? spec : {}) as Record<string, any>
+  const symbols: CompletionSymbol[] = [
+    ...starUniverse,
+    ...(metadata?.utilities ?? []),
+    { name: 'env', kind: 'variable' },
+    { name: 'secrets', kind: 'namespace' },
+  ]
+  const caps = (s.capabilities && typeof s.capabilities === 'object' && !Array.isArray(s.capabilities) ? s.capabilities : {}) as Record<string, any>
+  const granted = new Set([...Object.keys(caps), 'io'])
+  const ops = (name: string, list: { name?: string; params?: string[]; doc?: string }[] | undefined) => {
+    symbols.push({ name, kind: 'namespace' })
+    for (const op of list ?? []) {
+      if (!op.name) continue
+      symbols.push({
+        name: `${name}.${op.name}`, kind: 'function',
+        ...(op.params ? { params: op.params } : {}),
+        detail: op.params ? `(${op.params.join(', ')})` : '(...)',
+        ...(op.doc ? { doc: op.doc } : {}),
+      })
+    }
+  }
+  for (const cap of metadata?.capabilities ?? []) {
+    const name = cap.name ?? ''
+    if (!name || name === 'ext' || !granted.has(name)) continue
+    ops(name, cap.ops)
+  }
+  const ext = caps.ext
+  if (ext && typeof ext === 'object' && !Array.isArray(ext) && Object.keys(ext).length) {
+    symbols.push({ name: 'ext', kind: 'namespace' })
+    for (const alias of Object.keys(ext)) {
+      symbols.push({ name: `ext.${alias}`, kind: 'namespace' })
+      const source = typeof ext[alias] === 'object' && ext[alias] !== null && typeof ext[alias].source === 'string' ? ext[alias].source : ''
+      const entry = catalog?.find((e) => e.source === source)
+      if (entry) for (const op of entry.ops ?? []) {
+        if (!op.name) continue
+        symbols.push({
+          name: `ext.${alias}.${op.name}`, kind: 'function',
+          ...(op.params ? { params: op.params } : {}),
+          detail: op.params ? `(${op.params.join(', ')})` : '(...)',
+          ...(op.doc ? { doc: op.doc } : {}),
+        })
+      }
+    }
+  }
+  symbols.push(...docSymbols(doc))
+  const env_keys = s.env && typeof s.env === 'object' && !Array.isArray(s.env) ? Object.keys(s.env).sort() : []
+  return { symbols, env_keys, truncated: false }
 }
 
 export function policySymbols(metadata?: EditorMetadata, capability = '', op = ''): CompletionSymbol[] {

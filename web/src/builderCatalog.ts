@@ -14,7 +14,7 @@ export function filterExtensions(entries: ExtensionInfo[], query: string): Exten
 
 export interface Page<T> { items: T[]; total: number; start: number; end: number; page: number; pages: number }
 
-export function paginateExtensions(entries: ExtensionInfo[], page: number, pageSize = 12): Page<ExtensionInfo> {
+export function paginateExtensions<T>(entries: T[], page: number, pageSize = 12): Page<T> {
   const total = entries.length
   const pages = Math.max(1, Math.ceil(total / pageSize))
   const clamped = Math.min(Math.max(0, page), pages - 1)
