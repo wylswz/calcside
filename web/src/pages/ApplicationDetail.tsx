@@ -123,6 +123,9 @@ function Editor({ app, role, userID, qc }: Props) {
   const [base, setBase] = useState<Saved>(init.s)
   const [corrupt, setCorrupt] = useState(init.corrupt)
   const [resetOpen, setResetOpen] = useState(false)
+  // fp of the draft whose save last failed; null = no outstanding failure.
+  const [failedFp, setFailedFp] = useState<string | null>(null)
+  const saveFailed = failedFp !== null
   const [warn, setWarn] = useState('')
   const [storeFailed, setStoreFailed] = useState(false)
   const [run, setRun] = useState<RunView | null>(null)
@@ -207,6 +210,21 @@ function Editor({ app, role, userID, qc }: Props) {
     return { app2: a2, draftFp: snapFp }
   }
 
+  // attemptSave records the outcome: a non-conflict failure leaves the
+  // "Couldn't save" indicator up until a save lands; a conflict keeps the
+  // Reload Confirm flow instead. A null result (edit mid-flight) is
+  // neither success nor failure.
+  const attemptSave = async (): Promise<{ app2: Application; draftFp: string } | null> => {
+    try {
+      const r = await save()
+      if (r) setFailedFp(null)
+      return r
+    } catch (x: any) {
+      if (x?.code !== 'conflict') setFailedFp(fp(latest.current))
+      throw x
+    }
+  }
+
   const guarded = async (kind: string, fn: () => Promise<void>) => {
     if (corrupt || busy !== '') return
     setWarn(''); setBusy(kind)
@@ -225,16 +243,17 @@ function Editor({ app, role, userID, qc }: Props) {
 
   // fp covers everything the server persists; the test input is local.
   const fpDirty = fp(draft) !== base.fp
-  const saveNow = () => guarded('save', async () => { await save() })
+  const saveNow = () => guarded('save', async () => { await attemptSave() })
   const saveRef = useRef(saveNow)
   saveRef.current = saveNow
   // Autosave: fires only on shapes that would survive the PUT; anything
   // else stays 'Unsaved' silently — Run surfaces the real error.
   useEffect(() => {
-    if (view !== 'edit' || !fpDirty || corrupt || busy !== '' || !autosavable(draft)) return
+    // A failed draft is retried only after a new edit or an explicit Retry.
+    if (view !== 'edit' || !fpDirty || corrupt || busy !== '' || !autosavable(draft) || fp(draft) === failedFp) return
     const t = window.setTimeout(() => saveRef.current(), 1200)
     return () => window.clearTimeout(t)
-  }, [draft, fpDirty, corrupt, busy, view])
+  }, [draft, fpDirty, corrupt, busy, view, failedFp])
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
@@ -247,7 +266,7 @@ function Editor({ app, role, userID, qc }: Props) {
   }, [view, corrupt, busy])
 
   const onRun = () => guarded('run', async () => {
-    const s = await save()
+    const s = await attemptSave()
     if (!s) return
     const snapInput = latest.current.input
     const r = await api.postRawJson<RunView>(`/api/v1/applications/${s.app2.id}/test`,
@@ -263,7 +282,7 @@ function Editor({ app, role, userID, qc }: Props) {
   })
 
   const onPublish = () => guarded('publish', async () => {
-    const s = await save()
+    const s = await attemptSave()
     if (!s) return
     await api.post<{ application: Application }>(`/api/v1/applications/${s.app2.id}/publish`, { version: s.app2.version })
     if (mounted.current) qc.invalidateQueries({ queryKey: ['application', app.id] })
@@ -291,14 +310,15 @@ function Editor({ app, role, userID, qc }: Props) {
   }
 
   const ready = app.status === 'ready'
-  const saveState = busy === 'save' ? 'Saving…' : fpDirty ? 'Unsaved' : 'Saved'
+  const saveState = busy === 'save' ? 'Saving…' : saveFailed ? "Couldn't save" : fpDirty ? 'Unsaved' : 'Saved'
   return (
     <div className="app-page app-editor">
       <PageHeader title={draft.name || 'Application'}
         actions={view === 'edit' ? <Button variant="danger" onClick={() => setDelOpen(true)}>Delete</Button> : undefined}>
         <span className={`app-status app-status-${app.status}`}>{app.status}</span>{' '}
         {app.has_unpublished_changes && <span className="app-dim">unpublished changes</span>}{' '}
-        <span className="app-dim"><SwapLabel show={saveState} options={['Saved', 'Saving…', 'Unsaved']} /></span>
+        <span className="app-dim"><SwapLabel show={saveState} options={['Saved', 'Saving…', 'Unsaved', "Couldn't save"]} /></span>{' '}
+        {saveFailed && view === 'edit' && <Button size="sm" onClick={saveNow} disabled={busy !== ''}>Retry</Button>}
       </PageHeader>
       <p className="app-dim"><Link to="/applications" className="link">← Applications</Link> · <span className="app-mono">{app.id}</span></p>
 

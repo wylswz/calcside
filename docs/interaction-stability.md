@@ -60,7 +60,10 @@ and tests.
 - **C2 Input is never discarded implicitly.** Drafts survive view switches,
   refetches and re-renders. A dialog with unsaved input does not close on
   an outside click or Escape without confirmation. A refetch never
-  overwrites a field being edited.
+  overwrites a field being edited. Autosaved editors keep a persistent
+  status (Saved / Saving… / Unsaved / Couldn't save · Retry) that is never
+  blank and never claims Saved for a write that did not land (also relates
+  to F3).
 - **C3 View state survives data.** Expansion, selection, filters, tabs and
   scroll position persist across refetches; a refetch keeps showing the
   previous data instead of flashing back to a loading state.
@@ -85,6 +88,12 @@ and tests.
 - **P5 Outcomes appear where the user looks.** Success and failure show next
   to the control that caused them. A failure keeps the inputs and leaves the
   control where it was.
+- **P6 Hierarchy is carried by structure, not prose.** A section is a bounded
+  block (card with a title bar), not a line of small text. A block's primary
+  action sits in its title bar, styled primary; destructive actions use the
+  danger style and are spatially separated from primary ones. Instructional
+  text is a last resort: if a control needs a sentence to be used correctly,
+  change the control.
 
 ### F — mistakes are hard and recoverable
 
@@ -128,7 +137,8 @@ Every invariant has an owner mechanism, in order of preference:
 | C4 | — | review |
 | P1 | pending guards; static `mutate` check; e2e removal test | partial — async forms by review |
 | P2 | `ui.tsx` primitives; static browser-dialog check; e2e primitives test | enforced for buttons, menus, dialogs and labels |
-| P3, F3 | — | review |
+| P3, F3 | application autosave indicator | review |
+| P6 | app-card blocks on the application editor; danger Button variant; review | review — application editor and lists follow it |
 | P5 | policy editor footer reports validation and save failures; e2e "policy editor reports…" | partial — policy editor only |
 | P4 | `material.css` motion block; static duration/reduced-motion check | enforced in CSS, not measured |
 | F1 | S1, S2, `Confirm`; e2e menu and removal tests | enforced for menus and removals |
@@ -146,27 +156,48 @@ Every invariant has an owner mechanism, in order of preference:
   actions are review-only.
 - **C4:** view state is not yet consistently addressable in the URL.
 - **S6:** measured for dialogs only, not for menus or popovers.
+- **P6:** no static check; followed by review.
 - **P1:** pending guards are enforced on `Confirm` and by the static
   `mutate` check; longer inline forms are review-only.
 
 ### Application editor (EP-0014)
 
 `/applications/:id` is covered by `e2e/application.spec.ts` against a
-live Vite dev server (React StrictMode) proxying a scratch dev API:
-- S4: state/request-driven button labels use `SwapLabel` (Save draft /
-  Save & Test / Save & Publish / Invoke published); the Invoke button
-  is always rendered and merely disables until the app is ready, so
-  its appearance never moves neighboring controls.
+live Vite dev server (React StrictMode) proxying a scratch dev API. The
+page is divided into bounded cards (P6): Develop, Settings and Invoke.
+- Develop's title bar holds its actions — Run and Publish (primary),
+  with `SwapLabel` Run/Running… and Publish/Publishing… (S4). There is
+  no Save button: edits autosave 1200 ms after the last change (only
+  shapes the PUT would accept) and Cmd/Ctrl+S saves immediately, both
+  through the same snapshot pipeline as Run/Publish. The page header
+  keeps a persistent `SwapLabel` save indicator — Saved / Saving… /
+  Unsaved / Couldn't save — with a `Retry` button that appears after
+  the indicator only while a save has failed (S3); a conflict (409)
+  keeps the Reload Confirm flow instead (F3).
+- Run and Publish still save first and abort on a mid-flight edit with
+  "Changed while saving"; a conflicting save offers a reload Confirm
+  instead of overwriting.
+- The Invoke card is a separate call layer: its own input and output,
+  not shared with Develop's test fields. Its Invoke button is always
+  rendered and merely disables until the app is ready, so its
+  appearance never moves neighboring controls. "Create API key" in its
+  title bar mints an application-bound key in a `Modal`.
+- Delete is a danger-styled action in the page header; list pages carry
+  row-level Delete (applications) and End (running instances), each
+  through `Confirm` with tone danger (F2).
 - S1: state styles are paint-only; no transform/size on hover/press.
-- Save/Test/Publish snapshot the draft before the flight; a mid-flight
-  edit aborts the chain with "Changed while saving" and keeps edits.
-  A conflicting save offers a reload Confirm instead of overwriting.
 - Draft state is scoped by user + workspace + application id; navigating
   between apps remounts a clean editor under a different scope key.
 - Mobile (<768px) stacks with no horizontal overflow; screenshots
   `application-ui-{desktop,mobile}.png`.
-- Coverage is the 7-case browser suite plus static/unit geometry
-  checks, not frame-level measurement.
+- Coverage is the browser suite plus static/unit geometry checks, not
+  frame-level measurement.
+
+Known gaps in the editor: there is no version history beyond the
+published release — autosave cannot undo a bad edit except by reverting
+to the published code manually; and in-app navigation is unguarded — the
+console uses a plain `BrowserRouter` (no `useBlocker`), so `beforeunload`
+protects only real page unloads while a draft is unsaved.
 
 Application creation keeps the optional capability/extension form mounted
 when collapsed (C2). The kind-switch discard prompt covers structured
