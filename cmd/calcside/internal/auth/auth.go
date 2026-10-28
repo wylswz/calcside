@@ -31,7 +31,7 @@ type Principal struct {
 	KeySpec         json.RawMessage // restricted key's instance spec; nil = full access
 	KeyMaxInstances int
 	KeyViewOnly     bool
-	KeyInstanceID   string
+	KeyBoundID      string // the single resource (instance/application) a bound key reaches
 	KeyWorkspaceID  string // the workspace the key belongs to
 	Session         string // raw session token when cookie-auth
 }
@@ -52,7 +52,7 @@ func (p *Principal) Actor() service.Actor {
 	}
 	return service.Actor{
 		UserID: p.User.ID, Email: p.User.Email, Kind: p.Kind,
-		KeyID: p.KeyID, KeySpec: p.KeySpec, KeyMaxInstances: p.KeyMaxInstances, KeyViewOnly: p.KeyViewOnly, KeyInstanceID: p.KeyInstanceID,
+		KeyID: p.KeyID, KeySpec: p.KeySpec, KeyMaxInstances: p.KeyMaxInstances, KeyViewOnly: p.KeyViewOnly, KeyBoundID: p.KeyBoundID,
 		WorkspaceID: ws,
 	}
 }
@@ -205,7 +205,7 @@ func (s *Service) Resolve(ctx context.Context, r *http.Request) (*Principal, err
 			return nil, errors.New("key owner missing")
 		}
 		_ = s.st.TouchAPIKey(ctx, k.ID, now)
-		return &Principal{User: u, Kind: types.AuthAPIKey, KeyID: k.ID, KeySpec: k.Spec, KeyMaxInstances: k.MaxInstances, KeyViewOnly: k.ViewOnly, KeyInstanceID: k.InstanceID, KeyWorkspaceID: k.WorkspaceID}, nil
+		return &Principal{User: u, Kind: types.AuthAPIKey, KeyID: k.ID, KeySpec: k.Spec, KeyMaxInstances: k.MaxInstances, KeyViewOnly: k.ViewOnly, KeyBoundID: k.BoundID, KeyWorkspaceID: k.WorkspaceID}, nil
 	}
 	if c, err := r.Cookie(sessionCookie); err == nil && c.Value != "" {
 		sess, err := s.st.GetSession(ctx, hashToken(c.Value))

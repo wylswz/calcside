@@ -1018,6 +1018,8 @@ export interface components {
             view_only?: boolean;
             /** @description when set the key can only reach this instance */
             instance_id?: string;
+            /** @description when set the key can only reach this application */
+            application_id?: string;
         };
         CreateKeyRequest: {
             name: string;
@@ -1029,8 +1031,10 @@ export interface components {
             max_instances?: number;
             /** @description view-only key — sees the workspace's instances, runs and files; cannot run code */
             view_only?: boolean;
-            /** @description bind the key to this instance only; mutually exclusive with spec and view_only */
+            /** @description bind the key to this instance only; mutually exclusive with spec, view_only and application_id */
             instance_id?: string;
+            /** @description bind the key to this application only (view + invoke); mutually exclusive with spec, view_only and instance_id */
+            application_id?: string;
         };
         /** @enum {string} */
         MemberRole: "viewer" | "editor" | "owner";

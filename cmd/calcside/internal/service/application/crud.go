@@ -230,6 +230,10 @@ func (s *Service) Delete(ctx context.Context, a service.Actor, id string, versio
 	if !ok {
 		return service.Errf(types.ErrCodeConflict, "application changed")
 	}
+	// Keys bound to this application die with it.
+	if err := s.o.Store.RevokeBoundKeys(ctx, id); err != nil {
+		return fail(err)
+	}
 	return nil
 }
 

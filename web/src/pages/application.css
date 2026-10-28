@@ -34,8 +34,6 @@
 .kind-tabs { display: inline-flex; gap: 4px; font-size: 13px }
 .kind-tabs a { padding: 4px 10px; border: 1px solid rgb(var(--line)); border-radius: 999px; color: rgb(var(--sec)); text-decoration: none }
 .kind-tabs a.kind-on { color: rgb(var(--accent)); border-color: rgb(var(--accent)) }
-.app-page .app-steps { color: rgb(var(--sec)); font-size: 13px; padding-left: 18px }
-.app-page .app-steps li { margin: 2px 0 }
 .app-page .app-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 16px }
 .app-page .app-result { min-height: 44px; margin-top: 8px }
 .app-page .app-out { margin-top: 8px }

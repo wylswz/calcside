@@ -63,8 +63,9 @@ func (s *Service) ListKeys(ctx context.Context, a service.Actor) ([]*store.APIKe
 // CreateKey returns the stored key and its plaintext secret. A non-nil
 // spec makes a restricted key and requires maxInstances ≥ 1 (bounded by
 // the per-user limit when configured); a nil spec is full access and
-// maxInstances must be absent.
-func (s *Service) CreateKey(ctx context.Context, a service.Actor, name string, expiresInSeconds int64, spec json.RawMessage, maxInstances int, viewOnly bool, instanceID string) (*store.APIKey, string, error) {
+// maxInstances must be absent. instanceID or applicationID binds the
+// key to that one resource.
+func (s *Service) CreateKey(ctx context.Context, a service.Actor, name string, expiresInSeconds int64, spec json.RawMessage, maxInstances int, viewOnly bool, instanceID, applicationID string) (*store.APIKey, string, error) {
 	if err := s.session(ctx, a); err != nil {
 		return nil, "", err
 	}
@@ -89,7 +90,11 @@ func (s *Service) CreateKey(ctx context.Context, a service.Actor, name string, e
 		return nil, "", service.Errf(types.ErrCodeBadSpec, "view_only cannot combine with a restricted spec")
 	}
 	var boundIn *store.Instance
-	if instanceID != "" {
+	var boundApp *store.Application
+	switch {
+	case instanceID != "" && applicationID != "":
+		return nil, "", service.Errf(types.ErrCodeBadSpec, "instance_id and application_id are mutually exclusive")
+	case instanceID != "":
 		if len(spec) > 0 || viewOnly {
 			return nil, "", service.Errf(types.ErrCodeBadSpec, "instance_id cannot combine with spec or view_only")
 		}
@@ -99,6 +104,18 @@ func (s *Service) CreateKey(ctx context.Context, a service.Actor, name string, e
 			return nil, "", err
 		}
 		if err := s.access.Workspace(ctx, a, boundIn.WorkspaceID, access.Configure); err != nil {
+			return nil, "", err
+		}
+	case applicationID != "":
+		if len(spec) > 0 || viewOnly {
+			return nil, "", service.Errf(types.ErrCodeBadSpec, "application_id cannot combine with spec or view_only")
+		}
+		var err error
+		boundApp, err = s.access.Application(ctx, a, applicationID, access.Run)
+		if err != nil {
+			return nil, "", err
+		}
+		if err := s.access.Workspace(ctx, a, boundApp.WorkspaceID, access.Configure); err != nil {
 			return nil, "", err
 		}
 	}
@@ -113,8 +130,12 @@ func (s *Service) CreateKey(ctx context.Context, a service.Actor, name string, e
 	key.WorkspaceID = a.WorkspaceID
 	key.ViewOnly = viewOnly
 	if boundIn != nil {
-		key.InstanceID = boundIn.ID
+		key.BoundID = boundIn.ID
 		key.WorkspaceID = boundIn.WorkspaceID
+	}
+	if boundApp != nil {
+		key.BoundID = boundApp.ID
+		key.WorkspaceID = boundApp.WorkspaceID
 	}
 	if err := s.st.CreateAPIKey(ctx, key); err != nil {
 		return nil, "", service.Internal(err)

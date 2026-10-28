@@ -108,6 +108,9 @@ func (d *sqlDB) ListApplications(ctx context.Context, f store.ApplicationFilter)
 	if f.AfterID != "" {
 		q = q.Where("id > ?", f.AfterID)
 	}
+	if f.KeyApplicationID != "" {
+		q = q.Where("id = ?", f.KeyApplicationID)
+	}
 	rows, err := q.Order("id").Limit(limit).Find(ctx)
 	if err != nil {
 		return nil, err

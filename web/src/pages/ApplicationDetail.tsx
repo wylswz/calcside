@@ -256,12 +256,6 @@ function Editor({ app, role, userID, qc }: Props) {
       </PageHeader>
       <p className="app-dim"><Link to="/applications" className="link">← Applications</Link> · <span className="app-mono">{app.id}</span></p>
 
-      <ol className="app-steps">
-        <li><strong>1 · Write</strong> — edit <code>main(input)</code> below.</li>
-        <li><strong>2 · Test</strong> — saves the draft and runs it isolated; does not change the deployment.</li>
-        <li><strong>3 · Publish</strong> — deploys the saved draft; callers invoke the published version.</li>
-      </ol>
-
       <div className="app-grid">
         <div>
           <label className="app-label" htmlFor="app-name">Name</label>
@@ -293,7 +287,8 @@ function Editor({ app, role, userID, qc }: Props) {
         <Button onClick={onInvoke} disabled={busy !== '' || !ready || view === 'view' || corrupt}><SwapLabel show={busy === 'invoke' ? 'Invoking…' : 'Invoke published'} options={['Invoke published', 'Invoking…']} /></Button>
         {view === 'edit' && <button className="link-btn" onClick={() => setDelOpen(true)}>Delete</button>}
       </div>
-      <ApplicationCallExamples appId={app.id} input={draft.input} status={app.status} />
+      <ApplicationCallExamples appId={app.id} input={draft.input} status={app.status}
+        canCreateKey={view === 'edit'} appName={app.name} workspaceId={app.workspace_id} />
       <div className="app-result" role="status" aria-live="polite">
         {warn && <Notice tone="warning">{warn}</Notice>}
         {storeFailed && <Notice tone="warning">Not saved to this tab.</Notice>}
@@ -307,7 +302,6 @@ function Editor({ app, role, userID, qc }: Props) {
 
       <details className="app-adv" open={adv} onToggle={(e) => setAdv((e.target as HTMLDetailsElement).open)}>
         <summary>Advanced — JSON schemas and runtime settings</summary>
-        <p className="app-dim">By default the contract accepts any JSON object on input and returns any JSON object on output. Opt in per side only when you want a pinned schema.</p>
         {(['in', 'out'] as const).map((side) => (
           <div key={side} className="app-schema">
             <label className="app-check">

@@ -77,8 +77,10 @@ export default function Keys({ bare }: { bare?: boolean }) {
                 <td className={k.revoked_at ? 'line-through' : 'font-medium text-ink'}>{k.name}</td>
                 <td className="font-mono text-xs">{k.prefix}…</td>
                 <td className="max-w-[320px]">
-                  {k.instance_id
-                    ? <Link to={`/instances/${k.instance_id}`} className="link font-mono text-xs">this instance · {k.instance_id.slice(0, 12)}</Link>
+                  {k.application_id
+                    ? <Link to={`/applications/${k.application_id}`} className="link font-mono text-xs">application · {k.application_id.slice(0, 12)}</Link>
+                    : k.instance_id
+                    ? <Link to={`/instances/${k.instance_id}`} className="link font-mono text-xs">instance · {k.instance_id.slice(0, 12)}</Link>
                     : k.view_only
                     ? <span className="font-mono text-xs text-sec">view only</span>
                     : k.restricted

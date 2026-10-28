@@ -648,6 +648,7 @@ func (s *strictImpl) CreateKey(ctx context.Context, req gen.CreateKeyRequestObje
 	var maxInstances int
 	var viewOnly bool
 	var instanceID string
+	var applicationID string
 	if req.Body != nil {
 		name = req.Body.Name
 		if req.Body.ExpiresInSeconds != nil {
@@ -667,12 +668,15 @@ func (s *strictImpl) CreateKey(ctx context.Context, req gen.CreateKeyRequestObje
 		if req.Body.InstanceId != nil {
 			instanceID = *req.Body.InstanceId
 		}
+		if req.Body.ApplicationId != nil {
+			applicationID = *req.Body.ApplicationId
+		}
 	}
 	a, err := s.actor(ctx, p, req.Params.Workspace)
 	if err != nil {
 		return createKeyResp{fail(err)}, nil
 	}
-	key, secret, err := s.d.IAM.CreateKey(ctx, a, name, expiresIn, spec, maxInstances, viewOnly, instanceID)
+	key, secret, err := s.d.IAM.CreateKey(ctx, a, name, expiresIn, spec, maxInstances, viewOnly, instanceID, applicationID)
 	if err != nil {
 		return createKeyResp{fail(err)}, nil
 	}

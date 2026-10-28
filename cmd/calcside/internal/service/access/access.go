@@ -7,6 +7,7 @@ package access
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"calcside/cmd/calcside/internal/service"
 	"calcside/internal/store"
@@ -129,8 +130,8 @@ func (c *Checker) checkInstance(ctx context.Context, a service.Actor, in *store.
 
 // Workspace checks act on a workspace itself.
 func (c *Checker) Workspace(ctx context.Context, a service.Actor, wsID string, act Action) error {
-	// Instance-bound keys cannot create instances.
-	if a.KeyInstanceID != "" && act > View {
+	// Bound keys cannot create or change workspace objects.
+	if a.KeyBoundID != "" && act > View {
 		if err := c.check(ctx, a, wsID, View, service.NotFound("workspace not found")); err != nil {
 			return err
 		}
@@ -155,8 +156,8 @@ func (c *Checker) Instance(ctx context.Context, a service.Actor, id string, act 
 	if a.Restricted() && in.KeyID != a.KeyID {
 		return nil, service.NotFound("instance not found")
 	}
-	// An instance-bound key only ever sees its own instance.
-	if a.KeyInstanceID != "" && in.ID != a.KeyInstanceID {
+	// A bound key only ever sees the resource it is bound to.
+	if a.KeyBoundID != "" && in.ID != a.KeyBoundID {
 		return nil, service.NotFound("instance not found")
 	}
 	if err := c.checkInstance(ctx, a, in, act); err != nil {
@@ -165,14 +166,14 @@ func (c *Checker) Instance(ctx context.Context, a service.Actor, id string, act 
 	return in, nil
 }
 
-// Delete checks Run on the instance but additionally forbids
-// instance-bound keys: the human owns the instance's lifetime.
+// Delete checks Run on the instance but additionally forbids bound
+// keys: the human owns the instance's lifetime.
 func (c *Checker) Delete(ctx context.Context, a service.Actor, id string) (*store.Instance, error) {
 	in, err := c.Instance(ctx, a, id, Run)
 	if err != nil {
 		return nil, err
 	}
-	if a.KeyInstanceID != "" {
+	if a.KeyBoundID != "" {
 		return nil, service.Forbidden("forbidden")
 	}
 	return in, nil
@@ -266,27 +267,28 @@ func (c *Checker) Memberships(ctx context.Context, a service.Actor) ([]*store.Me
 
 // Instances returns the store filter for the instances a may list:
 // the actor's workspace, narrowed to key-created rows for a restricted
-// key.
+// key. A key bound to a non-instance resource lists nothing — no row
+// ever carries its bound id.
 func (c *Checker) Instances(ctx context.Context, a service.Actor) (store.InstanceFilter, error) {
 	f := store.InstanceFilter{WorkspaceID: a.WorkspaceID}
 	if a.Restricted() {
 		f.KeyID = a.KeyID
 	}
-	if a.KeyInstanceID != "" {
-		f.KeyInstanceID = a.KeyInstanceID
+	if a.KeyBoundID != "" {
+		f.KeyInstanceID = a.KeyBoundID
 	}
 	return f, nil
 }
 
 // Application loads the draft row then applies the same workspace/key
-// ceiling rules as instances. Bound and restricted keys never see apps;
-// a full key may Run, a view-only key may View, sessions Configure when
-// they hold editor/owner.
+// ceiling rules as instances. Restricted keys never see apps; a bound
+// key only sees the app it is bound to — a key bound to an instance is
+// hidden everywhere because no app carries its bound id. A full key
+// may Run, a view-only key may View, sessions Configure when they hold
+// editor/owner.
 func (c *Checker) Application(ctx context.Context, a service.Actor, id string, act Action) (*store.Application, error) {
 	hidden := service.NotFound("application not found")
-	// Keys are always scoped elsewhere; an app is never the target of a
-	// bound key, so any key-bound actor gets hidden.
-	if a.ViaKey() && (a.KeyInstanceID != "" || a.Restricted()) {
+	if a.Restricted() || (a.KeyBoundID != "" && a.KeyBoundID != id) {
 		return nil, hidden
 	}
 	row, err := c.st.GetApplication(ctx, id)
@@ -303,15 +305,23 @@ func (c *Checker) Application(ctx context.Context, a service.Actor, id string, a
 }
 
 // Applications returns the workspace-scoped list filter for the
-// applications endpoint. Bound/restricted keys and non-members get
-// hidden; callers append AfterID/Limit.
+// applications endpoint. Restricted keys and keys bound to a
+// non-application resource get hidden; an application-bound key lists
+// only its own application; callers append AfterID/Limit.
 func (c *Checker) Applications(ctx context.Context, a service.Actor) (store.ApplicationFilter, error) {
 	hidden := service.NotFound("applications not found")
-	if a.ViaKey() && (a.KeyInstanceID != "" || a.Restricted()) {
+	f := store.ApplicationFilter{WorkspaceID: a.WorkspaceID}
+	switch {
+	case a.Restricted():
 		return store.ApplicationFilter{}, hidden
+	case a.KeyBoundID != "":
+		if !strings.HasPrefix(a.KeyBoundID, string(store.PrefixApplication)) {
+			return store.ApplicationFilter{}, hidden
+		}
+		f.KeyApplicationID = a.KeyBoundID
 	}
 	if err := c.check(ctx, a, a.WorkspaceID, View, hidden); err != nil {
 		return store.ApplicationFilter{}, err
 	}
-	return store.ApplicationFilter{WorkspaceID: a.WorkspaceID}, nil
+	return f, nil
 }

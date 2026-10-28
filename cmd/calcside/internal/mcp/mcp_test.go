@@ -300,7 +300,7 @@ func TestMCPInstanceMode(t *testing.T) {
 	// bound key
 	boundSecret, bound := auth.NewAPIKey(u.ID, "bk", nil)
 	bound.WorkspaceID = store.PersonalWorkspaceID(u.ID)
-	bound.InstanceID = in.ID
+	bound.BoundID = in.ID
 	if err := st.CreateAPIKey(ctx, bound); err != nil {
 		t.Fatal(err)
 	}
