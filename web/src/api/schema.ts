@@ -1138,7 +1138,7 @@ export interface components {
                 [key: string]: unknown;
             };
             limits?: components["schemas"]["Limits"];
-            /** @description Policy names to attach (at most 32), including built-in policies. Omitted or null selects builtin.block_private_network by default. An explicit list replaces the defaults; [] selects none. Library Rego is snapshotted at creation; server policies (--policy-dir) always apply in addition. */
+            /** @description Policy names to attach (at most 32), including built-in policies. Omitted or null selects the default policies; none of the current built-ins are defaults, so this attaches none. builtin.block_private_network is opt-in via an explicit list; [] selects none. Library Rego is snapshotted at creation; server policies (--policy-dir) always apply in addition. */
             policies?: components["schemas"]["PolicyName"][] | null;
         };
         ExecActivity: {

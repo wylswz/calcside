@@ -512,7 +512,7 @@ func (factory) Ops() []capability.OpInfo {
 
 func (factory) ConfigFields() []capability.FieldDoc {
 	return []capability.FieldDoc{
-		{Name: "allow_hosts", Type: types.FieldStringList, Doc: "exact host, *.suffix wildcard, or host:port; empty = any host, subject to selected policies (builtin.block_private_network blocks private/reserved IPs by default)", Default: []string{}},
+		{Name: "allow_hosts", Type: types.FieldStringList, Doc: "exact host, *.suffix wildcard, or host:port; empty = any host, subject to selected policies (builtin.block_private_network blocks private/reserved IPs when selected)", Default: []string{}},
 		{Name: "methods", Type: types.FieldStringList, Doc: "permitted HTTP methods", Default: []string{"GET", "POST"}},
 		{Name: "max_response_bytes", Type: types.FieldInt, Doc: "response body cap", Default: defaultMaxResponse},
 		{Name: "timeout_ms", Type: types.FieldInt, Doc: "request timeout", Default: defaultTimeoutMs},

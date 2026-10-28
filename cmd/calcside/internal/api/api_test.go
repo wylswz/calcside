@@ -854,7 +854,7 @@ func TestBuiltinPolicyCatalog(t *testing.T) {
 		t.Fatalf("built-in catalog: %v", pols)
 	}
 	p := pols[0].(map[string]any)
-	if p["id"] != runtime.BlockPrivateNetworkPolicy || p["kind"] != "builtin" || p["default"] != true || p["rego"] != nil || p["description"] == "" {
+	if p["id"] != runtime.BlockPrivateNetworkPolicy || p["kind"] != "builtin" || p["default"] != false || p["rego"] != nil || p["description"] == "" {
 		t.Fatalf("built-in descriptor: %v", p)
 	}
 	path := "/api/v1/policies/" + runtime.BlockPrivateNetworkPolicy
@@ -904,7 +904,7 @@ func TestBuiltinNetworkPolicySelection(t *testing.T) {
 		name, field string
 		blocked     bool
 	}{
-		{"default", "", true},
+		{"default", "", false},
 		{"selected", `,"policies":["builtin.block_private_network"]`, true},
 		{"none", `,"policies":[]`, false},
 		{"custom-only", `,"policies":["custom"]`, false},
@@ -917,7 +917,7 @@ func TestBuiltinNetworkPolicySelection(t *testing.T) {
 			in := m["instance"].(map[string]any)
 			id := in["id"].(string)
 			selected, ok := in["spec"].(map[string]any)["policies"].([]any)
-			if !ok || (tc.blocked && (len(selected) != 1 || selected[0] != runtime.BlockPrivateNetworkPolicy)) || (tc.name == "none" && len(selected) != 0) {
+			if !ok || (tc.blocked && (len(selected) != 1 || selected[0] != runtime.BlockPrivateNetworkPolicy)) || ((tc.name == "none" || tc.name == "default") && len(selected) != 0) {
 				t.Fatalf("stored selection: %v", in)
 			}
 			for _, url := range []string{target.URL, localhost} {

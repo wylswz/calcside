@@ -148,9 +148,7 @@ def test_network_policy_selection(server, selection):
             spec["policies"] = selection
         inst = c.create_instance(spec)
         try:
-            expected = (
-                ["builtin.block_private_network"] if selection is None else selection
-            )
+            expected = [] if selection is None else selection
             assert inst["spec"]["policies"] == expected
             r = c.exec(inst["id"], f'print(net.get("{server}/healthz")["status"])')
             if expected:
