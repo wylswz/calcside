@@ -202,7 +202,7 @@ export default function InstanceDetail() {
       )}
 
       {ending && (
-        <Confirm title={`End instance ${name}?`} confirm="End instance" pending="Ending…" action={end} onClose={() => setEnding(false)}>
+        <Confirm tone="danger" title={`End instance ${name}?`} confirm="End instance" pending="Ending…" action={end} onClose={() => setEnding(false)}>
           <p className="text-sm text-body">Running code stops and the instance's files and variables are discarded. Its run history stays. This cannot be undone.</p>
         </Confirm>
       )}

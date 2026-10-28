@@ -130,12 +130,12 @@ export function RevealNew({ count, moved, onClick }: { count: number; moved: boo
 
 // Button forwards its ref so headless primitives (menu triggers) can
 // position against it and return focus to it.
-export const Button = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary'; size?: 'sm' }>(
+export const Button = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'danger'; size?: 'sm' }>(
   function Button({ variant, size, className, ...rest }, ref) {
     // Material (fill, edge, shadow, motion) comes from material.css.
     const base = 'inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium disabled:pointer-events-none '
     const sz = size === 'sm' ? 'h-7 px-2.5 text-xs' : 'h-8 px-3.5 text-sm'
-    return <button ref={ref} data-ui="button" data-variant={variant === 'primary' ? 'primary' : 'default'} className={base + sz + (className ? ' ' + className : '')} {...rest} />
+    return <button ref={ref} data-ui="button" data-variant={variant ?? 'default'} className={base + sz + (className ? ' ' + className : '')} {...rest} />
   },
 )
 
@@ -233,7 +233,7 @@ function returnFocus(): () => void {
 // detection: true for content that cannot be had again (a one-time
 // secret, with a discardPrompt saying what would be lost), false where
 // nothing is lost.
-export function Modal({ title, onClose, children, footer, wide, dirty: dirtyProp, discardPrompt = 'Discard unsaved changes?' }: {
+export function Modal({ title, onClose, children, footer, wide, dirty: dirtyProp, discardPrompt = 'Discard unsaved changes?', discardConfirm = 'Discard' }: {
   title: string
   onClose: () => void
   children: React.ReactNode
@@ -241,6 +241,7 @@ export function Modal({ title, onClose, children, footer, wide, dirty: dirtyProp
   wide?: boolean
   dirty?: boolean
   discardPrompt?: string
+  discardConfirm?: string
 }) {
   const [restore] = React.useState(returnFocus)
   const [edited, setEdited] = React.useState(false)
@@ -285,10 +286,12 @@ export function Modal({ title, onClose, children, footer, wide, dirty: dirtyProp
           </div>
           {discarding && (
             <div data-ui="dialog-discard" role="alertdialog" aria-label={discardPrompt}>
-              <div className="flex w-full flex-wrap items-center gap-3 border-t border-line px-6 py-4">
-                <p className="mr-auto text-sm font-medium text-ink">{discardPrompt}</p>
-                <Button onClick={onClose}>Discard</Button>
-                <Button variant="primary" autoFocus onClick={keep}>Keep editing</Button>
+              <div>
+                <p className="text-sm font-semibold text-ink">{discardPrompt}</p>
+                <div className="mt-4 flex justify-end gap-2">
+                  <Button autoFocus onClick={keep}>Keep editing</Button>
+                  <Button variant="danger" onClick={onClose}>{discardConfirm}</Button>
+                </div>
               </div>
             </div>
           )}
@@ -304,13 +307,14 @@ export function Modal({ title, onClose, children, footer, wide, dirty: dirtyProp
 // the time focus returns the removed row is gone and focus lands on its
 // neighbour (C1). A failure is shown in the footer, where nothing above it
 // moves, and the dialog stays open (P5).
-export function Confirm({ title, children, confirm, pending, action, onClose }: {
+export function Confirm({ title, children, confirm, pending, action, onClose, tone }: {
   title: string
   children?: React.ReactNode
   confirm: string
   pending: string
   action: () => Promise<unknown>
   onClose: () => void
+  tone?: 'danger'
 }) {
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState('')
@@ -330,7 +334,7 @@ export function Confirm({ title, children, confirm, pending, action, onClose }: 
       <div className="flex w-full items-start gap-2">
         <p role="alert" className="mr-auto min-w-0 flex-1 self-center text-xs text-warn-text">{error}</p>
         <Button onClick={onClose} disabled={busy}>Cancel</Button>
-        <Button variant="primary" onClick={run} disabled={busy}><SwapLabel show={busy ? pending : confirm} options={[confirm, pending]} /></Button>
+        <Button variant={tone === 'danger' ? 'danger' : 'primary'} onClick={run} disabled={busy}><SwapLabel show={busy ? pending : confirm} options={[confirm, pending]} /></Button>
       </div>
     }>
       {children}

@@ -8,6 +8,7 @@ import { Button, Confirm, Loading, Notice, PageHeader, SwapLabel } from '../comp
 import { cmTheme } from '../components/codemirror'
 import './application.css'
 import { ApplicationCallExamples } from '../components/ApplicationCallExamples'
+import { AppKeyModal } from '../components/AppKeyModal'
 
 type Draft = {
   name: string
@@ -22,6 +23,13 @@ type Draft = {
 type Saved = { draft: Draft; version: number; fp: string }
 
 const DEFAULT_INPUT = '{\n  "name": "world"\n}'
+
+const statusHint: Record<string, string> = {
+  draft: 'Not published.',
+  preparing: 'Deploying…',
+  degraded: 'Deployment unhealthy.',
+  disabled: 'Deployment disabled.',
+}
 
 function draftOf(a: Application): Draft {
   // spec_json is the verbatim stored text — re-serializing the decoded
@@ -48,6 +56,19 @@ function validSaved(x: unknown): x is Saved {
 }
 
 function scopeKey(user: string, ws: string, id: string) { return JSON.stringify(['appv1', user, ws, id]) }
+
+// autosavable: the spec text parses as JSON (or is empty) and every
+// enabled schema is non-empty JSON — the shapes the PUT accepts.
+function autosavable(d: Draft): boolean {
+  try {
+    if (d.spec.trim()) JSON.parse(d.spec)
+    for (const [on, t] of [[d.inOn, d.inText], [d.outOn, d.outText]] as const) {
+      if (on && !t.trim()) return false
+      if (on) JSON.parse(t)
+    }
+    return true
+  } catch { return false }
+}
 const mirror = new Map<string, Saved>()
 
 function loadSaved(key: string, app: Application): { s: Saved; corrupt: boolean } {
@@ -108,6 +129,7 @@ function Editor({ app, role, userID, qc }: Props) {
   const [outdated, setOutdated] = useState(false)
   const [busy, setBusy] = useState('')
   const [delOpen, setDelOpen] = useState(false)
+  const [keyOpen, setKeyOpen] = useState(false)
   const [reloadOpen, setReloadOpen] = useState<Application | null>(null)
   const [adv, setAdv] = useState(false)
   const mounted = useRef(false)
@@ -137,6 +159,9 @@ function Editor({ app, role, userID, qc }: Props) {
   }
   type Result = { id: string; output?: unknown; error?: { code: string; message: string }; duration_ms: number; steps: number }
   type RunView = { result: Result; output_json?: string }
+  // The Invoke card owns its own input/result; neither touches the draft.
+  const [callInput, setCallInput] = useState(DEFAULT_INPUT)
+  const [callRun, setCallRun] = useState<RunView | null>(null)
 
   // Save pipeline: snapshot everything BEFORE the flight; a draft that
   // changed during the save aborts the chained test/publish instead of
@@ -198,9 +223,30 @@ function Editor({ app, role, userID, qc }: Props) {
     finally { if (mounted.current) setBusy('') }
   }
 
-  const onSave = () => guarded('save', async () => { await save() })
+  // fp covers everything the server persists; the test input is local.
+  const fpDirty = fp(draft) !== base.fp
+  const saveNow = () => guarded('save', async () => { await save() })
+  const saveRef = useRef(saveNow)
+  saveRef.current = saveNow
+  // Autosave: fires only on shapes that would survive the PUT; anything
+  // else stays 'Unsaved' silently — Run surfaces the real error.
+  useEffect(() => {
+    if (view !== 'edit' || !fpDirty || corrupt || busy !== '' || !autosavable(draft)) return
+    const t = window.setTimeout(() => saveRef.current(), 1200)
+    return () => window.clearTimeout(t)
+  }, [draft, fpDirty, corrupt, busy, view])
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        if (view === 'edit' && !corrupt && busy === '' && fp(latest.current) !== latestBase.current.fp) saveRef.current()
+      }
+    }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [view, corrupt, busy])
 
-  const onTest = () => guarded('test', async () => {
+  const onRun = () => guarded('run', async () => {
     const s = await save()
     if (!s) return
     const snapInput = latest.current.input
@@ -224,12 +270,10 @@ function Editor({ app, role, userID, qc }: Props) {
   })
 
   const onInvoke = () => guarded('invoke', async () => {
-    const snapInput = latest.current.input
+    const snapInput = callInput
     const r = await api.postRawJson<RunView>(`/api/v1/applications/${app.id}/invoke`, snapInput)
     if (!mounted.current) return
-    if (fp(latest.current) !== latestBase.current.fp || latest.current.input !== snapInput) setOutdated(true)
-    else setOutdated(false)
-    setRun(r)
+    setCallRun(r)
   })
 
   const doDelete = async () => {
@@ -247,61 +291,63 @@ function Editor({ app, role, userID, qc }: Props) {
   }
 
   const ready = app.status === 'ready'
+  const saveState = busy === 'save' ? 'Saving…' : fpDirty ? 'Unsaved' : 'Saved'
   return (
     <div className="app-page app-editor">
-      <PageHeader title={draft.name || 'Application'}>
-        <span className={`app-status app-status-${app.status}`}>{app.status}</span>
-        {app.has_unpublished_changes && <span className="app-dim">unpublished changes</span>}
-        {dirty && <span className="app-dim">unsaved</span>}
+      <PageHeader title={draft.name || 'Application'}
+        actions={view === 'edit' ? <Button variant="danger" onClick={() => setDelOpen(true)}>Delete</Button> : undefined}>
+        <span className={`app-status app-status-${app.status}`}>{app.status}</span>{' '}
+        {app.has_unpublished_changes && <span className="app-dim">unpublished changes</span>}{' '}
+        <span className="app-dim"><SwapLabel show={saveState} options={['Saved', 'Saving…', 'Unsaved']} /></span>
       </PageHeader>
       <p className="app-dim"><Link to="/applications" className="link">← Applications</Link> · <span className="app-mono">{app.id}</span></p>
 
-      <div className="app-grid">
-        <div>
-          <label className="app-label" htmlFor="app-name">Name</label>
-          <input id="app-name" className="app-input" value={draft.name} disabled={view === 'view'} onChange={(e) => edit({ name: e.target.value })} />
-          <label className="app-label" id="app-code-label">Code — main.star</label>
-          <div className="app-cm" aria-labelledby="app-code-label">
-            <CodeMirror value={draft.code} height="360px" extensions={[python()]} theme={cmTheme}
-              readOnly={view === 'view'} onChange={(v) => edit({ code: v })} />
+      <section className="app-card">
+        <div className="app-card-head">
+          <span className="app-card-title">Develop</span>
+          <div className="flex items-center gap-2">
+            <Button onClick={onRun} disabled={busy !== '' || view === 'view' || corrupt}><SwapLabel show={busy === 'run' ? 'Running…' : 'Run'} options={['Run', 'Running…']} /></Button>
+            <Button variant="primary" onClick={onPublish} disabled={busy !== '' || view === 'view' || corrupt}><SwapLabel show={busy === 'publish' ? 'Publishing…' : 'Publish'} options={['Publish', 'Publishing…']} /></Button>
           </div>
         </div>
-        <div>
-          <label className="app-label" htmlFor="app-input">Input — a JSON object</label>
-          <textarea id="app-input" className="app-area" rows={5} spellCheck={false}
-            value={draft.input} onChange={(e) => edit({ input: e.target.value })} />
-          <div className="app-out">
-            <span className="app-label">Output</span>
-            <pre className="app-out-pre" aria-live="polite">
-              {run ? (run.output_json ?? (run.result.error ? `error: ${run.result.error.code} — ${run.result.error.message}` : '')) : 'Test to see output'}
-            </pre>
-            {outdated && <p className="app-dim">Result is from before your latest edits.</p>}
+        <label className="app-label" htmlFor="app-name">Name</label>
+        <input id="app-name" className="app-input" value={draft.name} disabled={view === 'view'} onChange={(e) => edit({ name: e.target.value })} />
+        <div className="app-grid mt-3">
+          <div>
+            <label className="app-label" id="app-code-label">Code — main.star</label>
+            <div className="app-cm" aria-labelledby="app-code-label">
+              <CodeMirror value={draft.code} height="360px" extensions={[python()]} theme={cmTheme}
+                readOnly={view === 'view'} onChange={(v) => edit({ code: v })} />
+            </div>
+          </div>
+          <div>
+            <label className="app-label" htmlFor="app-input">Input — a JSON object</label>
+            <textarea id="app-input" className="app-area" rows={5} spellCheck={false}
+              value={draft.input} onChange={(e) => edit({ input: e.target.value })} />
+            <div className="app-out">
+              <span className="app-label">Output</span>
+              <pre className="app-out-pre" aria-live="polite">
+                {run ? (run.output_json ?? (run.result.error ? `error: ${run.result.error.code} — ${run.result.error.message}` : '')) : 'Run to see output'}
+              </pre>
+              {outdated && <p className="app-dim">Result is from before your latest edits.</p>}
+            </div>
           </div>
         </div>
-      </div>
+        <div className="app-result" role="status" aria-live="polite">
+          {warn && <Notice tone="warning">{warn}</Notice>}
+          {storeFailed && <Notice tone="warning">Not saved to this tab.</Notice>}
+          {corrupt && (
+            <Notice tone="warning">
+              Saved editor state for this application is unreadable.
+              <button className="link-btn" onClick={() => setResetOpen(true)}>Reset it</button>
+            </Notice>
+          )}
+        </div>
+      </section>
 
-      <div className="app-actions">
-        <Button onClick={onSave} disabled={busy !== '' || view === 'view'}><SwapLabel show={busy === 'save' ? 'Saving…' : 'Save draft'} options={['Save draft', 'Saving…']} /></Button>
-        <Button variant="primary" onClick={onTest} disabled={busy !== '' || view === 'view' || corrupt}><SwapLabel show={busy === 'test' ? 'Testing…' : 'Save & Test'} options={['Save & Test', 'Testing…']} /></Button>
-        <Button variant="primary" onClick={onPublish} disabled={busy !== '' || view === 'view' || corrupt}><SwapLabel show={busy === 'publish' ? 'Publishing…' : 'Save & Publish'} options={['Save & Publish', 'Publishing…']} /></Button>
-        <Button onClick={onInvoke} disabled={busy !== '' || !ready || view === 'view' || corrupt}><SwapLabel show={busy === 'invoke' ? 'Invoking…' : 'Invoke published'} options={['Invoke published', 'Invoking…']} /></Button>
-        {view === 'edit' && <button className="link-btn" onClick={() => setDelOpen(true)}>Delete</button>}
-      </div>
-      <ApplicationCallExamples appId={app.id} input={draft.input} status={app.status}
-        canCreateKey={view === 'edit'} appName={app.name} workspaceId={app.workspace_id} />
-      <div className="app-result" role="status" aria-live="polite">
-        {warn && <Notice tone="warning">{warn}</Notice>}
-        {storeFailed && <Notice tone="warning">Not saved to this tab.</Notice>}
-        {corrupt && (
-          <Notice tone="warning">
-            Saved editor state for this application is unreadable.
-            <button className="link-btn" onClick={() => setResetOpen(true)}>Reset it</button>
-          </Notice>
-        )}
-      </div>
-
-      <details className="app-adv" open={adv} onToggle={(e) => setAdv((e.target as HTMLDetailsElement).open)}>
-        <summary>Advanced — JSON schemas and runtime settings</summary>
+      <details className="app-card" open={adv} onToggle={(e) => setAdv((e.target as HTMLDetailsElement).open)}>
+        <summary><span className="app-card-title">Settings</span></summary>
+        <div className="app-card-body">
         {(['in', 'out'] as const).map((side) => (
           <div key={side} className="app-schema">
             <label className="app-check">
@@ -327,10 +373,40 @@ function Editor({ app, role, userID, qc }: Props) {
         <label className="app-label" htmlFor="app-spec">Runtime spec (JSON, secrets by vault ref only)</label>
         <textarea id="app-spec" className="app-area" rows={4} spellCheck={false} disabled={view === 'view'}
           value={draft.spec} onChange={(e) => edit({ spec: e.target.value })} />
+        </div>
       </details>
 
+      <section className="app-card">
+        <div className="app-card-head">
+          <span className="app-card-title">Invoke</span>
+          {view === 'edit' && <Button onClick={() => setKeyOpen(true)}>Create API key</Button>}
+        </div>
+        {!ready && <p className="app-dim">{statusHint[app.status] ?? 'Not ready.'}</p>}
+        <div className="app-grid">
+          <div>
+            <label className="app-label" htmlFor="app-call-input">Input — a JSON object</label>
+            <textarea id="app-call-input" className="app-area" rows={5} spellCheck={false}
+              value={callInput} onChange={(e) => setCallInput(e.target.value)} />
+            <div className="mt-2">
+              <Button variant="primary" onClick={onInvoke} disabled={busy !== '' || !ready || view === 'view' || corrupt}><SwapLabel show={busy === 'invoke' ? 'Invoking…' : 'Invoke'} options={['Invoke', 'Invoking…']} /></Button>
+            </div>
+            <div className="app-out">
+              <span className="app-label">Output</span>
+              <pre className="app-out-pre app-call-out" aria-live="polite">
+                {callRun ? (callRun.output_json ?? (callRun.result.error ? `error: ${callRun.result.error.code} — ${callRun.result.error.message}` : '')) : 'Invoke to see output'}
+              </pre>
+            </div>
+          </div>
+          <div>
+            <span className="app-label">Request examples</span>
+            <ApplicationCallExamples appId={app.id} input={callInput} />
+          </div>
+        </div>
+      </section>
+
+
       {delOpen && (
-        <Confirm title="Delete application" confirm="Delete" pending="Deleting…" onClose={() => setDelOpen(false)}
+        <Confirm tone="danger" title="Delete application" confirm="Delete" pending="Deleting…" onClose={() => setDelOpen(false)}
           action={doDelete}>
           Delete “{draft.name}” and disable its deployment?
         </Confirm>
@@ -351,6 +427,7 @@ function Editor({ app, role, userID, qc }: Props) {
           This draft was changed by another session. Reload the newer version? Your current edits are kept in this tab until you confirm.
         </Confirm>
       )}
+      {keyOpen && <AppKeyModal appId={app.id} appName={app.name} workspaceId={app.workspace_id} onClose={() => setKeyOpen(false)} />}
       {busy === 'delete' && <Loading />}
     </div>
   )

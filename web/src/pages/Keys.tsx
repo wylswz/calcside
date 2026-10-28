@@ -91,7 +91,7 @@ export default function Keys({ bare }: { bare?: boolean }) {
                 <td className="whitespace-nowrap text-xs text-sec">{k.expires_at ? fmtTime(k.expires_at) : 'never'}</td>
                 <td className="text-xs">{k.revoked_at ? <span className="text-mute">revoked</span> : <span className="text-sec">active</span>}</td>
                 <td className="text-right">
-                  {!k.revoked_at && <Button size="sm" onClick={() => setRevoking(k)}>Revoke</Button>}
+                  {!k.revoked_at && <Button size="sm" variant="danger" onClick={() => setRevoking(k)}>Revoke</Button>}
                 </td>
               </tr>
             ))}
@@ -102,7 +102,7 @@ export default function Keys({ bare }: { bare?: boolean }) {
 
       {showNew && (
         <Modal title="New API key" onClose={() => setShowNew(false)} wide={!secret && access === 'restricted'}
-          dirty={secret ? true : undefined} discardPrompt={secret ? 'Close? The key secret is not shown again.' : undefined}>
+          dirty={secret ? true : undefined} discardPrompt={secret ? "The key secret won't be shown again." : undefined} discardConfirm="Close">
           {!secret ? (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
@@ -164,7 +164,7 @@ export default function Keys({ bare }: { bare?: boolean }) {
         </Modal>
       )}
       {revoking && (
-        <Confirm title={`Revoke key ${revoking.name}?`} confirm="Revoke" pending="Revoking…"
+        <Confirm tone="danger" title={`Revoke key ${revoking.name}?`} confirm="Revoke" pending="Revoking…"
           action={() => revoke.mutateAsync(revoking.id)} onClose={() => setRevoking(null)}>
           <p className="text-sm text-body">Agents using this key lose access immediately. This cannot be undone.</p>
         </Confirm>

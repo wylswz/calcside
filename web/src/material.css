@@ -178,6 +178,12 @@ body { background-color: rgb(var(--desk)); }
 @media (prefers-color-scheme: dark) {
   [data-ui='button'][data-variant='primary'] { color: #08111f; }
 }
+/* danger: the same material, only the colour marks it destructive (S1) */
+[data-ui='button'][data-variant='danger'] {
+  color: rgb(var(--danger));
+  border-color: rgb(var(--danger) / 0.35);
+}
+[data-ui='button'][data-variant='danger']:hover:not(:disabled) { background-color: rgb(var(--danger) / 0.08); }
 @media (max-width: 900px) { [data-ui='button'] { min-height: 44px; } }
 
 .segmented [role='tab']:not([aria-selected='true']):hover,
@@ -230,15 +236,22 @@ select.input { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://ww
   border-radius: var(--radius-surface);
   overflow: hidden;
 }
-/* the discard question covers the dialog in place instead of resizing it */
+/* the discard question covers the dialog in place instead of resizing it;
+   a small centred card, distinct from the dialog's own footer buttons */
 [data-ui='dialog-discard'] {
   position: absolute; inset: 0;
-  display: flex; align-items: flex-end;
+  display: flex; align-items: center; justify-content: center;
   background: rgb(var(--paper) / 0.72);
   -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
 }
-[data-ui='dialog-discard'] > div { background: var(--glass-strong); }
+[data-ui='dialog-discard'] > div {
+  max-width: 360px; padding: 20px;
+  background: var(--glass-strong);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-surface);
+  box-shadow: var(--shadow-float);
+}
 [data-ui='dialog-close'] {
   display: inline-flex; align-items: center; justify-content: center;
   width: 32px; height: 32px; margin-right: -8px;

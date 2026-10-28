@@ -55,7 +55,7 @@ test('create application with ext -> blocked publish fails -> republish -> ready
     const app0v = app0.version
     const putResp = page.waitForResponse((r) => r.url().includes(`/api/v1/applications/${id}`) && r.request().method() === 'PUT', { timeout: 60_000 })
     const pubResp = page.waitForResponse((r) => r.url().includes(`/api/v1/applications/${id}/publish`), { timeout: 60_000 })
-    await page.getByRole('button', { name: 'Save & Publish' }).click()
+    await page.getByRole('button', { name: 'Publish' }).click()
     expect((await putResp).status()).toBe(200)
     const pub = await pubResp
     expect(pub.status(), `publish should fail while artifacts blocked: ${pub.status()}`).toBeGreaterThanOrEqual(400)
@@ -74,7 +74,7 @@ test('create application with ext -> blocked publish fails -> republish -> ready
   }
 
   // explicit second publish — fetch succeeds synchronously, ready
-  await page.getByRole('button', { name: 'Save & Publish' }).click()
+  await page.getByRole('button', { name: 'Publish' }).click()
   await expect.poll(async () => {
     const r = await client.get(`/api/v1/applications/${id}`)
     return (await r.json()).application.status

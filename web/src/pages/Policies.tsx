@@ -177,7 +177,7 @@ export default function Policies({ bare }: { bare?: boolean }) {
                 <td className="space-x-2 whitespace-nowrap text-right">
                   {p.kind === 'builtin' ? <span className="text-xs text-mute">Read-only</span> : <>
                     <Button size="sm" onClick={() => setEditing(p)}>Edit</Button>
-                    <Button size="sm" onClick={() => setDeleting(p)}>Delete</Button>
+                    <Button size="sm" variant="danger" onClick={() => setDeleting(p)}>Delete</Button>
                   </>}
                 </td>
               </tr>
@@ -188,7 +188,7 @@ export default function Policies({ bare }: { bare?: boolean }) {
       </div>
       {(editing || showNew) && <PolicyEditor policy={editing} onClose={() => { setEditing(null); setShowNew(false) }} />}
       {deleting && (
-        <Confirm title={`Delete policy ${deleting.name}?`} confirm="Delete" pending="Deleting…"
+        <Confirm tone="danger" title={`Delete policy ${deleting.name}?`} confirm="Delete" pending="Deleting…"
           action={() => del.mutateAsync(deleting.id)} onClose={() => setDeleting(null)}>
           <p className="text-sm text-body">New instances can no longer select <code className="font-mono text-ink">{deleting.name}</code>. This cannot be undone.</p>
         </Confirm>

@@ -123,7 +123,7 @@ export default function Secrets({ bare }: { bare?: boolean }) {
                   <td className="whitespace-nowrap text-xs text-sec">{fmtTime(s.updated_at)}</td>
                   <td className="space-x-2 whitespace-nowrap text-right">
                     <Button size="sm" onClick={() => setEditing(s)}>Edit</Button>
-                    <Button size="sm" onClick={() => setDeleting(s)}>Delete</Button>
+                    <Button size="sm" variant="danger" onClick={() => setDeleting(s)}>Delete</Button>
                   </td>
                 </tr>
               ))}
@@ -135,7 +135,7 @@ export default function Secrets({ bare }: { bare?: boolean }) {
       {showNew && <SecretForm onClose={() => setShowNew(false)} />}
       {editing && <EditDomains s={editing} onClose={() => setEditing(null)} />}
       {deleting && (
-        <Confirm title={`Delete secret ${deleting.name}?`} confirm="Delete" pending="Deleting…"
+        <Confirm tone="danger" title={`Delete secret ${deleting.name}?`} confirm="Delete" pending="Deleting…"
           action={() => del.mutateAsync(deleting.id)} onClose={() => setDeleting(null)}>
           <p className="text-sm text-body">The stored value of <code className="font-mono text-ink">{deleting.name}</code> is erased. This cannot be undone.</p>
         </Confirm>
