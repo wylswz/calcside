@@ -301,7 +301,7 @@ func provideExtCatalog(opts *capext.Options) capext.CatalogProvider {
 // checker. The instance quota doubles as the application quota until a
 // dedicated flag exists.
 func provideApplicationService(st store.Store, rt runtime.Runtime, sb *sandbox.Service,
-	ac *access.Checker, rec sandbox.AuditSink, cfg config.Config) (*appsvc.Service, error) {
+	ac *access.Checker, rec appsvc.AuditSink, cfg config.Config) (*appsvc.Service, error) {
 	return appsvc.New(appsvc.Options{
 		Store: st, Runtime: rt, Sandbox: sb, Access: ac, Audit: rec,
 		MaxPerUser: cfg.MaxInstancesPerUser,

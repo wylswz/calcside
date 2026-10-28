@@ -3,8 +3,9 @@ import test from 'node:test'
 import { CompletionContext } from '@codemirror/autocomplete'
 import type { CompletionSource } from '@codemirror/autocomplete'
 import { EditorState } from '@codemirror/state'
-import { regoCompletions, starlarkCompletions } from './completion.ts'
-import type { CompletionContext as InstanceContext, EditorMetadata, FileEntry } from '../api.ts'
+import { applicationSymbols, regoCompletions, starlarkCompletions } from './completion.ts'
+import type { ExtensionInfo } from '../api.ts'
+import type { CompletionContext as InstanceContext, CompletionSymbol, EditorMetadata, FileEntry } from '../api.ts'
 
 const instance: InstanceContext = {
   symbols: [
@@ -139,4 +140,55 @@ test('aborted completions do not request directories', async () => {
 test('utility completion uses runtime symbols and options', async () => {
   assert.deepEqual((await complete(star, 'csv.'))?.options.map((o) => o.label), ['parse'])
   assert.ok((await complete(star, 'csv.parse("a", '))?.options.some((o) => o.label === 'delimiter='))
+})
+
+const appMetadata: EditorMetadata = {
+  utilities: [
+    { name: 'json', kind: 'namespace' },
+    { name: 'json.encode', kind: 'function', params: ['value'], detail: '(value)' },
+  ],
+  rego: [],
+  capabilities: [
+    { name: 'fs', ops: [{ name: 'read', params: ['path'], doc: 'Read a file' }, { name: 'list', params: ['dir'] }] },
+    { name: 'net', ops: [{ name: 'get', params: ['url'] }] },
+    { name: 'io', ops: [{ name: 'println', params: ['value'] }] },
+    { name: 'ext', ops: [{ name: 'register', params: ['alias'] }] },
+  ],
+}
+const appCatalog: ExtensionInfo[] = [
+  { source: 'contrib/tavily', name: 'tavily', dependencies: [], config: [], ops: [{ name: 'search', params: ['q'], doc: 'Web search' }] },
+]
+
+const map = (symbols: CompletionSymbol[]) => Object.fromEntries(symbols.map((s) => [s.name, s]))
+
+test('application spec derives the same symbol surface as a live instance', () => {
+  const ctx = applicationSymbols({
+    capabilities: { fs: {}, ext: { tav: { source: 'contrib/tavily' }, ghost: { source: 'missing/x' } } },
+    env: { REGION: 'us', ZONE: 'a' },
+  }, appMetadata, appCatalog, 'answer = 42\ndef helper(path, suffix = "x"):\n    return path + suffix\n')
+  const s = map(ctx.symbols)
+  assert.equal(s['fs.read']?.detail, '(path)')
+  assert.equal(s['fs.read']?.kind, 'function')
+  assert.ok(s.fs && !s.net && !s['net.get'], 'ungranted capability offered')
+  assert.equal(s['io.println']?.detail, '(value)', 'io is always granted')
+  assert.ok(!s.ext?.params, 'ext is not a plain capability')
+  assert.equal(s['ext.tav.search']?.detail, '(q)')
+  assert.equal(s['ext.tav.search']?.doc, 'Web search')
+  assert.ok(s['ext.ghost'] && !s['ext.ghost.search'], 'unknown source gets the alias only')
+  assert.equal(s['json.encode']?.detail, '(value)')
+  assert.equal(s.len?.kind, 'function')
+  assert.equal(s['helper']?.detail, '(path, suffix?)')
+  assert.equal(s.answer?.kind, 'variable')
+  assert.equal(s.input?.kind, 'variable')
+  assert.deepEqual(ctx.env_keys, ['REGION', 'ZONE'])
+  assert.equal(ctx.truncated, false)
+  // invalid specs degrade to the empty spec
+  assert.ok(!map(applicationSymbols('nope', appMetadata).symbols).fs)
+})
+
+test('application symbols drive the shared completion source', async () => {
+  const ctx = applicationSymbols({ capabilities: { fs: {} } }, appMetadata)
+  const source = starlarkCompletions(ctx)
+  assert.ok((await complete(source, 'fs.'))?.options.some((o) => o.label === 'read'))
+  assert.equal(await complete(source, 'net.'), null)
 })

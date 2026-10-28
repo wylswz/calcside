@@ -4,11 +4,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Application, workspaces, currentWorkspace } from '../api'
 import { SpecForm, type SpecFormHandle } from '../components/SpecForm'
 import type { InstanceDraft, DraftError } from '../instanceDraft'
-import { Button, Confirm, Loading, Notice, PageHeader, SwapLabel } from '../components/ui'
+import { Button, Confirm, Field, inputCls, Loading, Notice, PageHeader, SwapLabel } from '../components/ui'
 
-// NewApplication: the application half of the create flow — a name
-// plus a one-line mental model. The server seeds the main(input)
-// scaffold; code is edited on the application's page.
+// NewApplication mirrors NewInstance: the spec builder is the page,
+// the name lives in the sidebar identity slot, and the footer create
+// bar carries issues and the primary action. The server seeds the
+// main(input) scaffold; code is edited on the application's page.
 export default function NewApplication() {
   const nav = useNavigate()
   const qc = useQueryClient()
@@ -19,7 +20,6 @@ export default function NewApplication() {
   const [specDirty, setSpecDirty] = useState(false)
   const [rawDirty, setRawDirty] = useState(false)
   const [specErrs, setSpecErrs] = useState<{ section: string; message: string }[]>([])
-  const [showCaps, setShowCaps] = useState(false)
   const form = useRef<SpecFormHandle>(null)
   // stable callback: an inline fn in a child's effect deps would
   // re-fire on every render and falsely mark the form dirty
@@ -52,43 +52,34 @@ export default function NewApplication() {
   }
 
   return (
-    <div className="app-page">
+    <div className="instance-builder">
       <PageHeader title="New application">
         <KindSelect current="application" onDirty={() => ((name !== '' || specDirty || rawDirty) ? setDiscard(true) : nav('/instances/new'))} />
+        <span className="app-dim">A durable JSON function: callers POST a JSON object to main(input) and get one back. Edit code after creating.</span>
       </PageHeader>
-      <div className="app-new-card">
-        <label className="app-label" htmlFor="app-name">Name</label>
-        <input id="app-name" className="app-input" value={name} placeholder="Untitled application" onChange={(e) => setName(e.target.value)} />
-        <p className="app-dim">An application is a durable JSON function: you write <code>main(input)</code> in Starlark, callers POST a JSON object and get a JSON object back.</p>
-        <pre className="app-example">{`{"name": "world"}  ->  main(input)  ->  {"message": "Hello, world"}`}</pre>
+      <div className="builder-work-panel">
+        <SpecForm ref={form} application workspaceId={dest.id} onSpecChange={onSpec} onRawDirtyChange={setRawDirty}
+          identity={
+            <Field label="Name"><input id="app-name" className={inputCls} value={name} placeholder="Untitled application" onChange={(e) => setName(e.target.value)} /></Field>
+          }
+          footer={
+            <div className="create-bar">
+              {specErrs.length > 0 && <ul className="create-bar-issues" aria-live="polite">{specErrs.map((e, i) => <li key={i}>{e.section}: {e.message}</li>)}</ul>}
+              {err && <p className="create-bar-issues" role="alert">{err}</p>}
+              <Button variant="primary" className="w-full" disabled={busy || specErrs.length > 0} onClick={create}>
+                <SwapLabel show={busy ? 'Creating…' : 'Create application'} options={['Create application', 'Creating…']} />
+              </Button>
+              <p className="create-bar-note">Next: write main(input), run it, then publish.</p>
+            </div>
+          } />
       </div>
-      <section className="app-capabilities">
-        <button type="button" className="link-btn" aria-expanded={showCaps} aria-controls="app-capabilities" onClick={() => setShowCaps((v) => !v)}>
-          <SwapLabel show={showCaps ? 'Hide' : 'Optional: capabilities & extensions'} options={['Optional: capabilities & extensions', 'Hide']} />
-        </button>
-        {/* one permanently-mounted form: collapsing keeps config; the
-            ref stays valid so Create always uses it */}
-        <div id="app-capabilities" hidden={!showCaps}>
-          <SpecForm ref={form} application workspaceId={dest.id} onSpecChange={onSpec} onRawDirtyChange={setRawDirty} />
-        </div>
-      </section>
-      <div className="app-new-card">
-        <div className="app-result" role="status" aria-live="polite">
-          {specErrs.length > 0 && <Notice tone="warning">{specErrs[0].message}</Notice>}
-          {err && <Notice tone="warning">{err}</Notice>}
-        </div>
-        <Button variant="primary" disabled={busy || specErrs.length > 0} onClick={create}>
-          <SwapLabel show={busy ? 'Creating…' : 'Create application'} options={['Create application', 'Creating…']} />
-        </Button>
-        <p className="app-dim">A server-side draft is created with a scaffold you can test and publish.</p>
-        {discard && (
-          <Confirm title="Discard draft" confirm="Discard" pending="Discarding…"
-            onClose={() => setDiscard(false)}
-            action={async () => { nav('/instances/new') }}>
-            Leave without creating this application? Your name and configuration edits will be discarded.
-          </Confirm>
-        )}
-      </div>
+      {discard && (
+        <Confirm title="Discard draft" confirm="Discard" pending="Discarding…"
+          onClose={() => setDiscard(false)}
+          action={async () => { nav('/instances/new') }}>
+          Leave without creating this application? Your name and configuration edits will be discarded.
+        </Confirm>
+      )}
     </div>
   )
 }

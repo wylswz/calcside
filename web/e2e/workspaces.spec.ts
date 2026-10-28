@@ -573,15 +573,15 @@ test('new instance: extension library stays bounded at 1000 entries', async ({ p
   page.on('request', (r) => { if (r.url().startsWith('http') && !r.url().startsWith(consoleURL)) external.push(r.url()) })
 
   await page.goto(`${consoleURL}/instances/new`)
-  await expect(page.locator('.ext-library .ext-card')).toHaveCount(12)
+  await expect(page.locator('.extensions-block .ext-card')).toHaveCount(12)
   await expect(page.getByText('1–12 of 1,000')).toBeVisible()
-  const realIcon = page.locator('.ext-library .ext-card img').first()
+  const realIcon = page.locator('.extensions-block .ext-card img').first()
   await expect(realIcon).toBeVisible()
   await expect.poll(async () => realIcon.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true)
 
   // search hits the tail entry; one click adds it to the summary
   await page.getByLabel('Search extensions').fill('ext-0999')
-  await expect(page.getByText('1–1 of 1')).toBeVisible()
+  await expect(page.locator('.extensions-block').getByText('1–1 of 1')).toBeVisible()
   await page.getByRole('button', { name: 'Add ext-0999' }).click()
   const row = page.locator('[data-row^="ext:"]')
   await expect(row.locator('.config-item-title')).toHaveText('ext_0999')
@@ -596,7 +596,7 @@ test('new instance: extension library stays bounded at 1000 entries', async ({ p
   await expect(page.getByText('1–12 of 1,000')).toBeVisible()
   await page.getByRole('button', { name: 'Next extensions page' }).click()
   await expect(page.getByText('13–24 of 1,000')).toBeVisible()
-  await expect(page.locator('.ext-library .ext-card')).toHaveCount(12)
+  await expect(page.locator('.extensions-block .ext-card')).toHaveCount(12)
   await expect(row).toHaveCount(1)
   expect(external).toHaveLength(0)
 
@@ -669,14 +669,14 @@ test('new instance: palette controls stay put while adding and removing', async 
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport)
     await page.goto(`${consoleURL}/instances/new`)
-    await expect(page.locator('.ext-library .ext-card')).toHaveCount(12)
+    await expect(page.locator('.extensions-block .ext-card')).toHaveCount(12)
     const targets = {
       files: page.locator('.ability-choice').nth(0),
       network: page.locator('.ability-choice').nth(1),
       search: page.getByLabel('Search extensions'),
       next: page.getByRole('button', { name: 'Next extensions page' }),
-      ext2: page.locator('.ext-library .ext-card').nth(2).locator('.ext-card-action'),
-      ext3: page.locator('.ext-library .ext-card').nth(3).locator('.ext-card-action'),
+      ext2: page.locator('.extensions-block .ext-card').nth(2).locator('.ext-card-action'),
+      ext3: page.locator('.extensions-block .ext-card').nth(3).locator('.ext-card-action'),
       custom: page.getByRole('button', { name: 'Configure a custom extension' }),
     }
     // Document coordinates: Playwright may scroll a target into view to
@@ -814,9 +814,9 @@ test('console controls keep their box under hover and press', async ({ page }) =
     local_enabled: true, remote_enabled: false,
   } }))
   await page.goto(`${consoleURL}/instances/new`)
-  await expect(page.locator('.ext-library .ext-card')).toHaveCount(1)
+  await expect(page.locator('.extensions-block .ext-card')).toHaveCount(1)
   // tabs last: a pressed tab activates and swaps the panel
-  const controls = ['[data-ui="button"][data-variant="primary"]', '[data-ui="button"][data-variant="default"]', '.ability-choice', '.ext-library .ext-card', '.input', '.segmented [role="tab"]:not([aria-selected="true"])']
+  const controls = ['[data-ui="button"][data-variant="primary"]', '[data-ui="button"][data-variant="default"]', '.ability-choice', '.extensions-block .ext-card', '.input', '.segmented [role="tab"]:not([aria-selected="true"])']
   for (const sel of controls) {
     const control = page.locator(sel).first()
     await control.scrollIntoViewIfNeeded()

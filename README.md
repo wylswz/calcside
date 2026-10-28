@@ -65,7 +65,7 @@ Instance spec (`POST /api/v1/instances`):
  "limits": {"exec_timeout_ms": 30000, "max_steps": 10000000, "max_output_bytes": 1048576}}
 ```
 
-For an instance that needs internal HTTP access, pass `"policies": []` (or an explicit list without `builtin.block_private_network`). This does not bypass the instance's host allowlist, secret domain restrictions, or mandatory server policies. No network capability means no network access regardless of policy selection.
+To block internal addresses, add `builtin.block_private_network` to `policies`. An omitted `policies` field selects the default policies — none of the current built-ins are defaults, so no built-in policy applies unless you select it. This does not bypass the instance's host allowlist, secret domain restrictions, or mandatory server policies. No network capability means no network access regardless of policy selection.
 
 ## API benchmark (k6)
 

@@ -25,6 +25,7 @@ type lifecycleRuntime struct {
 	runtime.Runtime
 	events      []string
 	audits      int
+	auditWS     []string
 	prepareFail error
 	owner       runtime.Owner
 }
@@ -48,7 +49,10 @@ func (r *lifecycleRuntime) Delete(ctx context.Context, req *runtime.DeleteReques
 	return r.Runtime.Delete(ctx, req)
 }
 
-func (r *lifecycleRuntime) Record(runtime.AuditBatch) { r.audits++ }
+func (r *lifecycleRuntime) RecordWorkspace(workspaceID string, _ runtime.AuditBatch) {
+	r.audits++
+	r.auditWS = append(r.auditWS, workspaceID)
+}
 
 func lifecycleService(t *testing.T) (*Service, store.Store, *lifecycleRuntime, service.Actor) {
 	t.Helper()
@@ -104,13 +108,18 @@ func TestRealDraftLifecycle(t *testing.T) {
 	if err != nil || app.PersistentInstanceID != "" || app.PublishedVersion != 0 {
 		t.Fatalf("test unexpectedly published: %+v, %v", app, err)
 	}
+	for _, ws := range rt.auditWS {
+		if ws != app.WorkspaceID {
+			t.Fatalf("replica audit landed in the wrong workspace: %v", rt.auditWS)
+		}
+	}
 	for _, bad := range []string{`[]`, `42`, `null`} {
 		out, err := s.Test(ctx, actor, id, 1, json.RawMessage(bad))
 		if err != nil || out.Result.Error == nil || out.Result.Error.Code != "invalid_input" || out.OutputJSON != "" {
 			t.Fatalf("default object accepted %s: %+v, %v", bad, out, err)
 		}
 	}
-	rt.events, rt.audits = nil, 0
+	rt.events, rt.audits, rt.auditWS = nil, 0, nil
 	pub, err := s.Publish(ctx, actor, id, 1)
 	if err != nil {
 		t.Fatal(err)
@@ -158,7 +167,7 @@ func TestInvalidProgramsCannotPublish(t *testing.T) {
 			if err != nil || result.Result.Error == nil {
 				t.Fatalf("invalid draft not reported: %+v, %v", result, err)
 			}
-			rt.events, rt.audits = nil, 0
+			rt.events, rt.audits, rt.auditWS = nil, 0, nil
 			if _, err := s.Publish(ctx, actor, v.Application.ID, 1); err == nil {
 				t.Fatal("invalid program was published")
 			}

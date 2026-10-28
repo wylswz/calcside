@@ -24,12 +24,11 @@ test('create application with ext -> blocked publish fails -> republish -> ready
   test.setTimeout(180_000)
   await page.goto(`${viteURL}/applications/new`)
   await page.locator('#app-name').fill('Echo app')
-  // the optional capabilities section holds the ext selection
-  await page.getByRole('button', { name: /Optional.*capabilities/ }).click()
+  // the Add capabilities tab holds the ext selection
   await page.getByRole('button', { name: 'Add probe', exact: true }).click()
-  // collapse + reopen keeps the selection
-  await page.getByRole('button', { name: 'Hide' }).click()
-  await page.getByRole('button', { name: /Optional.*capabilities/ }).click()
+  // switching tabs and back keeps the selection
+  await page.getByRole('tab', { name: /Settings/ }).click()
+  await page.getByRole('tab', { name: 'Add capabilities' }).click()
   await page.getByRole('button', { name: 'Create application' }).click()
   await page.waitForURL(/\/applications\/app_/)
   const id = page.url().split('/').pop()!
@@ -220,7 +219,6 @@ test('call examples tabs show real request shapes', async ({ page }) => {
 test('raw spec invalid edit keeps draft and kind switch asks before discard', async ({ page }) => {
   await page.goto(`${viteURL}/applications/new`)
   await page.locator('#app-name').fill('Raw edit')
-  await page.getByRole('button', { name: /Optional.*capabilities/ }).click()
   await page.getByRole('button', { name: /Advanced/ }).click()
   const raw = page.getByLabel('Application spec JSON')
   await raw.fill('{ not json')

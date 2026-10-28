@@ -296,3 +296,32 @@ test('j) instances list End ends a running instance', async ({ page }) => {
   await dialog.getByRole('button', { name: 'End' }).click()
   await expect(row).toContainText('ended', { timeout: 15_000 })
 })
+
+test('k) failed save shows "Couldn\'t save" + Retry and keeps the draft', async ({ page }) => {
+  const r = await client.post('/api/v1/applications', { data: { name: 'Flaky' } })
+  const id = (await r.json()).application.id
+  await page.goto(`${viteURL}/applications/${id}`)
+  await expect(page.locator('.app-cm')).toContainText('def main(input)', { timeout: 15_000 })
+  // fail every PUT — the autosave after this edit surfaces the failure
+  await page.route('**/api/v1/applications/*', async (route) => {
+    if (route.request().method() === 'PUT') {
+      return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":{"code":"internal","message":"boom"}}' })
+    }
+    return route.continue()
+  })
+  const cm = page.locator('.app-cm .cm-content').first()
+  await cm.click()
+  await page.keyboard.press('Meta+A')
+  await page.keyboard.type('def main(input): return {"kept":1}')
+  const saved = () => page.locator('.swap-label > span[data-on="true"]', { hasText: 'Saved' })
+  await expect(page.locator('.swap-label > span[data-on="true"]', { hasText: "Couldn't save" })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible()
+  await expect(page.locator('.app-cm')).toContainText('"kept":1')
+  await page.unroute('**/api/v1/applications/*')
+  await page.getByRole('button', { name: 'Retry' }).click()
+  await expect(saved()).toBeVisible({ timeout: 10_000 })
+  await expect.poll(async () => {
+    const rr = await client.get(`/api/v1/applications/${id}`)
+    return (await rr.json()).application.code
+  }, { timeout: 10_000 }).toContain('"kept":1')
+})

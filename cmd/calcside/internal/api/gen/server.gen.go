@@ -901,7 +901,7 @@ type InstanceSpec struct {
 	Labels       *map[string]string      `json:"labels,omitempty"`
 	Limits       *Limits                 `json:"limits,omitempty"`
 
-	// Policies Policy names to attach (at most 32), including built-in policies. Omitted or null selects builtin.block_private_network by default. An explicit list replaces the defaults; [] selects none. Library Rego is snapshotted at creation; server policies (--policy-dir) always apply in addition.
+	// Policies Policy names to attach (at most 32), including built-in policies. Omitted or null selects the default policies; none of the current built-ins are defaults, so this attaches none. builtin.block_private_network is opt-in via an explicit list; [] selects none. Library Rego is snapshotted at creation; server policies (--policy-dir) always apply in addition.
 	Policies   *[]PolicyName          `json:"policies,omitempty"`
 	Secrets    *map[string]SecretSpec `json:"secrets,omitempty"`
 	TtlSeconds *int64                 `json:"ttl_seconds,omitempty"`

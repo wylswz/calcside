@@ -231,7 +231,8 @@ func TestNetworkPolicyThroughChild(t *testing.T) {
 		id, spec string
 		blocked  bool
 	}{
-		{"default", `{"capabilities":{"net":{}}}`, true},
+		{"default", `{"capabilities":{"net":{}}}`, false},
+		{"selected", `{"capabilities":{"net":{}},"policies":["builtin.block_private_network"]}`, true},
 		{"none", `{"capabilities":{"net":{}},"policies":[]}`, false},
 	} {
 		_, err := s.Create(context.Background(), &runtime.CreateRequest{InstanceID: tc.id, Owner: owner, Spec: []byte(tc.spec), ExpiresAt: time.Now().Add(time.Hour)})

@@ -199,8 +199,8 @@ func TestPolicyDefaultsSurviveSerialization(t *testing.T) {
 		raw  string
 		want int
 	}{
-		{`{}`, 1},
-		{`{"policies":null}`, 1},
+		{`{}`, 0},
+		{`{"policies":null}`, 0},
 		{`{"policies":[]}`, 0},
 		{`{"policies":["custom"]}`, 1},
 	} {

@@ -10,8 +10,9 @@ import { fmtBytes } from '../format'
 import { Field, inputCls } from './ui'
 import { InstanceExtensionEditor } from './InstanceExtensionEditor'
 import { ExtensionPicker } from './ExtensionPicker'
+import { PolicyPicker } from './PolicyPicker'
 import { ExtensionIcon } from './ExtensionIcon'
-import { InputsSection, RulesSection } from './SpecSections'
+import { InputsSection, LimitsSection } from './SpecSections'
 
 export interface SpecFormHandle { buildSpec(): { spec?: InstanceSpec; specJSON?: string; err?: string } }
 
@@ -20,8 +21,9 @@ interface Props {
   application?: boolean
   initial?: InstanceSpec
   workspaceId?: string
-  onSpecChange?: (draft: InstanceDraft, errors?: DraftError[]) => void
+  onSpecChange?: (draft: InstanceDraft, errors?: DraftError[], built?: { spec?: InstanceSpec; specJSON?: string }) => void
   onRawDirtyChange?: (dirty: boolean) => void
+  identity?: ReactNode
   footer?: ReactNode
 }
 
@@ -53,7 +55,7 @@ const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)'
 // page section for the forms. The instance summary beside them is short
 // (one fixed-height row per capability), so nothing needs its own scroll.
 export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
-  keyMode = false, application = false, initial, workspaceId, onSpecChange, onRawDirtyChange, footer,
+  keyMode = false, application = false, initial, workspaceId, onSpecChange, onRawDirtyChange, identity, footer,
 }, ref) {
   // Application mode: vault-ref secrets only (same ceiling as key
   // specs) — never inline values in a durable spec.
@@ -114,8 +116,9 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
     return errors.length ? { ok: false, errors } : built
   }, [activeDraft, refsOnly, extensions, catalog.isPending, catalog.isError, extErrors, advanced])
   useEffect(() => {
-    onSpecChange?.(activeDraft.draft, result.ok ? [] : result.errors)
-  }, [activeDraft.draft, result, onSpecChange])
+    onSpecChange?.(activeDraft.draft, result.ok ? [] : result.errors,
+      { spec: result.spec, ...(advanced ? { specJSON: json } : {}) })
+  }, [activeDraft.draft, result, onSpecChange, advanced, json])
   useEffect(() => {
     onRawDirtyChange?.(advanced && json !== jsonBaseline.current)
   }, [advanced, json, onRawDirtyChange])
@@ -232,11 +235,16 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
   const present = new Set([...(draft.fs ? ['fs'] : []), ...(draft.net ? ['net'] : []), ...extKeys])
   const keys = [...order.filter((k) => present.has(k)), ...[...present].filter((k) => !order.includes(k))]
   const selectedSources = new Set(draft.exts.map((e) => e.source))
-  const defaults = policies.data?.policies.filter((p) => p.default).map((p) => p.name) ?? ['builtin.block_private_network']
+  const defaults = policies.data?.policies.filter((p) => p.default).map((p) => p.name) ?? []
   const selectedPolicies = draft.policies ?? defaults
+  const hasDefaults = (policies.data?.policies ?? []).some((p) => p.default)
+  const togglePolicy = (name: string) =>
+    set({ policies: selectedPolicies.includes(name) ? selectedPolicies.filter((n) => n !== name) : [...selectedPolicies, name] })
+  const removePolicy = (name: string) => set({ policies: selectedPolicies.filter((n) => n !== name) })
+  const policyKind = (name: string) => policies.data?.policies.find((p) => p.name === name)?.kind
   const inputCount = draft.env.length + draft.secrets.length + draft.labels.length
   const limitCount = Object.keys(draft.limits).length
-  const rulesSummary = `${draft.policies === null ? 'Default policies' : `${selectedPolicies.length} ${selectedPolicies.length === 1 ? 'policy' : 'policies'}`}${limitCount ? ` · ${limitCount} ${limitCount === 1 ? 'limit' : 'limits'}` : ''}`
+  const limitsSummary = limitCount ? `${limitCount} ${limitCount === 1 ? 'limit' : 'limits'}` : 'Server defaults'
   const inputsSummary = inputCount ? `${inputCount} ${inputCount === 1 ? 'input' : 'inputs'}` : 'None'
   const sectionIssues = (sections: string[]) => errors.filter((e) => sections.includes(e.section)).length
 
@@ -353,7 +361,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
 
           {/* forceMount keeps both views mounted so editor state survives switching */}
           <Tabs.Content value="capabilities" forceMount className="spec-palette">
-            <p className="spec-pane-note">Optional. Each capability is added with safe defaults; adjust them under Settings. {application ? 'Applied when published.' : 'Settings are fixed after creation.'}</p>
+            <p className="spec-pane-note">Optional. Add capabilities and policies here; adjust capability details under Settings. {application ? 'Applied when published.' : 'Settings are fixed after creation.'}</p>
             <div className="ability-choices">
               <button type="button" className="ability-choice" data-selected={!!draft.fs} aria-label={draft.fs ? 'Files added' : 'Add Files'} onClick={addFiles}>
                 <FilesIcon />
@@ -366,10 +374,18 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
                 <span className="ability-add">{draft.net ? <><CheckIcon /> Added</> : 'Add'}</span>
               </button>
             </div>
-            <div>
+            <div className="extensions-block">
               <h4 className="mb-3 text-sm font-semibold text-ink">Extensions</h4>
               <ExtensionPicker entries={extensions} selectedSources={selectedSources} loading={catalog.isPending} error={catalog.isError}
                 onRetry={() => catalog.refetch()} onAdd={addExtension} onShow={pointAtExtension} onCustom={() => addExtension({ name: '', source: '' })} />
+            </div>
+            <div className="policies-block">
+              <h4 className="mb-3 text-sm font-semibold text-ink">Policies</h4>
+              <p className="spec-pane-note">Pluggable rules that constrain what capabilities may do. Add any number; they never grant access.</p>
+              <PolicyPicker entries={policies.data?.policies ?? []} selected={selectedPolicies}
+                loading={policies.isPending} error={policies.isError} onRetry={() => policies.refetch()}
+                onToggle={togglePolicy} onRemove={removePolicy}
+                showUseDefaults={hasDefaults && draft.policies !== null} onUseDefaults={() => set({ policies: null })} />
             </div>
           </Tabs.Content>
 
@@ -400,9 +416,9 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
               ))}
               {Object.keys(draft.otherCaps).map((name) => <div key={name} className="settings-card"><h4 className="config-item-title">{name}</h4><p className="config-item-summary">Existing configuration preserved. Use Advanced JSON to edit.</p></div>)}
             </section>
-            <section className="settings-group" data-section="rules">
-              <h3 className="spec-pane-title">Rules <span className="spec-pane-meta">{rulesSummary}</span></h3>
-              <RulesSection draft={draft} set={set} policies={policies.data?.policies ?? []} policiesError={policies.isError} onRetry={() => policies.refetch()} selected={selectedPolicies} />
+            <section className="settings-group" data-section="limits">
+              <h3 className="spec-pane-title">Limits <span className="spec-pane-meta">{limitsSummary}</span></h3>
+              <LimitsSection draft={draft} set={set} />
             </section>
             <section className="settings-group" data-section="inputs">
               <h3 className="spec-pane-title">Inputs <span className="spec-pane-meta">{inputsSummary}</span></h3>
@@ -414,7 +430,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
         <aside className="spec-selection" aria-label={application ? 'Application settings' : 'This instance'}>
           <h3 className="spec-pane-title">{application ? 'This application' : 'This instance'}</h3>
           <div className="spec-identity">
-            {!application && (
+            {application ? identity : (
               <>
                 <Field label="Name"><input className={inputCls} value={draft.name} placeholder="e.g. research run" onChange={(e) => set({ name: e.target.value })} /></Field>
                 <Field label="Lifetime (seconds)"><input className={inputCls} type="number" min="1" value={draft.ttlSeconds} onChange={(e) => set({ ttlSeconds: e.target.value === '' ? '' : Number(e.target.value) })} /></Field>
@@ -435,9 +451,31 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
               {rows}
             </div>
           </div>
+          <div>
+            <p className="sidebar-label">Policies</p>
+            <div className="selected-list">
+              {selectedPolicies.length === 0 && (
+                <div className="selected-row is-empty">
+                  <div className="min-w-0 flex-1">
+                    <h4 className="config-item-title">No policies</h4>
+                    <span className="selected-status">Add one to restrict capabilities</span>
+                  </div>
+                </div>
+              )}
+              {selectedPolicies.map((name) => (
+                <div key={name} data-row={`policy:${name}`} className="selected-row">
+                  <div className="min-w-0 flex-1">
+                    <p className="config-item-title">{name}</p>
+                    <span className="selected-status">{policyKind(name) === 'builtin' ? 'Built-in' : policyKind(name) === 'rego' ? 'Workspace policy' : 'Unknown'}</span>
+                  </div>
+                  <button type="button" className="text-btn" aria-label={`Remove policy ${name}`} onClick={() => removePolicy(name)}>Remove</button>
+                </div>
+              ))}
+            </div>
+          </div>
           <div className="sidebar-links">
-            <button type="button" onClick={() => openSettings('rules')}>
-              Rules <span className={sectionIssues(['Limits']) ? 'is-warn' : ''}>{rulesSummary}</span>
+            <button type="button" onClick={() => openSettings('limits')}>
+              Limits <span className={sectionIssues(['Limits']) ? 'is-warn' : ''}>{limitsSummary}</span>
             </button>
             <button type="button" onClick={() => openSettings('inputs')}>
               Inputs <span className={sectionIssues(['Variables', 'Secrets', 'Labels']) ? 'is-warn' : ''}>{inputsSummary}</span>

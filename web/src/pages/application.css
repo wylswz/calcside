@@ -31,14 +31,13 @@
 .app-page .app-status-ready { color: rgb(var(--accent)); border-color: rgb(var(--accent)) }
 .app-page .app-status-degraded { color: #b45309; border-color: #b45309 }
 .app-page .app-status-disabled { color: rgb(var(--sec)) }
-.app-page .app-new-card { max-width: 560px }
-.app-page .app-example {
-  background: rgb(var(--paper)); border: 1px solid rgb(var(--line));
-  border-radius: 6px; padding: 10px; font-size: 13px; overflow-x: auto;
-}
+/* fieldset is layout-transparent: it only toggles descendant controls
+   for the read-only view, never draws its own box (S1). */
+.app-page .app-fieldset { border: 0; margin: 0 0 16px; padding: 0 0 16px; min-width: 0; border-bottom: 1px solid rgb(var(--line)) }
+.app-page .app-fieldset:disabled { color: inherit }
 /* Shared create-kind tabs — used on both /instances/new and
    /applications/new, so the class must live outside .app-page. */
-.kind-tabs { display: inline-flex; gap: 4px; font-size: 13px }
+.kind-tabs { display: flex; width: max-content; gap: 4px; margin-bottom: 10px; font-size: 13px }
 .kind-tabs a { padding: 4px 10px; border: 1px solid rgb(var(--line)); border-radius: 999px; color: rgb(var(--sec)); text-decoration: none }
 .kind-tabs a.kind-on { color: rgb(var(--accent)); border-color: rgb(var(--accent)) }
 .app-page .app-result { min-height: 44px; margin-top: 8px }
@@ -55,8 +54,6 @@
 }
 /* Request-examples tabs + pre — bounded height, horizontal scroll on
    mobile so the page never overflows. */
-.app-page .app-capabilities { margin-top: 16px; min-width: 0 }
-.app-page .app-capabilities > div { margin-top: 12px }
 .app-page .app-examples { margin-top: 6px; min-width: 0 }
 .app-page .app-ex-tabs { display: flex; align-items: center; gap: 4px }
 .app-page .app-ex-tab {

@@ -46,9 +46,7 @@ func NewRecorder(st store.Store) *Recorder {
 // failed — a denied or erroring capability call is exactly the kind of
 // thing the audit log exists for.
 func (r *Recorder) Record(b runtime.AuditBatch) {
-	if b.Dropped > 0 {
-		slog.Warn("audit batch overflowed on the execution node", "dropped", b.Dropped)
-	}
+	logDropped(b)
 	ws := map[string]string{}
 	for _, ev := range b.Events {
 		w := ws[ev.InstanceID]
@@ -60,22 +58,50 @@ func (r *Recorder) Record(b runtime.AuditBatch) {
 				w = ws[ev.InstanceID]
 			}
 		}
-		r.enqueue(store.AuditEvent{
-			ID:          store.NewID(store.PrefixAudit),
-			WorkspaceID: w,
-			Ts:          ev.Ts,
-			UserID:      ev.UserID,
-			InstanceID:  ev.InstanceID,
-			ExecID:      ev.ExecID,
-			Capability:  ev.Capability,
-			Op:          ev.Op,
-			Args:        ev.Args,
-			Phase:       ev.Phase,
-			Decision:    ev.Decision,
-			Reason:      ev.Reason,
-			Error:       ev.Error,
-			DurationMs:  ev.DurationMs,
-		})
+		if w == "" {
+			// An unresolvable event must never poison the whole insert
+			// batch — replicas without an instance row belong to
+			// RecordWorkspace callers.
+			slog.Warn("audit event without workspace dropped", "instance_id", ev.InstanceID, "op", string(ev.Capability)+"."+string(ev.Op))
+			continue
+		}
+		r.enqueue(toStoreEvent(ev, w))
+	}
+}
+
+// RecordWorkspace enqueues a batch for a caller-known workspace. Use it
+// for replicas whose ids are not instance rows — application replicas
+// (apv_…) have no GetInstance answer, so the workspace arrives with the
+// call instead of a lookup.
+func (r *Recorder) RecordWorkspace(workspaceID string, b runtime.AuditBatch) {
+	logDropped(b)
+	for _, ev := range b.Events {
+		r.enqueue(toStoreEvent(ev, workspaceID))
+	}
+}
+
+func logDropped(b runtime.AuditBatch) {
+	if b.Dropped > 0 {
+		slog.Warn("audit batch overflowed on the execution node", "dropped", b.Dropped)
+	}
+}
+
+func toStoreEvent(ev runtime.AuditEvent, workspaceID string) store.AuditEvent {
+	return store.AuditEvent{
+		ID:          store.NewID(store.PrefixAudit),
+		WorkspaceID: workspaceID,
+		Ts:          ev.Ts,
+		UserID:      ev.UserID,
+		InstanceID:  ev.InstanceID,
+		ExecID:      ev.ExecID,
+		Capability:  ev.Capability,
+		Op:          ev.Op,
+		Args:        ev.Args,
+		Phase:       ev.Phase,
+		Decision:    ev.Decision,
+		Reason:      ev.Reason,
+		Error:       ev.Error,
+		DurationMs:  ev.DurationMs,
 	}
 }
 

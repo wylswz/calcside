@@ -12,7 +12,7 @@ func BuiltinPolicies() []BuiltinPolicy {
 	return []BuiltinPolicy{{
 		Name:        BlockPrivateNetworkPolicy,
 		Description: "Block private, loopback, link-local and reserved IP addresses, including DNS results and redirect targets. Server CIDR exemptions still apply.",
-		Default:     true,
+		Default:     false,
 	}}
 }
 

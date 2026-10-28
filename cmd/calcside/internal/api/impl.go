@@ -37,6 +37,13 @@ type rawJSON struct {
 }
 
 func (r rawJSON) write(w http.ResponseWriter) error {
+	// Statuses that forbid a body (1xx, 204, 304): writing one returns
+	// http.ErrBodyNotAllowed after the header is sent, which the strict
+	// layer would misread as a handler error.
+	if r.status >= 100 && r.status < 200 || r.status == http.StatusNoContent || r.status == http.StatusNotModified {
+		w.WriteHeader(r.status)
+		return nil
+	}
 	b, err := json.Marshal(r.body)
 	if err != nil {
 		return err

@@ -5,8 +5,8 @@ import type { CompletionContext as CursorContext } from '@codemirror/autocomplet
 import { python } from '@codemirror/lang-python'
 import { StreamLanguage } from '@codemirror/language'
 import { api } from '../api'
-import type { CompletionContext, EditorMetadata, FileEntry } from '../api'
-import { policySymbols, regoCompletions, starlarkCompletions } from './completion'
+import type { CompletionContext, EditorMetadata, ExtensionCatalog, FileEntry } from '../api'
+import { applicationSymbols, policySymbols, regoCompletions, starlarkCompletions } from './completion'
 
 const regoLanguage = StreamLanguage.define<{ quote: string }>({
   startState: () => ({ quote: '' }),
@@ -64,6 +64,37 @@ export function useStarlarkEditor(id: string, live: boolean, busy: boolean) {
     return [python(), autocompletion({ override: [starlarkCompletions(live ? data : undefined, loadFiles)] })]
   }, [data, id, live, busy, qc])
   return { extensions, error, isFetching, refetch, truncated: data?.truncated ?? false }
+}
+
+// useApplicationEditor completes against the application's draft spec —
+// there is no live instance, so symbols are built client-side from the
+// spec plus shared editor metadata and the extension catalog.
+// Document-derived symbols are read from the editor state inside the
+// completion source, so typing never reconfigures the editor.
+export function useApplicationEditor(specText: string, workspaceId: string) {
+  const metadata = useQuery({
+    queryKey: ['editor-metadata'],
+    queryFn: () => api.get<EditorMetadata>('/api/v1/editor/metadata'),
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  const catalog = useQuery({
+    queryKey: ['extensions', workspaceId],
+    queryFn: () => api.get<ExtensionCatalog>(`/api/v1/extensions?workspace=${encodeURIComponent(workspaceId)}`),
+    staleTime: 60_000,
+    retry: false,
+  })
+  const spec = useMemo(() => {
+    try { return JSON.parse(specText.trim() || '{}') } catch { return {} }
+  }, [specText])
+  const extensions = useMemo(() => [
+    python(),
+    autocompletion({
+      override: [(context) =>
+        starlarkCompletions(applicationSymbols(spec, metadata.data, catalog.data?.extensions, context.state.doc.toString()))(context)],
+    }),
+  ], [spec, metadata.data, catalog.data])
+  return { extensions, error: metadata.error, isFetching: metadata.isFetching }
 }
 
 export function useRegoEditor(capability: string, op: string) {

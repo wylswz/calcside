@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -254,6 +256,34 @@ func TestApplicationContracts(t *testing.T) {
 	// the literal must not have been re-parsed into a rounded float
 	if !strings.Contains(out, "9007199254740993") {
 		t.Fatalf("bigint rounded: %s", out)
+	}
+}
+
+// DELETE answers 204 with no body — a null body written after the
+// status line used to trip "headers already written" in gin.
+func TestApplicationDeleteNoBody(t *testing.T) {
+	e := newEnv(t)
+	cookies := login(e, "a@x.com")
+	csrf := map[string]string{"X-Requested-With": "calcside"}
+	_, m, _ := e.req("POST", "/api/v1/applications", `{"name":"svc"}`, csrf, cookies)
+	appID := m["application"].(map[string]any)["id"].(string)
+
+	r, err := http.NewRequest("DELETE", e.srv.URL+"/api/v1/applications/"+appID+"?version=1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("X-Requested-With", "calcside")
+	for _, c := range cookies {
+		r.AddCookie(c)
+	}
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 204 || len(data) != 0 {
+		t.Fatalf("delete: status=%d body=%q", resp.StatusCode, data)
 	}
 }
 
