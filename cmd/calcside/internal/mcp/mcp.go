@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -182,7 +183,7 @@ func Handler(sb Sandbox) http.Handler {
 		switch {
 		case p == nil:
 			writeErr(w, http.StatusUnauthorized, types.ErrCodeUnauthorized, "restricted API key required")
-		case p.ViaKey() && p.KeyInstanceID != "":
+		case p.ViaKey() && strings.HasPrefix(p.KeyBoundID, string(store.PrefixInstance)):
 			writeErr(w, http.StatusForbidden, types.ErrCodeForbidden, "this key is bound to an instance — use the instance URL")
 		case !p.ViaKey() || !p.Restricted():
 			writeErr(w, http.StatusForbidden, types.ErrCodeForbidden, "MCP requires a restricted API key")

@@ -188,7 +188,7 @@ export default function Providers({ bare }: { bare?: boolean }) {
                 <td className="whitespace-nowrap text-xs text-sec">{p.updated_at ? fmtTime(p.updated_at) : '—'}</td>
                 <td className="space-x-2 whitespace-nowrap text-right">
                   {canEdit && <Button size="sm" onClick={() => setEditing(p)}>Edit</Button>}
-                  {canEdit && <Button size="sm" onClick={() => setDeleting(p)}>Delete</Button>}
+                  {canEdit && <Button size="sm" variant="danger" onClick={() => setDeleting(p)}>Delete</Button>}
                 </td>
               </tr>
             ))}
@@ -199,7 +199,7 @@ export default function Providers({ bare }: { bare?: boolean }) {
       {showNew && <ProviderForm provider={null} entries={entries} secrets={secrets.data?.secrets ?? []} onClose={() => setShowNew(false)} />}
       {editing && <ProviderForm provider={editing} entries={entries} secrets={secrets.data?.secrets ?? []} onClose={() => setEditing(null)} />}
       {deleting && (
-        <Confirm title={`Delete provider ${deleting.name}?`} confirm="Delete" pending="Deleting…"
+        <Confirm tone="danger" title={`Delete provider ${deleting.name}?`} confirm="Delete" pending="Deleting…"
           action={() => del.mutateAsync(deleting.id)} onClose={() => setDeleting(null)}>
           <p className="text-sm text-body">Instances that selected this provider will fail closed until they are recreated with another one.</p>
         </Confirm>

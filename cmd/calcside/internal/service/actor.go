@@ -25,8 +25,9 @@ type Actor struct {
 	KeyMaxInstances int
 	// KeyViewOnly caps a key's ceiling at View.
 	KeyViewOnly bool
-	// KeyInstanceID binds the key to one instance; others are hidden.
-	KeyInstanceID string
+	// KeyBoundID binds the key to one resource — an instance or an
+	// application, distinguished by id prefix; everything else is hidden.
+	KeyBoundID string
 	// WorkspaceID is the workspace this request acts in: a key's own
 	// workspace, or the session workspace resolved per request
 	// (personal by default).

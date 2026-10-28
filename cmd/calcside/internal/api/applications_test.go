@@ -126,6 +126,96 @@ func TestApplicationKeyCeiling(t *testing.T) {
 	}
 }
 
+// Application-bound key: sees and invokes only its own application, is
+// hidden from everything else, and dies with the application.
+func TestApplicationBoundKey(t *testing.T) {
+	e := newEnv(t)
+	cookies := login(e, "a@x.com")
+	csrf := map[string]string{"X-Requested-With": "calcside"}
+	_, m, _ := e.req("POST", "/api/v1/applications", `{"name":"svc"}`, csrf, cookies)
+	appID := m["application"].(map[string]any)["id"].(string)
+	_, m, _ = e.req("POST", "/api/v1/applications", `{"name":"other"}`, csrf, cookies)
+	otherID := m["application"].(map[string]any)["id"].(string)
+
+	code, m, _ := e.req("POST", "/api/v1/keys", `{"name":"invoke","application_id":"`+appID+`"}`, csrf, cookies)
+	if code != 201 {
+		t.Fatalf("bound key create: %d %v", code, m)
+	}
+	if m["key"].(map[string]any)["application_id"] != appID {
+		t.Fatalf("key response missing application_id: %v", m["key"])
+	}
+	bearer := map[string]string{"Authorization": "Bearer " + m["secret"].(string)}
+
+	code, _, _ = e.req("GET", "/api/v1/applications/"+appID, "", bearer, nil)
+	if code != 200 {
+		t.Fatalf("bound get own: %d", code)
+	}
+	code, _, _ = e.req("GET", "/api/v1/applications/"+otherID, "", bearer, nil)
+	if code != 404 {
+		t.Fatalf("bound get other: %d", code)
+	}
+	code, m, _ = e.req("GET", "/api/v1/applications", "", bearer, nil)
+	if code != 200 || len(m["applications"].([]any)) != 1 {
+		t.Fatalf("bound list: %d %v", code, m)
+	}
+	// unpublished app: invoke reaches the service — 503, not 403/404
+	code, _, _ = e.req("POST", "/api/v1/applications/"+appID+"/invoke", `{}`, bearer, nil)
+	if code != 503 {
+		t.Fatalf("bound invoke: %d", code)
+	}
+	code, _, _ = e.req("PUT", "/api/v1/applications/"+appID, `{"version":1,"name":"x","code":"y"}`, bearer, nil)
+	if code != 403 {
+		t.Fatalf("bound update: %d", code)
+	}
+	code, _, _ = e.req("POST", "/api/v1/applications/"+appID+"/test", `{"version":1,"input":{}}`, bearer, nil)
+	if code != 403 {
+		t.Fatalf("bound test: %d", code)
+	}
+	code, _, _ = e.req("POST", "/api/v1/applications/"+appID+"/publish", `{"version":1}`, bearer, nil)
+	if code != 403 {
+		t.Fatalf("bound publish: %d", code)
+	}
+	// bound keys reach nothing else
+	code, m, _ = e.req("GET", "/api/v1/instances", "", bearer, nil)
+	if code != 200 || len(m["instances"].([]any)) != 0 {
+		t.Fatalf("bound instance list: %d %v", code, m)
+	}
+	code, _, _ = e.req("POST", "/api/v1/instances", `{"capabilities":{}}`, bearer, nil)
+	if code != 403 {
+		t.Fatalf("bound instance create: %d", code)
+	}
+	// invalid combinations
+	for _, body := range []string{
+		`{"name":"bad","application_id":"` + appID + `","spec":{"capabilities":{}},"max_instances":1}`,
+		`{"name":"bad","application_id":"` + appID + `","view_only":true}`,
+		`{"name":"bad","application_id":"` + appID + `","instance_id":"ins_x"}`,
+	} {
+		code, _, _ = e.req("POST", "/api/v1/keys", body, csrf, cookies)
+		if code != 400 {
+			t.Fatalf("combo %s: %d", body, code)
+		}
+	}
+	// application deletion revokes the key
+	code, _, _ = e.req("DELETE", "/api/v1/applications/"+appID+"?version=1", "", csrf, cookies)
+	if code != 200 && code != 204 {
+		t.Fatalf("delete app: %d", code)
+	}
+	_, m, _ = e.req("GET", "/api/v1/keys", "", nil, cookies)
+	found := false
+	for _, k := range m["keys"].([]any) {
+		kv := k.(map[string]any)
+		if kv["application_id"] == appID {
+			found = true
+			if kv["revoked_at"] == nil {
+				t.Fatal("bound key not revoked on delete")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("bound key missing")
+	}
+}
+
 // Schema defaults + precision through the API surface.
 func TestApplicationContracts(t *testing.T) {
 	e := newEnv(t)

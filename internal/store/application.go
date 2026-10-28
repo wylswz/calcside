@@ -49,6 +49,8 @@ type ApplicationFilter struct {
 	UserID      string
 	AfterID     string
 	Limit       int
+	// KeyApplicationID filters to one application for application-bound keys.
+	KeyApplicationID string
 }
 
 func validSchemaSide(raw json.RawMessage) error {

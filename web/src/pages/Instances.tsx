@@ -1,13 +1,14 @@
 
 import { Link, useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, SharedInstance, Instance, wsPath } from '../api'
 import { useRole } from '../workspace'
-import { Button, Loading, PageHeader, InstanceStatus, RevealNew } from '../components/ui'
+import { Button, Confirm, Loading, PageHeader, InstanceStatus, RevealNew } from '../components/ui'
 import { attentionText, expiringSoon } from '../nextStep'
 import { allowedSummary, instanceName } from '../activity'
 import { fmtTime, relTime } from '../format'
 import { useHeldOrder } from '../stableList'
+import { useState } from 'react'
 
 
 const toneCls = { danger: 'text-danger', warn: 'text-warn-text', mute: 'text-mute', sec: 'text-sec' } as const
@@ -23,7 +24,10 @@ function rank(i: Instance): number {
 
 export default function Instances() {
   const nav = useNavigate()
+  const qc = useQueryClient()
   const role = useRole()
+  const canEdit = role === 'owner' || role === 'editor'
+  const [ending, setEnding] = useState<Instance | null>(null)
   const { data, isLoading } = useQuery({
     queryKey: ['instances'],
     queryFn: () => api.get<{ instances: Instance[] }>(wsPath('/api/v1/instances')),
@@ -68,7 +72,7 @@ export default function Instances() {
           <div className="tbl-wrap">
             <table className="tbl">
               <thead>
-                <tr><th>Name</th><th>Status</th><th>Needs attention</th><th>Allowed</th><th>Last active</th></tr>
+                <tr><th>Name</th><th>Status</th><th>Needs attention</th><th>Allowed</th><th>Last active</th><th /></tr>
               </thead>
               <tbody>
                 {g.map((i) => {
@@ -85,6 +89,9 @@ export default function Instances() {
                       <span className="block truncate font-mono text-xs text-sec" title={allowedSummary(i.spec)}>{allowedSummary(i.spec)}</span>
                     </td>
                     <td className="whitespace-nowrap text-xs text-sec" title={fmtTime(i.last_active_at)}>{relTime(i.last_active_at)}</td>
+                    <td className="text-right">
+                      {i.status === 'running' && canEdit && <Button size="sm" variant="danger" onClick={() => setEnding(i)}>End</Button>}
+                    </td>
                   </tr>
                 )
                   })}
@@ -112,6 +119,16 @@ export default function Instances() {
             </table>
           </div>
         </div>
+      )}
+      {ending && (
+        <Confirm tone="danger" title={`End ${instanceName(ending)}?`} confirm="End" pending="Ending…"
+          action={async () => {
+            await api.del(`/api/v1/instances/${ending.id}`)
+            await qc.invalidateQueries({ queryKey: ['instances'] })
+          }}
+          onClose={() => setEnding(null)}>
+          <p className="text-sm text-body">Running code stops; files and variables are discarded.</p>
+        </Confirm>
       )}
     </div>
   )

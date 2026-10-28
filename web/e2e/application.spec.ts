@@ -39,15 +39,16 @@ test('a) create -> scaffold -> test -> publish -> ready -> live invoke', async (
   const id = page.url().split('/').pop()!
   await expect(page.locator('.app-cm')).toContainText('def main(input)')
 
-  await page.getByRole('button', { name: 'Save & Test' }).click()
-  await expect(page.locator('.app-out-pre')).toContainText('Hello, world', { timeout: 30_000 })
+  await page.getByRole('button', { name: 'Run' }).click()
+  await expect(page.locator('.app-out-pre:not(.app-call-out)')).toContainText('Hello, world', { timeout: 30_000 })
 
-  await page.getByRole('button', { name: 'Save & Publish' }).click()
+  await page.getByRole('button', { name: 'Publish' }).click()
   await waitReady(id)
   // the Invoke button is always rendered; it enables once ready
-  await expect(page.getByRole('button', { name: 'Invoke published' })).toBeEnabled({ timeout: 10_000 })
-  await page.getByRole('button', { name: 'Invoke published' }).click()
-  await expect(page.locator('.app-out-pre')).toContainText('Hello, world', { timeout: 30_000 })
+  const invokeCard = page.locator('section.app-card').filter({ hasText: 'Invoke' })
+  await expect(invokeCard.getByRole('button', { name: 'Invoke' })).toBeEnabled({ timeout: 10_000 })
+  await invokeCard.getByRole('button', { name: 'Invoke' }).click()
+  await expect(page.locator('.app-call-out')).toContainText('Hello, world', { timeout: 30_000 })
 })
 
 test('b) draft change stays unpublished until republish', async ({ page }) => {
@@ -58,7 +59,7 @@ test('b) draft change stays unpublished until republish', async ({ page }) => {
   const id = page.url().split('/').pop()!
 
   // publish the scaffold, wait ready, note its output
-  await page.getByRole('button', { name: 'Save & Publish' }).click()
+  await page.getByRole('button', { name: 'Publish' }).click()
   await waitReady(id)
   const inv0 = await client.post(`/api/v1/applications/${id}/invoke`, {
     headers: { 'Content-Type': 'application/json' },
@@ -73,8 +74,11 @@ test('b) draft change stays unpublished until republish', async ({ page }) => {
   await code.click()
   await page.keyboard.press('Meta+A')
   await page.keyboard.type('def main(input): return {"message": "v2"}')
-  await page.getByRole('button', { name: 'Save draft' }).click()
-  await page.waitForTimeout(500)
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect.poll(async () => {
+    const r0 = await client.get(`/api/v1/applications/${id}`)
+    return (await r0.json()).application.code
+  }, { timeout: 15_000 }).toContain('"v2"')
   const inv1 = await client.post(`/api/v1/applications/${id}/invoke`, {
     headers: { 'Content-Type': 'application/json' },
     data: `{"name":"a"}`,
@@ -82,7 +86,7 @@ test('b) draft change stays unpublished until republish', async ({ page }) => {
   expect((await inv1.json()).output_json).toContain('Hello, a')
 
   // republish — the live output flips
-  await page.getByRole('button', { name: 'Save & Publish' }).click()
+  await page.getByRole('button', { name: 'Publish' }).click()
   await waitReady(id)
   await expect.poll(async () => {
     const r = await client.post(`/api/v1/applications/${id}/invoke`, {
@@ -111,7 +115,7 @@ test('c) mid-save edits abort the chained publish', async ({ page }) => {
   await cm.click()
   await page.keyboard.press('Meta+A')
   await page.keyboard.type('def main(input): return {"first":1}')
-  const publish = page.getByRole('button', { name: 'Save & Publish' }).click()
+  const publish = page.getByRole('button', { name: 'Publish' }).click()
   await page.waitForTimeout(80)
   await cm.click()
   await page.keyboard.press('Meta+A')
@@ -119,22 +123,18 @@ test('c) mid-save edits abort the chained publish', async ({ page }) => {
   await publish
   // the in-flight edit must abort the publish chain — the PUT saved the
   // FIRST code (v2); nothing was published.
-  await page.waitForTimeout(1500)
+  await page.waitForTimeout(500)
   const r = await client.get(`/api/v1/applications/${id}`)
   const app = (await r.json()).application
   expect(app.published_version).toBe(0)
-  expect(app.version).toBe(2)
-  expect(app.code).toContain('"first":1')
-  // the latest code is preserved in the editor
+  // the latest code is preserved in the editor, and autosave persists it
   await expect(page.locator('.app-cm')).toContainText('"second":2')
-  // a follow-up save must NOT self-conflict — baseVersion advanced to 2
-  await page.getByRole('button', { name: 'Save draft' }).click()
   await expect.poll(async () => {
     const rr = await client.get(`/api/v1/applications/${id}`)
     return (await rr.json()).application.code
   }, { timeout: 15_000 }).toContain('"second":2')
   // then publish + invoke actually serves the SECOND code
-  await page.getByRole('button', { name: 'Save & Publish' }).click()
+  await page.getByRole('button', { name: 'Publish' }).click()
   await waitReady(id)
   const iv = await client.post(`/api/v1/applications/${id}/invoke`, {
     headers: { 'Content-Type': 'application/json' }, data: '{}',
@@ -157,7 +157,7 @@ test('c2) input-only mid-save change aborts and keeps the input', async ({ page 
   await cm.click()
   await page.keyboard.press('Meta+A')
   await page.keyboard.type('def main(input): return {"c":1}')
-  const saveP = page.getByRole('button', { name: 'Save & Test' }).click()
+  const saveP = page.getByRole('button', { name: 'Run' }).click()
   await page.waitForTimeout(80)
   await page.locator('#app-input').fill('{"changed":true}')
   await saveP
@@ -165,9 +165,9 @@ test('c2) input-only mid-save change aborts and keeps the input', async ({ page 
   const app = (await (await client.get(`/api/v1/applications/${id}`)).json()).application
   expect(app.published_version).toBe(0)
   await expect(page.locator('#app-input')).toHaveValue('{"changed":true}')
-  // a follow-up Save & Test works on the saved baseline
-  await page.getByRole('button', { name: 'Save & Test' }).click()
-  await expect(page.locator('.app-out-pre')).toContainText('"c":1', { timeout: 30_000 })
+  // a follow-up Run works on the saved baseline
+  await page.getByRole('button', { name: 'Run' }).click()
+  await expect(page.locator('.app-out-pre:not(.app-call-out)')).toContainText('"c":1', { timeout: 30_000 })
 })
 
 test('d) SPA navigation resets scope; B never receives A draft', async ({ page }) => {
@@ -194,7 +194,7 @@ test('d) SPA navigation resets scope; B never receives A draft', async ({ page }
   await expect(page.locator('.app-cm')).toContainText('def main(input)')
   await expect(page.locator('.app-cm')).not.toContainText('from_a')
   // saving B writes B's own code, never A's
-  await page.getByRole('button', { name: 'Save draft' }).click()
+  await page.keyboard.press('ControlOrMeta+s')
   const b = (await (await client.get(`/api/v1/applications/${id2}`)).json()).application
   expect(b.code).not.toContain('from_a')
   // back to A — its edits were scoped and restored
@@ -219,14 +219,14 @@ test('e) external write + my save -> 409, edits retained, reload offered', async
   await cm.click()
   await page.keyboard.press('Meta+A')
   await page.keyboard.type('def main(input): return {"mine":1}')
-  await page.getByRole('button', { name: 'Save draft' }).click()
+  await page.keyboard.press('ControlOrMeta+s')
   await expect(page.getByText('Saved elsewhere')).toBeVisible({ timeout: 15_000 })
   // edits must not be silently replaced; Cancel keeps them
   await expect(page.locator('.app-cm')).toContainText('"mine":1')
   await page.getByRole('button', { name: 'Cancel' }).click()
   await expect(page.locator('.app-cm')).toContainText('"mine":1')
   // save again -> conflict again -> Confirm reload replaces explicitly
-  await page.getByRole('button', { name: 'Save draft' }).click()
+  await page.keyboard.press('ControlOrMeta+s')
   await expect(page.getByText('Saved elsewhere')).toBeVisible({ timeout: 15_000 })
   await page.getByRole('button', { name: 'Reload' }).click()
   await expect(page.locator('.app-cm')).toContainText('remote', { timeout: 10_000 })
@@ -244,14 +244,14 @@ test('g) mobile populated layout, no horizontal overflow', async ({ page }) => {
   // populate output via the page itself, then resize — a viewport
   // change does not remount, so the populated state is preserved
   await page.goto(`${viteURL}/applications/${id}`)
-  await page.getByRole('button', { name: 'Save & Test' }).click()
-  await expect(page.locator('.app-out-pre')).toContainText('Hello, world', { timeout: 30_000 })
+  await page.getByRole('button', { name: 'Run' }).click()
+  await expect(page.locator('.app-out-pre:not(.app-call-out)')).toContainText('Hello, world', { timeout: 30_000 })
   await page.setViewportSize({ width: 390, height: 844 })
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
   expect(overflow).toBe(false)
   await page.screenshot({ path: '/tmp/calcside-ep14-logs/application-ui-mobile.png', fullPage: true })
   await page.setViewportSize({ width: 1440, height: 1000 })
-  await expect(page.locator('.app-out-pre')).toContainText('Hello, world')
+  await expect(page.locator('.app-out-pre:not(.app-call-out)')).toContainText('Hello, world')
   await page.screenshot({ path: '/tmp/calcside-ep14-logs/application-ui-desktop.png', fullPage: true })
 })
 
@@ -268,4 +268,31 @@ test('h) kind switch: pristine navigates, edited name asks', async ({ page }) =>
   await expect(page.getByText('Discard draft')).toBeVisible()
   await page.getByRole('button', { name: 'Cancel' }).click()
   await expect(page.locator('#app-name')).toHaveValue('half-done')
+})
+
+test('i) applications list Delete removes the row after confirm', async ({ page }) => {
+  const r = await client.post('/api/v1/applications', { data: { name: 'ToDelete' } })
+  const id = (await r.json()).application.id
+  await page.goto(`${viteURL}/applications`)
+  const row = page.locator('tr').filter({ hasText: 'ToDelete' })
+  await expect(row).toBeVisible({ timeout: 10_000 })
+  await row.getByRole('button', { name: 'Delete' }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toContainText('Delete ToDelete?')
+  await dialog.getByRole('button', { name: 'Delete' }).click()
+  await expect(row).toHaveCount(0)
+  const gone = await client.get(`/api/v1/applications/${id}`)
+  expect(gone.status()).toBe(404)
+})
+
+test('j) instances list End ends a running instance', async ({ page }) => {
+  const r = await client.post('/api/v1/instances', { data: { ttl_seconds: 600 } })
+  const inst = (await r.json()).instance
+  await page.goto(`${viteURL}/instances`)
+  const row = page.locator('tr').filter({ hasText: inst.id })
+  await expect(row).toBeVisible({ timeout: 10_000 })
+  await row.getByRole('button', { name: 'End' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: 'End' }).click()
+  await expect(row).toContainText('ended', { timeout: 15_000 })
 })

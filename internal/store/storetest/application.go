@@ -45,6 +45,14 @@ func RunApplications(t *testing.T, s store.Store) {
 		if err != nil || len(list) != 1 {
 			t.Fatalf("list: %v %d", err, len(list))
 		}
+		list, err = s.ListApplications(ctx, store.ApplicationFilter{WorkspaceID: "ws_1", KeyApplicationID: a.ID})
+		if err != nil || len(list) != 1 {
+			t.Fatalf("bound list: %v %d", err, len(list))
+		}
+		list, err = s.ListApplications(ctx, store.ApplicationFilter{WorkspaceID: "ws_1", KeyApplicationID: "app_other"})
+		if err != nil || len(list) != 0 {
+			t.Fatalf("bound list other: %v %d", err, len(list))
+		}
 	})
 
 	t.Run("cross_workspace_isolation", func(t *testing.T) {

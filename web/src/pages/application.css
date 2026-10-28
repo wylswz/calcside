@@ -14,12 +14,19 @@
 .app-page .app-cm { border: 1px solid rgb(var(--line)); border-radius: 6px; overflow: hidden }
 .app-page .app-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 24px }
 .app-page .app-grid > div { min-width: 0 }
-.app-page .app-list { list-style: none; padding: 0; margin: 12px 0 }
-.app-page .app-row {
-  display: flex; gap: 12px; align-items: baseline;
-  padding: 8px 0; border-bottom: 1px solid rgb(var(--line));
+.app-page .app-card {
+  border: 1px solid rgb(var(--line)); border-radius: var(--radius-surface);
+  background: rgb(var(--surface)); padding: 20px; margin-top: 20px; min-width: 0;
 }
-.app-page .app-name { color: var(--ink); font-weight: 500 }
+.app-page .app-card-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding-bottom: 12px; margin-bottom: 16px; border-bottom: 1px solid rgb(var(--line));
+}
+.app-page .app-card-title { font-size: 15px; font-weight: 600; color: rgb(var(--ink)) }
+/* the Settings summary is its collapsed card's only row; the divider
+   lives on the body wrapper, which exists only while open (S1) */
+.app-page details.app-card > summary { cursor: pointer; padding-bottom: 12px }
+.app-page details.app-card > .app-card-body { border-top: 1px solid rgb(var(--line)); padding-top: 16px }
 .app-page .app-status { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid rgb(var(--line)) }
 .app-page .app-status-ready { color: rgb(var(--accent)); border-color: rgb(var(--accent)) }
 .app-page .app-status-degraded { color: #b45309; border-color: #b45309 }
@@ -34,9 +41,6 @@
 .kind-tabs { display: inline-flex; gap: 4px; font-size: 13px }
 .kind-tabs a { padding: 4px 10px; border: 1px solid rgb(var(--line)); border-radius: 999px; color: rgb(var(--sec)); text-decoration: none }
 .kind-tabs a.kind-on { color: rgb(var(--accent)); border-color: rgb(var(--accent)) }
-.app-page .app-steps { color: rgb(var(--sec)); font-size: 13px; padding-left: 18px }
-.app-page .app-steps li { margin: 2px 0 }
-.app-page .app-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 16px }
 .app-page .app-result { min-height: 44px; margin-top: 8px }
 .app-page .app-out { margin-top: 8px }
 .app-page .app-out-pre {
@@ -44,20 +48,16 @@
   background: rgb(var(--paper)); border: 1px solid rgb(var(--line));
   border-radius: 6px; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere;
 }
-.app-page .app-adv { margin-top: 16px; border-top: 1px solid rgb(var(--line)); padding-top: 8px }
 .app-page .app-check { display: flex; gap: 6px; align-items: center; font-size: 13px; margin: 8px 0 4px }
 @media (max-width: 768px) {
   .app-page .app-grid { grid-template-columns: minmax(0, 1fr); gap: 0 }
-  .app-page .app-actions { flex-direction: column; align-items: stretch }
   .app-page .app-input { max-width: 100% }
 }
-.app-page .app-endpoint { font-size: 13px; margin: 8px 0 0 }
-.app-page .app-endpoint code { font-size: 12px }
 /* Request-examples tabs + pre — bounded height, horizontal scroll on
    mobile so the page never overflows. */
 .app-page .app-capabilities { margin-top: 16px; min-width: 0 }
 .app-page .app-capabilities > div { margin-top: 12px }
-.app-page .app-examples { margin-top: 12px; min-width: 0 }
+.app-page .app-examples { margin-top: 6px; min-width: 0 }
 .app-page .app-ex-tabs { display: flex; align-items: center; gap: 4px }
 .app-page .app-ex-tab {
   padding: 3px 10px; font-size: 12px; border: 1px solid rgb(var(--line));

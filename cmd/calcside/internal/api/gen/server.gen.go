@@ -425,9 +425,11 @@ type APIErrorCode string
 
 // APIKey defines model for APIKey.
 type APIKey struct {
-	CreatedAt time.Time  `json:"created_at"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	Id        string     `json:"id"`
+	// ApplicationId when set the key can only reach this application
+	ApplicationId *string    `json:"application_id,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	Id            string     `json:"id"`
 
 	// InstanceId when set the key can only reach this instance
 	InstanceId *string    `json:"instance_id,omitempty"`
@@ -651,9 +653,11 @@ type ContractDocument struct {
 
 // CreateKeyRequest defines model for CreateKeyRequest.
 type CreateKeyRequest struct {
-	ExpiresInSeconds *int64 `json:"expires_in_seconds,omitempty"`
+	// ApplicationId bind the key to this application only (view + invoke); mutually exclusive with spec, view_only and instance_id
+	ApplicationId    *string `json:"application_id,omitempty"`
+	ExpiresInSeconds *int64  `json:"expires_in_seconds,omitempty"`
 
-	// InstanceId bind the key to this instance only; mutually exclusive with spec and view_only
+	// InstanceId bind the key to this instance only; mutually exclusive with spec, view_only and application_id
 	InstanceId *string `json:"instance_id,omitempty"`
 
 	// MaxInstances required 1..maxPerUser when spec is set; must be absent for full access

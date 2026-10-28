@@ -567,7 +567,7 @@ func (s *Service) settle(ctx context.Context, in *store.Instance, status types.I
 		return service.Internal(err)
 	}
 	// Keys bound to this instance die with it.
-	if err := s.st.RevokeKeysByInstance(ctx, in.ID); err != nil {
+	if err := s.st.RevokeBoundKeys(ctx, in.ID); err != nil {
 		return service.Internal(err)
 	}
 	return nil

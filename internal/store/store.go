@@ -155,9 +155,10 @@ type APIKey struct {
 	Spec         json.RawMessage `json:"-"`
 	MaxInstances int             `json:"-"`
 	WorkspaceID  string          `json:"-"`
-	// InstanceID binds the key to a single instance (nullable).
-	InstanceID string `json:"instance_id,omitempty"`
-	ViewOnly   bool   `json:"-"`
+	// BoundID binds the key to a single resource — an instance or an
+	// application — identified by its prefixed id (nullable).
+	BoundID  string `json:"bound_id,omitempty"`
+	ViewOnly bool   `json:"-"`
 }
 
 type Session struct {
@@ -391,7 +392,9 @@ type Store interface {
 	ListChanges(ctx context.Context, workspaceID string, limit int) ([]*WorkspaceChange, error)
 
 	RevokeUserKeys(ctx context.Context, workspaceID, userID string) error
-	RevokeKeysByInstance(ctx context.Context, instanceID string) error
+	// RevokeBoundKeys revokes every key bound to the given resource id
+	// (instance or application); used when that resource dies.
+	RevokeBoundKeys(ctx context.Context, boundID string) error
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
 
 	// Tx runs fn against one store connection in a single transaction.

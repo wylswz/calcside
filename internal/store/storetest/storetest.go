@@ -200,6 +200,26 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		if got.RevokedAt == nil {
 			t.Fatal("expected RevokedAt set")
 		}
+		// bound key round-trip + bulk revoke on resource death
+		bk := &store.APIKey{UserID: u.ID, Name: "b", Prefix: "cs_boundk", Hash: "h2",
+			WorkspaceID: store.PersonalWorkspaceID(u.ID), BoundID: "ins_x"}
+		if err := s.CreateAPIKey(ctx, bk); err != nil {
+			t.Fatal(err)
+		}
+		got, err = s.GetAPIKeyByHash(ctx, "h2")
+		if err != nil || got.BoundID != "ins_x" {
+			t.Fatalf("bound id round-trip: %v %+v", err, got)
+		}
+		if err := s.RevokeBoundKeys(ctx, "ins_other"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RevokeBoundKeys(ctx, "ins_x"); err != nil {
+			t.Fatal(err)
+		}
+		got, _ = s.GetAPIKeyByHash(ctx, "h2")
+		if got.RevokedAt == nil {
+			t.Fatal("bound key not revoked")
+		}
 	})
 
 	t.Run("sessions", func(t *testing.T) {

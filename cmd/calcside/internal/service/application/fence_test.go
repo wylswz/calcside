@@ -94,7 +94,7 @@ func TestApplicationKeysAndWorkspaceIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, key := range []service.Actor{
-		{UserID: actor.UserID, WorkspaceID: actor.WorkspaceID, Kind: types.AuthAPIKey, KeyInstanceID: "ins_x"},
+		{UserID: actor.UserID, WorkspaceID: actor.WorkspaceID, Kind: types.AuthAPIKey, KeyBoundID: "ins_x"},
 		{UserID: actor.UserID, WorkspaceID: actor.WorkspaceID, Kind: types.AuthAPIKey, KeySpec: json.RawMessage(`{}`)},
 	} {
 		if _, err := s.Get(ctx, key, v.Application.ID); err == nil {

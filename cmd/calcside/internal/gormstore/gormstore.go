@@ -186,7 +186,7 @@ type keyRow struct {
 	MaxInstances int
 	WorkspaceID  string
 	ViewOnly     bool
-	InstanceID   string `gorm:"index"`
+	BoundID      string `gorm:"index"`
 }
 
 func (keyRow) TableName() string { return "api_keys" }
@@ -197,7 +197,7 @@ func (k keyRow) toStore() *store.APIKey {
 		CreatedAt: k.CreatedAt.UTC(), LastUsedAt: k.LastUsedAt,
 		ExpiresAt: k.ExpiresAt, RevokedAt: k.RevokedAt,
 		Spec: k.Spec, MaxInstances: k.MaxInstances, WorkspaceID: k.WorkspaceID,
-		ViewOnly: k.ViewOnly, InstanceID: k.InstanceID,
+		ViewOnly: k.ViewOnly, BoundID: k.BoundID,
 	}
 	utcPtr := func(t *time.Time) *time.Time {
 		if t == nil {
@@ -524,7 +524,7 @@ func (d *sqlDB) CreateAPIKey(ctx context.Context, k *store.APIKey) error {
 		CreatedAt: k.CreatedAt.UTC(), LastUsedAt: k.LastUsedAt,
 		ExpiresAt: k.ExpiresAt, RevokedAt: k.RevokedAt,
 		Spec: k.Spec, MaxInstances: k.MaxInstances, WorkspaceID: k.WorkspaceID,
-		InstanceID: k.InstanceID,
+		BoundID: k.BoundID,
 	}
 	return mapWriteErr(gorm.G[keyRow](d.g).Create(ctx, &row))
 }
@@ -1415,9 +1415,9 @@ func (d *sqlDB) CountMembers(ctx context.Context, workspaceID string, role types
 	return int(n), err
 }
 
-func (d *sqlDB) RevokeKeysByInstance(ctx context.Context, instanceID string) error {
+func (d *sqlDB) RevokeBoundKeys(ctx context.Context, boundID string) error {
 	now := time.Now().UTC()
-	_, err := gorm.G[keyRow](d.g).Where("instance_id = ? AND revoked_at IS NULL", instanceID).
+	_, err := gorm.G[keyRow](d.g).Where("bound_id = ? AND revoked_at IS NULL", boundID).
 		Update(ctx, "revoked_at", now)
 	return err
 }
