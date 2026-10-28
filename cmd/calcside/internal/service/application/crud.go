@@ -25,7 +25,7 @@ type Options struct {
 	Runtime    runtime.Runtime
 	Access     *access.Checker
 	Sandbox    *sandbox.Service
-	Audit      sandbox.AuditSink
+	Audit      AuditSink
 	MaxPerUser int
 	Now        func() time.Time
 }
@@ -49,9 +49,16 @@ func New(o Options) (*Service, error) {
 	return &Service{o: o, testSlots: make(chan struct{}, 8)}, nil
 }
 
+// AuditSink persists replica audit batches. Replica ids (apv_…) are
+// not instance rows, so the workspace arrives with the call — there is
+// no instance to look up.
+type AuditSink interface {
+	RecordWorkspace(workspaceID string, b runtime.AuditBatch)
+}
+
 type nopAudit struct{}
 
-func (nopAudit) Record(runtime.AuditBatch) {}
+func (nopAudit) RecordWorkspace(string, runtime.AuditBatch) {}
 
 type View struct {
 	Application           *store.Application `json:"application"`

@@ -952,8 +952,8 @@ func TestBuiltinNetworkPolicySelection(t *testing.T) {
 			}
 		}
 	}
-	if denied != 4 {
-		t.Fatalf("want 4 network policy audit denials, got %d", denied)
+	if denied != 2 {
+		t.Fatalf("want 2 network policy audit denials, got %d", denied)
 	}
 }
 

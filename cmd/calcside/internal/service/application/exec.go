@@ -15,11 +15,11 @@ import (
 
 // The caller defers cleanup before checking the outcome. In particular, a
 // successful test must retain its replica until Invoke has finished.
-func (s *Service) prepare(ctx context.Context, req *runtime.PrepareRequest) (*runtime.PrepareResponse, func(), error) {
+func (s *Service) prepare(ctx context.Context, workspaceID string, req *runtime.PrepareRequest) (*runtime.PrepareResponse, func(), error) {
 	resp, err := s.o.Runtime.Prepare(ctx, req)
 	epoch := req.Epoch
 	if resp != nil {
-		s.o.Audit.Record(resp.Audit)
+		s.o.Audit.RecordWorkspace(workspaceID, resp.Audit)
 		epoch = resp.Epoch
 	}
 	cleanup := func() {
@@ -98,7 +98,7 @@ func (s *Service) Publish(ctx context.Context, a service.Actor, id string, versi
 		return nil, err
 	}
 	replicaID := store.NewID("apv_")
-	prep, cleanup, err := s.prepare(ctx, &runtime.PrepareRequest{
+	prep, cleanup, err := s.prepare(ctx, app.WorkspaceID, &runtime.PrepareRequest{
 		CreateRequest: runtime.CreateRequest{
 			InstanceID: replicaID, Owner: owner,
 			Labels: map[string]string{"name": app.Name, "application_id": app.ID},
@@ -154,7 +154,7 @@ func (s *Service) Test(ctx context.Context, a service.Actor, id string, version 
 		return nil, err
 	}
 	replicaID := store.NewID("apv_")
-	prep, cleanup, err := s.prepare(ctx, &runtime.PrepareRequest{
+	prep, cleanup, err := s.prepare(ctx, app.WorkspaceID, &runtime.PrepareRequest{
 		CreateRequest: runtime.CreateRequest{
 			InstanceID: replicaID, Owner: owner,
 			Labels: map[string]string{"name": app.Name, "application_id": app.ID},
@@ -178,7 +178,7 @@ func (s *Service) Test(ctx context.Context, a service.Actor, id string, version 
 		InvokeID: store.NewID("inv_"), Input: input,
 	})
 	if out != nil {
-		s.o.Audit.Record(out.Audit)
+		s.o.Audit.RecordWorkspace(app.WorkspaceID, out.Audit)
 	}
 	if err != nil {
 		return nil, fail(err)
@@ -214,7 +214,7 @@ func (s *Service) Invoke(ctx context.Context, a service.Actor, id string, input 
 		InvokeID: store.NewID("inv_"), Input: input,
 	})
 	if out != nil {
-		s.o.Audit.Record(out.Audit)
+		s.o.Audit.RecordWorkspace(app.WorkspaceID, out.Audit)
 	}
 	if err != nil {
 		return nil, fail(err)

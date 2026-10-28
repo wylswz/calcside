@@ -12,6 +12,7 @@ import (
 	"calcside/cmd/calcside/internal/audit"
 	"calcside/cmd/calcside/internal/config"
 	"calcside/cmd/calcside/internal/service/access"
+	appsvc "calcside/cmd/calcside/internal/service/application"
 	auditsvc "calcside/cmd/calcside/internal/service/audit"
 	"calcside/cmd/calcside/internal/service/catalog"
 	"calcside/cmd/calcside/internal/service/iam"
@@ -28,6 +29,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		provideExtRepo, provideRegistry, provideRuntime, provideGlobalPolicies,
 		wire.Bind(new(sandbox.SecretResolver), new(*vault.Service)),
 		wire.Bind(new(sandbox.AuditSink), new(*audit.Recorder)),
+		wire.Bind(new(appsvc.AuditSink), new(*audit.Recorder)),
 		provideSandboxOptions, sandbox.New, vault.New,
 		wire.Bind(new(iam.SpecValidator), new(*sandbox.Service)),
 		wire.FieldsOf(new(config.Config), "MaxInstancesPerUser"),
