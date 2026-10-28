@@ -1909,8 +1909,8 @@ components:
       required: [memory_usage, memory_peak, memory_max]
       description: >-
         The instance's own cgroup v2 accounting, in bytes. Absent when the
-        instance has no group of its own (inproc isolation, or process
-        isolation without --instance-memory-max).
+        instance has no group of its own (cgroups unavailable or no
+        per-instance memory cap configured on the worker).
       properties:
         memory_usage: { type: integer, format: int64, description: memory.current }
         memory_peak: { type: integer, format: int64, description: memory.peak; 0 when the kernel does not report it }

@@ -28,10 +28,6 @@ import (
 	capfs "calcside/internal/capability/fs"
 	capio "calcside/internal/capability/io"
 	capnet "calcside/internal/capability/net"
-	common "calcside/internal/config"
-	"calcside/internal/node"
-	"calcside/internal/node/subproc"
-	"calcside/internal/nodeagent"
 	"calcside/internal/placement"
 	"calcside/internal/runtime"
 	"calcside/internal/store"
@@ -41,10 +37,8 @@ import (
 type application struct {
 	Server  *http.Server
 	Sandbox *sandbox.Service
-	// Serving is the persistent-instance scheduler; Agent runs it
-	// locally in single-node deployments (nil under --workers).
+	// Serving is the persistent-instance scheduler.
 	Serving *serving.Service
-	Agent   *nodeagent.Agent
 }
 
 func provideStore(ctx context.Context, cfg config.Config) (store.Store, func(), error) {
@@ -101,101 +95,62 @@ func provideRegistry(repo *extensions.Repository) *capability.Registry {
 	return reg
 }
 
-func provideNodeConfig(cfg config.Config, limits capability.ServerLimits) node.Config {
-	return node.Config{
-		Limits:             limits,
-		ExtAllowSources:    cfg.ExtAllowSources,
-		ExtLocalRoots:      cfg.ExtLocalRoots,
-		ExtCacheDir:        cfg.ExtCacheDir,
-		ExtFetchTimeout:    cfg.ExtFetchTimeout,
-		MaxConcurrentExecs: cfg.MaxConcurrentExecs,
-		ExecMemoryLimit:    cfg.ExecMemoryLimit,
-		EvalTimeout:        cfg.PolicyEvalTimeout,
-		MaxInstances:       cfg.MaxInstancesPerNode,
-		ReapInterval:       cfg.ReaperInterval,
+func provideRuntime(cfg config.Config, st store.Store) (runtime.Runtime, func(), error) {
+	// The API tier never executes code — every call forwards to a
+	// remote worker node; --workers/--worker-key are required.
+	if cfg.WorkerKey == "" {
+		return nil, nil, fmt.Errorf("--worker-key is required")
 	}
-}
-
-func provideNode(cfg node.Config) (*node.Node, func()) {
-	nd := node.Build(cfg)
-	return nd, nd.Close
-}
-
-func provideRuntime(cfg config.Config, st store.Store, ncfg node.Config, nd *node.Node) (runtime.Runtime, func(), error) {
-	// Execution tier. In-process by default; --workers switches the API
-	// tier to forward to remote worker nodes instead.
-	if cfg.Workers != "" {
-		if cfg.WorkerKey == "" {
-			return nil, nil, fmt.Errorf("--workers requires --worker-key")
-		}
-		nodes, err := parseWorkers(cfg.Workers)
-		if err != nil {
-			return nil, nil, err
-		}
-		slog.Info("remote execution tier", "workers", len(nodes))
-		client := worker.NewClient(
-			[]byte(cfg.WorkerKey),
-			cfg.NodeID,
-			func(context.Context) ([]placement.NodeRef, error) { return nodes, nil },
-			func(ctx context.Context, id string) (*placement.Binding, error) {
-				if strings.HasPrefix(id, string(store.PrefixServingReplica)) {
-					// Persistent replica: route only to the node that
-					// holds the live, current-generation ready lease.
-					rep, err := st.GetServingReplica(ctx, id)
-					if err != nil {
-						return nil, err
-					}
-					inst, err := st.GetPersistentInstance(ctx, rep.WorkspaceID, rep.InstanceID)
-					if err != nil {
-						return nil, err
-					}
-					live, err := st.ListServingNodes(ctx, time.Now())
-					if err != nil {
-						return nil, err
-					}
-					current := rep.State == store.ServingReplicaReady &&
-						rep.LeaseUntil.After(time.Now()) &&
-						inst.Enabled && inst.Generation == rep.Generation &&
-						inst.ReleaseID == rep.ReleaseID &&
-						inst.ActiveReplicaID == rep.ID
-					for _, n := range live {
-						if n.NodeID == rep.NodeID && n.BootID == rep.BootID &&
-							n.Incarnation == rep.NodeIncarnation && current {
-							return &placement.Binding{
-								InstanceID: rep.ID, NodeID: rep.NodeID, Epoch: rep.Epoch,
-							}, nil
-						}
-					}
-					return nil, placement.ErrNotBound
-				}
-				in, err := st.GetInstance(ctx, id)
+	nodes, err := config.ParseWorkers(cfg.Workers)
+	if err != nil {
+		return nil, nil, err
+	}
+	slog.Info("remote execution tier", "workers", len(nodes))
+	client := worker.NewClient(
+		[]byte(cfg.WorkerKey),
+		"api",
+		func(context.Context) ([]placement.NodeRef, error) { return nodes, nil },
+		func(ctx context.Context, id string) (*placement.Binding, error) {
+			if strings.HasPrefix(id, string(store.PrefixServingReplica)) {
+				// Persistent replica: route only to the node that
+				// holds the live, current-generation ready lease.
+				rep, err := st.GetServingReplica(ctx, id)
 				if err != nil {
 					return nil, err
 				}
-				if in.NodeID == "" {
-					return nil, placement.ErrNotBound
+				inst, err := st.GetPersistentInstance(ctx, rep.WorkspaceID, rep.InstanceID)
+				if err != nil {
+					return nil, err
 				}
-				return &placement.Binding{InstanceID: id, NodeID: in.NodeID, Epoch: in.LeaseEpoch}, nil
-			})
-		return client, client.HTTP.CloseIdleConnections, nil
-	} else if cfg.InstanceIsolation == common.IsolationProcess {
-		sup, err := subproc.New(subproc.Options{
-			Child:              subproc.ChildConfig{Node: ncfg},
-			MaxInstances:       cfg.MaxInstancesPerNode,
-			MaxConcurrentExecs: cfg.MaxConcurrentExecs,
-			ReapInterval:       cfg.ReaperInterval,
-			MemoryMax:          cfg.InstanceMemoryMax,
-			CgroupParent:       cfg.InstanceCgroupParent,
+				live, err := st.ListServingNodes(ctx, time.Now())
+				if err != nil {
+					return nil, err
+				}
+				current := rep.State == store.ServingReplicaReady &&
+					rep.LeaseUntil.After(time.Now()) &&
+					inst.Enabled && inst.Generation == rep.Generation &&
+					inst.ReleaseID == rep.ReleaseID &&
+					inst.ActiveReplicaID == rep.ID
+				for _, n := range live {
+					if n.NodeID == rep.NodeID && n.BootID == rep.BootID &&
+						n.Incarnation == rep.NodeIncarnation && current {
+						return &placement.Binding{
+							InstanceID: rep.ID, NodeID: rep.NodeID, Epoch: rep.Epoch,
+						}, nil
+					}
+				}
+				return nil, placement.ErrNotBound
+			}
+			in, err := st.GetInstance(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			if in.NodeID == "" {
+				return nil, placement.ErrNotBound
+			}
+			return &placement.Binding{InstanceID: id, NodeID: in.NodeID, Epoch: in.LeaseEpoch}, nil
 		})
-		if err != nil {
-			return nil, nil, err
-		}
-		sup.StartReaper()
-		slog.Info("instance isolation", "mode", cfg.InstanceIsolation)
-		return sup, sup.Close, nil
-	}
-	nd.Manager.StartReaper()
-	return nd.Manager, func() {}, nil
+	return client, client.HTTP.CloseIdleConnections, nil
 }
 
 func provideGlobalPolicies(cfg config.Config) (map[string]string, error) {
@@ -210,14 +165,6 @@ func provideGlobalPolicies(cfg config.Config) (map[string]string, error) {
 }
 
 func provideSandboxOptions(ctx context.Context, cfg config.Config, st store.Store, rt runtime.Runtime, vaultSvc sandbox.SecretResolver, rec sandbox.AuditSink, reg *capability.Registry, limits capability.ServerLimits, globalPolicies map[string]string, ac *access.Checker, repo *extensions.Repository) (sandbox.Options, error) {
-	// Instances a previous incarnation of this node owned cannot be
-	// recovered: their Starlark globals lived in that process's memory.
-	if n, err := st.MarkRunningAsLostForNode(ctx, cfg.NodeID); err != nil {
-		return sandbox.Options{}, fmt.Errorf("recover: %w", err)
-	} else if n > 0 {
-		slog.Warn("marked lost instances", "count", n)
-	}
-
 	extOpts := repo.Options()
 	return sandbox.Options{
 		Store:               st,
@@ -288,40 +235,18 @@ func provideWeb() fs.FS {
 // SQL; workers never touch the database.
 func provideServingService(cfg config.Config, st store.Store, secrets sandbox.SecretResolver,
 	globalPolicies map[string]string) (*serving.Service, error) {
+	refs, err := config.ParseWorkers(cfg.Workers)
+	if err != nil {
+		return nil, err
+	}
 	nodes := map[string]string{}
-	if cfg.Workers != "" {
-		refs, err := parseWorkers(cfg.Workers)
-		if err != nil {
-			return nil, err
-		}
-		for _, r := range refs {
-			nodes[r.NodeID] = r.Addr
-		}
-	} else {
-		nodes[cfg.NodeID] = "local"
+	for _, r := range refs {
+		nodes[r.NodeID] = r.Addr
 	}
 	return serving.New(serving.Options{
 		Store: st, Secrets: secrets, Nodes: nodes,
 		GlobalPolicies: globalPolicies,
 		LeaseDuration:  30 * time.Second, NodeTTL: 45 * time.Second,
-	})
-}
-
-// provideServingAgent runs the node agent in-process for local
-// topology; remote workers run their own agent and this stays nil.
-func provideServingAgent(cfg config.Config, svc *serving.Service, rt runtime.Runtime) (*nodeagent.Agent, error) {
-	if cfg.Workers != "" || svc == nil {
-		return nil, nil
-	}
-	cap := cfg.MaxInstancesPerNode
-	if cap <= 0 || cap > 128 {
-		cap = 128
-	}
-	boot := store.NewID("boot_")
-	slog.Info("serving node boot", "node_id", cfg.NodeID, "boot_id", boot)
-	return nodeagent.New(nodeagent.Options{
-		Control: svc, Runtime: rt, NodeID: cfg.NodeID, BootID: boot,
-		Capacity: cap,
 	})
 }
 

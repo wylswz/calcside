@@ -198,7 +198,7 @@ func invokeN(t *testing.T, rt runtime.Runtime, rep *store.ServingReplica, u *sto
 }
 
 func TestServingRestart(t *testing.T) {
-	for _, mode := range []string{"inproc", "process"} {
+	for _, mode := range []string{"process"} {
 		t.Run(mode, func(t *testing.T) {
 			lease, ttl := time.Second, 3*time.Second
 			if mode == "process" {
@@ -223,7 +223,7 @@ func TestServingRestart(t *testing.T) {
 				return svc
 			}
 			svc := newSvc(st)
-			swap := &swapHandler{h: extensions.CallbackHandler(nil, cbKey, svc)}
+			swap := &swapHandler{h: extensions.WithControl(st, cbKey, svc)}
 			apiSrv := httptest.NewServer(swap)
 			t.Cleanup(apiSrv.Close)
 
@@ -296,7 +296,7 @@ func TestServingRestart(t *testing.T) {
 				t.Fatal(err)
 			}
 			svc = newSvc(st)
-			swap.set(extensions.CallbackHandler(nil, cbKey, svc))
+			swap.set(extensions.WithControl(st, cbKey, svc))
 			// The same boot keeps renewing through the restored API:
 			// the lease must actually move forward, same id/epoch.
 			waitFor(t, budget, "renewal after api restart", func() bool {
@@ -329,7 +329,7 @@ func TestServingRestart(t *testing.T) {
 			rt2, closeRT2 := newRT()
 			var rt2Once sync.Once
 			t.Cleanup(func() { rt2Once.Do(closeRT2) })
-			swap.set(extensions.CallbackHandler(nil, cbKey, svc))
+			swap.set(extensions.WithControl(st, cbKey, svc))
 			agent2, err := nodeagent.New(nodeagent.Options{
 				Control: ctl2, Runtime: rt2, NodeID: "worker-test", BootID: "boot2",
 				Capacity: 2, PollInterval: 20 * time.Millisecond, CallTimeout: 2 * time.Second,

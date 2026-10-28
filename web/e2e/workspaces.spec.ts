@@ -1,5 +1,6 @@
 import { test, expect, request, chromium, type APIRequestContext, type Page } from '@playwright/test'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,6 +9,7 @@ import { createServer } from 'node:net'
 
 const repo = fileURLToPath(new URL('../../', import.meta.url))
 let server: ChildProcess | undefined
+let worker: ChildProcess | undefined
 let directory: string
 let client: APIRequestContext
 let consoleURL: string
@@ -29,20 +31,37 @@ test.beforeAll(async () => {
   const binary = join(directory, 'calcside')
   const database = join(directory, 'test.db')
   execFileSync('go', ['build', '-o', binary, './cmd/calcside'], { cwd: repo, env, stdio: 'pipe' })
+  const extRoots = join(repo, 'contrib')
+  const workerBin = join(directory, 'calcside-worker')
+  execFileSync('go', ['build', '-o', workerBin, './cmd/calcside-worker'], { cwd: repo, env, stdio: 'pipe' })
   execFileSync('atlas', ['migrate', 'apply', '--env', 'sqlite'], { cwd: repo, env: { ...env, ATLAS_DB_URL: `sqlite://${database}` }, stdio: 'pipe' })
   const listenPort = await port()
+  const workerPort = await port()
+  const wkey = randomBytes(32).toString('hex')
+  const workerURL = `http://127.0.0.1:${workerPort}`
   consoleURL = `http://console.localhost:${listenPort}`
   const transportURL = `http://127.0.0.1:${listenPort}`
   // The suite accumulates live instances across tests; the quota itself is
   // covered by Go tests, so keep it out of the way here.
-  server = spawn(binary, ['serve', '--dev', '--store', 'sqlite', '--dsn', database, '--addr', `127.0.0.1:${listenPort}`, '--console-origin', consoleURL, '--max-instances-per-user', '100'], { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] })
+  server = spawn(binary, ['serve', '--dev', '--store', 'sqlite', '--dsn', database, '--addr', `127.0.0.1:${listenPort}`, '--console-origin', consoleURL, '--max-instances-per-user', '100', '--ext-local-roots', extRoots, '--workers', `w1=127.0.0.1:${workerPort}`, '--worker-key', wkey], { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] })
+  worker = spawn(workerBin, ['serve', '--listen', `127.0.0.1:${workerPort}`, '--api-addr', transportURL, '--shared-key', wkey, '--node-id', 'w1', '--ext-cache-dir', join(directory, 'workercache'), '--instance-memory-max', '0'], { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] })
   server.stdout?.on('data', (chunk) => { output = (output + String(chunk)).slice(-64_000) })
   server.stderr?.on('data', (chunk) => { output = (output + String(chunk)).slice(-64_000) })
+  worker.stdout?.on('data', (chunk) => { output = (output + '[worker] ' + String(chunk)).slice(-64_000) })
+  worker.stderr?.on('data', (chunk) => { output = (output + '[worker] ' + String(chunk)).slice(-64_000) })
   client = await request.newContext({ baseURL: transportURL, extraHTTPHeaders: { 'X-Requested-With': 'calcside' } })
   await expect.poll(async () => {
     if (server?.exitCode !== null) throw new Error(`Test server exited: ${output}`)
     try { return (await client.get('/healthz', { timeout: 1000 })).status() } catch { return 0 }
   }, { timeout: 30_000 }).toBe(200)
+  {
+    const c = await request.newContext({ baseURL: workerURL })
+    await expect.poll(async () => {
+      if (worker?.exitCode !== null && worker?.exitCode !== undefined) throw new Error(`Worker exited: ${output}`)
+      try { return (await c.get('/healthz', { timeout: 1000 })).status() } catch { return 0 }
+    }, { timeout: 30_000 }).toBe(200)
+    await c.dispose()
+  }
 })
 
 test.afterAll(async () => {
@@ -50,7 +69,16 @@ test.afterAll(async () => {
   if (server && server.exitCode === null) {
     const exited = new Promise<void>((resolve) => server!.once('exit', () => resolve()))
     server.kill('SIGTERM')
-    await exited
+    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5000))])
+    if (server.exitCode === null) { server.kill('SIGKILL'); await exited }
+    server.stdout?.destroy(); server.stderr?.destroy()
+  }
+  if (worker && worker.exitCode === null) {
+    const wexited = new Promise<void>((resolve) => worker!.once('exit', () => resolve()))
+    worker.kill('SIGTERM')
+    await Promise.race([wexited, new Promise((resolve) => setTimeout(resolve, 5000))])
+    if (worker.exitCode === null) { worker.kill('SIGKILL'); await wexited }
+    worker.stdout?.destroy(); worker.stderr?.destroy()
   }
   if (directory) await rm(directory, { recursive: true })
 })
@@ -545,9 +573,9 @@ test('new instance: extension library stays bounded at 1000 entries', async ({ p
   page.on('request', (r) => { if (r.url().startsWith('http') && !r.url().startsWith(consoleURL)) external.push(r.url()) })
 
   await page.goto(`${consoleURL}/instances/new`)
-  await expect(page.locator('.ext-card')).toHaveCount(12)
+  await expect(page.locator('.ext-library .ext-card')).toHaveCount(12)
   await expect(page.getByText('1–12 of 1,000')).toBeVisible()
-  const realIcon = page.locator('.ext-card img').first()
+  const realIcon = page.locator('.ext-library .ext-card img').first()
   await expect(realIcon).toBeVisible()
   await expect.poll(async () => realIcon.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true)
 
@@ -568,7 +596,7 @@ test('new instance: extension library stays bounded at 1000 entries', async ({ p
   await expect(page.getByText('1–12 of 1,000')).toBeVisible()
   await page.getByRole('button', { name: 'Next extensions page' }).click()
   await expect(page.getByText('13–24 of 1,000')).toBeVisible()
-  await expect(page.locator('.ext-card')).toHaveCount(12)
+  await expect(page.locator('.ext-library .ext-card')).toHaveCount(12)
   await expect(row).toHaveCount(1)
   expect(external).toHaveLength(0)
 
@@ -641,14 +669,14 @@ test('new instance: palette controls stay put while adding and removing', async 
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport)
     await page.goto(`${consoleURL}/instances/new`)
-    await expect(page.locator('.ext-card')).toHaveCount(12)
+    await expect(page.locator('.ext-library .ext-card')).toHaveCount(12)
     const targets = {
       files: page.locator('.ability-choice').nth(0),
       network: page.locator('.ability-choice').nth(1),
       search: page.getByLabel('Search extensions'),
       next: page.getByRole('button', { name: 'Next extensions page' }),
-      ext2: page.locator('.ext-card').nth(2).locator('.ext-card-action'),
-      ext3: page.locator('.ext-card').nth(3).locator('.ext-card-action'),
+      ext2: page.locator('.ext-library .ext-card').nth(2).locator('.ext-card-action'),
+      ext3: page.locator('.ext-library .ext-card').nth(3).locator('.ext-card-action'),
       custom: page.getByRole('button', { name: 'Configure a custom extension' }),
     }
     // Document coordinates: Playwright may scroll a target into view to
@@ -786,9 +814,9 @@ test('console controls keep their box under hover and press', async ({ page }) =
     local_enabled: true, remote_enabled: false,
   } }))
   await page.goto(`${consoleURL}/instances/new`)
-  await expect(page.locator('.ext-card')).toHaveCount(1)
+  await expect(page.locator('.ext-library .ext-card')).toHaveCount(1)
   // tabs last: a pressed tab activates and swaps the panel
-  const controls = ['[data-ui="button"][data-variant="primary"]', '[data-ui="button"][data-variant="default"]', '.ability-choice', '.ext-card', '.input', '.segmented [role="tab"]:not([aria-selected="true"])']
+  const controls = ['[data-ui="button"][data-variant="primary"]', '[data-ui="button"][data-variant="default"]', '.ability-choice', '.ext-library .ext-card', '.input', '.segmented [role="tab"]:not([aria-selected="true"])']
   for (const sel of controls) {
     const control = page.locator(sel).first()
     await control.scrollIntoViewIfNeeded()

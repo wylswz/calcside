@@ -31,14 +31,5 @@ func (a *application) startServing(ctx context.Context) func() {
 			}
 		}()
 	}
-	if a.Agent != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := a.Agent.Run(ctx); err != nil && ctx.Err() == nil {
-				slog.Error("persistent restoration stopped")
-			}
-		}()
-	}
 	return wg.Wait
 }

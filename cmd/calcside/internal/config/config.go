@@ -14,6 +14,7 @@ import (
 	"calcside/cmd/calcside/internal/auth"
 	"calcside/internal/capability"
 	common "calcside/internal/config"
+	"calcside/internal/placement"
 	"calcside/internal/types"
 )
 
@@ -35,7 +36,6 @@ type Config struct {
 	GoogleClientSecret     string
 	GoogleAllowedDomains   []string
 	CookieSecure           bool
-	NodeID                 string
 	Workers                string
 	WorkerKey              string
 	MaxInstancesPerUser    int
@@ -57,9 +57,6 @@ type Config struct {
 	ExtLocalRoots          []string
 	ExtCacheDir            string
 	ExtFetchTimeout        time.Duration
-	InstanceIsolation      string
-	InstanceMemoryMax      int64
-	InstanceCgroupParent   string
 }
 
 // Parse builds the config from args like ["serve", "--addr", ...]. Flags
@@ -84,8 +81,7 @@ func Parse(args []string) (Config, error) {
 	fs.BoolVar(&c.CookieSecure, "cookie-secure", common.EnvBool("COOKIE_SECURE", false), "set Secure on cookies")
 	fs.BoolVar(&c.Dev, "dev", common.EnvBool("DEV", false), "dev mode: no login, anonymous principal (INSECURE)")
 	fs.BoolVar(&c.DevAllowRemote, "dev-allow-remote", common.EnvBool("DEV_ALLOW_REMOTE", false), "allow --dev on non-loopback addr (INSECURE)")
-	fs.StringVar(&c.NodeID, "node-id", common.EnvOr("NODE_ID", "local"), "stable identity of this execution node; keep it constant across restarts so orphaned bindings can be reclaimed")
-	fs.StringVar(&c.Workers, "workers", common.EnvOr("WORKERS", ""), "comma-separated worker list nodeID=host:port; empty runs execution in-process")
+	fs.StringVar(&c.Workers, "workers", common.EnvOr("WORKERS", ""), "comma-separated worker list nodeID=host:port (required — the API never executes code locally)")
 	fs.StringVar(&c.WorkerKey, "worker-key", common.EnvOr("WORKER_SHARED_KEY", ""), "shared HMAC secret authenticating API↔worker calls")
 	fs.IntVar(&c.MaxInstancesPerUser, "max-instances-per-user", common.EnvInt("MAX_INSTANCES_PER_USER", 10), "max live instances per user (cluster-wide, counted from the store)")
 	fs.IntVar(&c.MaxInstancesPerNode, "max-instances-per-node", common.EnvInt("MAX_INSTANCES_PER_NODE", 0), "max live instances on this execution node (0 = unlimited)")
@@ -108,9 +104,6 @@ func Parse(args []string) (Config, error) {
 	fs.StringVar(&extRoots, "ext-local-roots", common.EnvOr("EXT_LOCAL_ROOTS", ""), "comma-separated local extension roots (sources use root-name/extension) (empty disables local ext)")
 	fs.StringVar(&c.ExtCacheDir, "ext-cache-dir", common.EnvOr("EXT_CACHE_DIR", common.DefaultExtCacheDir()), "extension fetch cache dir")
 	fs.DurationVar(&c.ExtFetchTimeout, "ext-fetch-timeout", common.EnvDur("EXT_FETCH_TIMEOUT", 30*time.Second), "ext remote fetch timeout")
-	fs.StringVar(&c.InstanceIsolation, "instance-isolation", common.EnvOr("INSTANCE_ISOLATION", common.IsolationInproc), "in-process execution tier: inproc runs instances in this process, process gives each instance its own OS process")
-	fs.Int64Var(&c.InstanceMemoryMax, "instance-memory-max", int64(common.EnvInt("INSTANCE_MEMORY_MAX", 64<<20)), "per-instance memory cap in bytes with --instance-isolation=process (Linux cgroup v2; 0 disables)")
-	fs.StringVar(&c.InstanceCgroupParent, "instance-cgroup-parent", common.EnvOr("INSTANCE_CGROUP_PARENT", ""), "cgroup v2 group (relative to /sys/fs/cgroup) holding per-instance groups; empty uses this process's own group")
 	if err := fs.Parse(args); err != nil {
 		return c, err
 	}
@@ -131,9 +124,6 @@ func Parse(args []string) (Config, error) {
 	origin.Host = strings.ToLower(origin.Host)
 	origin.Path, origin.RawPath = "", ""
 	c.ConsoleOrigin = origin.String()
-	if err := common.CheckIsolation(c.InstanceIsolation); err != nil {
-		return c, err
-	}
 	if err := auth.ValidateAdminCredentials(c.AdminUsername, c.AdminPassword); err != nil {
 		return c, err
 	}
@@ -171,6 +161,12 @@ func Parse(args []string) (Config, error) {
 	}
 	if c.DefaultTTL <= 0 || c.MaxTTL <= 0 {
 		return c, fmt.Errorf("TTLs must be positive")
+	}
+	if _, err := ParseWorkers(c.Workers); err != nil {
+		return c, err
+	}
+	if c.WorkerKey == "" {
+		return c, fmt.Errorf("--worker-key is required")
 	}
 	return c, nil
 }
@@ -213,4 +209,28 @@ func (c Config) ExecLimits() capability.ServerLimits {
 		MaxNetResponseBytes: c.MaxNetResponseBytes,
 		SecretsAllowHTTP:    c.SecretsAllowHTTP,
 	}
+}
+
+// ParseWorkers parses --workers entries of the form "nodeID=host:port";
+// at least one valid entry is required — the API never executes code
+// locally.
+func ParseWorkers(spec string) ([]placement.NodeRef, error) {
+	var out []placement.NodeRef
+	seen := make(map[string]bool)
+	for _, ent := range strings.Split(spec, ",") {
+		id, addr, ok := strings.Cut(strings.TrimSpace(ent), "=")
+		id, addr = strings.TrimSpace(id), strings.TrimSpace(addr)
+		if !ok || id == "" || len(id) > 128 || addr == "" {
+			return nil, fmt.Errorf("--workers: bad entry %q, want nodeID=host:port", ent)
+		}
+		if seen[id] {
+			return nil, fmt.Errorf("--workers: duplicate node id")
+		}
+		seen[id] = true
+		out = append(out, placement.NodeRef{NodeID: id, Addr: addr})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("--workers is required")
+	}
+	return out, nil
 }

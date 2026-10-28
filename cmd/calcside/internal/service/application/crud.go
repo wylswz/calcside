@@ -114,7 +114,8 @@ func (s *Service) Create(ctx context.Context, a service.Actor, r CreateRequest) 
 		name = "Untitled application"
 	}
 	// Normalize + validate the spec before persistence: refs only,
-	// ext explicitly rejected, policies preserved.
+	// capabilities pass through the same boundary as instances;
+	// extension refs arrive already pinned by SpecPinner.
 	spec, _, _, err := s.boundary(ctx, a, a.WorkspaceID, specOr(r.Spec))
 	if err != nil {
 		return nil, fail(err)

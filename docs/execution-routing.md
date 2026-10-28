@@ -121,20 +121,18 @@ Release publishing, public persistent-instance invoke routes and the build
 schema editor remain separate follow-up work; database rows alone are not a
 public deployment API.
 
-`--instance-isolation=inproc|process` selects whether the innermost hop
-exists. The other hops are unchanged.
+The API tier never executes code: `calcside serve` requires `--workers` +
+`--worker-key`, and `calcside-worker serve` requires `--api-addr` +
+`--shared-key`. Every instance call is API → worker → instance process.
 
-| Mode | Path |
+| Component | Path |
 |---|---|
-| `calcside-worker serve` (default `process`) | worker → instance process → Manager |
-| `calcside-worker serve --instance-isolation=inproc` | worker → Manager (all instances in the worker process) |
-| `calcside serve` (default `inproc`, no `--workers`) | API → Manager in the same process (dev, tests) |
-| `calcside serve --instance-isolation=process` | API → instance process → Manager |
-| `calcside serve --workers=…` | API → worker → … (as configured on the worker) |
+| `calcside serve --workers=…` | API → signed remote client → worker |
+| `calcside-worker serve` | worker → Supervisor → instance process → Manager |
 
-Both `calcside` and `calcside-worker` understand the hidden `__instance`
-subcommand, so whichever binary is the supervisor re-executes itself. There is
-no second binary to deploy and no version skew between parent and child.
+Only `calcside-worker` understands the hidden `__instance` subcommand: the
+Supervisor re-executes its own binary as each instance's process. There is no
+second binary to deploy and no version skew between parent and child.
 `cmd/calcside-exec` runs the same entrypoint standalone.
 
 ## Why this shape

@@ -864,7 +864,7 @@ type Instance struct {
 
 // InstanceInspect live globals snapshot; values are reprs, secret-scrubbed
 type InstanceInspect struct {
-	// Resources The instance's own cgroup v2 accounting, in bytes. Absent when the instance has no group of its own (inproc isolation, or process isolation without --instance-memory-max).
+	// Resources The instance's own cgroup v2 accounting, in bytes. Absent when the instance has no group of its own (cgroups unavailable or no per-instance memory cap configured on the worker).
 	Resources *ResourceUsages   `json:"resources,omitempty"`
 	Variables map[string]string `json:"variables"`
 }
@@ -1074,7 +1074,7 @@ type PolicyUpdateRequest struct {
 // RawJSON raw JSON preserved byte-for-byte; never re-parsed by the API tier
 type RawJSON = json.RawMessage
 
-// ResourceUsages The instance's own cgroup v2 accounting, in bytes. Absent when the instance has no group of its own (inproc isolation, or process isolation without --instance-memory-max).
+// ResourceUsages The instance's own cgroup v2 accounting, in bytes. Absent when the instance has no group of its own (cgroups unavailable or no per-instance memory cap configured on the worker).
 type ResourceUsages struct {
 	// MemoryMax memory.max; 0 means unlimited
 	MemoryMax int64 `json:"memory_max"`

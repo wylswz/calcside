@@ -34,36 +34,30 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		return nil, nil, err
 	}
 	checker := access.New(store)
-	serverLimits := provideLimits(cfg)
-	nodeConfig := provideNodeConfig(cfg, serverLimits)
-	node, cleanup2 := provideNode(nodeConfig)
-	runtime, cleanup3, err := provideRuntime(cfg, store, nodeConfig, node)
+	runtime, cleanup2, err := provideRuntime(cfg, store)
 	if err != nil {
-		cleanup2()
 		cleanup()
 		return nil, nil, err
 	}
 	cipher, err := provideCipher(cfg)
 	if err != nil {
-		cleanup3()
 		cleanup2()
 		cleanup()
 		return nil, nil, err
 	}
 	service := vault.New(store, cipher, checker)
-	recorder, cleanup4 := provideRecorder(store)
+	recorder, cleanup3 := provideRecorder(store)
 	repository, err := provideExtRepo(cfg, store)
 	if err != nil {
-		cleanup4()
 		cleanup3()
 		cleanup2()
 		cleanup()
 		return nil, nil, err
 	}
 	registry := provideRegistry(repository)
+	serverLimits := provideLimits(cfg)
 	v, err := provideGlobalPolicies(cfg)
 	if err != nil {
-		cleanup4()
 		cleanup3()
 		cleanup2()
 		cleanup()
@@ -71,7 +65,6 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	}
 	options, err := provideSandboxOptions(ctx, cfg, store, runtime, service, recorder, registry, serverLimits, v, checker, repository)
 	if err != nil {
-		cleanup4()
 		cleanup3()
 		cleanup2()
 		cleanup()
@@ -91,7 +84,6 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	authService := provideAuth(cfg, store)
 	basicLogin, err := provideBasic(ctx, cfg, authService)
 	if err != nil {
-		cleanup4()
 		cleanup3()
 		cleanup2()
 		cleanup()
@@ -100,15 +92,13 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	fs := provideWeb()
 	user, err := provideAnonymous(ctx, cfg, store)
 	if err != nil {
-		cleanup4()
 		cleanup3()
 		cleanup2()
 		cleanup()
 		return nil, nil, err
 	}
-	artifactPreviews, cleanup5, err := provideArtifacts(cfg, sandboxService)
+	artifactPreviews, cleanup4, err := provideArtifacts(cfg, sandboxService)
 	if err != nil {
-		cleanup4()
 		cleanup3()
 		cleanup2()
 		cleanup()
@@ -116,7 +106,6 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	}
 	applicationService, err := provideApplicationService(store, runtime, sandboxService, checker, recorder, cfg)
 	if err != nil {
-		cleanup5()
 		cleanup4()
 		cleanup3()
 		cleanup2()
@@ -142,7 +131,6 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	}
 	googleFlow, err := provideGoogle(ctx, cfg)
 	if err != nil {
-		cleanup5()
 		cleanup4()
 		cleanup3()
 		cleanup2()
@@ -151,7 +139,6 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	}
 	servingService, err := provideServingService(cfg, store, service, v)
 	if err != nil {
-		cleanup5()
 		cleanup4()
 		cleanup3()
 		cleanup2()
@@ -159,23 +146,12 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		return nil, nil, err
 	}
 	server := provideServer(cfg, store, deps, googleFlow, servingService)
-	agent, err := provideServingAgent(cfg, servingService, runtime)
-	if err != nil {
-		cleanup5()
-		cleanup4()
-		cleanup3()
-		cleanup2()
-		cleanup()
-		return nil, nil, err
-	}
 	mainApplication := &application{
 		Server:  server,
 		Sandbox: sandboxService,
 		Serving: servingService,
-		Agent:   agent,
 	}
 	return mainApplication, func() {
-		cleanup5()
 		cleanup4()
 		cleanup3()
 		cleanup2()

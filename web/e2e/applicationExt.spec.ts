@@ -183,17 +183,36 @@ test('call examples tabs show real request shapes', async ({ page }) => {
   expect(r.status()).toBe(200)
   const id = (await r.json()).application.id
   await page.goto(`${viteURL}/applications/${id}`)
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: viteURL })
+  const examples = page.locator('.app-examples')
+  await examples.scrollIntoViewIfNeeded()
+  await page.getByRole('tab', { name: 'curl', exact: true }).focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByRole('tab', { name: 'Python', exact: true })).toBeFocused()
+  await expect(page.getByRole('tab', { name: 'Python', exact: true })).toHaveAttribute('aria-selected', 'true')
+  let panelHeight: number | undefined
   for (const tab of ['curl', 'Python', 'JavaScript']) {
     await page.getByRole('tab', { name: tab, exact: true }).click()
-    const body = await page.locator('.app-examples').innerText()
+    const panel = examples.getByRole('tabpanel')
+    const body = await panel.locator('pre').innerText()
     expect(body).toContain(`/api/v1/applications/${id}/invoke`)
+    expect(body).toContain('CALCSIDE_API_KEY')
+    expect(body).toContain('name') // the seeded input JSON is embedded verbatim
+    const height = await panel.evaluate((el) => el.getBoundingClientRect().height)
+    panelHeight ??= height
+    expect(Math.abs(height - panelHeight)).toBeLessThanOrEqual(1)
+    await panel.getByRole('button').click()
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(body)
+    // S1/S4: copy feedback changes paint/text, never the panel box.
+    expect(Math.abs(await panel.evaluate((el) => el.getBoundingClientRect().height) - panelHeight)).toBeLessThanOrEqual(1)
   }
-  const curl = await page.locator('.app-examples').innerText()
-  expect(curl).toContain('input')
+  await examples.screenshot({ path: '/tmp/calcside-ep14-logs/ext-mode-desktop-examples.png' })
   await page.setViewportSize({ width: 390, height: 844 })
-  const clipped = await page.locator('.app-examples').evaluate((el) => el.scrollWidth > el.clientWidth)
+  await examples.scrollIntoViewIfNeeded()
+  const clipped = await examples.evaluate((el) => el.scrollWidth > el.clientWidth)
   expect(clipped).toBe(false)
-  await page.screenshot({ path: '/tmp/calcside-ep14-logs/ext-sync-cache-mobile-examples.png' })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false)
+  await examples.screenshot({ path: '/tmp/calcside-ep14-logs/ext-mode-mobile-examples.png' })
 })
 
 // Invalid raw spec edits persist through collapse/reopen; a kind

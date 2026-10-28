@@ -16,21 +16,31 @@ if [ "$(id -u)" != 0 ]; then
 fi
 
 cg=/sys/fs/cgroup
-if mkdir -p "$cg/init" 2>/dev/null; then
+setup_cgroup() {
+	# probe: cgroup v2 must be present and writable, with the memory
+	# controller available for delegation
+	[ -f "$cg/cgroup.controllers" ] || return 1
+	grep -qw memory "$cg/cgroup.controllers" || return 1
+	mkdir -p "$cg/init" 2>/dev/null || return 1
+	mkdir -p "$cg/calcside/supervisor" 2>/dev/null || return 1
 	# cgroup v2 only hands controllers down from a group without member
 	# processes: park everything in init/, then give the worker
 	# calcside/ (instance groups) with itself in calcside/supervisor.
-	mkdir -p "$cg/calcside/supervisor"
-	for p in $(cat "$cg/cgroup.procs"); do
+	# Some listed PIDs exit between the read and the write — best-effort.
+	for p in $(cat "$cg/cgroup.procs" 2>/dev/null); do
 		echo "$p" >"$cg/init/cgroup.procs" 2>/dev/null || true
 	done
-	echo +memory >"$cg/cgroup.subtree_control"
-	echo +memory >"$cg/calcside/cgroup.subtree_control"
-	chown -R calcside:calcside "$cg/calcside"
-	echo $$ >"$cg/calcside/supervisor/cgroup.procs"
+	echo +memory >"$cg/cgroup.subtree_control" 2>/dev/null || return 1
+	echo +memory >"$cg/calcside/cgroup.subtree_control" 2>/dev/null || return 1
+	chown -R calcside:calcside "$cg/calcside" 2>/dev/null || return 1
+	echo $$ >"$cg/calcside/supervisor/cgroup.procs" 2>/dev/null || return 1
+	return 0
+}
+
+if setup_cgroup; then
 	export CALCSIDE_INSTANCE_CGROUP_PARENT="${CALCSIDE_INSTANCE_CGROUP_PARENT:-/calcside}"
 else
-	echo "worker-entrypoint: $cg is read-only (needs --security-opt writable-cgroups=true); per-instance memory limits disabled" >&2
+	echo "worker-entrypoint: per-instance memory limits disabled (cgroup v2/memory controller unavailable or not writable)" >&2
 fi
 
 exec su-exec calcside "$@"

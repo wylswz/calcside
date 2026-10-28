@@ -13,7 +13,6 @@ import (
 	"calcside/cmd/calcside-worker/internal/config"
 	"calcside/cmd/calcside-worker/internal/controlclient"
 	"calcside/cmd/calcside-worker/internal/extcache"
-	common "calcside/internal/config"
 	"calcside/internal/node"
 	"calcside/internal/node/subproc"
 	"calcside/internal/nodeagent"
@@ -31,6 +30,9 @@ func provideNodeID(cfg config.WorkerConfig) (string, error) {
 	if cfg.SharedKey == "" {
 		return "", fmt.Errorf("--shared-key is required: an unauthenticated worker is an open execution endpoint")
 	}
+	if cfg.APIAddr == "" {
+		return "", fmt.Errorf("--api-addr is required: the worker only reports back over node control")
+	}
 	id, err := nodeID(cfg)
 	if err != nil {
 		return "", err
@@ -39,10 +41,9 @@ func provideNodeID(cfg config.WorkerConfig) (string, error) {
 	return id, nil
 }
 
-func provideNodeConfig(cfg config.WorkerConfig, nodeID string) node.Config {
+func provideNodeConfig(cfg config.WorkerConfig) node.Config {
 	ncfg := node.Config{
 		Limits:             cfg.ExecLimits(),
-		ExtAllowSources:    cfg.ExtAllowSources,
 		ExtCacheDir:        extArtifactDir(cfg),
 		ExtFetchTimeout:    cfg.ExtFetchTimeout,
 		MaxConcurrentExecs: cfg.MaxConcurrentExecs,
@@ -77,30 +78,20 @@ func extArtifactDir(cfg config.WorkerConfig) string {
 	return filepath.Join(cfg.ExtCacheDir, "artifacts")
 }
 
-func provideRuntime(cfg config.WorkerConfig, nodeID string, ncfg node.Config, ext *extcache.Cache) (runtime.Runtime, func(), error) {
-	slog.Info("instance isolation", "mode", cfg.InstanceIsolation)
-	if cfg.InstanceIsolation == common.IsolationProcess {
-		sup, err := subproc.New(subproc.Options{
-			Child: subproc.ChildConfig{
-				Node: ncfg,
-			},
-			MaxInstances:       cfg.MaxInstances,
-			MaxConcurrentExecs: cfg.MaxConcurrentExecs,
-			ReapInterval:       cfg.ReaperInterval,
-			MemoryMax:          cfg.InstanceMemoryMax,
-			CgroupParent:       cfg.InstanceCgroupParent,
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		sup.StartReaper()
-		ad := extcache.WithRuntime(sup, ext)
-		return ad, sup.Close, nil
+func provideRuntime(cfg config.WorkerConfig, ncfg node.Config, ext *extcache.Cache) (runtime.Runtime, func(), error) {
+	sup, err := subproc.New(subproc.Options{
+		Child:              subproc.ChildConfig{Node: ncfg},
+		MaxInstances:       cfg.MaxInstances,
+		MaxConcurrentExecs: cfg.MaxConcurrentExecs,
+		ReapInterval:       cfg.ReaperInterval,
+		MemoryMax:          cfg.InstanceMemoryMax,
+		CgroupParent:       cfg.InstanceCgroupParent,
+	})
+	if err != nil {
+		return nil, nil, err
 	}
-	nd := node.Build(ncfg)
-	nd.Manager.StartReaper()
-	ad := extcache.WithRuntime(nd.Manager, ext)
-	return ad, nd.Close, nil
+	sup.StartReaper()
+	return extcache.WithRuntime(sup, ext), sup.Close, nil
 }
 
 // provideExtCache builds the synchronous extension artifact cache.
@@ -136,10 +127,6 @@ func provideExtCache(cfg config.WorkerConfig, nodeID string) (*extcache.Cache, e
 // provideServingAgent runs the node agent against the API's control
 // plane; without --api-addr the worker keeps legacy execution only.
 func provideServingAgent(cfg config.WorkerConfig, nodeID string, rt runtime.Runtime) (*nodeagent.Agent, error) {
-	if cfg.APIAddr == "" {
-		slog.Info("persistent restoration disabled (no --api-addr)")
-		return nil, nil
-	}
 	ctl, err := controlclient.New(cfg.APIAddr, nodeID, []byte(cfg.SharedKey), nil)
 	if err != nil {
 		return nil, err

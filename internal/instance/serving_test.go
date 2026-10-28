@@ -627,11 +627,23 @@ func TestReplicaPrepareRace(t *testing.T) {
 		}
 		_, _ = n.m.Keepalive(context.Background(), &runtime.KeepaliveRequest{InstanceID: req.InstanceID, Owner: n.owner, RenewedExpiresAt: n.clock().Add(time.Hour)})
 		n.m.Reap(context.Background())
+		// The scheduled Delete must bar admission before the blocked
+		// prepare can commit — wait for its lifecycle cancel before
+		// releasing the factory.
+		n.m.mu.Lock()
+		r := n.m.replicas[req.InstanceID]
+		n.m.mu.Unlock()
 		delDone := make(chan error, 1)
 		go func() {
 			_, err := n.m.Delete(context.Background(), &runtime.DeleteRequest{InstanceID: req.InstanceID, Owner: n.owner})
 			delDone <- err
 		}()
+		select {
+		case <-r.lifecycle.Done():
+		case <-time.After(5 * time.Second):
+			close(release)
+			t.Fatal("delete never cancelled the replica lifecycle")
+		}
 		close(release)
 		resp := <-done
 		// A prepare committed after Delete must never report a ready

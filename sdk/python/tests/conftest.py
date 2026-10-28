@@ -1,9 +1,10 @@
-"""Session fixture: build the Go server once and run it in dev mode."""
+"""Run a disposable API and process-isolated worker for SDK tests."""
 
 from __future__ import annotations
 
 import base64
 import os
+import secrets
 import socket
 import subprocess
 import time
@@ -26,49 +27,84 @@ def _free_port() -> int:
 def server(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("calcside-server")
     binary = tmp / "calcside"
-    subprocess.run(
-        ["go", "build", "-o", str(binary), "./cmd/calcside"],
-        cwd=REPO_ROOT,
-        check=True,
-    )
+    worker_binary = tmp / "calcside-worker"
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("CALCSIDE_", "ATLAS_"))
+    }
+    for target, package in [
+        (binary, "./cmd/calcside"),
+        (worker_binary, "./cmd/calcside-worker"),
+    ]:
+        subprocess.run(
+            ["go", "build", "-o", str(target), package],
+            cwd=REPO_ROOT,
+            env=env,
+            check=True,
+        )
     subprocess.run(
         ["atlas", "migrate", "apply", "--env", "sqlite"],
         cwd=REPO_ROOT,
-        env={**os.environ, "ATLAS_DB_URL": f"sqlite://{tmp / 't.db'}"},
+        env={**env, "ATLAS_DB_URL": f"sqlite://{tmp / 't.db'}"},
         check=True,
     )
     port = _free_port()
-    proc = subprocess.Popen(
-        [
-            str(binary),
-            "serve",
-            "--dev",
-            "--addr",
-            f"127.0.0.1:{port}",
-            "--dsn",
-            str(tmp / "t.db"),
-            "--secret-key",
-            SECRET_KEY,
-            "--secrets-allow-http",
-        ],
-        cwd=REPO_ROOT,
-    )
+    worker_port = _free_port()
+    while worker_port == port:
+        worker_port = _free_port()
+    shared_key = secrets.token_hex(32)
     url = f"http://127.0.0.1:{port}"
-    deadline = time.time() + 30
-    while time.time() < deadline:
-        if proc.poll() is not None:
-            raise RuntimeError(f"calcside exited with {proc.returncode}")
-        try:
-            urllib.request.urlopen(url + "/healthz", timeout=1)
-            break
-        except OSError:
-            time.sleep(0.2)
-    else:
-        proc.kill()
-        raise RuntimeError("calcside did not become healthy")
-    yield url
-    proc.terminate()
+    processes: list[subprocess.Popen] = []
     try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+        processes.append(
+            subprocess.Popen(
+                [
+                    str(binary), "serve", "--dev",
+                    "--addr", f"127.0.0.1:{port}",
+                    "--dsn", str(tmp / "t.db"),
+                    "--secret-key", SECRET_KEY, "--secrets-allow-http",
+                    "--workers", f"sdk-worker=127.0.0.1:{worker_port}",
+                    "--worker-key", shared_key,
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+            )
+        )
+        processes.append(
+            subprocess.Popen(
+                [
+                    str(worker_binary), "serve",
+                    "--listen", f"127.0.0.1:{worker_port}",
+                    "--api-addr", url, "--shared-key", shared_key,
+                    "--node-id", "sdk-worker",
+                    "--ext-cache-dir", str(tmp / "worker-cache"),
+                    "--instance-memory-max", "0", "--secrets-allow-http",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+            )
+        )
+        for endpoint in [url, f"http://127.0.0.1:{worker_port}"]:
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                if any(proc.poll() is not None for proc in processes):
+                    raise RuntimeError("API or worker exited during startup")
+                try:
+                    with urllib.request.urlopen(endpoint + "/healthz", timeout=1):
+                        break
+                except OSError:
+                    time.sleep(0.2)
+            else:
+                raise RuntimeError("API or worker did not become healthy")
+        yield url
+    finally:
+        for proc in processes:
+            if proc.poll() is None:
+                proc.terminate()
+        for proc in processes:
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)

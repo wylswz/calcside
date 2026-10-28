@@ -135,7 +135,6 @@ spec:
                   optional: true
             - name: CALCSIDE_GOOGLE_ALLOWED_DOMAINS
               value: {{ join "," .Values.config.googleAllowedDomains | quote }}
-            {{- if .Values.worker.enabled }}
             - name: CALCSIDE_WORKER_SHARED_KEY
               valueFrom:
                 secretKeyRef:
@@ -143,11 +142,6 @@ spec:
                   key: worker-shared-key
             - name: CALCSIDE_WORKERS
               value: {{ include "calcside.workerNodes" . | quote }}
-            {{- end }}
-            - name: CALCSIDE_INSTANCE_ISOLATION
-              value: {{ .Values.config.apiInstanceIsolation | quote }}
-            - name: CALCSIDE_INSTANCE_MEMORY_MAX
-              value: {{ .Values.config.apiInstanceMemoryMax | int64 | quote }}
             - name: CALCSIDE_MAX_INSTANCES_PER_USER
               value: {{ .Values.limits.maxInstancesPerUser | int64 | quote }}
             - name: CALCSIDE_MAX_INSTANCES_PER_NODE

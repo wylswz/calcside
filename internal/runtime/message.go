@@ -269,8 +269,8 @@ type InspectRequest struct {
 }
 
 // ResourceUsages is the instance's own cgroup accounting, in bytes. All
-// zero when the instance has no group of its own (inproc isolation, or
-// process isolation without a memory cap); MemoryMax 0 means unlimited.
+// zero when cgroups are unavailable or no per-instance memory cap is
+// configured on the worker; MemoryMax 0 means unlimited.
 type ResourceUsages struct {
 	MemoryUsage uint64 `json:"memory_usage"`
 	MemoryPeak  uint64 `json:"memory_peak,omitempty"`

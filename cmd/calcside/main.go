@@ -8,24 +8,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"calcside/cmd/calcside/internal/config"
 	"calcside/cmd/calcside/internal/service/sandbox"
-	"calcside/internal/node/subproc"
-	"calcside/internal/placement"
 )
 
 func main() {
-	if len(os.Args) == 2 && os.Args[1] == subproc.ChildArg {
-		if err := subproc.RunChild(os.Stdin, os.Stdout, nil); err != nil {
-			fmt.Fprintln(os.Stderr, "instance:", err)
-			os.Exit(1)
-		}
-		return
-	}
 	if len(os.Args) < 2 || os.Args[1] != "serve" {
 		fmt.Fprintln(os.Stderr, "usage: calcside serve [flags]")
 		os.Exit(2)
@@ -86,25 +76,6 @@ func serve(cfg config.Config) error {
 		return err
 	}
 	return nil
-}
-
-// parseWorkers parses --workers entries of the form "nodeID=host:port".
-func parseWorkers(spec string) ([]placement.NodeRef, error) {
-	var out []placement.NodeRef
-	seen := make(map[string]bool)
-	for _, ent := range strings.Split(spec, ",") {
-		id, addr, ok := strings.Cut(strings.TrimSpace(ent), "=")
-		id, addr = strings.TrimSpace(id), strings.TrimSpace(addr)
-		if !ok || id == "" || len(id) > 128 || addr == "" {
-			return nil, fmt.Errorf("--workers: bad entry %q, want nodeID=host:port", ent)
-		}
-		if seen[id] {
-			return nil, fmt.Errorf("--workers: duplicate node id")
-		}
-		seen[id] = true
-		out = append(out, placement.NodeRef{NodeID: id, Addr: addr})
-	}
-	return out, nil
 }
 
 // expireLoop sweeps instances whose sliding TTL elapsed. Nodes reclaim

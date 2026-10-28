@@ -68,8 +68,8 @@ func Errf(kind error, format string, args ...any) *Error {
 //	worker            subproc.Supervisor    one OS process per instance
 //	instance process  *instance.Manager     in-memory state, runs Starlark
 //
-// remote.Direct carries the worker→instance-process hop; the single
-// binary and tests use *instance.Manager directly.
+// remote.Direct carries the worker-to-instance-process hop. Only the
+// instance child and library tests use *instance.Manager directly.
 //
 // Retry semantics differ per method and are part of the contract:
 // Create, Exec, Delete, Prepare and Invoke have side effects and must

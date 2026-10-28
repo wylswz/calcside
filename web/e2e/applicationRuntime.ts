@@ -120,7 +120,7 @@ export async function startApplicationRuntime(): Promise<ApplicationRuntime> {
   const workerArgs = ['serve', '--listen', workerAddr, '--api-addr', proxyURL,
     '--shared-key', key, '--node-id', 'w1',
     '--ext-cache-dir', join(dir, 'workercache'),
-    '--instance-isolation', 'process', '--instance-memory-max', '0']
+    '--instance-memory-max', '0']
 
   let api = start(apiBin, apiArgs, 'api')
   let worker = start(workerBin, workerArgs, 'worker')

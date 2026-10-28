@@ -85,16 +85,12 @@ func serve(cfg config.WorkerConfig) error {
 	defer cleanup()
 
 	agentDone := make(chan struct{})
-	if app.Agent != nil {
-		go func() {
-			defer close(agentDone)
-			if err := app.Agent.Run(ctx); err != nil && ctx.Err() == nil {
-				slog.Error("persistent restoration stopped")
-			}
-		}()
-	} else {
-		close(agentDone)
-	}
+	go func() {
+		defer close(agentDone)
+		if err := app.Agent.Run(ctx); err != nil && ctx.Err() == nil {
+			slog.Error("persistent restoration stopped")
+		}
+	}()
 	defer func() {
 		stop()
 		<-agentDone

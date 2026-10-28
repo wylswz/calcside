@@ -1224,7 +1224,7 @@ export interface components {
             };
             resources?: components["schemas"]["ResourceUsages"];
         };
-        /** @description The instance's own cgroup v2 accounting, in bytes. Absent when the instance has no group of its own (inproc isolation, or process isolation without --instance-memory-max). */
+        /** @description The instance's own cgroup v2 accounting, in bytes. Absent when the instance has no group of its own (cgroups unavailable or no per-instance memory cap configured on the worker). */
         ResourceUsages: {
             /**
              * Format: int64
