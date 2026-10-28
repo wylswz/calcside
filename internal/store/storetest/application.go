@@ -139,7 +139,10 @@ func RunApplications(t *testing.T, s store.Store) {
 		if _, err := s.PublishApplication(ctx, "ws_1", a.ID, 9, rel, time.Now()); !errors.Is(err, store.ErrConflict) {
 			t.Fatalf("stale publish: %v", err)
 		}
-		now := time.Now().UTC()
+		// A non-microsecond fraction makes the PG precision regression
+		// deterministic: timestamptz stores microseconds, so the claim's
+		// in-memory LeaseUntil can never Equal the round-tripped row.
+		now := time.Now().UTC().Truncate(time.Second).Add(123456789 * time.Nanosecond)
 		node, err := s.RegisterServingNode(ctx, &store.ServingNode{
 			NodeID: "app-node", BootID: "app-boot", Addr: "local", Capacity: 1, HeartbeatUntil: now.Add(time.Minute),
 		}, now)
@@ -154,6 +157,15 @@ func RunApplications(t *testing.T, s store.Store) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// Compare stored timestamps on both sides of the publish: PG
+		// stores microseconds while the claim's returned copy keeps
+		// nanoseconds, so the old-lease equality must check the
+		// round-tripped value.
+		persisted, err := s.GetServingReplica(ctx, rep.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		leaseBefore := persisted.LeaseUntil
 		// Draft update bumps version, then publish records it.
 		a.Code = "v2"
 		if ok, err := s.UpdateApplicationDraft(ctx, a, 1); err != nil || !ok {
@@ -177,8 +189,8 @@ func RunApplications(t *testing.T, s store.Store) {
 			t.Fatalf("republish: %v %+v", err, pin3)
 		}
 		old, err := s.GetServingReplica(ctx, rep.ID)
-		if err != nil || !old.LeaseUntil.Equal(rep.LeaseUntil) {
-			t.Fatalf("republish shortened the old lease: %+v, %v", old, err)
+		if err != nil || !old.LeaseUntil.Equal(leaseBefore) {
+			t.Fatalf("republish shortened the old lease: before=%s old=%+v, %v", leaseBefore.Format(time.RFC3339Nano), old, err)
 		}
 		got, _ = s.GetApplication(ctx, a.ID)
 		if got.PublishedVersion != 2 {
