@@ -111,10 +111,6 @@ config:
   # Public origin users open in a browser; also used for OAuth callbacks and
   # artifact framing. Set this to your ingress URL in any real deployment.
   consoleOrigin: http://localhost:8080
-  # The API tier normally forwards execution to workers. These only matter
-  # when worker.enabled=false.
-  apiInstanceIsolation: inproc
-  apiInstanceMemoryMax: 0
   cookieSecure: false
   # Optional isolated origin for rendered HTML artifacts, e.g.
   # https://reports.example.net. Must share the same service.
@@ -159,7 +155,6 @@ limits:
   secretsAllowHTTP: false
 
 worker:
-  enabled: true
   replicaCount: 1
   # worker-entrypoint gives each instance its own cgroup when the process can
   # write to /sys/fs/cgroup (Docker's writable-cgroups); otherwise it logs a
@@ -184,7 +179,6 @@ worker:
     seccompProfile:
       type: RuntimeDefault
 
-  instanceIsolation: process
   # Kubernetes mounts /sys/fs/cgroup read-only in unprivileged pods, so
   # per-instance cgroup caps are off by default. The heap watchdog
   # (limits.execMemoryLimit) and the pod memory limit still apply.

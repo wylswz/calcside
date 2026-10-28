@@ -14,7 +14,6 @@ import (
 
 	"calcside/cmd/calcside/internal/auth"
 	"calcside/cmd/calcside/internal/config"
-	common "calcside/internal/config"
 	"calcside/internal/node"
 	"calcside/internal/node/subproc"
 	"calcside/internal/runtime/remote"
@@ -38,10 +37,11 @@ func testConfig(t *testing.T) config.Config {
 	t.Helper()
 	return config.Config{
 		Addr: "127.0.0.1:0", AddrExplicit: true, Dev: true, ConsoleOrigin: "http://localhost:8080",
-		Store: types.DriverSQLite, DSN: storetest.SQLite(t), NodeID: "api-test",
+		Store: types.DriverSQLite, DSN: storetest.SQLite(t),
+		Workers: "w1=127.0.0.1:1", WorkerKey: "test-worker-key",
 		DefaultTTL: time.Minute, MaxTTL: time.Hour, MaxExecTimeout: time.Minute,
 		MaxConcurrentExecs: 2, ReaperInterval: time.Hour, PolicyEvalTimeout: time.Second,
-		ExtCacheDir: t.TempDir(), InstanceIsolation: common.IsolationInproc,
+		ExtCacheDir: t.TempDir(),
 	}
 }
 
@@ -63,19 +63,14 @@ func request(t *testing.T, h http.Handler, method, path, body string, want int) 
 }
 
 func TestInitializeApp(t *testing.T) {
-	for _, mode := range []string{common.IsolationInproc, common.IsolationProcess, "remote"} {
-		t.Run(mode, func(t *testing.T) {
+	{
+		t.Run("remote", func(t *testing.T) {
 			cfg := testConfig(t)
-			if mode == "remote" {
-				nd := node.Build(node.Config{Limits: cfg.ExecLimits()})
-				t.Cleanup(nd.Close)
-				worker := httptest.NewServer(remote.NewHandler(nd.Manager, []byte("test-worker-key")))
-				t.Cleanup(worker.Close)
-				cfg.Workers = "worker-test=" + strings.TrimPrefix(worker.URL, "http://")
-				cfg.WorkerKey = "test-worker-key"
-			} else {
-				cfg.InstanceIsolation = mode
-			}
+			nd := node.Build(node.Config{Limits: cfg.ExecLimits()})
+			t.Cleanup(nd.Close)
+			worker := httptest.NewServer(remote.NewHandler(nd.Manager, []byte("test-worker-key")))
+			t.Cleanup(worker.Close)
+			cfg.Workers = "worker-test=" + strings.TrimPrefix(worker.URL, "http://")
 			app, cleanup, err := initializeApp(t.Context(), cfg)
 			if err != nil {
 				t.Fatal(err)
@@ -107,13 +102,11 @@ func TestInitializeApp(t *testing.T) {
 			if out["output"] != "41\n" {
 				t.Fatalf("globals not preserved: %v", out)
 			}
-			if mode == "remote" {
-				r := httptest.NewRequest("GET", remote.ExtTreePath, nil)
-				w := httptest.NewRecorder()
-				h.ServeHTTP(w, r)
-				if w.Code != http.StatusUnauthorized {
-					t.Fatalf("unsigned extension callback: %d", w.Code)
-				}
+			r := httptest.NewRequest("GET", remote.ExtTreePath, nil)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("unsigned extension callback: %d", w.Code)
 			}
 		})
 	}
@@ -157,7 +150,7 @@ func TestInitializeAppFailureCleanup(t *testing.T) {
 		{"basic-auth", func(c *config.Config) { c.AdminUsername = "admin" }, "--admin-username"},
 		{"cipher", func(c *config.Config) { c.SecretKey = "invalid" }, "--secret-key:"},
 		{"policy", func(c *config.Config) { c.PolicyDir = filepath.Join(t.TempDir(), "[") }, "--policy-dir:"},
-		{"worker-key", func(c *config.Config) { c.Workers = "w=127.0.0.1:1" }, "--workers requires --worker-key"},
+		{"worker-key", func(c *config.Config) { c.WorkerKey = "" }, "--worker-key is required"},
 		{"workers", func(c *config.Config) { c.Workers, c.WorkerKey = "invalid", "test-key" }, "--workers: bad entry"},
 		{"dev-address", func(c *config.Config) { c.Addr = "0.0.0.0:8080" }, "dev mode refuses non-loopback"},
 	} {
@@ -198,6 +191,12 @@ func TestInitializeAppProduction(t *testing.T) {
 
 func TestInitializeAppFlushesAuditBeforeClosingStore(t *testing.T) {
 	cfg := testConfig(t)
+	// real worker fixture — instance create/exec must hit a live runtime
+	nd := node.Build(node.Config{Limits: cfg.ExecLimits()})
+	t.Cleanup(nd.Close)
+	worker := httptest.NewServer(remote.NewHandler(nd.Manager, []byte(cfg.WorkerKey)))
+	t.Cleanup(worker.Close)
+	cfg.Workers = "worker-test=" + strings.TrimPrefix(worker.URL, "http://")
 	st := trackStore(t, &cfg)
 	var id string
 	func() {
@@ -233,7 +232,7 @@ func TestInitializeAppDoesNotMigrate(t *testing.T) {
 	if cleanup != nil {
 		t.Cleanup(cleanup)
 	}
-	if err == nil || !strings.Contains(err.Error(), "recover:") || app != nil || cleanup != nil {
+	if err == nil || !strings.Contains(err.Error(), "users") || app != nil || cleanup != nil {
 		t.Fatalf("app=%v cleanup=%t err=%v", app, cleanup != nil, err)
 	}
 	if st.closes != 1 {
@@ -492,6 +491,11 @@ func TestProfilePasswordChange(t *testing.T) {
 
 func TestArtifactsUseConsoleOrigin(t *testing.T) {
 	cfg := testConfig(t)
+	nd := node.Build(node.Config{Limits: cfg.ExecLimits()})
+	t.Cleanup(nd.Close)
+	worker := httptest.NewServer(remote.NewHandler(nd.Manager, []byte(cfg.WorkerKey)))
+	t.Cleanup(worker.Close)
+	cfg.Workers = "worker-test=" + strings.TrimPrefix(worker.URL, "http://")
 	cfg.ConsoleOrigin = "https://console.example.com"
 	cfg.ArtifactPreviewBaseURL = "https://reports.example.net"
 	app, cleanup, err := initializeApp(t.Context(), cfg)
@@ -512,5 +516,27 @@ func TestArtifactsUseConsoleOrigin(t *testing.T) {
 	}
 	if !strings.Contains(w.Header().Get("Content-Security-Policy"), "frame-ancestors "+cfg.ConsoleOrigin) {
 		t.Fatal("preview CSP did not use the console origin")
+	}
+}
+
+func TestServingWiring(t *testing.T) {
+	// Remote-only: the API always schedules; workers run their own
+	// agent — never the API.
+	cfg := testConfig(t)
+	app, cleanup, err := initializeApp(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	if app.Serving == nil {
+		t.Fatal("remote serving topology wrong")
+	}
+	// The api-callback surface is mounted and authenticated: an
+	// unsigned node register is 401, not 404.
+	w := httptest.NewRecorder()
+	app.Server.Handler.ServeHTTP(w, httptest.NewRequest("POST",
+		"/internal/v1/nodes/register", strings.NewReader(`{}`)))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("callback mount: %d", w.Code)
 	}
 }

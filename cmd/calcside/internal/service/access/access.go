@@ -277,3 +277,41 @@ func (c *Checker) Instances(ctx context.Context, a service.Actor) (store.Instanc
 	}
 	return f, nil
 }
+
+// Application loads the draft row then applies the same workspace/key
+// ceiling rules as instances. Bound and restricted keys never see apps;
+// a full key may Run, a view-only key may View, sessions Configure when
+// they hold editor/owner.
+func (c *Checker) Application(ctx context.Context, a service.Actor, id string, act Action) (*store.Application, error) {
+	hidden := service.NotFound("application not found")
+	// Keys are always scoped elsewhere; an app is never the target of a
+	// bound key, so any key-bound actor gets hidden.
+	if a.ViaKey() && (a.KeyInstanceID != "" || a.Restricted()) {
+		return nil, hidden
+	}
+	row, err := c.st.GetApplication(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, hidden
+		}
+		return nil, service.Internal(err)
+	}
+	if err := c.check(ctx, a, row.WorkspaceID, act, hidden); err != nil {
+		return nil, err
+	}
+	return row, nil
+}
+
+// Applications returns the workspace-scoped list filter for the
+// applications endpoint. Bound/restricted keys and non-members get
+// hidden; callers append AfterID/Limit.
+func (c *Checker) Applications(ctx context.Context, a service.Actor) (store.ApplicationFilter, error) {
+	hidden := service.NotFound("applications not found")
+	if a.ViaKey() && (a.KeyInstanceID != "" || a.Restricted()) {
+		return store.ApplicationFilter{}, hidden
+	}
+	if err := c.check(ctx, a, a.WorkspaceID, View, hidden); err != nil {
+		return store.ApplicationFilter{}, err
+	}
+	return store.ApplicationFilter{WorkspaceID: a.WorkspaceID}, nil
+}

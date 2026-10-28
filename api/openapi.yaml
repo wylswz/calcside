@@ -116,6 +116,46 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/EditorMetadata' }
         '401': { $ref: '#/components/responses/Error' }
+  /api/v1/editor/contracts/infer:
+    post:
+      operationId: inferContract
+      tags: [meta]
+      summary: Infer a JSON Schema from a raw JSON sample.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InferContractRequest' }
+      responses:
+        '200':
+          description: Inferred canonical schema text.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContractDocument' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
+  /api/v1/editor/contracts/validate:
+    post:
+      operationId: validateContract
+      tags: [meta]
+      summary: Validate and canonicalize a JSON Schema draft.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ValidateContractRequest' }
+      responses:
+        '200':
+          description: Canonicalized schema text.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContractDocument' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
   /api/v1/extensions:
     get:
       operationId: listExtensions
@@ -775,6 +815,172 @@ paths:
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
 
+  /api/v1/applications:
+    get:
+      operationId: listApplications
+      tags: [applications]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
+        - name: after
+          in: query
+          schema: { type: string, description: pagination cursor — last application id of the previous page }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200 }
+      responses:
+        '200':
+          description: application drafts in the workspace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationsResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createApplication
+      tags: [applications]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplicationCreateRequest'
+      responses:
+        '200':
+          description: created draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /api/v1/applications/{id}:
+    get:
+      operationId: getApplication
+      tags: [applications]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: application draft + live status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    put:
+      operationId: updateApplication
+      tags: [applications]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplicationUpdateRequest'
+      responses:
+        '200':
+          description: updated draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deleteApplication
+      tags: [applications]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: version
+          in: query
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '204': { description: deleted }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/applications/{id}/publish:
+    post:
+      operationId: publishApplication
+      tags: [applications]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplicationPublishRequest'
+      responses:
+        '202':
+          description: published; deployment proceeds asynchronously
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/applications/{id}/test:
+    post:
+      operationId: testApplication
+      tags: [applications]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplicationTestRequest'
+      responses:
+        '200':
+          description: ephemeral test run result; engine errors arrive in result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationRunResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /api/v1/applications/{id}/invoke:
+    post:
+      operationId: invokeApplication
+      tags: [applications]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        description: raw JSON object passed verbatim as main(input)
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RawJSON'
+      responses:
+        '200':
+          description: invocation result; engine errors arrive in result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationRunResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
   /api/v1/audit:
     get:
       operationId: listAudit
@@ -1268,6 +1474,29 @@ components:
           type: array
           items: { type: string }
         truncated: { type: boolean }
+    ContractDocument:
+      type: object
+      required: [schema]
+      properties:
+        schema:
+          type: string
+          description: Canonical JSON schema text.
+    InferContractRequest:
+      type: object
+      required: [sample]
+      properties:
+        sample:
+          type: string
+          maxLength: 65536
+          description: Raw JSON text of the sample document.
+    ValidateContractRequest:
+      type: object
+      required: [schema]
+      properties:
+        schema:
+          type: string
+          maxLength: 65536
+          description: Raw JSON schema text to normalize.
     EditorMetadata:
       type: object
       required: [rego, capabilities, utilities]
@@ -1680,8 +1909,8 @@ components:
       required: [memory_usage, memory_peak, memory_max]
       description: >-
         The instance's own cgroup v2 accounting, in bytes. Absent when the
-        instance has no group of its own (inproc isolation, or process
-        isolation without --instance-memory-max).
+        instance has no group of its own (cgroups unavailable or no
+        per-instance memory cap configured on the worker).
       properties:
         memory_usage: { type: integer, format: int64, description: memory.current }
         memory_peak: { type: integer, format: int64, description: memory.peak; 0 when the kernel does not report it }
@@ -1910,6 +2139,109 @@ components:
         secrets:
           type: array
           items: { $ref: '#/components/schemas/Secret' }
+    # --- applications (EP-0014 durable JSON functions) ---
+    RawJSON:
+      x-go-type: json.RawMessage
+      description: raw JSON preserved byte-for-byte; never re-parsed by the API tier
+    ApplicationStatus:
+      type: string
+      enum: [draft, preparing, ready, degraded, disabled]
+    Application:
+      type: object
+      required: [id, workspace_id, user_id, name, code, spec, version, published_version,
+                 status, has_unpublished_changes, created_at, updated_at]
+      properties:
+        id: { type: string }
+        workspace_id: { type: string }
+        user_id: { type: string }
+        name: { type: string }
+        code: { type: string, description: 'main.star source' }
+        spec:
+          $ref: '#/components/schemas/RawJSON'
+          description: normalized boundary spec (JSON object, refs only)
+        spec_json:
+          type: string
+          description: verbatim stored spec text — high-precision numbers stay exact; use this, never re-serialize spec
+        input_schema:
+          type: string
+          nullable: true
+          description: optional pinned JSON Schema text; null = default open object
+        output_schema:
+          type: string
+          nullable: true
+        version: { type: integer, format: int64, minimum: 1 }
+        published_version: { type: integer, format: int64, minimum: 0 }
+        persistent_instance_id: { type: string }
+        status: { $ref: '#/components/schemas/ApplicationStatus' }
+        release_id: { type: string }
+        error_code: { type: string }
+        has_unpublished_changes: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ApplicationResponse:
+      type: object
+      properties:
+        application: { $ref: '#/components/schemas/Application' }
+    ApplicationsResponse:
+      type: object
+      properties:
+        applications:
+          type: array
+          items: { $ref: '#/components/schemas/Application' }
+    ApplicationCreateRequest:
+      type: object
+      properties:
+        name: { type: string, maxLength: 128 }
+        code:
+          type: string
+          nullable: true
+          description: omitted/null = scaffold
+        spec:
+          $ref: '#/components/schemas/RawJSON'
+        input_schema:
+          type: string
+          nullable: true
+        output_schema:
+          type: string
+          nullable: true
+    ApplicationUpdateRequest:
+      type: object
+      required: [version, name, code]
+      properties:
+        version: { type: integer, format: int64, minimum: 1 }
+        name: { type: string, maxLength: 128 }
+        code: { type: string }
+        spec:
+          $ref: '#/components/schemas/RawJSON'
+        input_schema:
+          type: string
+          nullable: true
+        output_schema:
+          type: string
+          nullable: true
+    ApplicationPublishRequest:
+      type: object
+      required: [version]
+      properties:
+        version: { type: integer, format: int64, minimum: 1 }
+    ApplicationTestRequest:
+      type: object
+      required: [version]
+      properties:
+        version: { type: integer, format: int64, minimum: 1 }
+        input:
+          $ref: '#/components/schemas/RawJSON'
+          description: raw JSON input for main(input)
+    ApplicationRunResponse:
+      type: object
+      required: [result]
+      properties:
+        result:
+          x-go-type: rt.ProgramResult
+          x-go-type-import: { name: rt, path: calcside/internal/runtime }
+        output_json:
+          type: string
+          description: exact raw JSON output text — UI renders this verbatim, never reparses
 security:
   - bearerAuth: []
   - cookieAuth: []

@@ -9,6 +9,6 @@ import (
 )
 
 func initializeWorker(cfg config.WorkerConfig) (*workerApp, func(), error) {
-	wire.Build(provideNodeID, provideNodeConfig, provideRuntime, provideServer, wire.Struct(new(workerApp), "*"))
+	wire.Build(provideNodeID, provideExtCache, provideNodeConfig, provideRuntime, provideServingAgent, provideServer, wire.Struct(new(workerApp), "*"))
 	return nil, nil, nil
 }

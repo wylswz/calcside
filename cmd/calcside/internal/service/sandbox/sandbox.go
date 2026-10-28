@@ -17,6 +17,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"maps"
 	"time"
 	"unicode/utf8"
 
@@ -59,6 +60,12 @@ type nopAudit struct{}
 func (nopAudit) Record(runtime.AuditBatch) {}
 
 // Options wires the service.
+// SpecPinner pins extension alias/provider refs to immutable sums in
+// the raw spec before normalization (API artifact repository).
+type SpecPinner interface {
+	PinSpec(context.Context, []byte) (json.RawMessage, error)
+}
+
 type Options struct {
 	Store    store.Store
 	Runtime  runtime.Runtime
@@ -68,6 +75,9 @@ type Options struct {
 	Ext      *capext.Options
 	Limits   capability.ServerLimits
 	Access   *access.Checker
+	// SpecPinner pins extension alias/provider refs to immutable sums
+	// before normalization; nil in unit fixtures without extensions.
+	SpecPinner SpecPinner
 	// GlobalPolicies is the --policy-dir snapshot, loaded once at
 	// startup and shipped with every create request so that every node
 	// evaluates the same modules.
@@ -90,6 +100,7 @@ type Service struct {
 	globalPols map[string]string
 	maxPerUser int
 	now        func() time.Time
+	pinner     SpecPinner
 }
 
 // Activity aggregates run stats per instance for the list view; the
@@ -110,7 +121,7 @@ func New(o Options) *Service {
 		st: o.Store, rt: o.Runtime, secrets: o.Secrets, audit: o.Audit,
 		reg: o.Registry, ext: capext.NewInspector(o.Ext), limits: o.Limits,
 		access: o.Access, globalPols: o.GlobalPolicies,
-		maxPerUser: o.MaxInstancesPerUser, now: o.Now,
+		maxPerUser: o.MaxInstancesPerUser, now: o.Now, pinner: o.SpecPinner,
 	}
 }
 
@@ -350,6 +361,12 @@ func (s *Service) validateSpec(ctx context.Context, a service.Actor, rawSpec []b
 	rawSpec, err := s.resolveLLMProviders(ctx, a.WorkspaceID, rawSpec)
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	if s.pinner != nil {
+		rawSpec, err = s.pinner.PinSpec(ctx, rawSpec)
+		if err != nil {
+			return nil, nil, nil, fail(err)
+		}
 	}
 	spec, _, err := capability.NormalizeSpec(rawSpec, s.reg, s.limits)
 	if err != nil {
@@ -699,4 +716,25 @@ func (s *Service) ExpireDue(ctx context.Context, limit int) (int, error) {
 		n++
 	}
 	return n, nil
+}
+
+// ApplicationBoundary produces the sanitized spec + policy bundle +
+// resolved secrets for an application publish/test. Secrets are
+// resolved in memory only — never persisted. The caller performs
+// authorization first; a.WorkspaceID is set to the app's workspace
+// after the access load.
+func (s *Service) ApplicationBoundary(ctx context.Context, a service.Actor, rawSpec []byte) (json.RawMessage, runtime.PolicyBundle, []runtime.Secret, error) {
+	var draft runtime.Spec
+	if err := json.Unmarshal(rawSpec, &draft); err != nil {
+		return nil, runtime.PolicyBundle{}, nil, service.BadRequest("invalid application runtime settings")
+	}
+	spec, resolved, secs, err := s.validateSpec(ctx, a, rawSpec, true)
+	if err != nil {
+		return nil, runtime.PolicyBundle{}, nil, err
+	}
+	userPols, err := s.selectedPolicies(ctx, a.WorkspaceID, spec.Policies)
+	if err != nil {
+		return nil, runtime.PolicyBundle{}, nil, err
+	}
+	return spec.Sanitized(secs), runtime.PolicyBundle{Global: maps.Clone(s.globalPols), User: maps.Clone(userPols)}, resolved, nil
 }

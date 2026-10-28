@@ -17,13 +17,23 @@ func initializeWorker(cfg config.WorkerConfig) (*workerApp, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	nodeConfig := provideNodeConfig(cfg, string2)
-	runtime, cleanup, err := provideRuntime(cfg, string2, nodeConfig)
+	nodeConfig := provideNodeConfig(cfg)
+	cache, err := provideExtCache(cfg, string2)
 	if err != nil {
+		return nil, nil, err
+	}
+	runtime, cleanup, err := provideRuntime(cfg, nodeConfig, cache)
+	if err != nil {
+		return nil, nil, err
+	}
+	agent, err := provideServingAgent(cfg, string2, runtime)
+	if err != nil {
+		cleanup()
 		return nil, nil, err
 	}
 	server := provideServer(cfg, runtime)
 	mainWorkerApp := &workerApp{
+		Agent:  agent,
 		Server: server,
 		NodeID: string2,
 	}

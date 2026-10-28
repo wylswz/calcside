@@ -13,13 +13,15 @@ import { ExtensionPicker } from './ExtensionPicker'
 import { ExtensionIcon } from './ExtensionIcon'
 import { InputsSection, RulesSection } from './SpecSections'
 
-export interface SpecFormHandle { buildSpec(): { spec?: InstanceSpec; err?: string } }
+export interface SpecFormHandle { buildSpec(): { spec?: InstanceSpec; specJSON?: string; err?: string } }
 
 interface Props {
   keyMode?: boolean
+  application?: boolean
   initial?: InstanceSpec
   workspaceId?: string
   onSpecChange?: (draft: InstanceDraft, errors?: DraftError[]) => void
+  onRawDirtyChange?: (dirty: boolean) => void
   footer?: ReactNode
 }
 
@@ -51,11 +53,15 @@ const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)'
 // page section for the forms. The instance summary beside them is short
 // (one fixed-height row per capability), so nothing needs its own scroll.
 export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
-  keyMode = false, initial, workspaceId, onSpecChange, footer,
+  keyMode = false, application = false, initial, workspaceId, onSpecChange, onRawDirtyChange, footer,
 }, ref) {
+  // Application mode: vault-ref secrets only (same ceiling as key
+  // specs) — never inline values in a durable spec.
+  const refsOnly = keyMode || application
   const [draft, setDraft] = useState(() => draftFromSpec(initial))
   const [advanced, setAdvanced] = useState(false)
   const [json, setJSON] = useState('')
+  const jsonBaseline = useRef('')
   const [view, setView] = useState<View>('capabilities')
   const extIds = useRef<number[]>(draft.exts.map((_, i) => i))
   const extNext = useRef(draft.exts.length)
@@ -92,30 +98,35 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
     if (!advanced) return { draft, errors: [] as DraftError[] }
     try {
       const raw: unknown = JSON.parse(json)
-      const errors = validateRawSpec(raw, keyMode)
+      const errors = validateRawSpec(raw, refsOnly)
       return errors.length ? { draft, errors } : { draft: draftFromSpec(raw as InstanceSpec), errors }
     } catch {
       return { draft, errors: [{ section: 'JSON', message: 'Fix invalid JSON before returning to the editor or creating.' }] }
     }
-  }, [advanced, json, draft, keyMode])
+  }, [advanced, json, draft, refsOnly])
   const result = useMemo<BuildResult>(() => {
-    const built = buildInstanceSpec(activeDraft.draft, { keyMode, catalog: extensions })
+    const built = buildInstanceSpec(activeDraft.draft, { keyMode: refsOnly, catalog: extensions })
     const errors = [...activeDraft.errors, ...(built.ok ? [] : built.errors)]
     if (activeDraft.draft.exts.length && (catalog.isPending || catalog.isError)) {
       errors.push({ section: 'Extensions', message: catalog.isError ? 'Retry loading the extension catalog before creating.' : 'Wait for the extension catalog.' })
     }
     if (!advanced) extErrors.forEach((m) => errors.push({ section: 'Extensions', message: m }))
     return errors.length ? { ok: false, errors } : built
-  }, [activeDraft, keyMode, extensions, catalog.isPending, catalog.isError, extErrors, advanced])
+  }, [activeDraft, refsOnly, extensions, catalog.isPending, catalog.isError, extErrors, advanced])
   useEffect(() => {
     onSpecChange?.(activeDraft.draft, result.ok ? [] : result.errors)
   }, [activeDraft.draft, result, onSpecChange])
+  useEffect(() => {
+    onRawDirtyChange?.(advanced && json !== jsonBaseline.current)
+  }, [advanced, json, onRawDirtyChange])
   useImperativeHandle(ref, () => ({
     buildSpec() {
       setSubmitted(true)
-      return result.ok ? { spec: result.spec } : { err: result.errors.map((e) => `${e.section}: ${e.message}`).join('; ') }
+      return result.ok
+        ? { spec: result.spec, ...(advanced ? { specJSON: json } : {}) }
+        : { err: result.errors.map((e) => `${e.section}: ${e.message}`).join('; ') }
     },
-  }), [result])
+  }), [result, advanced, json])
   // "Configure" is navigation: the page scrolls to the chosen section.
   useEffect(() => {
     if (!reveal) return
@@ -135,7 +146,8 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
       // A structurally valid but incomplete draft can still be fixed in JSON.
       const built = buildInstanceSpec(draft)
       if (!built.spec) { setSubmitted(true); return }
-      setJSON(JSON.stringify(built.spec, null, 2))
+      jsonBaseline.current = JSON.stringify(built.spec, null, 2)
+      setJSON(jsonBaseline.current)
       setAdvanced(true)
     } else if (activeDraft.errors.length === 0) {
       const next = activeDraft.draft
@@ -314,10 +326,10 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
       <div className="spec-form">
         <div className="spec-json">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-sec">Advanced editing includes any inline secret values. Invalid edits cannot be submitted.</p>
+            <p className="text-sm text-sec">{refsOnly ? 'Secrets must use vault references.' : 'Advanced editing includes any inline secret values.'} Invalid edits cannot be submitted.</p>
             <button type="button" className="text-btn underline" onClick={toggleAdvanced}>Back to editor</button>
           </div>
-          <textarea aria-label="Instance spec JSON" className={inputCls + ' min-h-[420px] font-mono text-xs'} value={json} spellCheck={false} onChange={(e) => setJSON(e.target.value)} />
+          <textarea aria-label={application ? 'Application spec JSON' : 'Instance spec JSON'} className={inputCls + ' min-h-[420px] font-mono text-xs'} value={json} spellCheck={false} onChange={(e) => setJSON(e.target.value)} />
           {alert}
           {footer && <div className="spec-json-footer">{footer}</div>}
         </div>
@@ -330,7 +342,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
       <div className="spec-builder">
         <Tabs.Root className="spec-main" value={view} onValueChange={(v) => switchView(v as View)}>
           <div className="spec-tabs" ref={tabsRef}>
-            <Tabs.List className="segmented" aria-label="Instance configuration">
+            <Tabs.List className="segmented" aria-label={application ? 'Application configuration' : 'Instance configuration'}>
               <Tabs.Trigger value="capabilities">Add capabilities</Tabs.Trigger>
               <Tabs.Trigger value="settings">
                 Settings{errors.length > 0 && <span className="tab-badge" aria-label={`${errors.length} issues`}>{errors.length}</span>}
@@ -341,7 +353,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
 
           {/* forceMount keeps both views mounted so editor state survives switching */}
           <Tabs.Content value="capabilities" forceMount className="spec-palette">
-            <p className="spec-pane-note">Optional. Each capability is added with safe defaults; adjust them under Settings. Settings are fixed after creation.</p>
+            <p className="spec-pane-note">Optional. Each capability is added with safe defaults; adjust them under Settings. {application ? 'Applied when published.' : 'Settings are fixed after creation.'}</p>
             <div className="ability-choices">
               <button type="button" className="ability-choice" data-selected={!!draft.fs} aria-label={draft.fs ? 'Files added' : 'Add Files'} onClick={addFiles}>
                 <FilesIcon />
@@ -394,16 +406,20 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
             </section>
             <section className="settings-group" data-section="inputs">
               <h3 className="spec-pane-title">Inputs <span className="spec-pane-meta">{inputsSummary}</span></h3>
-              <InputsSection draft={draft} set={set} keyMode={keyMode} vault={vault.data?.secrets ?? []} vaultError={vault.isError} onRetryVault={() => vault.refetch()} listId={`vault-names-${ws}`} />
+              <InputsSection draft={draft} set={set} keyMode={refsOnly} application={application} vault={vault.data?.secrets ?? []} vaultError={vault.isError} onRetryVault={() => vault.refetch()} listId={`vault-names-${ws}`} />
             </section>
           </Tabs.Content>
         </Tabs.Root>
 
-        <aside className="spec-selection" aria-label="This instance">
-          <h3 className="spec-pane-title">This instance</h3>
+        <aside className="spec-selection" aria-label={application ? 'Application settings' : 'This instance'}>
+          <h3 className="spec-pane-title">{application ? 'This application' : 'This instance'}</h3>
           <div className="spec-identity">
-            <Field label="Name"><input className={inputCls} value={draft.name} placeholder="e.g. research run" onChange={(e) => set({ name: e.target.value })} /></Field>
-            <Field label="Lifetime (seconds)"><input className={inputCls} type="number" min="1" value={draft.ttlSeconds} onChange={(e) => set({ ttlSeconds: e.target.value === '' ? '' : Number(e.target.value) })} /></Field>
+            {!application && (
+              <>
+                <Field label="Name"><input className={inputCls} value={draft.name} placeholder="e.g. research run" onChange={(e) => set({ name: e.target.value })} /></Field>
+                <Field label="Lifetime (seconds)"><input className={inputCls} type="number" min="1" value={draft.ttlSeconds} onChange={(e) => set({ ttlSeconds: e.target.value === '' ? '' : Number(e.target.value) })} /></Field>
+              </>
+            )}
           </div>
           <div>
             <p className="sidebar-label">Capabilities</p>

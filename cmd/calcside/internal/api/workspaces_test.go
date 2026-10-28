@@ -32,6 +32,8 @@ func TestRouteCoverage(t *testing.T) {
 		"GetLLMProvider": true, "UpdateLLMProvider": true,
 		"DeleteLLMProvider": true,
 		"UpdateWorkspace":   true, "DeleteWorkspace": true, "ListMembers": true,
+		"GetApplication": true, "UpdateApplication": true, "DeleteApplication": true,
+		"PublishApplication": true, "TestApplication": true, "InvokeApplication": true,
 		"AddMember": true, "SetMemberRole": true, "RemoveMember": true,
 		"ListChanges": true, "ListShares": true, "PutShare": true,
 		"DeleteShare": true,
@@ -45,7 +47,10 @@ func TestRouteCoverage(t *testing.T) {
 		"CreatePolicy": true, "ValidatePolicy": true, "ListSecrets": true,
 		"ListLLMProviders": true, "CreateLLMProvider": true,
 		"CreateSecret": true, "ArtifactConfig": true, "PreviewArtifact": true,
+		"ListApplications": true, "CreateApplication": true,
 		"ExportArtifacts": true, "InstanceCompletions": true,
+		// Pure caller-text transforms: no store, no scope.
+		"InferContract": true, "ValidateContract": true,
 	}
 	for i := 0; i < ifaceType.NumMethod(); i++ {
 		op := ifaceType.Method(i).Name

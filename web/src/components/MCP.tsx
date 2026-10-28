@@ -4,12 +4,25 @@ import { claudeCodeSnippet, cursorSnippet, devinSnippet, headerSnippet, mcpURL }
 
 // CopyBlock renders copyable text (secret or client snippet) with a
 // copy button — one component for every "copy this once" surface.
-export function CopyBlock({ text, mono }: { text: string; mono?: boolean }) {
-  const [copied, setCopied] = useState(false)
+export function CopyBlock({ text, mono, preClassName = '' }: { text: string; mono?: boolean; preClassName?: string }) {
+  const [copiedText, setCopiedText] = useState<string | null>(null)
+  const [error, setError] = useState('')
+  const copy = async () => {
+    setError('')
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedText(text)
+    } catch {
+      setError('Copy failed. Select the text to copy.')
+    }
+  }
   return (
-    <div className="flex gap-2">
-      <pre className={`pre flex-1 overflow-auto break-all ${mono ? 'border-ink' : ''}`}>{text}</pre>
-      <Button onClick={async () => { await navigator.clipboard.writeText(text); setCopied(true) }}><SwapLabel show={copied ? 'Copied' : 'Copy'} options={['Copy', 'Copied']} /></Button>
+    <div className="min-w-0">
+      <div className="flex min-w-0 items-start gap-2">
+        <pre className={`pre min-w-0 flex-1 overflow-auto break-all ${mono ? 'border-ink' : ''} ${preClassName}`}>{text}</pre>
+        <Button onClick={copy}><SwapLabel show={copiedText === text ? 'Copied' : 'Copy'} options={['Copy', 'Copied']} /></Button>
+      </div>
+      <div className="min-h-5 text-xs text-warn-text" role="status">{error}</div>
     </div>
   )
 }

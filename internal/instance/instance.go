@@ -105,8 +105,11 @@ type Manager struct {
 	snap         Snapshotter
 	now          func() time.Time
 
-	mu    sync.Mutex
-	insts map[string]*inst
+	mu       sync.Mutex
+	insts    map[string]*inst
+	replicas map[string]*programReplica
+	creating map[string]bool
+	stopping bool
 
 	reapInterval time.Duration
 	reapGrace    time.Duration
@@ -155,7 +158,7 @@ func New(o Options) *Manager {
 		eng: o.Engine, reg: o.Registry, evalTimeout: o.EvalTimeout,
 		limits: o.Limits, maxInstances: o.MaxInstances,
 		snap: o.Snapshotter, now: o.Now,
-		insts: map[string]*inst{}, reapInterval: o.ReapInterval,
+		insts: map[string]*inst{}, replicas: map[string]*programReplica{}, creating: map[string]bool{}, reapInterval: o.ReapInterval,
 		reapGrace: o.ReapGrace, stop: make(chan struct{}),
 	}
 }
@@ -180,12 +183,16 @@ func (m *Manager) StartReaper() {
 
 // StopReaper stops the reaper goroutine.
 func (m *Manager) StopReaper() {
+	m.mu.Lock()
+	m.stopping = true
+	m.mu.Unlock()
 	select {
 	case <-m.stop:
 	default:
 		close(m.stop)
 	}
 	m.wg.Wait()
+	m.stopReplicas()
 }
 
 // buildSecrets turns the resolved secrets from the request into the
@@ -206,16 +213,48 @@ func buildSecrets(in []runtime.Secret) (*secrets.Set, error) {
 // Create instantiates bindings + policies and registers the instance.
 // The request must be self-contained: the node performs no lookups.
 func (m *Manager) Create(ctx context.Context, req *runtime.CreateRequest) (*runtime.CreateResponse, error) {
+	// Reserve the id in the shared namespace before any expensive
+	// work: replicas and pending creates check all three maps and the
+	// quota counts pending reservations.
+	m.mu.Lock()
+	if m.stopping {
+		m.mu.Unlock()
+		return nil, runtime.ErrNotRunning
+	}
+	if _, ok := m.insts[req.InstanceID]; ok {
+		m.mu.Unlock()
+		return nil, runtime.Errf(runtime.ErrBadSpec, "id is already in use")
+	}
+	if _, ok := m.replicas[req.InstanceID]; ok {
+		m.mu.Unlock()
+		return nil, runtime.Errf(runtime.ErrBadSpec, "id is already in use")
+	}
+	if m.creating[req.InstanceID] {
+		m.mu.Unlock()
+		return nil, runtime.Errf(runtime.ErrBadSpec, "id is already in use")
+	}
+	if m.maxInstances > 0 && len(m.insts)+len(m.replicas)+len(m.creating) >= m.maxInstances {
+		m.mu.Unlock()
+		return nil, runtime.ErrTooMany
+	}
+	m.creating[req.InstanceID] = true
+	m.mu.Unlock()
+	owned := true
+	defer func() {
+		// Only remove the reservation this call still owns: on
+		// success it was already swapped for the inst record, and a
+		// later prepare may legitimately hold a reservation on a
+		// reused id.
+		if owned {
+			m.mu.Lock()
+			delete(m.creating, req.InstanceID)
+			m.mu.Unlock()
+		}
+	}()
+
 	spec, typed, err := capability.NormalizeSpec(req.Spec, m.reg, m.limits)
 	if err != nil {
 		return nil, err
-	}
-
-	m.mu.Lock()
-	n := len(m.insts)
-	m.mu.Unlock()
-	if m.maxInstances > 0 && n >= m.maxInstances {
-		return nil, runtime.ErrTooMany
 	}
 
 	// Compile the policy snapshot the API tier captured for us.
@@ -265,6 +304,19 @@ func (m *Manager) Create(ctx context.Context, req *runtime.CreateRequest) (*runt
 		execLog:   map[string]*execEntry{},
 	}
 	m.mu.Lock()
+	if m.stopping {
+		m.mu.Unlock()
+		in.sess.Gate.Revoke()
+		in.sess.Close()
+		if in.secrets != nil {
+			in.secrets.Wipe()
+		}
+		return nil, runtime.ErrNotRunning
+	}
+	// Atomic publication: the reservation converts into the inst
+	// record in one critical section.
+	delete(m.creating, req.InstanceID)
+	owned = false
 	m.insts[req.InstanceID] = in
 	m.mu.Unlock()
 
@@ -395,6 +447,13 @@ func execResult(r *engine.Result) runtime.ExecResult {
 func (m *Manager) Keepalive(ctx context.Context, req *runtime.KeepaliveRequest) (*runtime.KeepaliveResponse, error) {
 	in, err := m.live(req.InstanceID, req.Owner, req.Epoch)
 	if err != nil {
+		if errors.Is(err, runtime.ErrNotFound) {
+			if kerr := m.keepaliveReplica(req); kerr == nil {
+				return &runtime.KeepaliveResponse{}, nil
+			} else if !errors.Is(kerr, runtime.ErrNotFound) {
+				return nil, kerr
+			}
+		}
 		return nil, err
 	}
 	in.renew(req.RenewedExpiresAt)
@@ -517,6 +576,13 @@ func (m *Manager) withConsole(in *inst, cap types.CapabilityName, actor runtime.
 func (m *Manager) Delete(ctx context.Context, req *runtime.DeleteRequest) (*runtime.DeleteResponse, error) {
 	in, err := m.live(req.InstanceID, req.Owner, req.Epoch)
 	if err != nil {
+		if errors.Is(err, runtime.ErrNotFound) {
+			if derr := m.deleteReplica(req); derr == nil {
+				return &runtime.DeleteResponse{}, nil
+			} else if !errors.Is(derr, runtime.ErrNotFound) {
+				return nil, derr
+			}
+		}
 		return nil, err
 	}
 	m.end(ctx, in)
@@ -556,13 +622,27 @@ func (m *Manager) Reap(ctx context.Context) {
 	for _, in := range doomed {
 		m.end(ctx, in)
 	}
+	var rs []*programReplica
+	m.mu.Lock()
+	for _, r := range m.replicas {
+		r.mu.Lock()
+		exp := r.expiresAt
+		r.mu.Unlock()
+		if !exp.IsZero() && !exp.After(m.now()) {
+			rs = append(rs, r)
+		}
+	}
+	m.mu.Unlock()
+	for _, r := range rs {
+		m.stopExpiredReplica(r)
+	}
 }
 
 // Count reports live instance count (tests/metrics).
 func (m *Manager) Count() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return len(m.insts)
+	return len(m.insts) + len(m.replicas) + len(m.creating)
 }
 
 func (in *inst) lockRequest(ctx context.Context) error {

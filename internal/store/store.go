@@ -395,6 +395,10 @@ type Store interface {
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
 
 	// Tx runs fn against one store connection in a single transaction.
+	ServingStore
+	ApplicationStore
+	ExtensionArtifactStore
+
 	Tx(ctx context.Context, fn func(Store) error) error
 
 	Close() error

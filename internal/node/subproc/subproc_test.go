@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -303,5 +304,77 @@ func TestLocalExtensionSourceThroughChild(t *testing.T) {
 	out, err := run(t, s, "ins_ext", "exec_ext", "print(ext.myext.hello())")
 	if err != nil || out.Result.Error != nil || out.Result.Output != "42\n" {
 		t.Fatalf("extension exec: err=%v res=%+v", err, out)
+	}
+}
+
+// Create after Close must reject without spawning — a fetch that lands
+// post-teardown cannot register a new child.
+func TestCreateAfterClose(t *testing.T) {
+	s := newSupervisor(t, nil)
+	s.Close()
+	_, err := s.Create(context.Background(), &runtime.CreateRequest{
+		InstanceID: "inst_x", Spec: []byte(`{"capabilities":{"fs":{}}}`),
+		ExpiresAt: time.Now().Add(time.Hour),
+	})
+	if !errors.Is(err, runtime.ErrNotRunning) {
+		t.Fatalf("want ErrNotRunning, got %v", err)
+	}
+	if s.Count() != 0 {
+		t.Fatal("create after close spawned a child")
+	}
+}
+
+// A create racing Close either fully registers or fully fails — no
+// child may escape the teardown snapshot.
+func TestCreateCloseRace(t *testing.T) {
+	s := newSupervisor(t, nil)
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, _ = s.Create(context.Background(), &runtime.CreateRequest{
+				InstanceID: fmt.Sprintf("inst_%d", i),
+				Spec:       []byte(`{"capabilities":{"fs":{}}}`),
+				ExpiresAt:  time.Now().Add(time.Hour),
+			})
+		}(i)
+	}
+	s.Close()
+	wg.Wait()
+	close(done)
+	<-done
+	if s.Count() != 0 {
+		t.Fatal("children escaped the teardown snapshot")
+	}
+}
+
+// instanceEnvironment must strip every control credential key — never
+// pass them to a child even when they arrive via Options.Env.
+func TestInstanceEnvironmentStripsCredentials(t *testing.T) {
+	in := []string{
+		"PATH=/bin",
+		"CALCSIDE_WORKER_SHARED_KEY=do-not-leak",
+		"GORACE=x",
+		"CALCSIDE_API_ADDR=do-not-leak",
+		"CALCSIDE_SUBPROC_TEST_CHILD=1",
+		"CALCSIDE_SECRET_KEY=do-not-leak",
+		"CALCSIDE_NODE_ID=do-not-leak",
+		"CALCSIDE_NODE_ID_FILE=do-not-leak",
+		"CALCSIDE_WORKER_SHARED_KEY=dupe",
+	}
+	out := instanceEnvironment(in)
+	var names []string
+	for _, e := range out {
+		name, _, _ := strings.Cut(e, "=")
+		names = append(names, name)
+		if strings.Contains(e, "do-not-leak") {
+			t.Fatalf("credential leaked into child env: %s", e)
+		}
+	}
+	want := []string{"PATH", "GORACE", "CALCSIDE_SUBPROC_TEST_CHILD"}
+	if fmt.Sprintf("%v", names) != fmt.Sprintf("%v", want) {
+		t.Fatalf("env order/set: %v", names)
 	}
 }

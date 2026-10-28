@@ -80,8 +80,10 @@ helm-lint:
 	  --set database.driver=postgres \
 	  --set-string database.postgres.dsn='postgres://user:pass@postgres:5432/calcside?sslmode=disable&search_path=public' \
 	  --set replicaCount=2 >/dev/null
-	helm template calcside charts/calcside --namespace calcside \
-	  --set worker.enabled=false >/dev/null
+	! helm template calcside charts/calcside --namespace calcside \
+	  --set worker.enabled=false 2>/dev/null
+	! helm template calcside charts/calcside --namespace calcside \
+	  --set worker.replicaCount=0 2>/dev/null
 
 wire:
 	go tool wire $(WIRE_PACKAGES)
@@ -211,11 +213,38 @@ dev:
 # Backend only, serving the embedded console (run `make web` first).
 serve-dev:
 	@ATLAS_DB_URL="sqlite://$(abspath $(DEV_DSN))" atlas migrate apply --env sqlite
-	go run ./cmd/calcside serve --dev --addr 127.0.0.1:$(DEV_API_PORT) \
+	@go build -o bin/calcside-dev ./cmd/calcside
+	@go build -o bin/calcside-worker-dev ./cmd/calcside-worker
+	@api_pid=""; worker_pid=""; \
+	cleanup() { [ -n "$$api_pid" ] && kill "$$api_pid" 2>/dev/null || true; [ -n "$$worker_pid" ] && kill "$$worker_pid" 2>/dev/null || true; }; \
+	trap cleanup INT TERM EXIT; \
+	( bin/calcside-worker-dev serve --listen 127.0.0.1:$(DEV_WORKER_PORT) \
+	    --node-id $(DEV_WORKER_ID) --shared-key $(DEV_WORKER_KEY) \
+	    --api-addr http://127.0.0.1:$(DEV_API_PORT) \
+	    --net-allow-cidrs=$(DEV_NET_ALLOW_CIDRS) ) & \
+	worker_pid=$$!; \
+	healthy=0; \
+	for i in $$(seq 1 240); do \
+	  if ! kill -0 $$worker_pid 2>/dev/null; then \
+	    echo "make serve-dev: worker exited before becoming healthy" >&2; exit 1; \
+	  fi; \
+	  if curl -sf http://127.0.0.1:$(DEV_WORKER_PORT)/healthz >/dev/null 2>&1; then \
+	    healthy=1; break; \
+	  fi; \
+	  sleep 0.25; \
+	done; \
+	if [ $$healthy -ne 1 ]; then \
+	  echo "make serve-dev: worker did not answer /healthz within 60s" >&2; exit 1; \
+	fi; \
+	bin/calcside-dev serve --dev --addr 127.0.0.1:$(DEV_API_PORT) \
 	  --console-origin="$${CALCSIDE_CONSOLE_ORIGIN:-http://localhost:$(DEV_API_PORT)}" \
 	  --policy-dir policies/examples --secret-key $(CALCSIDE_SECRET_KEY) \
 	  --dsn $(DEV_DSN) --ext-local-roots $(DEV_EXT_ROOTS) \
-	  --net-allow-cidrs=$(DEV_NET_ALLOW_CIDRS)
+	  --net-allow-cidrs=$(DEV_NET_ALLOW_CIDRS) \
+	  --workers $(DEV_WORKER_ID)=127.0.0.1:$(DEV_WORKER_PORT) \
+	  --worker-key $(DEV_WORKER_KEY) & \
+	api_pid=$$!; \
+	wait $$api_pid
 
 tidy:
 	go mod tidy

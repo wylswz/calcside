@@ -148,3 +148,36 @@ Every invariant has an owner mechanism, in order of preference:
 - **S6:** measured for dialogs only, not for menus or popovers.
 - **P1:** pending guards are enforced on `Confirm` and by the static
   `mutate` check; longer inline forms are review-only.
+
+### Application editor (EP-0014)
+
+`/applications/:id` is covered by `e2e/application.spec.ts` against a
+live Vite dev server (React StrictMode) proxying a scratch dev API:
+- S4: state/request-driven button labels use `SwapLabel` (Save draft /
+  Save & Test / Save & Publish / Invoke published); the Invoke button
+  is always rendered and merely disables until the app is ready, so
+  its appearance never moves neighboring controls.
+- S1: state styles are paint-only; no transform/size on hover/press.
+- Save/Test/Publish snapshot the draft before the flight; a mid-flight
+  edit aborts the chain with "Changed while saving" and keeps edits.
+  A conflicting save offers a reload Confirm instead of overwriting.
+- Draft state is scoped by user + workspace + application id; navigating
+  between apps remounts a clean editor under a different scope key.
+- Mobile (<768px) stacks with no horizontal overflow; screenshots
+  `application-ui-{desktop,mobile}.png`.
+- Coverage is the 7-case browser suite plus static/unit geometry
+  checks, not frame-level measurement.
+
+Application creation keeps the optional capability/extension form mounted
+when collapsed (C2). The kind-switch discard prompt covers structured
+configuration and invalid Advanced JSON, not only the name (C2/F2).
+Application-mode forms omit instance lifetime fields and allow only vault
+references. Raw Advanced JSON is submitted without a browser-number
+round trip.
+
+Invocation examples use Radix keyboard tabs and the shared `CopyBlock`
+with `SwapLabel` feedback (P2/S4). Their code panel has a fixed height
+and local horizontal scrolling (S1/S3). Copy failures are visible without
+discarding text (P5). Snippet unit tests capture the actual curl arguments,
+Python request bytes and JavaScript fetch body without network access;
+all preserve the exact JSON input, including large integers.

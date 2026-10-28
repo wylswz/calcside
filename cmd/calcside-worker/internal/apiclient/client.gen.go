@@ -4,6 +4,7 @@
 package apiclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	rt "calcside/internal/runtime"
 
 	"github.com/oapi-codegen/runtime"
 )
@@ -80,14 +83,44 @@ type ExtTree struct {
 	Sum string `json:"sum"`
 }
 
+// NodePrepareRequest defines model for NodePrepareRequest.
+type NodePrepareRequest = rt.NodePrepareRequest
+
+// NodePrepareResult defines model for NodePrepareResult.
+type NodePrepareResult = rt.NodePrepareResponse
+
+// NodeRegisterRequest defines model for NodeRegisterRequest.
+type NodeRegisterRequest = rt.NodeRegisterRequest
+
+// NodeRegisterResult defines model for NodeRegisterResult.
+type NodeRegisterResult = rt.NodeRegisterResponse
+
+// NodeSyncRequest defines model for NodeSyncRequest.
+type NodeSyncRequest = rt.NodeSyncRequest
+
+// NodeSyncResult defines model for NodeSyncResult.
+type NodeSyncResult = rt.NodeSyncResponse
+
 // Error defines model for Error.
 type Error = ErrorEnvelope
 
 // ExtTreeParams defines parameters for ExtTree.
 type ExtTreeParams struct {
-	// Path Server-local root-name/extension identifier to resolve, e.g. contrib/tavily.
+	// Path Extension source identifier (local root-name/extension or remote source).
 	Path string `form:"path" json:"path"`
+
+	// Sum Required h1 integrity sum the artifact must match.
+	Sum string `form:"sum" json:"sum"`
 }
+
+// NodePrepareJSONRequestBody defines body for NodePrepare for application/json ContentType.
+type NodePrepareJSONRequestBody = NodePrepareRequest
+
+// NodeRegisterJSONRequestBody defines body for NodeRegister for application/json ContentType.
+type NodeRegisterJSONRequestBody = NodeRegisterRequest
+
+// NodeSyncJSONRequestBody defines body for NodeSync for application/json ContentType.
+type NodeSyncJSONRequestBody = NodeSyncRequest
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -163,21 +196,189 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 // The interface specification for the client above.
 type ClientInterface interface {
 
-	// ExtTree (worker → API) Fetch a local extension source tree.
+	// ExtTree (worker → API) Fetch a captured extension artifact tree.
 	//
-	// Reverse-direction call: the worker asks the API tier to read a local extension directory — workers carry no filesystem roots. The API enforces the same containment and size caps the filesystem path would, and returns the tree plus its h1 sum so the worker can cache it. Signed with the same HMAC scheme.
+	// Reverse-direction call: the worker asks the API tier for an immutable captured extension tree — workers carry no source roots and never fetch git/remote sources. The path is the source identifier and sum is the required h1 integrity pin; the API reads the stored artifact, never a mutable source. Signed with the same HMAC scheme.
 	//
 	// Corresponds with GET /internal/v1/ext/tree (the `ExtTree` operationId).
 	ExtTree(ctx context.Context, params *ExtTreeParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// NodePrepareWithBody Fetch the full self-contained prepare payload for one replica.
+	//
+	// Exactly one fenced assignment per fetch; secrets are resolved in memory, never persisted or logged. Lease expiry converts via ServerNow minus round-trip time at the worker.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /internal/v1/nodes/prepare (the `NodePrepare` operationId).
+	NodePrepareWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// NodePrepare Fetch the full self-contained prepare payload for one replica.
+	//
+	// Exactly one fenced assignment per fetch; secrets are resolved in memory, never persisted or logged. Lease expiry converts via ServerNow minus round-trip time at the worker.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /internal/v1/nodes/prepare (the `NodePrepare` operationId).
+	NodePrepare(ctx context.Context, body NodePrepareJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// NodeRegisterWithBody Worker boot registration; returns the assigned incarnation.
+	//
+	// Idempotent for the same boot id; a new boot bumps the node's incarnation and invalidates every prior fence. ServerNow is the API clock sampled at end of response for lease conversion.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /internal/v1/nodes/register (the `NodeRegister` operationId).
+	NodeRegisterWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// NodeRegister Worker boot registration; returns the assigned incarnation.
+	//
+	// Idempotent for the same boot id; a new boot bumps the node's incarnation and invalidates every prior fence. ServerNow is the API clock sampled at end of response for lease conversion.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /internal/v1/nodes/register (the `NodeRegister` operationId).
+	NodeRegister(ctx context.Context, body NodeRegisterJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// NodeSyncWithBody Heartbeat + reports + inventory; returns the full desired set.
+	//
+	// Heartbeats the exact node tuple (stale boot -> 409), persists report audit before state, renews locally-ready inventory, and returns the authoritative assignment set on success only.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /internal/v1/nodes/sync (the `NodeSync` operationId).
+	NodeSyncWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// NodeSync Heartbeat + reports + inventory; returns the full desired set.
+	//
+	// Heartbeats the exact node tuple (stale boot -> 409), persists report audit before state, renews locally-ready inventory, and returns the authoritative assignment set on success only.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /internal/v1/nodes/sync (the `NodeSync` operationId).
+	NodeSync(ctx context.Context, body NodeSyncJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
-// ExtTree (worker → API) Fetch a local extension source tree.
+// ExtTree (worker → API) Fetch a captured extension artifact tree.
 //
-// Reverse-direction call: the worker asks the API tier to read a local extension directory — workers carry no filesystem roots. The API enforces the same containment and size caps the filesystem path would, and returns the tree plus its h1 sum so the worker can cache it. Signed with the same HMAC scheme.
+// Reverse-direction call: the worker asks the API tier for an immutable captured extension tree — workers carry no source roots and never fetch git/remote sources. The path is the source identifier and sum is the required h1 integrity pin; the API reads the stored artifact, never a mutable source. Signed with the same HMAC scheme.
 //
 // Corresponds with GET /internal/v1/ext/tree (the `ExtTree` operationId).
 func (c *Client) ExtTree(ctx context.Context, params *ExtTreeParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewExtTreeRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// NodePrepareWithBody Fetch the full self-contained prepare payload for one replica.
+//
+// Exactly one fenced assignment per fetch; secrets are resolved in memory, never persisted or logged. Lease expiry converts via ServerNow minus round-trip time at the worker.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /internal/v1/nodes/prepare (the `NodePrepare` operationId).
+func (c *Client) NodePrepareWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewNodePrepareRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// NodePrepare Fetch the full self-contained prepare payload for one replica.
+//
+// Exactly one fenced assignment per fetch; secrets are resolved in memory, never persisted or logged. Lease expiry converts via ServerNow minus round-trip time at the worker.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /internal/v1/nodes/prepare (the `NodePrepare` operationId).
+func (c *Client) NodePrepare(ctx context.Context, body NodePrepareJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewNodePrepareRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// NodeRegisterWithBody Worker boot registration; returns the assigned incarnation.
+//
+// Idempotent for the same boot id; a new boot bumps the node's incarnation and invalidates every prior fence. ServerNow is the API clock sampled at end of response for lease conversion.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /internal/v1/nodes/register (the `NodeRegister` operationId).
+func (c *Client) NodeRegisterWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewNodeRegisterRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// NodeRegister Worker boot registration; returns the assigned incarnation.
+//
+// Idempotent for the same boot id; a new boot bumps the node's incarnation and invalidates every prior fence. ServerNow is the API clock sampled at end of response for lease conversion.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /internal/v1/nodes/register (the `NodeRegister` operationId).
+func (c *Client) NodeRegister(ctx context.Context, body NodeRegisterJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewNodeRegisterRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// NodeSyncWithBody Heartbeat + reports + inventory; returns the full desired set.
+//
+// Heartbeats the exact node tuple (stale boot -> 409), persists report audit before state, renews locally-ready inventory, and returns the authoritative assignment set on success only.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /internal/v1/nodes/sync (the `NodeSync` operationId).
+func (c *Client) NodeSyncWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewNodeSyncRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// NodeSync Heartbeat + reports + inventory; returns the full desired set.
+//
+// Heartbeats the exact node tuple (stale boot -> 409), persists report audit before state, renews locally-ready inventory, and returns the authoritative assignment set on success only.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /internal/v1/nodes/sync (the `NodeSync` operationId).
+func (c *Client) NodeSync(ctx context.Context, body NodeSyncJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewNodeSyncRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -224,6 +425,14 @@ func NewExtTreeRequest(server string, params *ExtTreeParams) (*http.Request, err
 			}
 		}
 
+		if queryFrag, err := runtime.StyleParamWithOptions("form", true, "sum", params.Sum, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			return nil, err
+		} else {
+			for _, qp := range strings.Split(queryFrag, "&") {
+				rawQueryFragments = append(rawQueryFragments, qp)
+			}
+		}
+
 		if encoded := queryValues.Encode(); encoded != "" {
 			rawQueryFragments = append(rawQueryFragments, encoded)
 		}
@@ -234,6 +443,126 @@ func NewExtTreeRequest(server string, params *ExtTreeParams) (*http.Request, err
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewNodePrepareRequest calls the generic NodePrepare builder with application/json body
+func NewNodePrepareRequest(server string, body NodePrepareJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewNodePrepareRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewNodePrepareRequestWithBody constructs an http.Request for the NodePrepare method, with any body, and a specified content type
+func NewNodePrepareRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/internal/v1/nodes/prepare")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewNodeRegisterRequest calls the generic NodeRegister builder with application/json body
+func NewNodeRegisterRequest(server string, body NodeRegisterJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewNodeRegisterRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewNodeRegisterRequestWithBody constructs an http.Request for the NodeRegister method, with any body, and a specified content type
+func NewNodeRegisterRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/internal/v1/nodes/register")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewNodeSyncRequest calls the generic NodeSync builder with application/json body
+func NewNodeSyncRequest(server string, body NodeSyncJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewNodeSyncRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewNodeSyncRequestWithBody constructs an http.Request for the NodeSync method, with any body, and a specified content type
+func NewNodeSyncRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/internal/v1/nodes/sync")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -282,14 +611,68 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
-	// ExtTreeWithResponse (worker → API) Fetch a local extension source tree.
+	// ExtTreeWithResponse (worker → API) Fetch a captured extension artifact tree.
 	//
-	// Reverse-direction call: the worker asks the API tier to read a local extension directory — workers carry no filesystem roots. The API enforces the same containment and size caps the filesystem path would, and returns the tree plus its h1 sum so the worker can cache it. Signed with the same HMAC scheme.
+	// Reverse-direction call: the worker asks the API tier for an immutable captured extension tree — workers carry no source roots and never fetch git/remote sources. The path is the source identifier and sum is the required h1 integrity pin; the API reads the stored artifact, never a mutable source. Signed with the same HMAC scheme.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /internal/v1/ext/tree (the `ExtTree` operationId).
 	ExtTreeWithResponse(ctx context.Context, params *ExtTreeParams, reqEditors ...RequestEditorFn) (*ExtTreeResponse, error)
+
+	// NodePrepareWithBodyWithResponse Fetch the full self-contained prepare payload for one replica.
+	//
+	// Exactly one fenced assignment per fetch; secrets are resolved in memory, never persisted or logged. Lease expiry converts via ServerNow minus round-trip time at the worker.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /internal/v1/nodes/prepare (the `NodePrepare` operationId).
+	NodePrepareWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*NodePrepareResponse, error)
+
+	// NodePrepareWithResponse Fetch the full self-contained prepare payload for one replica.
+	//
+	// Exactly one fenced assignment per fetch; secrets are resolved in memory, never persisted or logged. Lease expiry converts via ServerNow minus round-trip time at the worker.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /internal/v1/nodes/prepare (the `NodePrepare` operationId).
+	NodePrepareWithResponse(ctx context.Context, body NodePrepareJSONRequestBody, reqEditors ...RequestEditorFn) (*NodePrepareResponse, error)
+
+	// NodeRegisterWithBodyWithResponse Worker boot registration; returns the assigned incarnation.
+	//
+	// Idempotent for the same boot id; a new boot bumps the node's incarnation and invalidates every prior fence. ServerNow is the API clock sampled at end of response for lease conversion.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /internal/v1/nodes/register (the `NodeRegister` operationId).
+	NodeRegisterWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*NodeRegisterResponse, error)
+
+	// NodeRegisterWithResponse Worker boot registration; returns the assigned incarnation.
+	//
+	// Idempotent for the same boot id; a new boot bumps the node's incarnation and invalidates every prior fence. ServerNow is the API clock sampled at end of response for lease conversion.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /internal/v1/nodes/register (the `NodeRegister` operationId).
+	NodeRegisterWithResponse(ctx context.Context, body NodeRegisterJSONRequestBody, reqEditors ...RequestEditorFn) (*NodeRegisterResponse, error)
+
+	// NodeSyncWithBodyWithResponse Heartbeat + reports + inventory; returns the full desired set.
+	//
+	// Heartbeats the exact node tuple (stale boot -> 409), persists report audit before state, renews locally-ready inventory, and returns the authoritative assignment set on success only.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /internal/v1/nodes/sync (the `NodeSync` operationId).
+	NodeSyncWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*NodeSyncResponse, error)
+
+	// NodeSyncWithResponse Heartbeat + reports + inventory; returns the full desired set.
+	//
+	// Heartbeats the exact node tuple (stale boot -> 409), persists report audit before state, renews locally-ready inventory, and returns the authoritative assignment set on success only.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /internal/v1/nodes/sync (the `NodeSync` operationId).
+	NodeSyncWithResponse(ctx context.Context, body NodeSyncJSONRequestBody, reqEditors ...RequestEditorFn) (*NodeSyncResponse, error)
 }
 
 type ExtTreeResponse struct {
@@ -340,9 +723,153 @@ func (r ExtTreeResponse) ContentType() string {
 	return ""
 }
 
-// ExtTreeWithResponse (worker → API) Fetch a local extension source tree.
+type NodePrepareResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *NodePrepareResult
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r NodePrepareResponse) GetJSON200() *NodePrepareResult {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r NodePrepareResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r NodePrepareResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r NodePrepareResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r NodePrepareResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r NodePrepareResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type NodeRegisterResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *NodeRegisterResult
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r NodeRegisterResponse) GetJSON200() *NodeRegisterResult {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r NodeRegisterResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r NodeRegisterResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r NodeRegisterResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r NodeRegisterResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r NodeRegisterResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type NodeSyncResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *NodeSyncResult
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r NodeSyncResponse) GetJSON200() *NodeSyncResult {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r NodeSyncResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r NodeSyncResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r NodeSyncResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r NodeSyncResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r NodeSyncResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// ExtTreeWithResponse (worker → API) Fetch a captured extension artifact tree.
 //
-// Reverse-direction call: the worker asks the API tier to read a local extension directory — workers carry no filesystem roots. The API enforces the same containment and size caps the filesystem path would, and returns the tree plus its h1 sum so the worker can cache it. Signed with the same HMAC scheme.
+// Reverse-direction call: the worker asks the API tier for an immutable captured extension tree — workers carry no source roots and never fetch git/remote sources. The path is the source identifier and sum is the required h1 integrity pin; the API reads the stored artifact, never a mutable source. Signed with the same HMAC scheme.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -353,6 +880,96 @@ func (c *ClientWithResponses) ExtTreeWithResponse(ctx context.Context, params *E
 		return nil, err
 	}
 	return ParseExtTreeResponse(rsp)
+}
+
+// NodePrepareWithBodyWithResponse Fetch the full self-contained prepare payload for one replica.
+//
+// Exactly one fenced assignment per fetch; secrets are resolved in memory, never persisted or logged. Lease expiry converts via ServerNow minus round-trip time at the worker.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /internal/v1/nodes/prepare (the `NodePrepare` operationId).
+func (c *ClientWithResponses) NodePrepareWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*NodePrepareResponse, error) {
+	rsp, err := c.NodePrepareWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseNodePrepareResponse(rsp)
+}
+
+// NodePrepareWithResponse Fetch the full self-contained prepare payload for one replica.
+//
+// Exactly one fenced assignment per fetch; secrets are resolved in memory, never persisted or logged. Lease expiry converts via ServerNow minus round-trip time at the worker.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /internal/v1/nodes/prepare (the `NodePrepare` operationId).
+func (c *ClientWithResponses) NodePrepareWithResponse(ctx context.Context, body NodePrepareJSONRequestBody, reqEditors ...RequestEditorFn) (*NodePrepareResponse, error) {
+	rsp, err := c.NodePrepare(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseNodePrepareResponse(rsp)
+}
+
+// NodeRegisterWithBodyWithResponse Worker boot registration; returns the assigned incarnation.
+//
+// Idempotent for the same boot id; a new boot bumps the node's incarnation and invalidates every prior fence. ServerNow is the API clock sampled at end of response for lease conversion.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /internal/v1/nodes/register (the `NodeRegister` operationId).
+func (c *ClientWithResponses) NodeRegisterWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*NodeRegisterResponse, error) {
+	rsp, err := c.NodeRegisterWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseNodeRegisterResponse(rsp)
+}
+
+// NodeRegisterWithResponse Worker boot registration; returns the assigned incarnation.
+//
+// Idempotent for the same boot id; a new boot bumps the node's incarnation and invalidates every prior fence. ServerNow is the API clock sampled at end of response for lease conversion.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /internal/v1/nodes/register (the `NodeRegister` operationId).
+func (c *ClientWithResponses) NodeRegisterWithResponse(ctx context.Context, body NodeRegisterJSONRequestBody, reqEditors ...RequestEditorFn) (*NodeRegisterResponse, error) {
+	rsp, err := c.NodeRegister(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseNodeRegisterResponse(rsp)
+}
+
+// NodeSyncWithBodyWithResponse Heartbeat + reports + inventory; returns the full desired set.
+//
+// Heartbeats the exact node tuple (stale boot -> 409), persists report audit before state, renews locally-ready inventory, and returns the authoritative assignment set on success only.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /internal/v1/nodes/sync (the `NodeSync` operationId).
+func (c *ClientWithResponses) NodeSyncWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*NodeSyncResponse, error) {
+	rsp, err := c.NodeSyncWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseNodeSyncResponse(rsp)
+}
+
+// NodeSyncWithResponse Heartbeat + reports + inventory; returns the full desired set.
+//
+// Heartbeats the exact node tuple (stale boot -> 409), persists report audit before state, renews locally-ready inventory, and returns the authoritative assignment set on success only.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /internal/v1/nodes/sync (the `NodeSync` operationId).
+func (c *ClientWithResponses) NodeSyncWithResponse(ctx context.Context, body NodeSyncJSONRequestBody, reqEditors ...RequestEditorFn) (*NodeSyncResponse, error) {
+	rsp, err := c.NodeSync(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseNodeSyncResponse(rsp)
 }
 
 // ParseExtTreeResponse parses an HTTP response from a ExtTreeWithResponse call
@@ -371,6 +988,105 @@ func ParseExtTreeResponse(rsp *http.Response) (*ExtTreeResponse, error) {
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest ExtTree
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseNodePrepareResponse parses an HTTP response from a NodePrepareWithResponse call
+func ParseNodePrepareResponse(rsp *http.Response) (*NodePrepareResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &NodePrepareResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest NodePrepareResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseNodeRegisterResponse parses an HTTP response from a NodeRegisterWithResponse call
+func ParseNodeRegisterResponse(rsp *http.Response) (*NodeRegisterResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &NodeRegisterResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest NodeRegisterResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseNodeSyncResponse parses an HTTP response from a NodeSyncWithResponse call
+func ParseNodeSyncResponse(rsp *http.Response) (*NodeSyncResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &NodeSyncResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest NodeSyncResult
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

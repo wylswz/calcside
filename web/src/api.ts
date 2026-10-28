@@ -8,6 +8,10 @@ import type { paths, components } from './api/schema'
 
 export type User = components['schemas']['User']
 export type Instance = components['schemas']['Instance']
+export type Application = components['schemas']['Application']
+export type ApplicationStatus = components['schemas']['ApplicationStatus']
+export type ProgramResult = components['schemas']['ApplicationRunResponse']['result']
+export type ApplicationRun = components['schemas']['ApplicationRunResponse']
 export type SharedInstance = components['schemas']['SharedInstance']
 export type InstanceSpec = components['schemas']['InstanceSpec']
 export type ExecResult = components['schemas']['ExecResult']
@@ -106,9 +110,9 @@ export async function loadAuthConfig(onRetrying?: (retrying: boolean) => void): 
   }
 }
 
-const raw = createClient<paths>({ credentials: 'same-origin' })
+const rawClient = createClient<paths>({ credentials: 'same-origin' })
 
-raw.use({
+rawClient.use({
   async onRequest({ request }) {
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       request.headers.set('X-Requested-With', 'calcside')
@@ -181,10 +185,29 @@ export const api = {
     return { blob: data, filename, redacted: response.headers.get('X-Calcside-Redacted') === 'true', fileCount: Number(response.headers.get('X-Calcside-File-Count') || 0) }
   },
   get: async <T>(path: string): Promise<T> => call<T>('get', path),
+  // postRawJson sends an already-serialized JSON body verbatim —
+  // high-precision numbers must never round-trip through JSON.parse.
+  postRawJson: async <T>(path: string, raw: string): Promise<T> => rawJson<T>('POST', path, raw),
+  putRawJson: async <T>(path: string, raw: string): Promise<T> => rawJson<T>('PUT', path, raw),
   post: async <T>(path: string, body?: unknown): Promise<T> => call<T>('post', path, body ?? {}),
   put: async <T>(path: string, body: unknown): Promise<T> => call<T>('put', path, body),
   patch: async <T>(path: string, body: unknown): Promise<T> => call<T>('patch', path, body),
   del: async <T>(path: string): Promise<T> => call<T>('delete', path),
+}
+
+async function rawJson<T>(method: 'POST' | 'PUT', path: string, raw: string): Promise<T> {
+  const fn = (rawClient as any)[method].bind(rawClient)
+  const { data, error, response } = await fn(path as never, {
+    headers: { 'Content-Type': 'application/json' },
+    body: raw,
+    bodySerializer: (b: unknown) => b as string,
+  })
+  if (error !== undefined && error !== null) {
+    const e = (error as any)?.error
+    throw new ApiError(response.status, (e?.code ?? '') as ApiErrorCode | '', e?.message ?? response.statusText)
+  }
+  if (!response.ok) throw new ApiError(response.status, '', response.statusText)
+  return data as T
 }
 
 async function call<T>(method: 'get' | 'post' | 'put' | 'patch' | 'delete', path: string, body?: unknown, headers?: HeadersInit): Promise<T> {
@@ -194,7 +217,7 @@ async function call<T>(method: 'get' | 'post' | 'put' | 'patch' | 'delete', path
 async function request(method: 'get' | 'post' | 'put' | 'patch' | 'delete', path: string, body?: unknown, headers?: HeadersInit, parseAs: 'json' | 'blob' = 'json'): Promise<{ data: unknown; response: Response }> {
   // openapi-fetch is typed per-path; the console's dynamic paths are
   // handled via the untyped escape hatch.
-  const fn = (raw as any)[method.toUpperCase()].bind(raw)
+  const fn = (rawClient as any)[method.toUpperCase()].bind(rawClient)
   const { data, error, response } = await fn(path as never, { headers, parseAs, ...(method === 'get' || method === 'delete' ? {} : { body }) })
   if (error !== undefined && error !== null) {
     const e = (error as any)?.error

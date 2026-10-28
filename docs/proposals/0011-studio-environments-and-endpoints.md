@@ -135,7 +135,7 @@ go to disk and are never shared between endpoints.
 
 ### Isolation
 
-Requests run in child processes as instances do (`--instance-isolation`),
+Requests run in worker child processes, as instances do,
 from a small per-endpoint pool. A child serves one endpoint only, so one
 endpoint's secrets never share a process with another's. Each request gets a
 fresh session (globals and `/work`) inside the child. Per-endpoint limits:

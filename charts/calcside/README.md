@@ -114,9 +114,6 @@ do not have; `worker.instanceMemoryMax` therefore defaults to `0`. The heap
 watchdog (`limits.execMemoryLimit`) and the pod memory limit still apply. Leave it
 at `0` unless your platform grants writable cgroups.
 
-To disable the worker tier entirely (execution runs in the API process, suitable
-for development), set `worker.enabled=false`.
-
 ## Extensions and policies
 
 The API data volume holds `/data/policies`, `/data/ext`, and `/data/ext-cache`.

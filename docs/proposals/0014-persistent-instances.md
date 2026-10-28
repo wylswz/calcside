@@ -1,10 +1,63 @@
 # EP-0014: Persistent instances
 
-- **Status:** Draft
+- **Status:** In progress
 - **Scope:** engine, runtime/worker protocol, API, store, console. Refines the
   JSON request/response subset of EP-0011; builds on the immutable boundary
   lifecycle of EP-0012.
 - **Related:** EP-0010 (workspaces, access), EP-0011, EP-0012
+
+## Delivery status
+
+Delivered (JSON contract, execution, durable placement and node recovery —
+the public build/publish/invoke flow is **not** usable yet):
+
+- `internal/serving`: bounded JSON decoding (`DecodeJSON`: byte/depth/node
+  budgets, duplicate-key, UTF-8 and number-token guards) and the pinned
+  JSON Schema 2020-12 subset compiler/validator
+  (`CompileSchema`/`Validate`/`JSON`), backed by
+  `github.com/santhosh-tekuri/jsonschema/v6` behind a thin subset walker.
+- `internal/engine`: bounded typed Starlark-to-JSON conversion
+  (`MarshalJSONValue`), and the compiled-program path
+  (`PrepareProgram`/`InvokeProgram`): config/path/schema validation,
+  one-shot `SourceProgramOptions` compile with static load-graph checks,
+  disarmed-gate pure init, fresh session + seeded assets + re-initialized
+  modules per invoke, armed-gate `main` call, convert/redact/validate
+  output, sanitized stdout. Cold-run coverage lives in the engine tests.
+  Source, schema and policy snapshots now also have durable release identities.
+- `internal/instance` + worker protocol + `internal/node/subproc` +
+  `cmd/calcside/internal/worker`: ephemeral serving replicas
+  (`runtime.ServingRuntime` embedded in `Runtime`,
+  `/runtime/v1/prepare` + `/runtime/v1/invoke`): dedicated leased
+  replicas sharing the instance namespace/quota, exact
+  owner/epoch/release/generation fences, serialized calls with a
+  bounded queue (1 active + 32 queued), per-call fresh
+  session/audit, lease-pinned deadlines, failure audit always
+  carried. Renewal extends future calls only — in-flight calls stay
+  pinned to their lease snapshot.
+- `internal/store` + paired SQLite/PostgreSQL migrations: immutable,
+  content-addressed releases; persistent desired instances; node boot
+  history; atomic replica claims, epochs, finite leases and failure backoff.
+  Secret values are forbidden in releases. Extension snapshots are explicitly
+  rejected until immutable extension dependency storage is implemented.
+- `service/serving`, signed node-control callbacks and `internal/nodeagent`:
+  bounded scheduler passes, deterministic placement, startup registration and
+  assignment pull, independent heartbeats and prepare workers, ready-only
+  renewal, audit acknowledgements and shutdown draining. New boots cannot
+  shorten old leases or revive old epochs. API and node clocks need not agree:
+  the node conservatively converts API leases into local deadlines.
+- Startup wiring for API-local and remote-worker topologies. SQLite restart
+  integration tests cover both in-process and child-process execution, API
+  handle/service reconstruction, node boot replacement, and fresh globals/VFS.
+  PostgreSQL execution still requires the separate configured backend gate.
+
+Pending:
+
+- Build/publish form carrying the two schema objects (editor UI included,
+  see "Application editor" below).
+- Public publish/invoke API routes and access-table entries, including
+  publish-time spec normalization, capability ceilings and quotas.
+- Release upgrades/rollback and remaining user-facing lifecycle controls.
+- Console UI.
 
 ## Problem
 
@@ -31,8 +84,8 @@ are gone. Three gaps block that today:
 - **Release** — immutable, content-addressed snapshot: selected `.star`
   sources, bounded assets, and a normalized spec (capabilities, extensions,
   policies, limits, secret references). Its content hash covers the
-  entrypoint, both schemas, file bytes, the normalized boundary, and
-  snapshots of user policies and extension dependency content/revisions
+  entrypoint, both canonical schemas, file bytes, the normalized boundary,
+  and snapshots of user policies and extension dependency content/revisions
   (secret *references*, never values), workspace-scoped to avoid
   cross-workspace dedup leaks. Never mutated after creation.
 - **Persistent instance** — the durable, user-facing serving resource: a
@@ -69,35 +122,17 @@ role.
 
 ## Program shape
 
-The entrypoint file (default `main.star`) defines three top-level names:
+The entrypoint file (default `main.star`) defines one top-level name:
 
 ```python
-input_schema = {
-    "type": "object",
-    "properties": {
-        "name": {"type": "string", "minLength": 1},
-        "tags": {"type": "array", "items": {"type": "string"}, "maxItems": 16},
-    },
-    "required": ["name"],
-    "additionalProperties": False,
-}
-output_schema = {
-    "type": "object",
-    "properties": {
-        "greeting": {"type": "string"},
-        "tag_count": {"type": "integer"},
-    },
-    "required": ["greeting", "tag_count"],
-    "additionalProperties": False,
-}
-
 def main(input):
     tags = input.get("tags", [])
     return {"greeting": "hello, " + input["name"], "tag_count": len(tags)}
 ```
 
-- Both schema declarations are required at publish: `{}` means explicitly
-  unconstrained; omitting one is an error, not a default.
+- The schemas are **not** declared in code: they are release metadata
+  supplied at publish time (see "Publishing" and "Application editor"),
+  so a program cannot change its contract by editing source.
 - `main` receives the validated input as a frozen JSON-shaped value and
   returns a JSON-able value, served as `application/json`.
 - `load()` resolves only against release files — VFS-only, no host or
@@ -114,6 +149,14 @@ release and records the new persistent instance's desired state in one atomic
 write; preparation proceeds asynchronously (`preparing` → `ready`, or
 `degraded` with an explicit error).
 
+The request carries required `input_schema` and `output_schema` JSON
+objects supplied by the build form: `{}` means explicitly unconstrained;
+an absent schema is an error, not a default. Publish bounds the documents
+and compiles them with the pinned-subset validator (`serving.CompileSchema`);
+invalid schemas fail the request before any release is written. The
+canonical compiled schemas are stored on the release and covered by its
+content hash, so retries and idempotency keys compare the same contract.
+
 The snapshot is taken under the source instance's existing
 request/execution/artifact synchronization, in the acquisition order used
 today, yielding one coherent bounded snapshot of the selected sources,
@@ -122,17 +165,46 @@ validation and storage writes run — publish never compiles or writes while
 holding instance locks. No hidden dev state travels: only selected `.star`
 files and bounded assets — never VFS leftovers, globals, or run history.
 
-Schemas are extracted statically: `input_schema`/`output_schema` must be
-bounded literal dict/list JSON values, not dynamically computed. The
-entrypoint is verified by compiling the program and running a pure init —
-top-level evaluation with effectful capabilities denied and step/time/memory
-bounds. Publishing never runs `main` and never performs a network or file
-side effect. At prepare time the engine re-reads the schema globals and
-rejects the release if they differ from the captured metadata. A cold-run
-test uses the same initialize/validate/call path as invoke.
+The entrypoint is verified by compiling the program and running a pure
+init — top-level evaluation with effectful capabilities denied and
+step/time/memory bounds — which checks that `main` exists and is callable.
+Publishing never runs `main` and never performs a network or file side
+effect. Prepare and invoke use the release's captured schemas as
+authoritative; there is no code-based schema override to re-read or
+re-compare. A cold-run test uses the same initialize/validate/call path as
+invoke.
 
 Publish carries a workspace-scoped idempotency key: a retry returns the same
 release and instance; the same key with different snapshot/options conflicts.
+
+## Application editor
+
+The build/publish form derives the two schema drafts from sample JSON
+objects — one click per side — then lets the user edit the result before
+publishing. Generation rules:
+
+- A sample object produces an object schema whose `properties` map every
+  observed key to an inferred schema; by default all observed properties
+  land in `required`, and a per-property "optional" toggle *removes* the
+  name from the parent's `required` list (it never becomes a nullable
+  union type).
+- Objects recurse; arrays infer a single `items` schema. An empty array
+  yields `"items": {}` (explicitly unconstrained); a heterogeneous array
+  yields a bounded `anyOf` of the observed element shapes.
+- `null` in a sample maps to `"type": "null"` explicitly — it never marks
+  a property optional.
+- Inference is provisional: a sample cannot express business constraints
+  (`minLength`, `minimum`, `enum`, formats). The editor stays editable so
+  users tighten before publishing and must review before publish.
+- Exact integers are preserved end to end: inference must not round the
+  sample through `JSON.parse`-style float64 (a `9007199254740993` member
+  stays an exact integer in the generated schema and in preview).
+- The backend remains authoritative: publish validates the raw schema
+  documents with `serving.CompileSchema` regardless of what the editor
+  produced; drafts stay bounded by the same limits.
+
+A console draft editor is available with the stateless infer/validate
+contract endpoints; snapshot/publish is still not connected.
 
 ## Schemas
 
@@ -146,27 +218,38 @@ and the annotations `title`/`description` plus `$schema` restricted to the
 exact 2020-12 URI.
 
 Everything else — `$ref` (remote *and* local), `$defs`, `format`, `pattern`,
-composition beyond `anyOf`, `default` — is rejected at publish. No coercion
-or default injection; unknown fields follow `additionalProperties`. Schema
-nesting depth and validation work are bounded.
+composition beyond `anyOf`, `default` — is rejected at publish. Boolean
+subschemas exist nowhere except `additionalProperties`. No coercion or
+default injection; unknown fields follow `additionalProperties`.
+
+Validation uses `github.com/santhosh-tekuri/jsonschema/v6` behind a thin
+subset walker that enforces the keyword allowlist and product rules above;
+draft 2020-12 semantics are the library's, including enum elements that
+need not be unique. Bounds are size/structure only: schema bytes ≤64 KiB,
+nesting depth, node count, `anyOf` ≤16 members, `minLength`/`maxLength`/
+`minItems`/`maxItems` capped at 2^31-1 (the library truncates them to
+platform int), and number tokens capped at
+`serving.MaxNumberTokenBytes` (256 bytes) with bounded exponents so every
+converter output also decodes. There is deliberately no work/CPU budget;
+request body limits bound input size, not validation execution time.
 
 ## Invoking
 
 `POST /api/v1/persistent-instances/{id}/invoke` takes a raw JSON body —
-**data only**, never code, entrypoint, or spec overrides — and returns
-`{invocation_id, release_id, output}`. Request path, in order:
+**data only**, never code, entrypoint, spec overrides, or schemas — and
+returns `{invocation_id, release_id, output}`. Request path, in order:
 
 1. Bound input bytes, depth and value count *before* validation.
-2. Validate against `input_schema`; invalid input is rejected before any
-   user code or capability runs.
+2. Validate against the release's `input_schema`; invalid input is rejected
+   before any user code or capability runs.
 3. Initialize the fresh session and call `main`.
 4. Convert the return value to a typed Go value with traversal, depth, node
    and byte budgets enforced *during* conversion — before any unbounded Go
    value or encoding is constructed. Integers are preserved; non-finite
    numbers, cycles, non-string dict keys and non-JSON values are rejected.
-5. Redact known secrets, then validate the **redacted** output against
-   `output_schema`. Fail closed: a redaction that breaks the schema is an
-   `invalid_output` error, never a silently invalid success.
+5. Redact known secrets, then validate the **redacted** output against the
+   release's `output_schema`. Fail closed: a redaction that breaks the
+   schema is an `invalid_output` error, never a silently invalid success.
 
 Errors: `422` invalid input; `500` `invalid_output` or sanitized runtime
 error; `429` queue overload; `503` not ready or disabled; `504` timeout with
@@ -198,14 +281,15 @@ All routes land in `api/openapi.yaml` first when implemented; shapes are illustr
 
 | Route | Body → result |
 |---|---|
-| `POST /api/v1/instances/{id}/publish` | `{name, entrypoint, sources[], assets[], idempotency_key}` → `{release_id, persistent_instance_id, status}` |
+| `POST /api/v1/instances/{id}/publish` | `{name, entrypoint, sources[], assets[], input_schema, output_schema, idempotency_key}` → `{release_id, persistent_instance_id, status}` |
 | `GET /api/v1/persistent-instances/{id}` | → `{status, active_release, input_schema, output_schema, error}` |
 | `POST /api/v1/persistent-instances/{id}/invoke` | raw JSON input → `{invocation_id, release_id, output}` |
 | `POST /api/v1/persistent-instances/{id}/disable` | durable stop |
 | `POST /api/v1/persistent-instances/{id}/activate-release` | `{release_id}` upgrade/rollback |
 
 `sources` is the explicit `.star` set (entrypoint among them) that `load()`
-may reach; `assets` adds only explicit bounded input files.
+may reach; `assets` adds only explicit bounded input files. Both schema
+fields are required JSON objects in the pinned subset.
 
 ## Access and security
 
@@ -258,8 +342,8 @@ immutable revisions — no silent catalog drift.
 
 - Publish captures only selected sources: dev globals and unselected files
   are unavailable to the release; every invoke sees fresh globals/`/work`.
-- Schema acceptance: valid/invalid schemas, unsupported keywords, any `$ref`;
-  pathological but bounded inputs.
+- Schema acceptance: valid/invalid schema objects supplied at publish,
+  unsupported keywords, any `$ref`; pathological but bounded inputs.
 - Invalid input produces zero capability calls; invalid or redaction-broken
   output never returns as success.
 - Publishing executes no effectful calls (denied-capability probe).

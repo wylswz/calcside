@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -47,19 +46,4 @@ func EnvBool(key string, def bool) bool {
 		}
 	}
 	return def
-}
-
-// Instance isolation modes: inproc runs every instance inside the
-// node's own process; process gives each instance its own OS process
-// (see internal/node/subproc).
-const (
-	IsolationInproc  = "inproc"
-	IsolationProcess = "process"
-)
-
-func CheckIsolation(v string) error {
-	if v != IsolationInproc && v != IsolationProcess {
-		return fmt.Errorf("--instance-isolation: must be %q or %q, got %q", IsolationInproc, IsolationProcess, v)
-	}
-	return nil
 }

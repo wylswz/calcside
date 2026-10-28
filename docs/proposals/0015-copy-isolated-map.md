@@ -16,7 +16,7 @@ elements on bounded worker threads:
 `map` applies one unary function per element; `amap` zips N values with N
 unary functions (elementwise pairing, not cartesian, not async/futures).
 Both return a plain list in input order and run inside the existing
-instance process under `inproc` and `process` isolation; no extra process
+instance's worker-managed child process; no extra process
 or worker-protocol change is needed to map.
 
 Isolation is by **copy**, not shared access or freezing: each task calls a
@@ -87,8 +87,8 @@ Structured fork/join inside `Engine.Exec`:
   touch the source graph, so a deferred copy still observes exact
   call-entry state. A reused worker still builds a fresh clone per task;
   nothing carries between tasks, including repeated input elements.
-- The pool lives in the existing instance process for `inproc` and
-  `process`; no worker-protocol op is needed just to map. The combinators
+- The pool lives in the existing instance child process;
+  no worker-protocol op is needed just to map. The combinators
   register through shared bindings (help, completion, docs, prompt
   metadata, EP-0002); extension context is inherited; imports are not
   re-executed.
@@ -254,7 +254,7 @@ re-executing source to rebuild functions, and process-per-task isolation.
 - Fail-fast cancel/join with no post-return events; child timeout and the
   aggregate step budget are not multiplied by concurrency.
 - Output cap under interleaved writes; pool/task cap; nested-call
-  rejection; `inproc` vs `process` parity under `-race`.
+  rejection; worker/subprocess integration under `-race`.
 
 ## Alternatives considered
 

@@ -104,6 +104,9 @@ func (s *Service) Delete(ctx context.Context, a service.Actor, id string) error 
 		return service.Conflict("workspace has running instances")
 	}
 	return s.st.Tx(ctx, func(tx store.Store) error {
+		if err := tx.LockWorkspace(ctx, id); err != nil {
+			return service.Internal(err)
+		}
 		// Revoke keys rather than deleting: rows stay for the record.
 		members, err := tx.ListMembers(ctx, id)
 		if err != nil {
@@ -131,6 +134,15 @@ func (s *Service) Delete(ctx context.Context, a service.Actor, id string) error 
 			if err := tx.DeleteSecret(ctx, sc.ID); err != nil {
 				return service.Internal(err)
 			}
+		}
+		// Applications own persistent instances; a workspace cannot
+		// vanish while drafts still exist.
+		apps, err := tx.ListApplications(ctx, store.ApplicationFilter{WorkspaceID: id, Limit: 1})
+		if err != nil {
+			return service.Internal(err)
+		}
+		if len(apps) > 0 {
+			return service.Errf(types.ErrCodeConflict, "workspace has applications")
 		}
 		for _, m := range members {
 			if err := tx.DeleteMember(ctx, id, m.UserID); err != nil {

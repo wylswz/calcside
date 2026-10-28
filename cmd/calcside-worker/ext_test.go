@@ -3,217 +3,353 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"calcside/cmd/calcside-worker/internal/config"
-	capext "calcside/internal/capability/ext"
-	common "calcside/internal/config"
+	"calcside/cmd/calcside-worker/internal/extcache"
+	"calcside/internal/extartifact"
+	"calcside/internal/node/subproc"
 	"calcside/internal/runtime"
 	"calcside/internal/runtime/remote"
 )
 
-func TestLocalExtResolverRoundTrip(t *testing.T) {
-	// API side: a local root holding one extension tree.
-	root := filepath.Join(t.TempDir(), "contrib")
-	extDir := filepath.Join(root, "myext")
-	mustWrite := func(path, content string) {
-		t.Helper()
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	mustWrite(filepath.Join(extDir, "capability.yaml"), "name: myext\nversion: 0.1.0\n")
-	mustWrite(filepath.Join(extDir, "main.star"), "def hello():\n    return 1\n")
-	mustWrite(filepath.Join(extDir, "sub", "helpers.star"), "def h():\n    return 2\n")
+var extTestKey = []byte("test-shared-key-0123456789abcdef")
 
-	srv := httptest.NewServer(extTreeFixture([]string{root}, testKey))
-	defer srv.Close()
+func extSpec(source, sum string) json.RawMessage {
+	b, _ := json.Marshal(map[string]any{"capabilities": map[string]any{
+		"ext": map[string]any{"x": map[string]any{"source": source, "sum": sum}},
+	}})
+	return b
+}
 
-	cache := t.TempDir()
-	resolve := LocalExtResolver(srv.URL, "w1", testKey, cache)
-	p := capext.ParsedIdentifier{Local: "contrib/myext"}
-
-	dir, err := resolve(context.Background(), p)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
+// A child carries only a cache resolver — never API credentials.
+func TestConfigureChildCacheOnly(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &subproc.ChildConfig{}
+	cfg.Node.ExtCacheDir = dir
+	if err := configureChild(cfg); err != nil {
+		t.Fatal(err)
 	}
-	for _, rel := range []string{"capability.yaml", "main.star", "sub/helpers.star"} {
-		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
-			t.Errorf("missing cached file %s: %v", rel, err)
-		}
+	if cfg.Node.ExtSourceResolver == nil {
+		t.Fatal("configureChild set no source resolver")
 	}
-	got, _ := os.ReadFile(filepath.Join(dir, "main.star"))
-	if string(got) != "def hello():\n    return 1\n" {
-		t.Fatalf("bad content: %q", got)
-	}
-	// Second resolve hits the cache (sum unchanged) but must not fail.
-	if _, err := resolve(context.Background(), p); err != nil {
-		t.Fatalf("cached resolve: %v", err)
-	}
-	// Outside the roots is refused by the API, not just locally.
-	if _, err := resolve(context.Background(), capext.ParsedIdentifier{Local: t.TempDir()}); err == nil {
-		t.Fatal("expected containment failure")
-	}
-	for _, source := range []string{"../myext", "contrib/../myext", "other/myext", extDir} {
-		if _, err := resolve(context.Background(), capext.ParsedIdentifier{Local: source}); err == nil {
-			t.Errorf("accepted invalid source %q", source)
-		}
-	}
-	mustWrite(filepath.Join(extDir, "main.star"), "def hello():\n    return 3\n")
-	mod, err := (&capext.CapabilityLoader{
-		Identifier: "contrib/myext",
-		Options:    &capext.Options{LocalResolver: resolve},
-	}).Load(context.Background())
+	raw, err := json.Marshal(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(mod.Sources["main.star"]) != "def hello():\n    return 3\n" {
-		t.Fatal("worker used a stale extension tree")
+	for _, banned := range []string{"api_addr", "api_key", string(extTestKey), "shared-key", "node_id"} {
+		if strings.Contains(string(raw), banned) {
+			t.Fatalf("child config leaks %q", banned)
+		}
 	}
 }
 
-var testKey = []byte("test-shared-key-0123456789abcdef")
-
-func extTreeFixture(roots []string, key []byte) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := remote.VerifyRequest(key, r, nil, time.Now()); err != nil {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
-			return
-		}
-		if r.Method != http.MethodGet || r.URL.Path != remote.ExtTreePath {
-			http.NotFound(w, r)
-			return
-		}
-		opts := capext.Options{LocalRoots: roots}
-		dir, err := opts.ResolveLocal(capext.ParsedIdentifier{Local: r.URL.Query().Get("path")}, "")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		files, err := capext.ReadSources(dir)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		sum, err := capext.HashTree(dir)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"files": files, "sum": sum})
-	})
-}
-
-func TestWorkerLocalExtensionThroughAPI(t *testing.T) {
-	for _, mode := range []string{common.IsolationInproc, common.IsolationProcess} {
-		t.Run(mode, func(t *testing.T) {
-			root := filepath.Join(t.TempDir(), "contrib")
-			dir := filepath.Join(root, "myext")
-			if err := os.MkdirAll(dir, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			for name, data := range map[string]string{"capability.yaml": "name: myext\nops: [{name: hello}]\n", "main.star": "def hello():\n    return 42\n"} {
-				if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o644); err != nil {
-					t.Fatal(err)
-				}
-			}
-			var calls atomic.Int64
-			fixture := extTreeFixture([]string{root}, testKey)
-			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Header.Get("X-Calcside-Node") != "worker-ext" {
-					http.Error(w, "wrong node", http.StatusUnauthorized)
-					return
-				}
-				calls.Add(1)
-				fixture.ServeHTTP(w, r)
-			}))
-			t.Cleanup(api.Close)
-			cfg := config.WorkerConfig{Addr: "127.0.0.1:0", SharedKey: string(testKey), NodeID: "worker-ext", APIAddr: api.URL, ExtCacheDir: t.TempDir(), DefaultTTL: time.Minute, MaxTTL: time.Hour, MaxExecTimeout: time.Minute, ReaperInterval: time.Hour, MaxConcurrentExecs: 2, InstanceIsolation: mode}
-			app, cleanup, err := initializeWorker(cfg)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(cleanup)
-			worker := httptest.NewServer(app.Server.Handler)
-			t.Cleanup(worker.Close)
-			rt, err := remote.NewDirect(worker.URL, worker.Client(), testKey, "api-test")
-			if err != nil {
-				t.Fatal(err)
-			}
-			owner := runtime.Owner{UserID: "usr_ext"}
-			for i, value := range []int{42, 43} {
-				if err := os.WriteFile(filepath.Join(dir, "main.star"), []byte(fmt.Sprintf("def hello():\n    return %d\n", value)), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				sum, err := capext.HashTree(dir)
-				if err != nil {
-					t.Fatal(err)
-				}
-				id := fmt.Sprintf("ins_ext_%d", i)
-				created, err := rt.Create(t.Context(), &runtime.CreateRequest{InstanceID: id, Owner: owner, Spec: []byte(fmt.Sprintf(`{"capabilities":{"ext":{"myext":{"source":"contrib/myext","sum":%q}}}}`, sum)), ExpiresAt: time.Now().Add(time.Minute)})
-				if err != nil {
-					t.Fatal(err)
-				}
-				out, err := rt.Exec(t.Context(), &runtime.ExecRequest{InstanceID: id, Owner: owner, Epoch: created.Epoch, ExecID: "exe_ext", Code: "print(ext.myext.hello())"})
-				if err != nil || out.Result.Error != nil || out.Result.Output != fmt.Sprintf("%d\n", value) {
-					t.Fatalf("extension exec: %v %+v", err, out)
-				}
-				if _, err := rt.Delete(t.Context(), &runtime.DeleteRequest{InstanceID: id, Owner: owner, Epoch: created.Epoch}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if calls.Load() < 2 {
-				t.Fatalf("worker did not resolve via API: %d", calls.Load())
-			}
-			_, err = rt.Create(t.Context(), &runtime.CreateRequest{InstanceID: "ins_bad_sum", Owner: owner, Spec: []byte(`{"capabilities":{"ext":{"myext":{"source":"contrib/myext","sum":"h1:wrong"}}}}`), ExpiresAt: time.Now().Add(time.Minute)})
-			if err == nil || !strings.Contains(err.Error(), "sum mismatch") {
-				t.Fatalf("expected sum validation: %v", err)
-			}
-		})
+// CacheResolver is read-only: a miss is a fixed error, never a fetch.
+func TestCacheResolverMissNoFetch(t *testing.T) {
+	dir := t.TempDir()
+	resolve := extcache.CacheResolver(dir)
+	files := map[string][]byte{"capability.yaml": []byte("name: x\n")}
+	sum, err := extartifact.TreeHash(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolve(context.Background(), "contrib/x", sum); err == nil {
+		t.Fatal("missing artifact resolved")
+	}
+	if _, err := extartifact.Install(dir, "contrib/x", sum, files); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := resolve(context.Background(), "contrib/x", sum); err != nil || got == "" {
+		t.Fatalf("installed: %v %q", err, got)
+	}
+	if _, err := resolve(context.Background(), "../x", sum); !errors.Is(err, runtime.ErrBadSpec) {
+		t.Fatalf("bad source: %v", err)
 	}
 }
 
-func TestLocalExtResolverFailures(t *testing.T) {
+// Ensure blocks the caller until the synchronous fetch lands — the
+// wrapped runtime never sees Create/Prepare before the artifact is
+// installed.
+func TestEnsureBlocksUntilInstalled(t *testing.T) {
+	files := map[string][]byte{"capability.yaml": []byte("name: x\n")}
+	sum, _ := extartifact.TreeHash(files)
+	var fetches atomic.Int32
+	release := make(chan struct{})
+	fetch := func(ctx context.Context, source, sum string) (map[string][]byte, string, error) {
+		fetches.Add(1)
+		<-release // hold until the test lets it through
+		return files, sum, nil
+	}
+	dir := t.TempDir()
+	c, err := extcache.New(dir, fetch, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- c.Ensure(context.Background(), extSpec("contrib/x", sum)) }()
+	time.Sleep(200 * time.Millisecond)
+	select {
+	case err := <-done:
+		t.Fatalf("Ensure returned before the fetch landed: %v", err)
+	default:
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	// second Ensure: verified cache hit — zero additional fetches
+	if err := c.Ensure(context.Background(), extSpec("contrib/x", sum)); err != nil {
+		t.Fatal(err)
+	}
+	if n := fetches.Load(); n != 1 {
+		t.Fatalf("cache hit refetched: %d", n)
+	}
+}
+
+// A canceled caller waiting inside the fetch must not reach the inner
+// runtime — WithRuntime rechecks ctx before delegating.
+func TestCanceledEnsureNeverCreates(t *testing.T) {
+	fetch := func(ctx context.Context, source, sum string) (map[string][]byte, string, error) {
+		<-ctx.Done()
+		return nil, "", ctx.Err()
+	}
+	c, _ := extcache.New(t.TempDir(), fetch, 0)
+	inner := &countRuntime{}
+	rt := extcache.WithRuntime(inner, c)
+	sum, _ := extartifact.TreeHash(map[string][]byte{"a": []byte("b")})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	resp, err := rt.Create(ctx, &runtime.CreateRequest{Spec: extSpec("contrib/x", sum)})
+	if err == nil || resp != nil {
+		t.Fatal("canceled create ran")
+	}
+	if inner.creates.Load() != 0 {
+		t.Fatal("inner runtime reached while canceled")
+	}
+}
+
+// Mismatched sums, malformed refs, oversized bodies and bad HMAC all
+// fail closed — nothing reaches the inner runtime.
+func TestFetchFailuresFailClosed(t *testing.T) {
+	files := map[string][]byte{"a": []byte("b")}
+	sum, _ := extartifact.TreeHash(files)
 	for _, tc := range []struct {
-		name       string
-		status     int
-		body, want string
+		name     string
+		spec     json.RawMessage
+		fetch    extcache.Fetch
+		wantSpec bool
 	}{
-		{"api-error", 400, `{"error":{"kind":"bad_spec","message":"source refused"}}`, "source refused"},
-		{"http-error", 503, `unavailable`, "503"},
-		{"path-escape", 200, `{"sum":"h1:test","files":{"../escape":"eA=="}}`, "escapes cache dir"},
+		{"sum mismatch", extSpec("contrib/x", sum), func(ctx context.Context, s, su string) (map[string][]byte, string, error) {
+			return files, "h1:" + strings.Repeat("0", 43) + "=", nil
+		}, false},
+		{"bad source", extSpec("../x", sum), func(ctx context.Context, s, su string) (map[string][]byte, string, error) {
+			return files, su, nil
+		}, true},
+		{"fetch error", extSpec("contrib/x", sum), func(ctx context.Context, s, su string) (map[string][]byte, string, error) {
+			return nil, "", errors.New("boom")
+		}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				if strings.HasPrefix(tc.body, "{") {
-					w.Header().Set("Content-Type", "application/json")
-				}
-				w.WriteHeader(tc.status)
-				_, _ = w.Write([]byte(tc.body))
-			}))
-			defer server.Close()
-			_, err := LocalExtResolver(server.URL, "worker", testKey, t.TempDir())(t.Context(), capext.ParsedIdentifier{Local: "contrib/myext"})
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("expected %s: %v", tc.want, err)
+			c, _ := extcache.New(t.TempDir(), tc.fetch, 0)
+			inner := &countRuntime{}
+			rt := extcache.WithRuntime(inner, c)
+			if _, err := rt.Prepare(context.Background(), &runtime.PrepareRequest{CreateRequest: runtime.CreateRequest{Spec: tc.spec}}); err == nil {
+				t.Fatal("expected failure")
+			}
+			if inner.preps.Load() != 0 {
+				t.Fatal("inner runtime reached on failure")
 			}
 		})
 	}
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	_, err := LocalExtResolver("http://127.0.0.1:1", "worker", testKey, t.TempDir())(ctx, capext.ParsedIdentifier{Local: "contrib/myext"})
-	if err == nil || !strings.Contains(err.Error(), "context canceled") {
-		t.Fatalf("ignored cancellation: %v", err)
+}
+
+// The authenticated fetch: exact source/sum/node + real HMAC verify,
+// and a >2MiB VALID JSON body fails closed.
+func TestAuthenticatedFetchAndOversize(t *testing.T) {
+	files := map[string][]byte{"a": []byte("b")}
+	sum, _ := extartifact.TreeHash(files)
+	var gotSrc, gotSum, gotNode string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := remote.VerifyRequest(extTestKey, r, body, time.Now()); err != nil {
+			w.WriteHeader(401)
+			return
+		}
+		gotSrc, gotSum = r.URL.Query().Get("path"), r.URL.Query().Get("sum")
+		gotNode = r.Header.Get("X-Calcside-Node")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"sum": sum, "files": files})
+	}))
+	defer srv.Close()
+
+	c, err := provideExtCache(config.WorkerConfig{APIAddr: srv.URL, SharedKey: string(extTestKey), ExtCacheDir: t.TempDir()}, "w1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Ensure(context.Background(), extSpec("contrib/x", sum)); err != nil {
+		t.Fatal(err)
+	}
+	if gotSrc != "contrib/x" || gotSum != sum || gotNode != "w1" {
+		t.Fatalf("fetch identity: %q %q %q", gotSrc, gotSum, gotNode)
+	}
+
+	// oversize VALID JSON — without the 2MiB bound this installs
+	big := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"sum": sum, "files": files, "padding": strings.Repeat("x", 3<<20),
+		})
+	}))
+	defer big.Close()
+	c2, _ := extcache.New(t.TempDir(), func(ctx context.Context, s, su string) (map[string][]byte, string, error) {
+		req, _ := http.NewRequestWithContext(ctx, "GET", big.URL+"/internal/v1/ext/tree?path="+s+"&sum="+su, nil)
+		resp, err := (&boundedClient{}).Do(req)
+		if err != nil {
+			return nil, "", err
+		}
+		defer resp.Body.Close()
+		var body struct {
+			Sum   string            `json:"sum"`
+			Files map[string][]byte `json:"files"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			return nil, "", err
+		}
+		return body.Files, body.Sum, nil
+	}, 0)
+	if err := c2.Ensure(context.Background(), extSpec("contrib/x", sum)); err == nil {
+		t.Fatal("oversize artifact installed — bound missing")
+	}
+}
+
+type countRuntime struct {
+	runtime.Runtime
+	creates, preps atomic.Int32
+}
+
+func (c *countRuntime) Create(ctx context.Context, req *runtime.CreateRequest) (*runtime.CreateResponse, error) {
+	c.creates.Add(1)
+	return &runtime.CreateResponse{}, nil
+}
+func (c *countRuntime) Prepare(ctx context.Context, req *runtime.PrepareRequest) (*runtime.PrepareResponse, error) {
+	c.preps.Add(1)
+	return &runtime.PrepareResponse{}, nil
+}
+
+// The configured timeout bounds the fetch even when the caller's
+// deadline is far later; a post-deadline valid response still fails.
+func TestEnsureDeadlineAlwaysBounded(t *testing.T) {
+	files := map[string][]byte{"a": []byte("b")}
+	sum, _ := extartifact.TreeHash(files)
+	for _, tc := range []struct {
+		name          string
+		parentTimeout time.Duration
+		validLate     bool
+	}{
+		{"no parent deadline", 0, false},
+		{"10s parent deadline", 10 * time.Second, false},
+		{"misbehaving fetcher returns valid late", 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := extcache.New(t.TempDir(), func(ctx context.Context, s, su string) (map[string][]byte, string, error) {
+				<-ctx.Done()
+				if tc.validLate {
+					return files, su, nil // ignores cancel — must still fail
+				}
+				return nil, "", ctx.Err()
+			}, 20*time.Millisecond)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inner := &countRuntime{}
+			rt := extcache.WithRuntime(inner, c)
+			pctx := context.Background()
+			if tc.parentTimeout > 0 {
+				var cancel context.CancelFunc
+				pctx, cancel = context.WithTimeout(pctx, tc.parentTimeout)
+				defer cancel()
+			}
+			done := make(chan error, 1)
+			go func() {
+				_, err := rt.Create(pctx, &runtime.CreateRequest{Spec: extSpec("contrib/x", sum)})
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("expected DeadlineExceeded, got %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("Ensure did not honor the configured timeout")
+			}
+			if inner.creates.Load() != 0 {
+				t.Fatal("inner runtime reached after deadline failure")
+			}
+		})
+	}
+}
+
+// The semaphore bounds concurrent fetches to 4; identical content
+// installs atomically without extra fetches on a verified cache hit.
+func TestEnsureBoundedConcurrencyAndCacheHit(t *testing.T) {
+	var active, maxActive atomic.Int32
+	barrier := make(chan struct{})
+	var calls atomic.Int32
+	c, err := extcache.New(t.TempDir(), func(ctx context.Context, s, su string) (map[string][]byte, string, error) {
+		n := active.Add(1)
+		for {
+			m := maxActive.Load()
+			if n <= m || maxActive.CompareAndSwap(m, n) {
+				break
+			}
+		}
+		calls.Add(1)
+		<-barrier
+		active.Add(-1)
+		sum2, _ := extartifact.TreeHash(map[string][]byte{"a": []byte(s)})
+		return map[string][]byte{"a": []byte(s)}, sum2, nil
+	}, 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		src := "contrib/x" + string(rune('0'+i))
+		sum, _ := extartifact.TreeHash(map[string][]byte{"a": []byte(src)})
+		spec := extSpec(src, sum)
+		wg.Add(1)
+		go func() { defer wg.Done(); errs <- c.Ensure(context.Background(), spec) }()
+	}
+	time.Sleep(200 * time.Millisecond)
+	close(barrier)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if m := maxActive.Load(); m > 4 {
+		t.Fatalf("concurrency bound violated: %d", m)
+	}
+	// verified cache hit → zero additional fetch calls
+	before := calls.Load()
+	for i := 0; i < 8; i++ {
+		src := "contrib/x" + string(rune('0'+i))
+		sum, _ := extartifact.TreeHash(map[string][]byte{"a": []byte(src)})
+		if err := c.Ensure(context.Background(), extSpec(src, sum)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls.Load() != before {
+		t.Fatalf("cache hit refetched: %d -> %d", before, calls.Load())
 	}
 }

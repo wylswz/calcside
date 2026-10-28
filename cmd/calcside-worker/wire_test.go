@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"calcside/cmd/calcside-worker/internal/config"
-	common "calcside/internal/config"
 	"calcside/internal/node/subproc"
 	"calcside/internal/runtime"
 	"calcside/internal/runtime/remote"
@@ -28,13 +27,13 @@ func TestMain(m *testing.M) {
 }
 
 func TestInitializeWorker(t *testing.T) {
-	for _, mode := range []string{common.IsolationInproc, common.IsolationProcess} {
-		t.Run(mode, func(t *testing.T) {
+	{
+		t.Run("process", func(t *testing.T) {
 			cfg := config.WorkerConfig{
 				Addr: "127.0.0.1:0", SharedKey: "test-worker-key", NodeID: "worker-test",
+				APIAddr:    "http://127.0.0.1:1",
 				DefaultTTL: time.Minute, MaxTTL: time.Hour, MaxExecTimeout: time.Minute,
 				ReaperInterval: time.Hour, MaxConcurrentExecs: 2, ExtCacheDir: t.TempDir(),
-				InstanceIsolation: mode,
 			}
 			app, cleanup, err := initializeWorker(cfg)
 			if err != nil {
@@ -84,5 +83,43 @@ func TestInitializeWorkerRequiresKey(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "--shared-key is required") || app != nil || cleanup != nil {
 		t.Fatalf("app=%v cleanup=%t err=%v", app, cleanup != nil, err)
+	}
+}
+
+func TestInitializeWorkerRequiresAPIAddr(t *testing.T) {
+	app, cleanup, err := initializeWorker(config.WorkerConfig{
+		NodeID: "worker-test", SharedKey: "test-key", ExtCacheDir: t.TempDir(),
+	})
+	if cleanup != nil {
+		t.Cleanup(cleanup)
+	}
+	if err == nil || !strings.Contains(err.Error(), "--api-addr is required") || app != nil || cleanup != nil {
+		t.Fatalf("app=%v cleanup=%t err=%v", app, cleanup != nil, err)
+	}
+}
+
+func TestWorkerAgentWiring(t *testing.T) {
+	base := config.WorkerConfig{
+		Addr: "127.0.0.1:0", SharedKey: "test-worker-key", NodeID: "worker-test",
+		APIAddr:    "http://127.0.0.1:1",
+		DefaultTTL: time.Minute, MaxTTL: time.Hour, MaxExecTimeout: time.Minute,
+		ReaperInterval: time.Hour, MaxConcurrentExecs: 2, ExtCacheDir: t.TempDir(),
+	}
+	// Configured addr: agent constructs without touching the network
+	// (all contact happens inside Run).
+	cfg := base
+	app, cleanup, err := initializeWorker(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+	if app.Agent == nil {
+		t.Fatal("missing agent with api addr")
+	}
+	// A malformed addr fails construction.
+	cfg = base
+	cfg.APIAddr = "not a url"
+	if _, _, err = initializeWorker(cfg); err == nil {
+		t.Fatal("bad api addr accepted")
 	}
 }

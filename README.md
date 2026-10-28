@@ -135,8 +135,8 @@ and deleted-instance metadata remain in the store. Only instances created by thi
 run are deleted. Interrupted runs or failed deletes rely on TTL to release live
 resources. The default per-user limit is 10 live instances; account for existing
 instances and configure `--max-instances-per-user` / worker capacity when raising
-`BENCH_VUS`. Record database backend, dataset size, isolation mode (`inproc` versus
-`process`), local versus remote worker routing, and server concurrency limits when
+`BENCH_VUS`. Record database backend, dataset size, worker count and placement,
+per-instance process limits, and server concurrency limits when
 comparing runs. This is a closed-loop benchmark without think time, not a fixed
 arrival-rate test; run the load generator on a separate machine for capacity results.
 

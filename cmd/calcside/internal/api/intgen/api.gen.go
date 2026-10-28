@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"net/http"
 
+	rt "calcside/internal/runtime"
+
 	"github.com/gin-gonic/gin"
 	"github.com/oapi-codegen/runtime"
 )
@@ -79,20 +81,59 @@ type ExtTree struct {
 	Sum string `json:"sum"`
 }
 
+// NodePrepareRequest defines model for NodePrepareRequest.
+type NodePrepareRequest = rt.NodePrepareRequest
+
+// NodePrepareResult defines model for NodePrepareResult.
+type NodePrepareResult = rt.NodePrepareResponse
+
+// NodeRegisterRequest defines model for NodeRegisterRequest.
+type NodeRegisterRequest = rt.NodeRegisterRequest
+
+// NodeRegisterResult defines model for NodeRegisterResult.
+type NodeRegisterResult = rt.NodeRegisterResponse
+
+// NodeSyncRequest defines model for NodeSyncRequest.
+type NodeSyncRequest = rt.NodeSyncRequest
+
+// NodeSyncResult defines model for NodeSyncResult.
+type NodeSyncResult = rt.NodeSyncResponse
+
 // Error defines model for Error.
 type Error = ErrorEnvelope
 
 // ExtTreeParams defines parameters for ExtTree.
 type ExtTreeParams struct {
-	// Path Server-local root-name/extension identifier to resolve, e.g. contrib/tavily.
+	// Path Extension source identifier (local root-name/extension or remote source).
 	Path string `form:"path" json:"path"`
+
+	// Sum Required h1 integrity sum the artifact must match.
+	Sum string `form:"sum" json:"sum"`
 }
+
+// NodePrepareJSONRequestBody defines body for NodePrepare for application/json ContentType.
+type NodePrepareJSONRequestBody = NodePrepareRequest
+
+// NodeRegisterJSONRequestBody defines body for NodeRegister for application/json ContentType.
+type NodeRegisterJSONRequestBody = NodeRegisterRequest
+
+// NodeSyncJSONRequestBody defines body for NodeSync for application/json ContentType.
+type NodeSyncJSONRequestBody = NodeSyncRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
-	// ExtTree (worker → API) Fetch a local extension source tree.
+	// ExtTree (worker → API) Fetch a captured extension artifact tree.
 	// (GET /internal/v1/ext/tree)
 	ExtTree(c *gin.Context, params ExtTreeParams)
+	// NodePrepare Fetch the full self-contained prepare payload for one replica.
+	// (POST /internal/v1/nodes/prepare)
+	NodePrepare(c *gin.Context)
+	// NodeRegister Worker boot registration; returns the assigned incarnation.
+	// (POST /internal/v1/nodes/register)
+	NodeRegister(c *gin.Context)
+	// NodeSync Heartbeat + reports + inventory; returns the full desired set.
+	// (POST /internal/v1/nodes/sync)
+	NodeSync(c *gin.Context)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -121,6 +162,14 @@ func (siw *ServerInterfaceWrapper) ExtTree(c *gin.Context) {
 		return
 	}
 
+	// ------------- Required query parameter "sum" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "sum", c.Request.URL.Query(), &params.Sum, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sum: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -129,6 +178,45 @@ func (siw *ServerInterfaceWrapper) ExtTree(c *gin.Context) {
 	}
 
 	siw.Handler.ExtTree(c, params)
+}
+
+// NodePrepare operation middleware
+func (siw *ServerInterfaceWrapper) NodePrepare(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.NodePrepare(c)
+}
+
+// NodeRegister operation middleware
+func (siw *ServerInterfaceWrapper) NodeRegister(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.NodeRegister(c)
+}
+
+// NodeSync operation middleware
+func (siw *ServerInterfaceWrapper) NodeSync(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.NodeSync(c)
 }
 
 // GinServerOptions provides options for the Gin server.
@@ -158,6 +246,9 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 		ErrorHandler:       errorHandler,
 	}
 
+	router.POST(options.BaseURL+"/internal/v1/nodes/register", wrapper.NodeRegister)
+	router.POST(options.BaseURL+"/internal/v1/nodes/sync", wrapper.NodeSync)
+	router.POST(options.BaseURL+"/internal/v1/nodes/prepare", wrapper.NodePrepare)
 	router.GET(options.BaseURL+"/internal/v1/ext/tree", wrapper.ExtTree)
 }
 
@@ -202,11 +293,137 @@ func (response ExtTreedefaultJSONResponse) VisitExtTreeResponse(w http.ResponseW
 	return err
 }
 
+type NodePrepareRequestObject struct {
+	Body *NodePrepareJSONRequestBody
+}
+
+type NodePrepareResponseObject interface {
+	VisitNodePrepareResponse(w http.ResponseWriter) error
+}
+
+type NodePrepare200JSONResponse NodePrepareResult
+
+func (response NodePrepare200JSONResponse) VisitNodePrepareResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type NodePreparedefaultJSONResponse struct {
+	Body       ErrorEnvelope
+	StatusCode int
+}
+
+func (response NodePreparedefaultJSONResponse) VisitNodePrepareResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type NodeRegisterRequestObject struct {
+	Body *NodeRegisterJSONRequestBody
+}
+
+type NodeRegisterResponseObject interface {
+	VisitNodeRegisterResponse(w http.ResponseWriter) error
+}
+
+type NodeRegister200JSONResponse NodeRegisterResult
+
+func (response NodeRegister200JSONResponse) VisitNodeRegisterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type NodeRegisterdefaultJSONResponse struct {
+	Body       ErrorEnvelope
+	StatusCode int
+}
+
+func (response NodeRegisterdefaultJSONResponse) VisitNodeRegisterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type NodeSyncRequestObject struct {
+	Body *NodeSyncJSONRequestBody
+}
+
+type NodeSyncResponseObject interface {
+	VisitNodeSyncResponse(w http.ResponseWriter) error
+}
+
+type NodeSync200JSONResponse NodeSyncResult
+
+func (response NodeSync200JSONResponse) VisitNodeSyncResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type NodeSyncdefaultJSONResponse struct {
+	Body       ErrorEnvelope
+	StatusCode int
+}
+
+func (response NodeSyncdefaultJSONResponse) VisitNodeSyncResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
-	// ExtTree (worker → API) Fetch a local extension source tree.
+	// ExtTree (worker → API) Fetch a captured extension artifact tree.
 	// (GET /internal/v1/ext/tree)
 	ExtTree(ctx context.Context, request ExtTreeRequestObject) (ExtTreeResponseObject, error)
+	// NodePrepare Fetch the full self-contained prepare payload for one replica.
+	// (POST /internal/v1/nodes/prepare)
+	NodePrepare(ctx context.Context, request NodePrepareRequestObject) (NodePrepareResponseObject, error)
+	// NodeRegister Worker boot registration; returns the assigned incarnation.
+	// (POST /internal/v1/nodes/register)
+	NodeRegister(ctx context.Context, request NodeRegisterRequestObject) (NodeRegisterResponseObject, error)
+	// NodeSync Heartbeat + reports + inventory; returns the full desired set.
+	// (POST /internal/v1/nodes/sync)
+	NodeSync(ctx context.Context, request NodeSyncRequestObject) (NodeSyncResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx *gin.Context, request any) (any, error)
@@ -285,6 +502,99 @@ func (sh *strictHandler) ExtTree(ctx *gin.Context, params ExtTreeParams) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(ExtTreeResponseObject); ok {
 		if err := validResponse.VisitExtTreeResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// NodePrepare operation middleware
+func (sh *strictHandler) NodePrepare(ctx *gin.Context) {
+	var request NodePrepareRequestObject
+
+	var body NodePrepareJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.NodePrepare(ctx, request.(NodePrepareRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "NodePrepare")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(NodePrepareResponseObject); ok {
+		if err := validResponse.VisitNodePrepareResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// NodeRegister operation middleware
+func (sh *strictHandler) NodeRegister(ctx *gin.Context) {
+	var request NodeRegisterRequestObject
+
+	var body NodeRegisterJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.NodeRegister(ctx, request.(NodeRegisterRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "NodeRegister")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(NodeRegisterResponseObject); ok {
+		if err := validResponse.VisitNodeRegisterResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// NodeSync operation middleware
+func (sh *strictHandler) NodeSync(ctx *gin.Context) {
+	var request NodeSyncRequestObject
+
+	var body NodeSyncJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.NodeSync(ctx, request.(NodeSyncRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "NodeSync")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(NodeSyncResponseObject); ok {
+		if err := validResponse.VisitNodeSyncResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

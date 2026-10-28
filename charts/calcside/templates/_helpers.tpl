@@ -125,8 +125,11 @@ Fail early on combinations that cannot work.
 {{- fail "database.postgres.dsn or database.postgres.existingSecret is required when database.driver=postgres" -}}
 {{- end -}}
 {{- end -}}
-{{- if and .Values.worker.enabled (lt (int .Values.worker.replicaCount) 1) -}}
-{{- fail "worker.replicaCount must be at least 1 when worker.enabled is true" -}}
+{{- if hasKey .Values.worker "enabled" -}}
+{{- fail "worker.enabled was removed: the API never executes code locally, workers are required" -}}
+{{- end -}}
+{{- if lt (int .Values.worker.replicaCount) 1 -}}
+{{- fail "worker.replicaCount must be at least 1" -}}
 {{- end -}}
 {{- if not .Values.config.consoleOrigin -}}
 {{- fail "config.consoleOrigin is required" -}}

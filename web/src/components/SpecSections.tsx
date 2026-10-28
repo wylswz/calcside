@@ -67,10 +67,11 @@ export function RulesSection({ draft, set, policies, policiesError, onRetry, sel
 
 // InputsSection edits variables, labels and secret bindings. Secret
 // values are write-only; vault entries are referenced by name.
-export function InputsSection({ draft, set, keyMode, vault, vaultError, onRetryVault, listId }: {
+export function InputsSection({ draft, set, keyMode, application = false, vault, vaultError, onRetryVault, listId }: {
   draft: InstanceDraft
   set: Patch
   keyMode: boolean
+  application?: boolean
   vault: Secret[]
   vaultError: boolean
   onRetryVault: () => void
@@ -87,7 +88,7 @@ export function InputsSection({ draft, set, keyMode, vault, vaultError, onRetryV
         </div>)}
       </div>)}
       <div className="flex justify-between"><h4 className="font-semibold text-ink">Secrets</h4><button type="button" className="text-btn" onClick={() => set({ secrets: [...draft.secrets, { name: '', kind: 'vault', ref: '', value: '', domains: [], extra: {} }] })}>Add secret</button></div>
-      {keyMode && <p className="text-xs text-sec">Restricted keys store vault references only. Inline values are not allowed.</p>}
+      {keyMode && <p className="text-xs text-sec">{application ? 'Applications' : 'Restricted keys'} store vault references only. Inline values are not allowed.</p>}
       {vaultError && <p className="text-xs text-sec">Vault unavailable. Existing references are preserved; enter a reference by name or retry. <button className="underline" onClick={onRetryVault}>Retry vault</button></p>}
       <datalist id={listId}>{vault.map((s) => <option key={s.id} value={s.name} />)}</datalist>
       {draft.secrets.map((secret, index) => {

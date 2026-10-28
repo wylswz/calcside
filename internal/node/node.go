@@ -26,7 +26,11 @@ type Config struct {
 	// set — a remote worker resolves local identifiers through the API.
 	// It is not serializable; an instance process rebuilds it from its
 	// own config (see cmd/calcside-worker).
-	ExtLocalResolver   capext.LocalResolver `json:"-"`
+	ExtLocalResolver capext.LocalResolver `json:"-"`
+	// ExtSourceResolver resolves pinned (source,sum) artifacts into
+	// cache dirs — workers bind the extcache
+	// synchronous cache-only resolver; local resolution stays a unit seam for now.
+	ExtSourceResolver  capext.SourceResolver `json:"-"`
 	ExtCacheDir        string
 	ExtFetchTimeout    time.Duration
 	MaxConcurrentExecs int
@@ -50,11 +54,12 @@ func newRegistry(c Config) *capability.Registry {
 	reg.Register(capnet.Factory())
 	reg.Register(capio.Factory())
 	reg.Register(capext.Factory(capext.Options{
-		AllowSources:  c.ExtAllowSources,
-		LocalRoots:    c.ExtLocalRoots,
-		LocalResolver: c.ExtLocalResolver,
-		CacheDir:      c.ExtCacheDir,
-		FetchTimeout:  c.ExtFetchTimeout,
+		AllowSources:   c.ExtAllowSources,
+		LocalRoots:     c.ExtLocalRoots,
+		LocalResolver:  c.ExtLocalResolver,
+		SourceResolver: c.ExtSourceResolver,
+		CacheDir:       c.ExtCacheDir,
+		FetchTimeout:   c.ExtFetchTimeout,
 	}))
 	return reg
 }

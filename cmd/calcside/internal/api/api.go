@@ -23,6 +23,7 @@ import (
 	"calcside/cmd/calcside/internal/auth"
 	mcpapi "calcside/cmd/calcside/internal/mcp"
 	"calcside/cmd/calcside/internal/service/access"
+	"calcside/cmd/calcside/internal/service/application"
 	auditsvc "calcside/cmd/calcside/internal/service/audit"
 	"calcside/cmd/calcside/internal/service/catalog"
 	"calcside/cmd/calcside/internal/service/iam"
@@ -46,6 +47,7 @@ type Deps struct {
 	Audit       *auditsvc.Service
 	Catalog     *catalog.Service
 	Sandbox     *sandbox.Service
+	Application *application.Service
 	Workspace   *workspacesvc.Service
 	Access      *access.Checker
 	Previews    *ArtifactPreviews

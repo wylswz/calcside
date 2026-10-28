@@ -68,14 +68,15 @@ func Errf(kind error, format string, args ...any) *Error {
 //	worker            subproc.Supervisor    one OS process per instance
 //	instance process  *instance.Manager     in-memory state, runs Starlark
 //
-// remote.Direct carries the worker→instance-process hop; the single
-// binary and tests use *instance.Manager directly.
+// remote.Direct carries the worker-to-instance-process hop. Only the
+// instance child and library tests use *instance.Manager directly.
 //
 // Retry semantics differ per method and are part of the contract:
-// Create, Exec and Delete have side effects and must never be retried
-// transparently — an Exec may have injected secrets into outbound
-// requests before failing. Keepalive, Browse, Prompt and Inspect are
-// read-only with respect to script state and may be retried.
+// Create, Exec, Delete, Prepare and Invoke have side effects and must
+// never be retried transparently — an Exec or Invoke may have injected
+// secrets into outbound requests before failing, and Invoke carries no
+// dedup at all. Keepalive, Browse, Prompt and Inspect are read-only
+// with respect to script state and may be retried.
 type Runtime interface {
 	Create(ctx context.Context, req *CreateRequest) (*CreateResponse, error)
 	Exec(ctx context.Context, req *ExecRequest) (*ExecResponse, error)
@@ -85,4 +86,5 @@ type Runtime interface {
 	Export(ctx context.Context, req *ExportRequest) (*ExportResponse, error)
 	Prompt(ctx context.Context, req *PromptRequest) (*PromptResponse, error)
 	Inspect(ctx context.Context, req *InspectRequest) (*InspectResponse, error)
+	ServingRuntime
 }

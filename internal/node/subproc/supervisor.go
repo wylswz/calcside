@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -215,6 +216,14 @@ func (s *Supervisor) Count() int {
 }
 
 func (s *Supervisor) Create(ctx context.Context, req *runtime.CreateRequest) (*runtime.CreateResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	select {
+	case <-s.stop:
+		return nil, runtime.ErrNotRunning
+	default:
+	}
 	s.mu.Lock()
 	if _, ok := s.procs[req.InstanceID]; ok || s.starting[req.InstanceID] {
 		s.mu.Unlock()
@@ -242,9 +251,22 @@ func (s *Supervisor) Create(ctx context.Context, req *runtime.CreateRequest) (*r
 		return nil, err
 	}
 	p.renew(req.ExpiresAt)
+	// A Close racing the create must not let a child escape the
+	// teardown snapshot; the same check bounds the caller ctx.
 	s.mu.Lock()
-	s.procs[req.InstanceID] = p
-	s.mu.Unlock()
+	select {
+	case <-s.stop:
+		s.mu.Unlock()
+		s.terminate(p)
+		return nil, runtime.ErrNotRunning
+	case <-ctx.Done():
+		s.mu.Unlock()
+		s.terminate(p)
+		return nil, ctx.Err()
+	default:
+		s.procs[req.InstanceID] = p
+		s.mu.Unlock()
+	}
 	// The child may have died between Create and registration.
 	if p.exited() {
 		s.forget(p)
@@ -278,12 +300,12 @@ func (s *Supervisor) spawn(ctx context.Context, id string) (*proc, error) {
 	}
 
 	cmd := exec.Command(s.o.Path, s.o.Args...)
-	env := os.Environ()
+	env := append(os.Environ(), s.o.Env...)
 	if s.cg != nil {
 		// Have the child's GC work hard before the kernel OOM-kills it.
 		env = append(env, fmt.Sprintf("GOMEMLIMIT=%d", s.o.MemoryMax/10*9))
 	}
-	cmd.Env = append(env, s.o.Env...)
+	cmd.Env = instanceEnvironment(env)
 	cmd.Stderr = os.Stderr
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -529,4 +551,30 @@ func (s *Supervisor) Inspect(ctx context.Context, req *runtime.InspectRequest) (
 
 func (s *Supervisor) Export(ctx context.Context, req *runtime.ExportRequest) (*runtime.ExportResponse, error) {
 	return call(s, req.InstanceID, func(p *proc) (*runtime.ExportResponse, error) { return p.rt.Export(ctx, req) })
+}
+
+// instanceEnvironment strips control-plane credentials from the child's
+// environment. Workers receive API_ADDR/WORKER_SHARED_KEY via env (Compose,
+// Helm); the child must never inherit them — it resolves extensions from
+// the local artifact cache only. Options.Env entries for the same keys are
+// scrubbed too: the option is meant for runtime knobs (GORACE, GOMEMLIMIT,
+// the test marker), not credentials.
+var childEnvDeny = map[string]bool{
+	"CALCSIDE_WORKER_SHARED_KEY": true,
+	"CALCSIDE_API_ADDR":          true,
+	"CALCSIDE_SECRET_KEY":        true,
+	"CALCSIDE_NODE_ID":           true,
+	"CALCSIDE_NODE_ID_FILE":      true,
+}
+
+func instanceEnvironment(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		name, _, _ := strings.Cut(e, "=")
+		if childEnvDeny[name] {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }

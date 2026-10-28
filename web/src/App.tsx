@@ -6,6 +6,9 @@ import WorkspaceSwitcher from './components/WorkspaceSwitcher'
 import WorkspaceTabs, { WorkspaceRedirect } from './pages/WorkspaceTabs'
 import Login from './pages/Login'
 import Instances from './pages/Instances'
+import Applications from './pages/Applications'
+import NewApplication from './pages/NewApplication'
+import ApplicationDetail from './pages/ApplicationDetail'
 import NewInstance from './pages/NewInstance'
 import InstanceDetail from './pages/InstanceDetail'
 import ArtifactPreviewPage from './pages/ArtifactPreview'
@@ -29,6 +32,7 @@ function useMe(onBackendRetrying: (retrying: boolean) => void) {
 // the first group, you configure in the second.
 const navWork = [
   { to: '/', label: 'Instances', end: true },
+  { to: '/applications', label: 'Applications' },
   { to: '/audit', label: 'Audit' },
   { to: '/workspace', label: 'Workspace' },
 ]
@@ -113,6 +117,10 @@ export default function App() {
           <Route path="/" element={<Instances />} />
           <Route path="/instances/new" element={<NewInstance />} />
           <Route path="/instances/:id" element={<InstanceDetail />} />
+          <Route path="/instances/:id/build" element={<Navigate to="/applications/new" replace />} />
+          <Route path="/applications" element={<Applications />} />
+          <Route path="/applications/new" element={<NewApplication />} />
+          <Route path="/applications/:id" element={<ApplicationDetail />} />
           <Route path="/workspace" element={<WorkspaceTabs />} />
           <Route path="/workspace/:tab" element={<WorkspaceTabs />} />
           <Route path="/keys" element={<Navigate to="/workspace/keys" replace />} />

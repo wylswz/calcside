@@ -251,7 +251,11 @@ export default function InstanceDetail() {
               {isOwner && <> · <button className="text-accent hover:underline" onClick={() => setShare(true)}>manage</button></>}
             </p>
             {canCreate && (
-              <p className="side-text mt-3"><button className="text-accent hover:underline" title="New instance — no files or state copied" onClick={() => navigate(`/instances/new?from=${id}`)}>Create similar</button></p>
+              <p className="side-text mt-3">
+                <button className="text-accent hover:underline" title="New instance — no files or state copied" onClick={() => navigate(`/instances/new?from=${id}`)}>Create similar</button>
+                {' · '}
+                <button className="text-accent hover:underline" title="Draft a persistent instance contract from this instance's files" onClick={() => navigate(`/instances/${id}/build`)}>Build contract</button>
+              </p>
             )}
           </section>
           <section aria-label="Agent">
