@@ -2,7 +2,6 @@ package gormstore
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"time"
 
@@ -57,16 +56,11 @@ type interruptRow struct {
 	ApplicationID        string     `gorm:"column:application_id"`
 	RunID                string     `gorm:"column:run_id"`
 	StepSeq              int        `gorm:"column:step_seq"`
-	Kind                 string     `gorm:"column:kind"`
 	Status               string     `gorm:"column:status"`
-	Title                string     `gorm:"column:title"`
-	Assignees            string     `gorm:"column:assignees"`
-	EventSchema          *string    `gorm:"column:event_schema"`
 	Handler              string     `gorm:"column:handler"`
 	OnExpire             string     `gorm:"column:on_expire"`
 	Context              []byte     `gorm:"column:context"`
 	ExpiresAt            *time.Time `gorm:"column:expires_at"`
-	FireAt               *time.Time `gorm:"column:fire_at"`
 	Event                []byte     `gorm:"column:event"`
 	ResolvedBy           string     `gorm:"column:resolved_by"`
 	ResolvedAt           *time.Time `gorm:"column:resolved_at"`
@@ -133,16 +127,12 @@ func stepToRow(s *store.RunStep) *runStepRow {
 func (r *interruptRow) toDomain() *store.Interrupt {
 	out := &store.Interrupt{
 		ID: r.ID, WorkspaceID: r.WorkspaceID, ApplicationID: r.ApplicationID,
-		RunID: r.RunID, StepSeq: r.StepSeq, Kind: r.Kind, Status: r.Status,
-		Title: r.Title, Handler: r.Handler, OnExpire: r.OnExpire,
+		RunID: r.RunID, StepSeq: r.StepSeq, Status: r.Status,
+		Handler: r.Handler, OnExpire: r.OnExpire,
 		Context: r.Context, Event: r.Event, ResolvedBy: r.ResolvedBy,
 		KeyID: r.KeyID, DispatchState: r.DispatchState,
 		DispatchAttempts: r.DispatchAttempts, Attempt: r.Attempt,
 		CreatedAt: r.CreatedAt.UTC(), UpdatedAt: r.UpdatedAt.UTC(),
-	}
-	_ = json.Unmarshal([]byte(r.Assignees), &out.Assignees)
-	if r.EventSchema != nil {
-		out.EventSchema = json.RawMessage(*r.EventSchema)
 	}
 	utcPtr := func(t *time.Time) *time.Time {
 		if t == nil {
@@ -151,36 +141,23 @@ func (r *interruptRow) toDomain() *store.Interrupt {
 		u := t.UTC()
 		return &u
 	}
-	out.ExpiresAt, out.FireAt, out.ResolvedAt = utcPtr(r.ExpiresAt), utcPtr(r.FireAt), utcPtr(r.ResolvedAt)
+	out.ExpiresAt, out.ResolvedAt = utcPtr(r.ExpiresAt), utcPtr(r.ResolvedAt)
 	out.DispatchAfter, out.DispatchClaimedUntil = utcPtr(r.DispatchAfter), utcPtr(r.DispatchClaimedUntil)
 	return out
 }
 
 func interruptToRow(i *store.Interrupt) (*interruptRow, error) {
-	assignees := "[]"
-	if i.Assignees != nil {
-		b, err := json.Marshal(i.Assignees)
-		if err != nil {
-			return nil, err
-		}
-		assignees = string(b)
-	}
-	r := &interruptRow{
+	return &interruptRow{
 		ID: i.ID, WorkspaceID: i.WorkspaceID, ApplicationID: i.ApplicationID,
-		RunID: i.RunID, StepSeq: i.StepSeq, Kind: i.Kind, Status: i.Status,
-		Title: i.Title, Assignees: assignees, Handler: i.Handler, OnExpire: i.OnExpire,
-		Context: i.Context, ExpiresAt: i.ExpiresAt, FireAt: i.FireAt,
+		RunID: i.RunID, StepSeq: i.StepSeq, Status: i.Status,
+		Handler: i.Handler, OnExpire: i.OnExpire,
+		Context: i.Context, ExpiresAt: i.ExpiresAt,
 		Event: i.Event, ResolvedBy: i.ResolvedBy, ResolvedAt: i.ResolvedAt,
 		KeyID: i.KeyID, DispatchState: i.DispatchState,
 		DispatchAfter: i.DispatchAfter, DispatchClaimedUntil: i.DispatchClaimedUntil,
 		DispatchAttempts: i.DispatchAttempts, Attempt: i.Attempt,
 		CreatedAt: i.CreatedAt.UTC(), UpdatedAt: i.UpdatedAt.UTC(),
-	}
-	if i.EventSchema != nil {
-		s := string(i.EventSchema)
-		r.EventSchema = &s
-	}
-	return r, nil
+	}, nil
 }
 
 // --- locks ---
@@ -391,7 +368,7 @@ func (d *sqlDB) ListInterrupts(ctx context.Context, f store.InterruptFilter) ([]
 
 // --- finish step ---
 
-func (d *sqlDB) FinishStep(ctx context.Context, out store.StepOutcome, acceptEarly func(kind string, eventSchema json.RawMessage, event []byte) bool) error {
+func (d *sqlDB) FinishStep(ctx context.Context, out store.StepOutcome, acceptEarly func(event []byte) bool) error {
 	if out.Now.IsZero() {
 		return store.ErrInvalidServingRecord
 	}
@@ -502,7 +479,7 @@ func (d *sqlDB) FinishStep(ctx context.Context, out store.StepOutcome, acceptEar
 // commitWait applies the waiting branch of FinishStep inside the tx:
 // the reserved slot becomes pending (or resolved, when an accepted
 // early resolution already arrived).
-func commitWait(ctx context.Context, tx *gorm.DB, out store.StepOutcome, now time.Time, acceptEarly func(string, json.RawMessage, []byte) bool) error {
+func commitWait(ctx context.Context, tx *gorm.DB, out store.StepOutcome, now time.Time, acceptEarly func([]byte) bool) error {
 	w := out.Wait
 	intr, err := lockInterrupt(ctx, tx, w.InterruptID)
 	if err != nil {
@@ -511,28 +488,15 @@ func commitWait(ctx context.Context, tx *gorm.DB, out store.StepOutcome, now tim
 	if intr.RunID != out.RunID || intr.StepSeq != out.Seq || intr.Status != store.InterruptSlotReserved {
 		return store.ErrConflict
 	}
-	assignees := "[]"
-	if w.Assignees != nil {
-		b, err := json.Marshal(w.Assignees)
-		if err != nil {
-			return err
-		}
-		assignees = string(b)
-	}
 	updates := map[string]any{
-		"kind": w.Kind, "title": w.Title, "assignees": assignees,
 		"handler": w.Handler, "on_expire": w.OnExpire, "context": w.Context,
-		"expires_at": w.ExpiresAt, "fire_at": w.FireAt,
-		"status": store.InterruptPending, "updated_at": now,
-	}
-	if w.EventSchema != nil {
-		s := string(w.EventSchema)
-		updates["event_schema"] = s
+		"expires_at": w.ExpiresAt,
+		"status":     store.InterruptPending, "updated_at": now,
 	}
 	// An early resolution stored while reserved is committed or
 	// discarded inside the same transaction.
 	if intr.ResolvedAt != nil {
-		if acceptEarly != nil && acceptEarly(w.Kind, w.EventSchema, intr.Event) {
+		if acceptEarly != nil && acceptEarly(intr.Event) {
 			updates["status"] = store.InterruptResolved
 			updates["dispatch_state"] = store.DispatchQueued
 			updates["dispatch_after"] = now
@@ -596,8 +560,7 @@ func (d *sqlDB) ListDueInterrupts(ctx context.Context, now time.Time, limit int)
 		limit = 200
 	}
 	rows, err := gorm.G[interruptRow](d.g).
-		Where("status = ? AND ((kind <> ? AND expires_at <= ?) OR (kind = ? AND fire_at <= ?))",
-			store.InterruptPending, store.InterruptTimer, now.UTC(), store.InterruptTimer, now.UTC()).
+		Where("status = ? AND expires_at <= ?", store.InterruptPending, now.UTC()).
 		Order("id").Limit(limit).Find(ctx)
 	if err != nil {
 		return nil, err
@@ -617,8 +580,7 @@ func (d *sqlDB) ExpireInterrupt(ctx context.Context, id string, now time.Time) (
 		if err != nil {
 			return err
 		}
-		if row.Status != store.InterruptPending || row.Kind == store.InterruptTimer ||
-			row.ExpiresAt == nil || row.ExpiresAt.After(now) {
+		if row.Status != store.InterruptPending || row.ExpiresAt == nil || row.ExpiresAt.After(now) {
 			return nil
 		}
 		updates := map[string]any{
@@ -660,34 +622,6 @@ func (d *sqlDB) ExpireInterrupt(ctx context.Context, id string, now time.Time) (
 			}
 		}
 		ok = true
-		return nil
-	})
-	return ok, err
-}
-
-func (d *sqlDB) FireTimer(ctx context.Context, id string, now time.Time) (bool, error) {
-	var ok bool
-	err := d.g.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		ok = false
-		row, err := lockInterrupt(ctx, tx, id)
-		if err != nil {
-			return err
-		}
-		if row.Status != store.InterruptPending || row.Kind != store.InterruptTimer ||
-			row.FireAt == nil || row.FireAt.After(now) {
-			return nil
-		}
-		res := tx.Model(&interruptRow{}).
-			Where("id = ? AND status = ?", id, store.InterruptPending).
-			Updates(map[string]any{
-				"status": store.InterruptResolved, "resolved_by": store.ResolvedByTimer,
-				"resolved_at": now.UTC(), "dispatch_state": store.DispatchQueued,
-				"dispatch_after": now.UTC(), "attempt": 1, "updated_at": now.UTC(),
-			})
-		if res.Error != nil {
-			return res.Error
-		}
-		ok = res.RowsAffected == 1
 		return nil
 	})
 	return ok, err

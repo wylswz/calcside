@@ -1420,7 +1420,7 @@ paths:
         - name: status
           in: query
           schema: { type: string }
-        - name: resolvable
+        - name: resumable
           in: query
           schema: { type: boolean }
         - name: before
@@ -1452,33 +1452,16 @@ paths:
                 $ref: '#/components/schemas/InterruptResponse'
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
-  /api/v1/interrupts/{id}/resolve:
+  /api/v1/interrupts/{id}/resume:
     post:
-      operationId: resolveInterrupt
+      operationId: resumeInterrupt
       tags: [interrupts]
-      parameters: [{ $ref: '#/components/parameters/IdPath' }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/InterruptResolveRequest'
-      responses:
-        '200':
-          description: resolved interrupt
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/InterruptResponse'
-        '400': { $ref: '#/components/responses/Error' }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
-  /api/v1/interrupts/{id}/callback:
-    post:
-      operationId: interruptCallback
-      tags: [interrupts]
+      description: >-
+        Resume a pending interrupt with a JSON object event; the run's
+        declared handler is called with it. The first resume wins, later
+        ones get 409 already_resolved. Authorized by the interrupt's
+        resume_token (Bearer or ?token=) or by a caller with Run on the
+        application.
       parameters:
         - { $ref: '#/components/parameters/IdPath' }
         - name: token
@@ -1492,11 +1475,14 @@ paths:
               $ref: '#/components/schemas/RawJSON'
       responses:
         '202':
-          description: event accepted
+          description: event accepted; the handler is dispatched
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/InterruptCallbackResponse'
+                $ref: '#/components/schemas/InterruptResumeResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
         '413': { $ref: '#/components/responses/Error' }
@@ -2330,10 +2316,6 @@ components:
         output_schema:
           type: string
           nullable: true
-        handlers:
-          type: string
-          nullable: true
-          description: "handler declarations document {name: {context_schema?}}, raw JSON preserved byte-for-byte"
         version: { type: integer, format: int64, minimum: 1 }
         published_version: { type: integer, format: int64, minimum: 0 }
         persistent_instance_id: { type: string }
@@ -2369,9 +2351,6 @@ components:
         output_schema:
           type: string
           nullable: true
-        handlers:
-          type: string
-          nullable: true
     ApplicationUpdateRequest:
       type: object
       required: [version, name, code]
@@ -2385,9 +2364,6 @@ components:
           type: string
           nullable: true
         output_schema:
-          type: string
-          nullable: true
-        handlers:
           type: string
           nullable: true
     ApplicationPublishRequest:
@@ -2420,11 +2396,9 @@ components:
     # --- EP-0016 runs & interrupts ---
     InterruptWaiting:
       type: object
-      required: [interrupt_id, kind, console_url]
+      required: [interrupt_id, console_url]
       properties:
         interrupt_id: { type: string }
-        kind: { type: string }
-        title: { type: string }
         console_url: { type: string }
     Run:
       type: object
@@ -2463,32 +2437,22 @@ components:
         ended_at: { type: string, format: date-time }
     Interrupt:
       type: object
-      required: [id, run_id, application_id, application_name, status, can_resolve, created_at]
+      required: [id, run_id, application_id, application_name, status, can_resume, created_at]
       properties:
         id: { type: string }
         run_id: { type: string }
         application_id: { type: string }
         application_name: { type: string }
-        kind: { type: string }
         status: { type: string }
-        title: { type: string }
-        assignees:
-          type: array
-          items: { type: string }
-        event_schema: { type: string }
         handler: { type: string }
         on_expire: { type: string }
         expires_at: { type: string, format: date-time }
-        fire_at: { type: string, format: date-time }
         resolved_by: { type: string }
         resolved_by_label: { type: string }
-        assignee_labels:
-          type: array
-          items: { type: string }
         resolved_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time }
-        can_resolve: { type: boolean }
-        callback_url: { type: string }
+        can_resume: { type: boolean }
+        resume_url: { type: string }
         context_json: { type: string }
         event_json: { type: string }
     RunsResponse:
@@ -2518,13 +2482,7 @@ components:
       type: object
       properties:
         interrupt: { $ref: '#/components/schemas/Interrupt' }
-    InterruptResolveRequest:
-      type: object
-      required: [event]
-      properties:
-        event:
-          $ref: '#/components/schemas/RawJSON'
-    InterruptCallbackResponse:
+    InterruptResumeResponse:
       type: object
       properties:
         status: { type: string }

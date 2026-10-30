@@ -39,7 +39,7 @@ func TestRouteCoverage(t *testing.T) {
 		"DeleteShare": true,
 		"ListRuns":    true, "GetRun": true, "CancelRun": true, "RetryRun": true,
 		"ListInterrupts": true, "GetInterrupt": true,
-		"ResolveInterrupt": true, "InterruptCallback": true,
+		"ResumeInterrupt": true,
 	}
 	safe := map[string]bool{
 		"Healthz": true, "AuthConfig": true, "Me": true, "ChangePassword": true,

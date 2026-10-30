@@ -1,22 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildApprovalEvent, eventParse, resolveDraftKey, hasCustomSchema, deadlineOf, interruptTitle, resolverLabel } from './interrupts'
-import type { Interrupt } from './api'
+import { eventParse, resumeDraftKey, deadlineOf, interruptTitle, resolverLabel, runPhase } from './interrupts.ts'
+import type { RunDetail, RunStep } from './api.ts'
+import type { Interrupt } from './api.ts'
 
 const intr = (o: Partial<Interrupt>): Interrupt => o as Interrupt
 
-test('resolveDraftKey scopes by user + workspace + interrupt (C2)', () => {
-	assert.equal(resolveDraftKey('u1', 'w1', 'int_a'), '["intrv1","u1","w1","int_a"]')
-	assert.notEqual(resolveDraftKey('u1', 'w1', 'int_a'), resolveDraftKey('u2', 'w1', 'int_a'))
-	assert.notEqual(resolveDraftKey('u1', 'w1', 'int_a'), resolveDraftKey('u1', 'w2', 'int_a'))
-	assert.notEqual(resolveDraftKey('u1', 'w1', 'int_a'), resolveDraftKey('u1', 'w1', 'int_b'))
-})
-
-test('buildApprovalEvent emits the exact event body, note only when set', () => {
-	assert.equal(buildApprovalEvent(true, ''), '{"approved":true}')
-	assert.equal(buildApprovalEvent(false, ''), '{"approved":false}')
-	assert.equal(buildApprovalEvent(true, 'go "yes"'), '{"approved":true,"note":"go \\"yes\\""}')
-	assert.equal(buildApprovalEvent(false, 'no'), '{"approved":false,"note":"no"}')
+test('resumeDraftKey scopes by user + workspace + interrupt (C2)', () => {
+	assert.equal(resumeDraftKey('u1', 'w1', 'int_a'), '["intrv1","u1","w1","int_a"]')
+	assert.notEqual(resumeDraftKey('u1', 'w1', 'int_a'), resumeDraftKey('u2', 'w1', 'int_a'))
+	assert.notEqual(resumeDraftKey('u1', 'w1', 'int_a'), resumeDraftKey('u1', 'w2', 'int_a'))
+	assert.notEqual(resumeDraftKey('u1', 'w1', 'int_a'), resumeDraftKey('u1', 'w1', 'int_b'))
 })
 
 test('eventParse accepts only JSON objects', () => {
@@ -29,41 +23,37 @@ test('eventParse accepts only JSON objects', () => {
 	if (p.ok) assert.equal(p.json, '{"a":9007199254740993}') // verbatim
 })
 
-test('hasCustomSchema / deadlineOf / titles', () => {
-	assert.equal(hasCustomSchema(intr({})), false)
-	assert.equal(hasCustomSchema(intr({ event_schema: '{"type":"object"}' })), true)
-	assert.equal(deadlineOf(intr({ expires_at: 'x', fire_at: 'y' })), 'y')
+test('deadlineOf / titles / resolver labels', () => {
 	assert.equal(deadlineOf(intr({ expires_at: 'x' })), 'x')
-	assert.equal(interruptTitle(intr({ kind: 'approval' })), 'approval')
-	assert.equal(interruptTitle(intr({ kind: 'approval', title: 'ship' })), 'ship')
+	assert.equal(deadlineOf(intr({})), undefined)
+	assert.equal(interruptTitle(intr({})), 'interrupt')
+	assert.equal(interruptTitle(intr({ handler: 'on_ok' })), '→ on_ok')
 	assert.equal(resolverLabel(intr({ resolved_by_label: 'Ann' })), 'Ann')
-	assert.equal(resolverLabel(intr({ resolved_by: 'timer' })), 'timer')
+	assert.equal(resolverLabel(intr({ resolved_by: 'token' })), 'token')
 })
 
-import { serializeHandlers, parseHandlers, handlerNameErr, schemaErr } from './interrupts'
-import type { HandlerRow } from './interrupts'
+const run = (o: Partial<RunDetail>): RunDetail => o as RunDetail
+const step = (o: Partial<RunStep>): RunStep => o as RunStep
 
-test('serializeHandlers embeds schema verbatim (big ints)', () => {
-	const rows: HandlerRow[] = [
-		{ name: 'on_ok', on: true, text: '{"enum":[9007199254740993]}' },
-		{ name: 'on_x', on: false, text: '' },
-		{ name: 'bad', on: true, text: '{oops' },
-	]
-	assert.equal(serializeHandlers(rows),
-		'{"on_ok":{"context_schema":{"enum":[9007199254740993]}},"on_x":{},"bad":{}}')
-})
-
-test('parseHandlers round-trips and flags invalid names', () => {
-	const doc = '{"on_ok":{"context_schema":{"enum":[9007199254740993]}},"on_x":{}}'
-	const rows = parseHandlers(doc)
-	assert.equal(rows.length, 2)
-	assert.equal(rows[0].on, true)
-	assert.equal(rows[0].text, '{"enum":[9007199254740993]}')
-	assert.equal(serializeHandlers(rows), doc)
-	assert.equal(parseHandlers('').length, 0)
-	assert.equal(handlerNameErr('main', rows, 0), '"main" is reserved')
-	assert.equal(handlerNameErr('on_ok', rows, 0), 'duplicate name')
-	assert.notEqual(handlerNameErr('good_name', rows, 0), '')
-	assert.equal(schemaErr('{"type":"object"}'), '')
-	assert.notEqual(schemaErr('[1]'), '')
+test('runPhase derives waiting/running/terminal phases', () => {
+	const pending = intr({ id: 'int_1', status: 'pending', handler: 'on_ok' })
+	assert.deepEqual(runPhase({ run: run({ status: 'waiting' }), interrupts: [pending] }).phase, 'waiting')
+	// A resolved-but-undispatched interrupt means the handler is running.
+	const resolved = intr({ id: 'int_1', status: 'resolved', handler: 'on_ok', created_at: 'a' })
+	const p = runPhase({ run: run({ status: 'waiting' }), interrupts: [resolved] })
+	assert.equal(p.phase, 'running')
+	assert.equal(p.phase === 'running' && p.handler, 'on_ok')
+	// Expired dispatch uses on_expire.
+	const expired = intr({ id: 'int_1', status: 'expired', handler: 'on_ok', on_expire: 'on_exp' })
+	const pe = runPhase({ run: run({ status: 'waiting' }), interrupts: [expired] })
+	assert.equal(pe.phase === 'running' && pe.handler, 'on_exp')
+	// Chained second pending interrupt flips back to waiting.
+	const chained = [resolved, intr({ id: 'int_2', status: 'pending', handler: 'on_next', created_at: 'b' })]
+	assert.equal(runPhase({ run: run({ status: 'waiting' }), interrupts: chained }).phase, 'waiting')
+	// Running step entry is the fallback handler label.
+	const ps = runPhase({ run: run({ status: 'running' }), steps: [step({ status: 'running', entry: 'main' })] })
+	assert.equal(ps.phase === 'running' && ps.handler, 'main')
+	// Terminal outcomes.
+	assert.deepEqual(runPhase({ run: run({ status: 'succeeded', output_json: '{"ok":true}' }) }), { phase: 'succeeded', output: '{"ok":true}' })
+	assert.deepEqual(runPhase({ run: run({ status: 'failed', error_code: 'chain_limit' }) }), { phase: 'failed', errorCode: 'chain_limit' })
 })

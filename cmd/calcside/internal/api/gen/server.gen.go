@@ -459,14 +459,11 @@ type APIKey struct {
 // Application defines model for Application.
 type Application struct {
 	// Code main.star source
-	Code      string    `json:"code"`
-	CreatedAt time.Time `json:"created_at"`
-	ErrorCode *string   `json:"error_code,omitempty"`
-
-	// Handlers handler declarations document {name: {context_schema?}}, raw JSON preserved byte-for-byte
-	Handlers              *string `json:"handlers,omitempty"`
-	HasUnpublishedChanges bool    `json:"has_unpublished_changes"`
-	Id                    string  `json:"id"`
+	Code                  string    `json:"code"`
+	CreatedAt             time.Time `json:"created_at"`
+	ErrorCode             *string   `json:"error_code,omitempty"`
+	HasUnpublishedChanges bool      `json:"has_unpublished_changes"`
+	Id                    string    `json:"id"`
 
 	// InputSchema optional pinned JSON Schema text; null = default open object
 	InputSchema          *string `json:"input_schema,omitempty"`
@@ -492,7 +489,6 @@ type Application struct {
 type ApplicationCreateRequest struct {
 	// Code omitted/null = scaffold
 	Code         *string `json:"code,omitempty"`
-	Handlers     *string `json:"handlers,omitempty"`
 	InputSchema  *string `json:"input_schema,omitempty"`
 	Name         *string `json:"name,omitempty"`
 	OutputSchema *string `json:"output_schema,omitempty"`
@@ -534,7 +530,6 @@ type ApplicationTestRequest struct {
 // ApplicationUpdateRequest defines model for ApplicationUpdateRequest.
 type ApplicationUpdateRequest struct {
 	Code         string  `json:"code"`
-	Handlers     *string `json:"handlers,omitempty"`
 	InputSchema  *string `json:"input_schema,omitempty"`
 	Name         string  `json:"name"`
 	OutputSchema *string `json:"output_schema,omitempty"`
@@ -933,37 +928,20 @@ type InstancesResponse struct {
 type Interrupt struct {
 	ApplicationId   string     `json:"application_id"`
 	ApplicationName string     `json:"application_name"`
-	AssigneeLabels  *[]string  `json:"assignee_labels,omitempty"`
-	Assignees       *[]string  `json:"assignees,omitempty"`
-	CallbackUrl     *string    `json:"callback_url,omitempty"`
-	CanResolve      bool       `json:"can_resolve"`
+	CanResume       bool       `json:"can_resume"`
 	ContextJson     *string    `json:"context_json,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
 	EventJson       *string    `json:"event_json,omitempty"`
-	EventSchema     *string    `json:"event_schema,omitempty"`
 	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
-	FireAt          *time.Time `json:"fire_at,omitempty"`
 	Handler         *string    `json:"handler,omitempty"`
 	Id              string     `json:"id"`
-	Kind            *string    `json:"kind,omitempty"`
 	OnExpire        *string    `json:"on_expire,omitempty"`
 	ResolvedAt      *time.Time `json:"resolved_at,omitempty"`
 	ResolvedBy      *string    `json:"resolved_by,omitempty"`
 	ResolvedByLabel *string    `json:"resolved_by_label,omitempty"`
+	ResumeUrl       *string    `json:"resume_url,omitempty"`
 	RunId           string     `json:"run_id"`
 	Status          string     `json:"status"`
-	Title           *string    `json:"title,omitempty"`
-}
-
-// InterruptCallbackResponse defines model for InterruptCallbackResponse.
-type InterruptCallbackResponse struct {
-	Status *string `json:"status,omitempty"`
-}
-
-// InterruptResolveRequest defines model for InterruptResolveRequest.
-type InterruptResolveRequest struct {
-	// Event raw JSON preserved byte-for-byte; never re-parsed by the API tier
-	Event RawJSON `json:"event"`
 }
 
 // InterruptResponse defines model for InterruptResponse.
@@ -971,12 +949,15 @@ type InterruptResponse struct {
 	Interrupt *Interrupt `json:"interrupt,omitempty"`
 }
 
+// InterruptResumeResponse defines model for InterruptResumeResponse.
+type InterruptResumeResponse struct {
+	Status *string `json:"status,omitempty"`
+}
+
 // InterruptWaiting defines model for InterruptWaiting.
 type InterruptWaiting struct {
-	ConsoleUrl  string  `json:"console_url"`
-	InterruptId string  `json:"interrupt_id"`
-	Kind        string  `json:"kind"`
-	Title       *string `json:"title,omitempty"`
+	ConsoleUrl  string `json:"console_url"`
+	InterruptId string `json:"interrupt_id"`
 }
 
 // InterruptsResponse defines model for InterruptsResponse.
@@ -1444,14 +1425,14 @@ type PutShareJSONBody struct {
 
 // ListInterruptsParams defines parameters for ListInterrupts.
 type ListInterruptsParams struct {
-	Status     *string `form:"status,omitempty" json:"status,omitempty"`
-	Resolvable *bool   `form:"resolvable,omitempty" json:"resolvable,omitempty"`
-	Before     *string `form:"before,omitempty" json:"before,omitempty"`
-	Limit      *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+	Status    *string `form:"status,omitempty" json:"status,omitempty"`
+	Resumable *bool   `form:"resumable,omitempty" json:"resumable,omitempty"`
+	Before    *string `form:"before,omitempty" json:"before,omitempty"`
+	Limit     *int32  `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
-// InterruptCallbackParams defines parameters for InterruptCallback.
-type InterruptCallbackParams struct {
+// ResumeInterruptParams defines parameters for ResumeInterrupt.
+type ResumeInterruptParams struct {
 	Token *string `form:"token,omitempty" json:"token,omitempty"`
 }
 
@@ -1560,11 +1541,8 @@ type ExecJSONRequestBody = ExecRequest
 // PutShareJSONRequestBody defines body for PutShare for application/json ContentType.
 type PutShareJSONRequestBody PutShareJSONBody
 
-// InterruptCallbackJSONRequestBody defines body for InterruptCallback for application/json ContentType.
-type InterruptCallbackJSONRequestBody = RawJSON
-
-// ResolveInterruptJSONRequestBody defines body for ResolveInterrupt for application/json ContentType.
-type ResolveInterruptJSONRequestBody = InterruptResolveRequest
+// ResumeInterruptJSONRequestBody defines body for ResumeInterrupt for application/json ContentType.
+type ResumeInterruptJSONRequestBody = RawJSON
 
 // CreateKeyJSONRequestBody defines body for CreateKey for application/json ContentType.
 type CreateKeyJSONRequestBody = CreateKeyRequest
@@ -1719,11 +1697,8 @@ type ServerInterface interface {
 	// (GET /api/v1/interrupts/{id})
 	GetInterrupt(c *gin.Context, id IdPath)
 
-	// (POST /api/v1/interrupts/{id}/callback)
-	InterruptCallback(c *gin.Context, id IdPath, params InterruptCallbackParams)
-
-	// (POST /api/v1/interrupts/{id}/resolve)
-	ResolveInterrupt(c *gin.Context, id IdPath)
+	// (POST /api/v1/interrupts/{id}/resume)
+	ResumeInterrupt(c *gin.Context, id IdPath, params ResumeInterruptParams)
 
 	// (GET /api/v1/keys)
 	ListKeys(c *gin.Context, params ListKeysParams)
@@ -2796,11 +2771,11 @@ func (siw *ServerInterfaceWrapper) ListInterrupts(c *gin.Context) {
 		return
 	}
 
-	// ------------- Optional query parameter "resolvable" -------------
+	// ------------- Optional query parameter "resumable" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "resolvable", c.Request.URL.Query(), &params.Resolvable, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "resumable", c.Request.URL.Query(), &params.Resumable, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
 	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resolvable: %w", err), http.StatusBadRequest)
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resumable: %w", err), http.StatusBadRequest)
 		return
 	}
 
@@ -2855,8 +2830,8 @@ func (siw *ServerInterfaceWrapper) GetInterrupt(c *gin.Context) {
 	siw.Handler.GetInterrupt(c, id)
 }
 
-// InterruptCallback operation middleware
-func (siw *ServerInterfaceWrapper) InterruptCallback(c *gin.Context) {
+// ResumeInterrupt operation middleware
+func (siw *ServerInterfaceWrapper) ResumeInterrupt(c *gin.Context) {
 
 	var err error
 	_ = err
@@ -2871,7 +2846,7 @@ func (siw *ServerInterfaceWrapper) InterruptCallback(c *gin.Context) {
 	}
 
 	// Parameter object where we will unmarshal all parameters from the context
-	var params InterruptCallbackParams
+	var params ResumeInterruptParams
 
 	// ------------- Optional query parameter "token" -------------
 
@@ -2888,32 +2863,7 @@ func (siw *ServerInterfaceWrapper) InterruptCallback(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.InterruptCallback(c, id, params)
-}
-
-// ResolveInterrupt operation middleware
-func (siw *ServerInterfaceWrapper) ResolveInterrupt(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id IdPath
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.ResolveInterrupt(c, id)
+	siw.Handler.ResumeInterrupt(c, id, params)
 }
 
 // ListKeys operation middleware
@@ -3800,8 +3750,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/api/v1/runs/:id/retry", wrapper.RetryRun)
 	router.GET(options.BaseURL+"/api/v1/interrupts", wrapper.ListInterrupts)
 	router.GET(options.BaseURL+"/api/v1/interrupts/:id", wrapper.GetInterrupt)
-	router.POST(options.BaseURL+"/api/v1/interrupts/:id/resolve", wrapper.ResolveInterrupt)
-	router.POST(options.BaseURL+"/api/v1/interrupts/:id/callback", wrapper.InterruptCallback)
+	router.POST(options.BaseURL+"/api/v1/interrupts/:id/resume", wrapper.ResumeInterrupt)
 }
 
 type ErrorJSONResponse ErrorEnvelope
@@ -6223,19 +6172,19 @@ func (response GetInterrupt404JSONResponse) VisitGetInterruptResponse(w http.Res
 	return err
 }
 
-type InterruptCallbackRequestObject struct {
+type ResumeInterruptRequestObject struct {
 	Id     IdPath `json:"id"`
-	Params InterruptCallbackParams
-	Body   *InterruptCallbackJSONRequestBody
+	Params ResumeInterruptParams
+	Body   *ResumeInterruptJSONRequestBody
 }
 
-type InterruptCallbackResponseObject interface {
-	VisitInterruptCallbackResponse(w http.ResponseWriter) error
+type ResumeInterruptResponseObject interface {
+	VisitResumeInterruptResponse(w http.ResponseWriter) error
 }
 
-type InterruptCallback202JSONResponse InterruptCallbackResponse
+type ResumeInterrupt202JSONResponse InterruptResumeResponse
 
-func (response InterruptCallback202JSONResponse) VisitInterruptCallbackResponse(w http.ResponseWriter) error {
+func (response ResumeInterrupt202JSONResponse) VisitResumeInterruptResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -6247,74 +6196,9 @@ func (response InterruptCallback202JSONResponse) VisitInterruptCallbackResponse(
 	return err
 }
 
-type InterruptCallback404JSONResponse struct{ ErrorJSONResponse }
+type ResumeInterrupt400JSONResponse struct{ ErrorJSONResponse }
 
-func (response InterruptCallback404JSONResponse) VisitInterruptCallbackResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type InterruptCallback409JSONResponse ErrorEnvelope
-
-func (response InterruptCallback409JSONResponse) VisitInterruptCallbackResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(409)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type InterruptCallback413JSONResponse ErrorEnvelope
-
-func (response InterruptCallback413JSONResponse) VisitInterruptCallbackResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(413)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type ResolveInterruptRequestObject struct {
-	Id   IdPath `json:"id"`
-	Body *ResolveInterruptJSONRequestBody
-}
-
-type ResolveInterruptResponseObject interface {
-	VisitResolveInterruptResponse(w http.ResponseWriter) error
-}
-
-type ResolveInterrupt200JSONResponse InterruptResponse
-
-func (response ResolveInterrupt200JSONResponse) VisitResolveInterruptResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type ResolveInterrupt400JSONResponse struct{ ErrorJSONResponse }
-
-func (response ResolveInterrupt400JSONResponse) VisitResolveInterruptResponse(w http.ResponseWriter) error {
+func (response ResumeInterrupt400JSONResponse) VisitResumeInterruptResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -6326,9 +6210,9 @@ func (response ResolveInterrupt400JSONResponse) VisitResolveInterruptResponse(w 
 	return err
 }
 
-type ResolveInterrupt401JSONResponse ErrorEnvelope
+type ResumeInterrupt401JSONResponse ErrorEnvelope
 
-func (response ResolveInterrupt401JSONResponse) VisitResolveInterruptResponse(w http.ResponseWriter) error {
+func (response ResumeInterrupt401JSONResponse) VisitResumeInterruptResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -6340,9 +6224,9 @@ func (response ResolveInterrupt401JSONResponse) VisitResolveInterruptResponse(w 
 	return err
 }
 
-type ResolveInterrupt403JSONResponse ErrorEnvelope
+type ResumeInterrupt403JSONResponse ErrorEnvelope
 
-func (response ResolveInterrupt403JSONResponse) VisitResolveInterruptResponse(w http.ResponseWriter) error {
+func (response ResumeInterrupt403JSONResponse) VisitResumeInterruptResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -6354,9 +6238,9 @@ func (response ResolveInterrupt403JSONResponse) VisitResolveInterruptResponse(w 
 	return err
 }
 
-type ResolveInterrupt404JSONResponse ErrorEnvelope
+type ResumeInterrupt404JSONResponse ErrorEnvelope
 
-func (response ResolveInterrupt404JSONResponse) VisitResolveInterruptResponse(w http.ResponseWriter) error {
+func (response ResumeInterrupt404JSONResponse) VisitResumeInterruptResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -6368,9 +6252,9 @@ func (response ResolveInterrupt404JSONResponse) VisitResolveInterruptResponse(w 
 	return err
 }
 
-type ResolveInterrupt409JSONResponse ErrorEnvelope
+type ResumeInterrupt409JSONResponse ErrorEnvelope
 
-func (response ResolveInterrupt409JSONResponse) VisitResolveInterruptResponse(w http.ResponseWriter) error {
+func (response ResumeInterrupt409JSONResponse) VisitResumeInterruptResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -6378,6 +6262,20 @@ func (response ResolveInterrupt409JSONResponse) VisitResolveInterruptResponse(w 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeInterrupt413JSONResponse ErrorEnvelope
+
+func (response ResumeInterrupt413JSONResponse) VisitResumeInterruptResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -8683,11 +8581,8 @@ type StrictServerInterface interface {
 	// (GET /api/v1/interrupts/{id})
 	GetInterrupt(ctx context.Context, request GetInterruptRequestObject) (GetInterruptResponseObject, error)
 
-	// (POST /api/v1/interrupts/{id}/callback)
-	InterruptCallback(ctx context.Context, request InterruptCallbackRequestObject) (InterruptCallbackResponseObject, error)
-
-	// (POST /api/v1/interrupts/{id}/resolve)
-	ResolveInterrupt(ctx context.Context, request ResolveInterruptRequestObject) (ResolveInterruptResponseObject, error)
+	// (POST /api/v1/interrupts/{id}/resume)
+	ResumeInterrupt(ctx context.Context, request ResumeInterruptRequestObject) (ResumeInterruptResponseObject, error)
 
 	// (GET /api/v1/keys)
 	ListKeys(ctx context.Context, request ListKeysRequestObject) (ListKeysResponseObject, error)
@@ -9884,14 +9779,14 @@ func (sh *strictHandler) GetInterrupt(ctx *gin.Context, id IdPath) {
 	}
 }
 
-// InterruptCallback operation middleware
-func (sh *strictHandler) InterruptCallback(ctx *gin.Context, id IdPath, params InterruptCallbackParams) {
-	var request InterruptCallbackRequestObject
+// ResumeInterrupt operation middleware
+func (sh *strictHandler) ResumeInterrupt(ctx *gin.Context, id IdPath, params ResumeInterruptParams) {
+	var request ResumeInterruptRequestObject
 
 	request.Id = id
 	request.Params = params
 
-	var body InterruptCallbackJSONRequestBody
+	var body ResumeInterruptJSONRequestBody
 	if err := ctx.ShouldBindJSON(&body); err != nil {
 		sh.options.RequestErrorHandlerFunc(ctx, err)
 		return
@@ -9899,51 +9794,18 @@ func (sh *strictHandler) InterruptCallback(ctx *gin.Context, id IdPath, params I
 	request.Body = &body
 
 	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
-		return sh.ssi.InterruptCallback(ctx, request.(InterruptCallbackRequestObject))
+		return sh.ssi.ResumeInterrupt(ctx, request.(ResumeInterruptRequestObject))
 	}
 	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "InterruptCallback")
+		handler = middleware(handler, "ResumeInterrupt")
 	}
 
 	response, err := handler(ctx, request)
 
 	if err != nil {
 		sh.options.HandlerErrorFunc(ctx, err)
-	} else if validResponse, ok := response.(InterruptCallbackResponseObject); ok {
-		if err := validResponse.VisitInterruptCallbackResponse(ctx.Writer); err != nil {
-			sh.options.ResponseErrorHandlerFunc(ctx, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// ResolveInterrupt operation middleware
-func (sh *strictHandler) ResolveInterrupt(ctx *gin.Context, id IdPath) {
-	var request ResolveInterruptRequestObject
-
-	request.Id = id
-
-	var body ResolveInterruptJSONRequestBody
-	if err := ctx.ShouldBindJSON(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(ctx, err)
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
-		return sh.ssi.ResolveInterrupt(ctx, request.(ResolveInterruptRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "ResolveInterrupt")
-	}
-
-	response, err := handler(ctx, request)
-
-	if err != nil {
-		sh.options.HandlerErrorFunc(ctx, err)
-	} else if validResponse, ok := response.(ResolveInterruptResponseObject); ok {
-		if err := validResponse.VisitResolveInterruptResponse(ctx.Writer); err != nil {
+	} else if validResponse, ok := response.(ResumeInterruptResponseObject); ok {
+		if err := validResponse.VisitResumeInterruptResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

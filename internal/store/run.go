@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 )
 
@@ -41,13 +40,6 @@ const (
 	StepUnknown   = "unknown"
 )
 
-// Interrupt kinds (committed at wait; "" while reserved).
-const (
-	InterruptApproval = "approval"
-	InterruptCallback = "callback"
-	InterruptTimer    = "timer"
-)
-
 // Interrupt statuses.
 const (
 	InterruptSlotReserved = "reserved"
@@ -66,9 +58,8 @@ const (
 
 // Interrupt resolver identities.
 const (
-	ResolvedByCallback = "callback"
-	ResolvedByTimer    = "timer"
-	ResolvedByExpiry   = "expiry"
+	ResolvedByToken  = "token" // the interrupt's bound resume token
+	ResolvedByExpiry = "expiry"
 )
 
 // Run is one application execution from main to a terminal outcome.
@@ -111,27 +102,22 @@ type RunStep struct {
 // Interrupt is one durable request for exactly one external
 // resolution. Context/Event are service-sealed ciphertext.
 type Interrupt struct {
-	ID            string          `json:"id"`
-	WorkspaceID   string          `json:"workspace_id"`
-	ApplicationID string          `json:"application_id"`
-	RunID         string          `json:"run_id"`
-	StepSeq       int             `json:"step_seq"`
-	Kind          string          `json:"kind,omitempty"`
-	Status        string          `json:"status"`
-	Title         string          `json:"title,omitempty"`
-	Assignees     []string        `json:"assignees,omitempty"`
-	EventSchema   json.RawMessage `json:"event_schema,omitempty"`
-	Handler       string          `json:"handler,omitempty"`
-	OnExpire      string          `json:"on_expire,omitempty"`
-	Context       []byte          `json:"-"`
-	ExpiresAt     *time.Time      `json:"expires_at,omitempty"`
-	FireAt        *time.Time      `json:"fire_at,omitempty"`
+	ID            string     `json:"id"`
+	WorkspaceID   string     `json:"workspace_id"`
+	ApplicationID string     `json:"application_id"`
+	RunID         string     `json:"run_id"`
+	StepSeq       int        `json:"step_seq"`
+	Status        string     `json:"status"`
+	Handler       string     `json:"handler,omitempty"`
+	OnExpire      string     `json:"on_expire,omitempty"`
+	Context       []byte     `json:"-"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
 	// Event holds the winning resolution — also for an early
 	// (reserved-state) resolution, stored until commit decides.
 	Event      []byte     `json:"-"`
 	ResolvedBy string     `json:"resolved_by,omitempty"`
 	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
-	// KeyID is the bound callback API key id.
+	// KeyID is the bound resume API key id.
 	KeyID                string     `json:"key_id,omitempty"`
 	DispatchState        string     `json:"dispatch_state,omitempty"`
 	DispatchAfter        *time.Time `json:"dispatch_after,omitempty"`
@@ -170,15 +156,10 @@ type InterruptFilter struct {
 // into a committed interrupt.
 type WaitCommit struct {
 	InterruptID string
-	Kind        string
-	Title       string
-	Assignees   []string
-	EventSchema json.RawMessage
 	Handler     string
 	OnExpire    string
 	Context     []byte
 	ExpiresAt   *time.Time
-	FireAt      *time.Time
 }
 
 // StepOutcome is the atomic end-of-step transition written by
@@ -220,22 +201,19 @@ type RunStore interface {
 	// revoked), and the run/interrupt transitions of the outcome
 	// apply atomically. acceptEarly decides whether an event that
 	// arrived while the slot was reserved counts as the resolution.
-	FinishStep(ctx context.Context, out StepOutcome, acceptEarly func(kind string, eventSchema json.RawMessage, event []byte) bool) error
+	FinishStep(ctx context.Context, out StepOutcome, acceptEarly func(event []byte) bool) error
 	// ResolveInterrupt records the single resolution of a pending or
 	// reserved interrupt; first arriver wins. early reports that the
 	// interrupt is still reserved (resolution stored for commit).
 	ResolveInterrupt(ctx context.Context, id string, event []byte, resolvedBy string, now time.Time) (early bool, err error)
 
-	// ListDueInterrupts returns pending interrupts past their
-	// deadline: non-timer expires_at or timer fire_at at/before now.
+	// ListDueInterrupts returns pending interrupts whose expires_at
+	// is at/before now.
 	ListDueInterrupts(ctx context.Context, now time.Time, limit int) ([]*Interrupt, error)
-	// ExpireInterrupt CAS-transitions a due non-timer pending
-	// interrupt to expired; it queues the on_expire dispatch or ends
+	// ExpireInterrupt CAS-transitions a due pending interrupt to
+	// expired; it queues the on_expire dispatch or ends
 	// the run expired. Reports whether this call committed.
 	ExpireInterrupt(ctx context.Context, id string, now time.Time) (bool, error)
-	// FireTimer CAS-transitions a due timer to resolved and queues
-	// its handler dispatch. Reports whether this call committed.
-	FireTimer(ctx context.Context, id string, now time.Time) (bool, error)
 
 	// ClaimDispatch atomically claims one queued interrupt whose
 	// dispatch_after is due, moving it to running until claimUntil.

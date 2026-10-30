@@ -93,11 +93,11 @@ func (d Deps) authMiddleware() gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		// The interrupt callback accepts its bound key as Bearer or
-		// ?token= and is exempt from CSRF (bearer-only route).
-		cb := strings.HasPrefix(c.Request.URL.Path, "/api/v1/interrupts/") &&
-			strings.HasSuffix(c.Request.URL.Path, "/callback")
-		if cb && !hasBearer(c.Request) {
+		// Interrupt resume also accepts its bound token as ?token=;
+		// cookie sessions on it still need CSRF like any mutation.
+		resume := strings.HasPrefix(c.Request.URL.Path, "/api/v1/interrupts/") &&
+			strings.HasSuffix(c.Request.URL.Path, "/resume")
+		if resume && !hasBearer(c.Request) {
 			if tok := c.Request.URL.Query().Get("token"); tok != "" {
 				r := c.Request.Clone(c.Request.Context())
 				r.Header.Set("Authorization", "Bearer "+tok)
@@ -121,7 +121,7 @@ func (d Deps) authMiddleware() gin.HandlerFunc {
 		if p == nil && d.Dev && d.Anonymous != nil {
 			p = &auth.Principal{User: d.Anonymous, Kind: types.AuthAnonymous}
 		}
-		if p != nil && auth.NeedsCSRF(p) && !cb &&
+		if p != nil && auth.NeedsCSRF(p) &&
 			c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
 			if !auth.CSRFHeaderOK(c.Request) {
 				writeErr(c.Writer, http.StatusForbidden, types.ErrCodeCSRF, "missing X-Requested-With header")
@@ -148,7 +148,7 @@ func bodyLimit() gin.HandlerFunc {
 		if strings.HasSuffix(c.Request.URL.Path, "/exec") {
 			limit = sandbox.MaxCodeBytes + 1024
 		}
-		if strings.HasSuffix(c.Request.URL.Path, "/callback") {
+		if strings.HasSuffix(c.Request.URL.Path, "/resume") {
 			limit = 64<<10 + 1024
 		}
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)

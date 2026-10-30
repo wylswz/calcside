@@ -31,7 +31,7 @@ const (
 	Tick                = time.Second     // dispatcher cadence
 	ClaimFor            = 2 * time.Minute // dispatch claim lease
 	keySafetyDays       = 31              // bound-key expiry safety cap
-	defaultExpireS      = 7 * 86400       // approval/callback default deadline
+	defaultExpireS      = 7 * 86400       // default interrupt deadline
 	prepareLease        = 45 * time.Second
 )
 
@@ -64,6 +64,7 @@ type Service struct {
 	o    Options
 	stop chan struct{}
 	done chan struct{}
+	wake chan struct{} // buffered(1); a fresh resolution nudges the loop
 }
 
 func New(o Options) (*Service, error) {
@@ -79,7 +80,7 @@ func New(o Options) (*Service, error) {
 	if o.MaxSteps <= 0 {
 		o.MaxSteps = defaultMaxSteps
 	}
-	return &Service{o: o, stop: make(chan struct{}), done: make(chan struct{})}, nil
+	return &Service{o: o, stop: make(chan struct{}), done: make(chan struct{}), wake: make(chan struct{}, 1)}, nil
 }
 
 // --- sealing helpers -------------------------------------------------
@@ -119,8 +120,8 @@ type Started struct {
 }
 
 // Begin records a running run, its first step and the step's reserved
-// interrupt slots with bound callback keys. With no declared handlers
-// or no cipher there are no slots.
+// interrupt slots with bound resume keys. Programs that never reference
+// `interrupt`, and servers without a cipher, get no slots.
 func (s *Service) Begin(ctx context.Context, app *store.Application, rel *store.ServingRelease, trigger string, actor service.Actor) (*Started, error) {
 	now := s.o.Now().UTC()
 	run := &store.Run{
@@ -135,7 +136,7 @@ func (s *Service) Begin(ctx context.Context, app *store.Application, rel *store.
 	}
 	var slots []*store.Interrupt
 	var wire []runtime.InterruptSlot
-	if len(rel.Program.Handlers) > 0 && s.o.Cipher != nil {
+	if s.o.Cipher != nil && serving.UsesInterrupt(rel.Program.Sources) {
 		var err error
 		slots, wire, err = s.mintSlots(ctx, app, run.ID, 0, now)
 		if err != nil {
@@ -169,10 +170,9 @@ func (s *Service) mintSlots(ctx context.Context, app *store.Application, runID s
 			KeyID: key.ID, CreatedAt: now, UpdatedAt: now,
 		})
 		wire = append(wire, runtime.InterruptSlot{
-			ID:          iid,
-			ConsoleURL:  s.o.ConsoleOrigin + "/inbox?interrupt=" + iid,
-			CallbackURL: s.o.ConsoleOrigin + "/api/v1/interrupts/" + iid + "/callback",
-			Token:       secret,
+			ID:        iid,
+			ResumeURL: s.resumeURL(iid),
+			Token:     secret,
 		})
 	}
 	return slots, wire, nil
@@ -192,8 +192,6 @@ type Outcome struct {
 // WaitingRef is the wire-visible handle of a committed interrupt.
 type WaitingRef struct {
 	InterruptID string `json:"interrupt_id"`
-	Kind        string `json:"kind"`
-	Title       string `json:"title,omitempty"`
 	ConsoleURL  string `json:"console_url"`
 }
 
@@ -234,19 +232,14 @@ func (s *Service) Complete(ctx context.Context, st *Started, seq, attempt int, e
 			break
 		}
 		wc := &store.WaitCommit{
-			InterruptID: w.InterruptID, Kind: w.Kind, Title: w.Title,
-			Assignees: w.Assignees, EventSchema: w.EventSchema,
-			Handler: w.Handler, OnExpire: w.OnExpire, Context: ctxSeal,
+			InterruptID: w.InterruptID,
+			Handler:     w.Handler, OnExpire: w.OnExpire, Context: ctxSeal,
 		}
 		if w.ExpiresInS > 0 {
 			t := now.Add(time.Duration(w.ExpiresInS) * time.Second)
 			wc.ExpiresAt = &t
 		}
-		if w.FireInS > 0 {
-			t := now.Add(time.Duration(w.FireInS) * time.Second)
-			wc.FireAt = &t
-		}
-		if wc.ExpiresAt == nil && w.Kind != store.InterruptTimer {
+		if wc.ExpiresAt == nil {
 			t := now.Add(defaultExpireS * time.Second)
 			wc.ExpiresAt = &t
 		}
@@ -268,6 +261,11 @@ func (s *Service) Complete(ctx context.Context, st *Started, seq, attempt int, e
 	if err := s.o.Store.FinishStep(ctx, out, s.acceptEarlyFor(out.Wait)); err != nil {
 		return nil, service.Internal(err)
 	}
+	if out.Status == store.StepWaiting {
+		// An early (reserved-state) resolution accepted at commit is
+		// already queued for dispatch — don't wait for the tick.
+		s.nudge()
+	}
 	run, err := s.o.Store.GetRun(ctx, st.Run.ID)
 	if err != nil {
 		return nil, service.Internal(err)
@@ -275,9 +273,8 @@ func (s *Service) Complete(ctx context.Context, st *Started, seq, attempt int, e
 	oc := &Outcome{RunID: run.ID, Status: run.Status, Run: run}
 	if out.Status == store.StepWaiting && out.Wait != nil {
 		oc.Waiting = &WaitingRef{
-			InterruptID: out.Wait.InterruptID, Kind: out.Wait.Kind,
-			Title:      out.Wait.Title,
-			ConsoleURL: s.o.ConsoleOrigin + "/inbox?interrupt=" + out.Wait.InterruptID,
+			InterruptID: out.Wait.InterruptID,
+			ConsoleURL:  s.o.ConsoleOrigin + "/inbox?interrupt=" + out.Wait.InterruptID,
 		}
 	}
 	if run.Status == store.RunSucceeded {
@@ -291,28 +288,26 @@ func (s *Service) Complete(ctx context.Context, st *Started, seq, attempt int, e
 
 // acceptEarlyFor decides inside the FinishStep transaction whether an
 // event stored while the slot was reserved counts as the resolution:
-// only callback events that decrypt and validate against the committed
-// schema. The stored event is sealed under the interrupt id.
-func (s *Service) acceptEarlyFor(w *store.WaitCommit) func(string, json.RawMessage, []byte) bool {
-	return func(kind string, eventSchema json.RawMessage, event []byte) bool {
-		if kind != store.InterruptCallback || s.o.Cipher == nil || w == nil {
+// events that decrypt and validate as a JSON object. The stored event
+// is sealed under the interrupt id.
+func (s *Service) acceptEarlyFor(w *store.WaitCommit) func([]byte) bool {
+	return func(event []byte) bool {
+		if s.o.Cipher == nil || w == nil {
 			return false
 		}
 		pt, err := s.open(event, "interrupt-event:"+w.InterruptID)
 		if err != nil {
 			return false
 		}
-		return s.validateEvent(eventSchema, pt) == nil
+		return s.validateEvent(pt) == nil
 	}
 }
 
-// validateEvent decrypts (already decrypted here — early events are
-// stored sealed by ResolveInterrupt callers), bounds and schema-checks
-// an event body. Callback default is an unconstrained object.
-func (s *Service) validateEvent(eventSchema json.RawMessage, event []byte) error {
-	if len(eventSchema) == 0 {
-		eventSchema = json.RawMessage(`{"type":"object","additionalProperties":true}`)
-	}
+// eventSchema is the only event contract: any bounded JSON object.
+var eventSchema = json.RawMessage(`{"type":"object","additionalProperties":true}`)
+
+// validateEvent bounds and shape-checks a plaintext event body.
+func (s *Service) validateEvent(event []byte) error {
 	sch, err := serving.CompileSchema(eventSchema, serving.DefaultLimits())
 	if err != nil {
 		return err

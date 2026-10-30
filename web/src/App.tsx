@@ -47,7 +47,7 @@ function InboxBadge() {
   const ws = currentWorkspace() ?? ''
   const q = useQuery({
     queryKey: ['inbox-count', ws],
-    queryFn: () => api.get<{ interrupts?: unknown[] }>(wsPath('/api/v1/interrupts?status=pending&resolvable=true')),
+    queryFn: () => api.get<{ interrupts?: unknown[] }>(wsPath('/api/v1/interrupts?status=pending&resumable=true')),
     refetchInterval: 5000,
   })
   const n = q.data?.interrupts?.length ?? 0

@@ -20,17 +20,14 @@ const PrefixApplication IDPrefix = "app_"
 // records which draft version the persistent instance currently serves
 // (0 = never published).
 type Application struct {
-	ID           string          `json:"id"`
-	WorkspaceID  string          `json:"workspace_id"`
-	UserID       string          `json:"user_id"`
-	Name         string          `json:"name"`
-	Code         string          `json:"code"`
-	Spec         json.RawMessage `json:"spec"`
-	InputSchema  json.RawMessage `json:"input_schema,omitempty"`
-	OutputSchema json.RawMessage `json:"output_schema,omitempty"`
-	// Handlers is the declared interrupt-handler table, a JSON object
-	// {name: {"context_schema": {...}?}}.
-	Handlers             json.RawMessage `json:"handlers,omitempty"`
+	ID                   string          `json:"id"`
+	WorkspaceID          string          `json:"workspace_id"`
+	UserID               string          `json:"user_id"`
+	Name                 string          `json:"name"`
+	Code                 string          `json:"code"`
+	Spec                 json.RawMessage `json:"spec"`
+	InputSchema          json.RawMessage `json:"input_schema,omitempty"`
+	OutputSchema         json.RawMessage `json:"output_schema,omitempty"`
 	Version              int64           `json:"version"`
 	PublishedVersion     int64           `json:"published_version"`
 	PersistentInstanceID string          `json:"persistent_instance_id,omitempty"`
@@ -107,14 +104,11 @@ func ValidateApplication(a *Application) error {
 	if err := validSchemaSide(a.OutputSchema); err != nil {
 		return err
 	}
-	if err := ValidateHandlerDeclarations(a.Handlers); err != nil {
-		return err
-	}
 	return nil
 }
 
 // NewApplication constructs a version-1 draft.
-func NewApplication(workspaceID, userID, name, code string, spec, inSchema, outSchema, handlers json.RawMessage, now time.Time) (*Application, error) {
+func NewApplication(workspaceID, userID, name, code string, spec, inSchema, outSchema json.RawMessage, now time.Time) (*Application, error) {
 	if len(spec) == 0 {
 		spec = json.RawMessage(`{}`)
 	}
@@ -123,7 +117,6 @@ func NewApplication(workspaceID, userID, name, code string, spec, inSchema, outS
 		Spec:         append(json.RawMessage(nil), spec...),
 		InputSchema:  append(json.RawMessage(nil), inSchema...),
 		OutputSchema: append(json.RawMessage(nil), outSchema...),
-		Handlers:     append(json.RawMessage(nil), handlers...),
 		Version:      1, PublishedVersion: 0,
 		CreatedAt: now.UTC(), UpdatedAt: now.UTC(),
 	}

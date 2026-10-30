@@ -9,20 +9,14 @@ import (
 	"calcside/internal/secrets"
 )
 
-// interruptConfig is a program that reserves an approval interrupt and
-// waits on it, with two declared handlers.
+// interruptConfig is a program that reserves an interrupt and waits on
+// it; on_ok and on_exp are plain top-level functions.
 func interruptConfig() ProgramConfig {
 	return ProgramConfig{
 		Sources: map[string][]byte{
 			"main.star": []byte(`def main(input):
     rid = interrupt.run_id()
-    req = interrupt.new(
-        "approval",
-        title = "Approve order",
-        assignees = ["usr_a", "usr_b"],
-        event_schema = {"type": "object"},
-        expires_in_s = 60,
-    )
+    req = interrupt.new(expires_in_s = 60)
     print("rid=" + rid + " id=" + req["id"])
     interrupt.wait(
         req["id"],
@@ -41,10 +35,6 @@ def on_exp(ctx):
 		},
 		InputSchema:  json.RawMessage(`{"type":"object"}`),
 		OutputSchema: json.RawMessage(`{"type":"object"}`),
-		Handlers: map[string]json.RawMessage{
-			"on_ok":  json.RawMessage(`{"type":"object","required":["order_id"],"properties":{"order_id":{"type":"string"}}}`),
-			"on_exp": nil,
-		},
 	}
 }
 
@@ -53,8 +43,8 @@ func invokeCall(id string) ProgramCall {
 		ID:    id,
 		RunID: "run_1",
 		Interrupts: []InterruptSlot{
-			{ID: "int_1", ConsoleURL: "https://console/int_1"},
-			{ID: "int_2", ConsoleURL: "https://console/int_2", CallbackURL: "https://api/cb/int_2", Token: "cb_secret_tok"},
+			{ID: "int_1", ResumeURL: "https://api/int_1/resume", Token: "resume_tok_1"},
+			{ID: "int_2", ResumeURL: "https://api/int_2/resume", Token: "resume_tok_2"},
 		},
 	}
 }
@@ -74,15 +64,8 @@ func TestProgramInterruptWaiting(t *testing.T) {
 	if w == nil {
 		t.Fatal("no waiting outcome")
 	}
-	if w.InterruptID != "int_1" || w.Handler != "on_ok" || w.OnExpire != "on_exp" ||
-		w.Kind != "approval" || w.Title != "Approve order" || w.ExpiresInS != 60 {
+	if w.InterruptID != "int_1" || w.Handler != "on_ok" || w.OnExpire != "on_exp" || w.ExpiresInS != 60 {
 		t.Fatalf("bad waiting: %+v", w)
-	}
-	if len(w.Assignees) != 2 || w.Assignees[0] != "usr_a" || w.Assignees[1] != "usr_b" {
-		t.Fatalf("assignees: %v", w.Assignees)
-	}
-	if string(w.EventSchema) != `{"type":"object"}` {
-		t.Fatalf("event_schema: %s", w.EventSchema)
 	}
 	var ctx map[string]any
 	if err := json.Unmarshal(w.Context, &ctx); err != nil || ctx["order_id"] != "o1" {
@@ -96,42 +79,25 @@ func TestProgramInterruptWaiting(t *testing.T) {
 	}
 }
 
-func TestProgramInterruptCallbackTokenRedacted(t *testing.T) {
+func TestProgramInterruptResumeTokenRedacted(t *testing.T) {
 	e := New(4)
 	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
 	cfg := interruptConfig()
 	cfg.Sources["main.star"] = []byte(`def main(input):
-    req = interrupt.new("callback")
-    print("cb=" + req["callback_token"])
-    return {"tok": req["callback_token"]}
-
-def on_ok(ctx):
-    return {}
+    req = interrupt.new()
+    print("tok=" + req["resume_token"] + " url=" + req["resume_url"])
+    return {"tok": req["resume_token"]}
 `)
-	cfg.Handlers = map[string]json.RawMessage{"on_ok": nil}
 	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-1"})
-
-	// Reserve the callback slot by skipping the approval slot: the
-	// first new() claims int_1; call new twice so the callback claims
-	// int_2.
-	cfg.Sources["main.star"] = []byte(`def main(input):
-    interrupt.new("approval")
-    req = interrupt.new("callback")
-    print("cb=" + req["callback_token"])
-    return {"tok": req["callback_token"]}
-
-def on_ok(ctx):
-    return {}
-`)
-	p, _ = prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-2"})
 	res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{}`), deps, creation, invokeCall("inv-1"))
 	if res.Error != nil {
 		t.Fatalf("invoke: %+v", res.Error)
 	}
-	if strings.Contains(res.Stdout, "cb_secret_tok") || !strings.Contains(res.Stdout, "[REDACTED]") {
-		t.Fatalf("token leaked to stdout: %q", res.Stdout)
+	if strings.Contains(res.Stdout, "resume_tok_1") || !strings.Contains(res.Stdout, "[REDACTED]") ||
+		!strings.Contains(res.Stdout, "https://api/int_1/resume") {
+		t.Fatalf("stdout: %q", res.Stdout)
 	}
-	if strings.Contains(string(res.Output), "cb_secret_tok") || !strings.Contains(string(res.Output), "[REDACTED]") {
+	if strings.Contains(string(res.Output), "resume_tok_1") || !strings.Contains(string(res.Output), "[REDACTED]") {
 		t.Fatalf("token leaked to output: %s", res.Output)
 	}
 }
@@ -143,31 +109,46 @@ func TestProgramInterruptErrors(t *testing.T) {
 %s
 def on_ok(ctx):
     return {}
+
+def two(a, b):
+    return {}
+
+def _private(ctx):
+    return {}
+
+NOT_FN = 1
 `
 	cases := []struct {
 		name    string
 		body    string
 		call    ProgramCall
-		wantSub string // optional substring of the eval error (message is generic in result)
+		wantSub string // substring of the surfaced usage message
 	}{
 		{"wait unreserved", `    interrupt.wait("int_9", handler = "on_ok", context = {})`, invokeCall("i"), "not reserved"},
-		{"undeclared handler", `    req = interrupt.new("approval")
-    interrupt.wait(req["id"], handler = "nope", context = {})`, invokeCall("i"), "not declared"},
-		{"bad context", `    req = interrupt.new("approval")
-    interrupt.wait(req["id"], handler = "on_ok", context = {})`, invokeCall("i"), "handler schema"},
-		{"no run", `    interrupt.new("approval")`, ProgramCall{ID: "i"}, "application runs"},
+		{"missing handler", `    req = interrupt.new()
+    interrupt.wait(req["id"], handler = "nope", context = {})`, invokeCall("i"), "top-level one-argument function"},
+		{"wrong arity", `    req = interrupt.new()
+    interrupt.wait(req["id"], handler = "two", context = {})`, invokeCall("i"), "top-level one-argument function"},
+		{"underscore", `    req = interrupt.new()
+    interrupt.wait(req["id"], handler = "_private", context = {})`, invokeCall("i"), "top-level one-argument function"},
+		{"main", `    req = interrupt.new()
+    interrupt.wait(req["id"], handler = "main", context = {})`, invokeCall("i"), "top-level one-argument function"},
+		{"not a function", `    req = interrupt.new()
+    interrupt.wait(req["id"], handler = "NOT_FN", context = {})`, invokeCall("i"), "top-level one-argument function"},
+		{"bad on_expire", `    req = interrupt.new()
+    interrupt.wait(req["id"], handler = "on_ok", on_expire = "nope", context = {})`, invokeCall("i"), "on_expire"},
+		{"no run", `    interrupt.new()`, ProgramCall{ID: "i"}, "application runs"},
 		{"run_id no run", `    interrupt.run_id()`, ProgramCall{ID: "i"}, "application runs"},
-		{"slot limit", `    interrupt.new("approval")`, ProgramCall{ID: "i", RunID: "run_1"}, "interrupt limit"},
-		{"timer no fire", `    interrupt.new("timer")`, invokeCall("i"), "fire_in_s"},
-		{"approval fire", `    interrupt.new("approval", fire_in_s = 5)`, invokeCall("i"), "fire_in_s"},
+		{"no slots", `    interrupt.new()`, ProgramCall{ID: "i", RunID: "run_1"}, "--secret-key"},
+		{"slot limit", `    interrupt.new()
+    interrupt.new()
+    interrupt.new()`, invokeCall("i"), "interrupt limit"},
+		{"bad expiry", `    interrupt.new(expires_in_s = 0)`, invokeCall("i"), "expires_in_s"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := interruptConfig()
 			cfg.Sources["main.star"] = []byte(strings.Replace(base, "%s", tc.body, 1))
-			cfg.Handlers = map[string]json.RawMessage{
-				"on_ok": json.RawMessage(`{"type":"object","required":["k"],"properties":{"k":{"type":"string"}}}`),
-			}
 			p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-" + tc.name})
 			res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{}`), deps, creation, tc.call)
 			if res.Error == nil {
@@ -175,6 +156,9 @@ def on_ok(ctx):
 			}
 			if res.Waiting != nil {
 				t.Fatalf("failed call recorded waiting: %+v", res.Waiting)
+			}
+			if res.Error.Code != "runtime" || !strings.Contains(res.Error.Message, tc.wantSub) {
+				t.Fatalf("error = %+v, want runtime containing %q", res.Error, tc.wantSub)
 			}
 		})
 	}
@@ -187,13 +171,12 @@ func TestProgramInterruptSecretContext(t *testing.T) {
 	deps, creation := progEnv(t, &spyFactory{}, nil, secs, nil)
 	cfg := interruptConfig()
 	cfg.Sources["main.star"] = []byte(`def main(input):
-    req = interrupt.new("approval")
+    req = interrupt.new()
     interrupt.wait(req["id"], handler = "on_ok", context = {"k": "s3cr3t"})
 
 def on_ok(ctx):
     return {}
 `)
-	cfg.Handlers = map[string]json.RawMessage{"on_ok": nil}
 	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-1"})
 	res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{}`), deps, creation, invokeCall("inv-1"))
 	if res.Error == nil || res.Waiting != nil {
@@ -210,10 +193,10 @@ func TestProgramHandlerEntry(t *testing.T) {
 
 def on_ok(ctx):
     return {"status": ctx["context"]["order_id"], "approved": ctx["event"]["approved"], "iid": ctx["interrupt_id"]}
+
+def two(a, b):
+    return {}
 `)
-	cfg.Handlers = map[string]json.RawMessage{
-		"on_ok": json.RawMessage(`{"type":"object","required":["order_id"],"properties":{"order_id":{"type":"string"}}}`),
-	}
 	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-1"})
 
 	call := ProgramCall{ID: "inv-1", Entry: "on_ok", RunID: "run_1", Step: 1}
@@ -230,15 +213,8 @@ def on_ok(ctx):
 		t.Fatalf("bad handler output: %s", res.Output)
 	}
 
-	// A context that fails the handler schema is invalid_input.
-	bad := e.InvokeProgram(context.Background(), p, json.RawMessage(`{"context":{"other":1}}`), deps, creation,
-		ProgramCall{ID: "inv-2", Entry: "on_ok", RunID: "run_1", Step: 1})
-	if bad.Error == nil || bad.Error.Code != "invalid_input" {
-		t.Fatalf("bad context: %+v", bad.Error)
-	}
-
 	// A non-object or context-less input is invalid_input.
-	for _, raw := range []string{`[]`, `{"run_id":"r"}`} {
+	for _, raw := range []string{`[]`, `{"run_id":"r"}`, `{"context":[]}`} {
 		r := e.InvokeProgram(context.Background(), p, json.RawMessage(raw), deps, creation,
 			ProgramCall{ID: "inv-3" + raw, Entry: "on_ok", RunID: "run_1", Step: 1})
 		if r.Error == nil || r.Error.Code != "invalid_input" {
@@ -246,68 +222,23 @@ def on_ok(ctx):
 		}
 	}
 
-	// Unknown entry is invalid_input.
-	unk := e.InvokeProgram(context.Background(), p, json.RawMessage(`{"context":{"order_id":"o"}}`), deps, creation,
-		ProgramCall{ID: "inv-4", Entry: "ghost", RunID: "run_1", Step: 1})
-	if unk.Error == nil || unk.Error.Code != "invalid_input" {
-		t.Fatalf("unknown entry: %+v", unk.Error)
-	}
-}
-
-func TestProgramHandlerDeclarations(t *testing.T) {
-	e := New(4)
-	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
-	src := `def main(input):
-    return {}
-
-def on_ok(ctx):
-    return {}
-`
-	badHandler := func(handlers map[string]json.RawMessage, s string) ProgramResult {
-		cfg := interruptConfig()
-		cfg.Sources["main.star"] = []byte(s)
-		cfg.Handlers = handlers
-		_, res := e.PrepareProgram(context.Background(), cfg, deps, creation, ProgramCall{ID: "p"})
-		return res
-	}
-	for name, handlers := range map[string]map[string]json.RawMessage{
-		"underscore":  {"_x": nil},
-		"main":        {"main": nil},
-		"bad ident":   {"1bad": nil},
-		"non object":  {"on_ok": json.RawMessage(`{"type":"string"}`)},
-		"non compile": {"on_ok": json.RawMessage(`{"type":"object","pattern":"x"}`)},
-	} {
-		res := badHandler(handlers, src)
-		if res.Error == nil || res.Error.Code != "invalid_program" {
-			t.Fatalf("%s: %+v", name, res.Error)
+	// Names that can never be handlers are invalid_input before any
+	// session work.
+	for _, entry := range []string{"_x", "1bad", "a.b"} {
+		r := e.InvokeProgram(context.Background(), p, json.RawMessage(`{"context":{}}`), deps, creation,
+			ProgramCall{ID: "inv-n" + entry, Entry: entry, RunID: "run_1", Step: 1})
+		if r.Error == nil || r.Error.Code != "invalid_input" {
+			t.Fatalf("entry %q: %+v", entry, r.Error)
 		}
 	}
-	// Declared but missing in code.
-	res := badHandler(map[string]json.RawMessage{"ghost": nil}, src)
-	if res.Error == nil || res.Error.Code != "invalid_program" {
-		t.Fatalf("missing handler: %+v", res.Error)
-	}
-	// Declared but wrong arity.
-	res = badHandler(map[string]json.RawMessage{"on_ok": nil}, `def main(input):
-    return {}
-
-def on_ok(a, b):
-    return {}
-`)
-	if res.Error == nil || res.Error.Code != "invalid_program" {
-		t.Fatalf("arity: %+v", res.Error)
-	}
-	// Too many handlers.
-	many := map[string]json.RawMessage{}
-	for i := 0; i < 33; i++ {
-		many[string(rune('a'+i%26))+strings.Repeat("x", i/26)] = nil
-	}
-	cfg := interruptConfig()
-	cfg.Sources["main.star"] = []byte(src)
-	cfg.Handlers = many
-	_, res = e.PrepareProgram(context.Background(), cfg, deps, creation, ProgramCall{ID: "p2"})
-	if res.Error == nil || res.Error.Code != "invalid_program" {
-		t.Fatalf("handler count: %+v", res.Error)
+	// A well-formed name the program does not define as a one-argument
+	// function fails as invalid_program.
+	for _, entry := range []string{"ghost", "two"} {
+		r := e.InvokeProgram(context.Background(), p, json.RawMessage(`{"context":{}}`), deps, creation,
+			ProgramCall{ID: "inv-g" + entry, Entry: entry, RunID: "run_1", Step: 1})
+		if r.Error == nil || r.Error.Code != "invalid_program" {
+			t.Fatalf("entry %q: %+v", entry, r.Error)
+		}
 	}
 }
 
@@ -319,7 +250,6 @@ func TestProgramInterruptTopLevel(t *testing.T) {
 def main(input):
     return {}
 `)
-	cfg.Handlers = nil
 	_, res := e.PrepareProgram(context.Background(), cfg, deps, creation, ProgramCall{ID: "p"})
 	if res.Error == nil || res.Error.Code != "invalid_program" {
 		t.Fatalf("top-level interrupt call: %+v", res.Error)

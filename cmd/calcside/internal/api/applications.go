@@ -54,10 +54,6 @@ func appDTO(v *application.View) gen.Application {
 		s := string(a.OutputSchema)
 		d.OutputSchema = &s
 	}
-	if len(a.Handlers) > 0 {
-		s := string(a.Handlers)
-		d.Handlers = &s
-	}
 	if a.PersistentInstanceID != "" {
 		d.PersistentInstanceId = &a.PersistentInstanceID
 	}
@@ -84,20 +80,10 @@ func runDTO(rv *application.RunView) gen.ApplicationRunResponse {
 	if rv.Waiting != nil {
 		w := rv.Waiting
 		out.Waiting = &gen.InterruptWaiting{
-			InterruptId: w.InterruptID, Kind: w.Kind, ConsoleUrl: w.ConsoleURL,
-			Title: optStr(w.Title),
+			InterruptId: w.InterruptID, ConsoleUrl: w.ConsoleURL,
 		}
 	}
 	return out
-}
-
-// handlersRaw carries the declarations document byte-for-byte like
-// input_schema (a raw JSON string field), preserving big integers.
-func handlersRaw(h *string) json.RawMessage {
-	if h == nil || *h == "" {
-		return nil
-	}
-	return json.RawMessage(*h)
 }
 
 func strPtr(s string) *string { return &s }
@@ -215,7 +201,6 @@ func (s *strictImpl) CreateApplication(ctx context.Context, req gen.CreateApplic
 	v, err := s.d.Application.Create(ctx, a, application.CreateRequest{
 		Name: name, Code: b.Code, Spec: spec,
 		InputSchema: schemaSide(b.InputSchema), OutputSchema: schemaSide(b.OutputSchema),
-		Handlers: handlersRaw(b.Handlers),
 	})
 	if err != nil {
 		return createApplicationResp{appFail(err)}, nil

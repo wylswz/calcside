@@ -6,10 +6,10 @@ import { startApplicationRuntime, type ApplicationRuntime } from './applicationR
 // order), F2 (named confirms), P5/C2 (already_resolved in place with
 // input kept), C4 (deep links).
 
-const APPROVAL = `def on_ok(h):
+const WAITS = `def on_ok(h):
     return {"ok": h["event"]["approved"]}
 def main(input):
-    i = interrupt.new("approval", title="ship it")
+    i = interrupt.new()
     interrupt.wait(i["id"], handler="on_ok", context={"x": 1})
     return {"unreachable": True}
 `
@@ -31,7 +31,7 @@ test.describe.configure({ mode: 'serial' })
 
 async function makeApp(name: string): Promise<string> {
 	const r = await client.post('/api/v1/applications', {
-		data: { name, code: APPROVAL, handlers: '{"on_ok":{}}' },
+		data: { name, code: WAITS },
 	})
 	const { application } = await r.json()
 	return application.id as string
@@ -45,7 +45,7 @@ async function testRun(appID: string): Promise<{ run_id: string; int_id: string 
 	return { run_id: b.run_id, int_id: b.waiting.interrupt_id }
 }
 
-test('a) develop waiting -> approve -> handler output on run page', async ({ page }) => {
+test('a) develop waiting -> resume -> handler output on run page', async ({ page }) => {
 	const appID = await makeApp('int-e2e')
 	const { run_id: runID, int_id: intID } = await testRun(appID)
 
@@ -54,24 +54,29 @@ test('a) develop waiting -> approve -> handler output on run page', async ({ pag
 	await page.screenshot({ path: '/tmp/calcside-ep16-logs/app-detail.png' })
 
 	await page.goto(`${viteURL}/applications/${appID}/runs/${runID}`)
-	await expect(page.getByText('Waiting on — ship it')).toBeVisible()
+	await expect(page.getByText('Waiting on — → on_ok')).toBeVisible()
 	await page.screenshot({ path: '/tmp/calcside-ep16-logs/run-page.png' })
 
-	// Approve through the named confirm (F2); the box keeps geometry (S3).
+	// Resume through the named confirm (F2); the box keeps geometry (S3).
 	const card = page.locator('section.app-card').filter({ hasText: 'Waiting on' })
 	const box = await card.boundingBox()
-	await card.getByRole('button', { name: 'Approve' }).click()
-	await expect(page.getByText('Sends this event:')).toBeVisible()
-	await page.getByRole('button', { name: 'Approve', exact: true }).last().click()
+	await page.locator(`#event-${intID}`).fill('{"approved":true}')
+	await card.getByRole('button', { name: 'Resume' }).click()
+	await expect(page.getByText('Calls on_ok with this event:')).toBeVisible()
+	await page.getByRole('button', { name: 'Resume', exact: true }).last().click()
 	const box2 = await card.boundingBox()
 	expect(Math.abs((box2?.height ?? 0) - (box?.height ?? 0))).toBeLessThan(80)
-	// The dispatcher runs the handler; the run completes.
+	// The submit control reports a waiting state until the phase flips.
+	await expect(page.getByText(/Resumed — running handler…|Running — on_ok|Running on_ok/).first()).toBeVisible()
+	// The dispatcher runs the handler; the run completes and the
+	// handler's return value is the application output.
 	await expect.poll(async () => {
 		const r = await client.get(`/api/v1/runs/${runID}`)
 		return (await r.json()).run.status
 	}, { timeout: 30_000 }).toBe('succeeded')
+	await expect(page.locator('pre.app-out-pre').filter({ hasText: '"ok":true' })).toBeVisible()
 
-	// Deep link still resolves even off the resolvable page (C4).
+	// Deep link still works off the resumable page (C4).
 	await page.goto(`${viteURL}/inbox?interrupt=${intID}`)
 	await expect(page.getByText(/Resolved by|View run/).first()).toBeVisible()
 	await page.screenshot({ path: '/tmp/calcside-ep16-logs/inbox.png' })
@@ -81,15 +86,13 @@ test('b) already_resolved surfaces in place with input kept (P5/C2)', async ({ p
 	const appID = await makeApp('int-race')
 	const { int_id: intID } = await testRun(appID)
 	await page.goto(`${viteURL}/inbox?interrupt=${intID}`)
-	await page.locator(`#note-${intID}`).fill('keep me')
+	await page.locator(`#event-${intID}`).fill('{"keep":"me"}')
 	// Lose the race via the API.
-	await client.post(`/api/v1/interrupts/${intID}/resolve`, {
-		data: { event: { approved: true } },
-	})
-	await page.getByRole('button', { name: 'Approve' }).click()
-	await page.getByRole('button', { name: 'Approve', exact: true }).last().click()
-	await expect(page.getByText(/Already resolved/).first()).toBeVisible()
-	await expect(page.locator(`#note-${intID}`)).toHaveValue('keep me')
+	await client.post(`/api/v1/interrupts/${intID}/resume`, { data: { approved: true } })
+	await page.getByRole('button', { name: 'Resume' }).click()
+	await page.getByRole('button', { name: 'Resume', exact: true }).last().click()
+	await expect(page.getByText(/Already resumed/).first()).toBeVisible()
+	await expect(page.locator(`#event-${intID}`)).toHaveValue('{"keep":"me"}')
 })
 
 test('c) cancel run; retry absent while waiting; count slot stable (S4)', async ({ page }) => {
@@ -106,17 +109,12 @@ test('c) cancel run; retry absent while waiting; count slot stable (S4)', async 
 	expect(Math.abs((w2?.width ?? 0) - (w1?.width ?? 0))).toBeLessThan(2)
 })
 
-test('d) handlers editor remove via confirm (F2)', async ({ page }) => {
-	await page.goto(`${viteURL}/applications/new`)
-	await page.locator('#app-name').fill('int-handlers')
-	await page.getByRole('button', { name: 'Create application' }).click()
-	await page.waitForURL(/\/applications\/app_/)
-	await page.getByRole('button', { name: 'Add handler' }).click()
-	await page.getByLabel('handler name').fill('on_ok')
-	await page.getByRole('button', { name: 'Remove' }).click()
-	await expect(page.getByText(/Remove handler on_ok/)).toBeVisible()
-	await page.getByRole('button', { name: 'Remove', exact: true }).last().click()
-	await expect(page.getByLabel('handler name')).toHaveCount(0)
+test('d) settings have no handler declarations', async ({ page }) => {
+	const appID = await makeApp('int-no-decl')
+	await page.goto(`${viteURL}/applications/${appID}`)
+	await expect(page.locator('section.app-card').filter({ hasText: 'Runs' })).toBeVisible()
+	await expect(page.getByRole('button', { name: 'Add handler' })).toHaveCount(0)
+	await expect(page.getByText('Handlers', { exact: true })).toHaveCount(0)
 })
 
 test('e) resolved row keeps its box until reveal (S3/F1)', async ({ page }) => {
@@ -134,10 +132,8 @@ test('e) resolved row keeps its box until reveal (S3/F1)', async ({ page }) => {
 	// keep its box as a placeholder while the other row stays put (S3).
 	const before1 = (await page.locator('tbody tr').nth(0).boundingBox())!
 	const before2 = (await page.locator('tbody tr').nth(1).boundingBox())!
-	const rr = await client.post(`/api/v1/interrupts/${b.int_id}/resolve`, {
-		data: { event: { approved: true } },
-	})
-	expect(rr.status(), `resolve: ${await rr.text()}`).toBe(200)
+	const rr = await client.post(`/api/v1/interrupts/${b.int_id}/resume`, { data: { approved: true } })
+	expect(rr.status(), `resume: ${await rr.text()}`).toBe(202)
 	await expect(page.locator('tbody tr.row-gone')).toContainText('Resolved by', { timeout: 15_000 })
 	const after1 = (await page.locator('tbody tr').nth(0).boundingBox())!
 	const after2 = (await page.locator('tbody tr').nth(1).boundingBox())!

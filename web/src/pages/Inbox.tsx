@@ -3,10 +3,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Interrupt, listInterrupts, getInterrupt, currentWorkspace } from '../api'
 import { useHeldOrder } from '../stableList'
 import { Loading, Notice, PageHeader, RevealNew, TimeLeft } from '../components/ui'
-import { ResolveForm } from '../components/ResolveForm'
+import { ResumeForm } from '../components/ResumeForm'
 import { deadlineOf, interruptTitle, resolverLabel, fmtDateTime } from '../interrupts'
 
-// The interrupt inbox: resolvable pending interrupts, held order with
+// The interrupt inbox: resumable pending interrupts, held order with
 // "Show N new" (S5/C3). Selection lives in ?interrupt= for deep links
 // (C4); a row resolved since the last reveal keeps its box as
 // "Resolved by … · View run" until the user reveals fresh data (S3/F1).
@@ -19,12 +19,12 @@ export default function Inbox() {
 
 	const q = useQuery({
 		queryKey: ['inbox', ws],
-		queryFn: () => listInterrupts({ status: 'pending', resolvable: true }),
+		queryFn: () => listInterrupts({ status: 'pending', resumable: true }),
 		refetchInterval: 5000,
 	})
 	const held = useHeldOrder(q.data?.interrupts?.map((i) => ({ i })) ?? undefined, ({ i }) => ({ key: i.id, slot: 'inbox' }), { keepGone: true })
 
-	// Deep link: a selected interrupt may sit outside the resolvable
+	// Deep link: a selected interrupt may sit outside the resumable
 	// page (resolved elsewhere or out of scope) — fetch it anyway (C4).
 	const selQ = useQuery({
 		queryKey: ['interrupt', sel],
@@ -49,7 +49,7 @@ export default function Inbox() {
 						<div className="tbl-wrap">
 							<table className="tbl">
 								<thead>
-									<tr><th>Title</th><th>Kind</th><th>Application</th><th>Deadline</th></tr>
+									<tr><th>Handler</th><th>Run</th><th>Application</th><th>Expires</th></tr>
 								</thead>
 								<tbody>
 									{held.rows.map(({ item: { i }, gone }) => gone ? (
@@ -58,7 +58,7 @@ export default function Inbox() {
 										<tr key={i.id} className={`row-hover${sel === i.id ? ' row-sel' : ''}`}
 											onClick={() => setParams({ interrupt: i.id })}>
 											<td><Link to={`/inbox?interrupt=${i.id}`} className="link font-medium">{interruptTitle(i)}</Link></td>
-											<td className="text-xs text-sec">{i.kind}</td>
+											<td className="text-xs text-sec app-mono">{i.run_id}</td>
 											<td className="text-xs"><Link className="link" to={`/applications/${i.application_id}`}>{i.application_name}</Link></td>
 											<td className="text-xs text-sec">{deadlineOf(i) ? <TimeLeft expiresAt={deadlineOf(i)!} /> : '—'}</td>
 										</tr>
@@ -72,10 +72,10 @@ export default function Inbox() {
 					<section className="app-card">
 						<div className="app-card-head"><span className="app-card-title">{interruptTitle(selected)}</span></div>
 						<div className="app-card-body">
-							{selected.status === 'pending' && selected.can_resolve ? (
-								<ResolveForm interrupt={selected}
+							{selected.status === 'pending' && selected.can_resume ? (
+								<ResumeForm interrupt={selected}
 									scope={{ userId: me?.user.id ?? '', workspaceId: ws }}
-									onResolved={() => qc.invalidateQueries({ queryKey: ['inbox'] })} />
+									onResumed={() => qc.invalidateQueries({ queryKey: ['inbox'] })} />
 							) : (
 								<p className="text-sm text-body">
 									{selected.status !== 'pending'
@@ -92,7 +92,7 @@ export default function Inbox() {
 	)
 }
 
-// GoneRow is the inert placeholder for a row that left the resolvable
+// GoneRow is the inert placeholder for a row that left the resumable
 // page — same table row and box (S3/F1), showing who resolved it once
 // the single-interrupt fetch lands. It vanishes only on reveal or
 // navigation.
@@ -110,7 +110,7 @@ function GoneRow({ interrupt: i }: { interrupt: Interrupt }) {
 	return (
 		<tr className="row-gone" aria-disabled="true">
 			<td><span className="text-sm text-sec">{interruptTitle(i)} — {text}</span></td>
-			<td className="text-xs text-sec">{i.kind}</td>
+			<td className="text-xs text-sec app-mono">{i.run_id}</td>
 			<td className="text-xs"><Link className="link" to={`/applications/${i.application_id}`}>{i.application_name}</Link></td>
 			<td className="text-xs"><Link className="link" to={`/applications/${i.application_id}/runs/${i.run_id}`}>View run</Link></td>
 		</tr>

@@ -9,6 +9,7 @@ import (
 
 	"calcside/cmd/calcside/internal/service"
 	"calcside/internal/runtime"
+	"calcside/internal/serving"
 	"calcside/internal/store"
 )
 
@@ -33,6 +34,8 @@ func (s *Service) Start() {
 				return
 			case <-tick.C:
 				s.RunOnce(ctx)
+			case <-s.wake: // a resolution just landed; dispatch now
+				s.RunOnce(ctx)
 			}
 		}
 	}()
@@ -56,14 +59,8 @@ func (s *Service) RunOnce(ctx context.Context) {
 	due, err := s.o.Store.ListDueInterrupts(ctx, now, 64)
 	if err == nil {
 		for _, d := range due {
-			if d.Kind == store.InterruptTimer {
-				if ok, err := s.o.Store.FireTimer(ctx, d.ID, now); err == nil && ok {
-					s.auditEvent(d.WorkspaceID, "", d.RunID, "dispatch", "timer fired "+d.ID)
-				}
-			} else {
-				if ok, err := s.o.Store.ExpireInterrupt(ctx, d.ID, now); err == nil && ok {
-					s.auditEvent(d.WorkspaceID, "", d.RunID, "expire", "interrupt expired "+d.ID)
-				}
+			if ok, err := s.o.Store.ExpireInterrupt(ctx, d.ID, now); err == nil && ok {
+				s.auditEvent(d.WorkspaceID, "", d.RunID, "expire", "interrupt expired "+d.ID)
 			}
 		}
 	}
@@ -203,7 +200,7 @@ func (s *Service) dispatch(ctx context.Context, intr *store.Interrupt) {
 	// Mint the new step's slots, then start the handler step.
 	var slots []*store.Interrupt
 	var wire []runtime.InterruptSlot
-	if s.o.Cipher != nil {
+	if s.o.Cipher != nil && serving.UsesInterrupt(rel.Program.Sources) {
 		var err error
 		slots, wire, err = s.mintSlots(ctx, app, run.ID, seq, now)
 		if err != nil {
@@ -241,7 +238,7 @@ func (s *Service) dispatch(ctx context.Context, intr *store.Interrupt) {
 	}
 	inputMap := map[string]any{
 		"run_id": run.ID, "step": seq, "interrupt_id": intr.ID,
-		"kind": intr.Kind, "handler": handler,
+		"handler": handler,
 		"context": json.RawMessage(ctxJSON), "resolution": resolution,
 		"event": json.RawMessage(eventJSON), "resolved_by": intr.ResolvedBy,
 		"resolved_at": resolvedAt, "attempt": intr.Attempt,

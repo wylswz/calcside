@@ -40,25 +40,6 @@ func (s *Service) prepare(ctx context.Context, workspaceID string, req *runtime.
 
 var errNilResult = errors.New("empty runtime response")
 
-// handlersOf decodes the stored handler-declarations document into the
-// program-bundle map (already validated at write time).
-func handlersOf(raw json.RawMessage) map[string]runtime.HandlerSpec {
-	if len(raw) == 0 {
-		return nil
-	}
-	var m map[string]struct {
-		ContextSchema json.RawMessage `json:"context_schema"`
-	}
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil
-	}
-	out := make(map[string]runtime.HandlerSpec, len(m))
-	for name, h := range m {
-		out[name] = runtime.HandlerSpec{ContextSchema: h.ContextSchema}
-	}
-	return out
-}
-
 // finishRun maps a run outcome onto the wire view.
 func runView(oc *runsvc.Outcome, res runtime.ProgramResult) *RunView {
 	rv := &RunView{Result: res}
@@ -106,7 +87,6 @@ func (s *Service) release(ctx context.Context, a service.Actor, app *store.Appli
 			Sources:      map[string][]byte{"main.star": []byte(app.Code)},
 			InputSchema:  in,
 			OutputSchema: out,
-			Handlers:     handlersOf(app.Handlers),
 		}, s.o.Now())
 	if err != nil {
 		return nil, nil, fail(err)

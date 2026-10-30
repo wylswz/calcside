@@ -108,9 +108,8 @@ func newEnv(t *testing.T, cipher *vaultcipher.Cipher, maxSteps int) *tenv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handlers := json.RawMessage(`{"on_ok":{},"on_exp":{},"on_tick":{}}`)
 	app, err := store.NewApplication(store.PersonalWorkspaceID(u.ID), u.ID, "app", "code",
-		json.RawMessage(`{}`), nil, nil, handlers, rNow)
+		json.RawMessage(`{}`), nil, nil, rNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,12 +117,9 @@ func newEnv(t *testing.T, cipher *vaultcipher.Cipher, maxSteps int) *tenv {
 		t.Fatal(err)
 	}
 	bundle := runtime.ProgramBundle{
-		Sources:      map[string][]byte{"main.star": []byte("def main(i): pass")},
+		Sources:      map[string][]byte{"main.star": []byte("def main(i):\n    interrupt.new()\n")},
 		InputSchema:  json.RawMessage(`{"type":"object","additionalProperties":true}`),
 		OutputSchema: json.RawMessage(`{"type":"object","additionalProperties":true}`),
-		Handlers: map[string]runtime.HandlerSpec{
-			"on_ok": {}, "on_exp": {}, "on_tick": {},
-		},
 	}
 	rel, err := store.NewServingRelease(app.WorkspaceID, u.ID, json.RawMessage(`{}`),
 		runtime.PolicyBundle{}, bundle, rNow)
@@ -154,9 +150,9 @@ func keyActor(u *store.User, boundID string) service.Actor {
 		KeyID: "key_t", KeyBoundID: boundID, WorkspaceID: store.PersonalWorkspaceID(u.ID)}
 }
 
-func waitingRes(id, kind string) runtime.ProgramResult {
+func waitingRes(id string) runtime.ProgramResult {
 	return runtime.ProgramResult{Waiting: &runtime.ProgramWaiting{
-		InterruptID: id, Kind: kind, Title: "t", Handler: "on_ok",
+		InterruptID: id, Handler: "on_ok",
 		Context: json.RawMessage(`{"x":1}`),
 	}}
 }
@@ -172,100 +168,120 @@ func startRun(t *testing.T, e *tenv) *Started {
 	return st
 }
 
-func TestEarlyCallbackCommit(t *testing.T) {
+func alreadyResolved(t *testing.T, err error) {
+	t.Helper()
+	var se *service.Error
+	if !errors.As(err, &se) || se.Code != types.ErrCodeAlreadyResolved {
+		t.Fatalf("want already_resolved, got %v", err)
+	}
+}
+
+func TestEarlyTokenResumeCommit(t *testing.T) {
 	e := newEnv(t, testCipher(t), 0)
 	ctx := context.Background()
 	st := startRun(t, e)
 	slot := st.Interrupts[0]
-
-	// Early resolution while reserved → accepted, stays reserved.
-	if err := e.svc.Callback(ctx, keyActor(e.usr, slot.ID), slot.ID, []byte(`{"go":true}`)); err != nil {
-		t.Fatalf("early callback: %v", err)
+	if slot.ResumeURL != "http://c/api/v1/interrupts/"+slot.ID+"/resume" {
+		t.Fatalf("resume url: %s", slot.ResumeURL)
 	}
 
-	// Commit the step as a callback wait → early event is accepted and
-	// the interrupt resolves + queues dispatch in one transaction.
+	// The token may resume while the slot is still reserved.
+	if err := e.svc.Resume(ctx, keyActor(e.usr, slot.ID), slot.ID, json.RawMessage(`{"go":true}`)); err != nil {
+		t.Fatalf("early resume: %v", err)
+	}
+	// Committing the wait applies the early event and queues dispatch.
 	oc, err := e.svc.Complete(ctx, st, 0, 1, "main", "",
-		&runtime.InvokeResponse{Result: waitingRes(slot.ID, store.InterruptCallback)}, nil)
+		&runtime.InvokeResponse{Result: waitingRes(slot.ID)}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if oc.Status != store.RunWaiting || oc.Waiting == nil || oc.Waiting.Kind != store.InterruptCallback {
+	if oc.Status != store.RunWaiting || oc.Waiting == nil || oc.Waiting.InterruptID != slot.ID {
 		t.Fatalf("outcome: %+v", oc)
 	}
 	intr, _ := e.st.GetInterrupt(ctx, slot.ID)
 	if intr.Status != store.InterruptResolved || intr.DispatchState != store.DispatchQueued ||
-		intr.ResolvedBy != "callback" {
+		intr.ResolvedBy != store.ResolvedByToken {
 		t.Fatalf("early commit: %+v", intr)
 	}
-	// Duplicate callback → already_resolved.
-	if err := e.svc.Callback(ctx, keyActor(e.usr, slot.ID), slot.ID, []byte(`{"go":2}`)); err == nil {
-		t.Fatal("second callback accepted")
-	} else {
-		var se *service.Error
-		if !errors.As(err, &se) || se.Code != types.ErrCodeAlreadyResolved {
-			t.Fatalf("dup callback: %v", err)
-		}
-	}
+	alreadyResolved(t, e.svc.Resume(ctx, keyActor(e.usr, slot.ID), slot.ID, json.RawMessage(`{"go":2}`)))
 
-	// Dispatch runs the handler and finishes the run.
+	// Dispatch runs the handler; its return value is the run output.
 	e.rt.res = runtime.ProgramResult{Output: json.RawMessage(`{"done":true}`)}
 	e.svc.RunOnce(ctx)
 	run, _ := e.st.GetRun(ctx, st.Run.ID)
 	if run.Status != store.RunSucceeded || run.Steps != 2 {
 		t.Fatalf("dispatched run: %+v", run)
 	}
-	steps, _ := e.st.ListRunSteps(ctx, st.Run.ID)
-	if len(steps) != 2 || steps[1].Entry != "on_ok" || steps[1].Status != store.StepSucceeded {
-		t.Fatalf("steps: %+v", steps)
+	d, err := e.svc.GetRun(ctx, actor(e.usr), st.Run.ID)
+	if err != nil || d.OutputJSON != `{"done":true}` {
+		t.Fatalf("run output: %v %+v", err, d)
 	}
 	inv := e.rt.invokes[0]
 	if inv.Entry != "on_ok" || inv.RunID != st.Run.ID {
 		t.Fatalf("invoke: %+v", inv)
 	}
-	// Handler input carries the decrypted early event.
 	var input map[string]any
 	if err := json.Unmarshal(inv.Input, &input); err != nil {
 		t.Fatal(err)
 	}
-	if input["event"] == nil || input["resolution"] != "resolved" || input["kind"] != "callback" {
+	if input["event"] == nil || input["resolution"] != "resolved" || input["resolved_by"] != "token" {
 		t.Fatalf("handler input: %s", inv.Input)
+	}
+	if _, ok := input["kind"]; ok {
+		t.Fatalf("handler input carries kind: %s", inv.Input)
 	}
 }
 
-func TestEarlyCallbackDiscarded(t *testing.T) {
+func TestResumeAuthorization(t *testing.T) {
 	e := newEnv(t, testCipher(t), 0)
 	ctx := context.Background()
-
-	// Early event on a slot that commits as approval → discarded,
-	// stays pending.
 	st := startRun(t, e)
-	slot := st.Interrupts[0]
-	if err := e.svc.Callback(ctx, keyActor(e.usr, slot.ID), slot.ID, []byte(`{"go":true}`)); err != nil {
-		t.Fatal(err)
+	slot, other := st.Interrupts[0], st.Interrupts[1]
+	user := actor(e.usr)
+
+	// A reserved slot is invisible to regular callers.
+	if err := e.svc.Resume(ctx, user, slot.ID, json.RawMessage(`{}`)); err == nil {
+		t.Fatal("user resumed a reserved slot")
 	}
 	if _, err := e.svc.Complete(ctx, st, 0, 1, "main", "",
-		&runtime.InvokeResponse{Result: waitingRes(slot.ID, store.InterruptApproval)}, nil); err != nil {
+		&runtime.InvokeResponse{Result: waitingRes(slot.ID)}, nil); err != nil {
 		t.Fatal(err)
+	}
+	// Another interrupt's token is hidden; non-object events are rejected.
+	var se *service.Error
+	if err := e.svc.Resume(ctx, keyActor(e.usr, other.ID), slot.ID, json.RawMessage(`{}`)); !errors.As(err, &se) || se.Code != types.ErrCodeNotFound {
+		t.Fatalf("foreign token: %v", err)
+	}
+	if err := e.svc.Resume(ctx, user, slot.ID, json.RawMessage(`[1]`)); !errors.As(err, &se) || se.Code != types.ErrCodeBadRequest {
+		t.Fatalf("array event: %v", err)
+	}
+	// A user with Run resumes the pending interrupt once.
+	v, err := e.svc.GetInterrupt(ctx, user, slot.ID)
+	if err != nil || !v.CanResume || v.ResumeURL == "" {
+		t.Fatalf("view: %v %+v", err, v)
+	}
+	if err := e.svc.Resume(ctx, user, slot.ID, json.RawMessage(`{"approved":true}`)); err != nil {
+		t.Fatalf("user resume: %v", err)
 	}
 	intr, _ := e.st.GetInterrupt(ctx, slot.ID)
-	if intr.Status != store.InterruptPending || intr.Event != nil || intr.ResolvedBy != "" {
-		t.Fatalf("approval early not discarded: %+v", intr)
+	if intr.ResolvedBy != e.usr.ID || intr.DispatchState != store.DispatchQueued {
+		t.Fatalf("resumed: %+v", intr)
 	}
+	alreadyResolved(t, e.svc.Resume(ctx, keyActor(e.usr, slot.ID), slot.ID, json.RawMessage(`{}`)))
+}
 
-	// Invalid event on a callback-committed slot → discarded.
-	st2 := startRun(t, e)
-	slot2 := st2.Interrupts[0]
-	if err := e.svc.Callback(ctx, keyActor(e.usr, slot2.ID), slot2.ID, []byte(`[1,2]`)); err != nil {
+func TestNoSlotsWithoutInterruptReference(t *testing.T) {
+	e := newEnv(t, testCipher(t), 0)
+	bundle := e.rel.Program
+	bundle.Sources = map[string][]byte{"main.star": []byte("def main(i):\n    return i\n")}
+	rel, err := store.NewServingRelease(e.app.WorkspaceID, e.usr.ID, json.RawMessage(`{}`),
+		runtime.PolicyBundle{}, bundle, rNow)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.svc.Complete(ctx, st2, 0, 1, "main", "",
-		&runtime.InvokeResponse{Result: waitingRes(slot2.ID, store.InterruptCallback)}, nil); err != nil {
-		t.Fatal(err)
-	}
-	intr2, _ := e.st.GetInterrupt(ctx, slot2.ID)
-	if intr2.Status != store.InterruptPending || intr2.Event != nil {
-		t.Fatalf("invalid early not discarded: %+v", intr2)
+	st, err := e.svc.Begin(context.Background(), e.app, rel, store.RunTriggerTest, actor(e.usr))
+	if err != nil || len(st.Interrupts) != 0 {
+		t.Fatalf("slots for a program without interrupt: %v %d", err, len(st.Interrupts))
 	}
 }
 
@@ -275,7 +291,7 @@ func TestChainLimit(t *testing.T) {
 	st := startRun(t, e)
 	// Step 1 waits (steps=1 < 2 OK).
 	oc, err := e.svc.Complete(ctx, st, 0, 1, "main", "",
-		&runtime.InvokeResponse{Result: waitingRes(st.Interrupts[0].ID, store.InterruptApproval)}, nil)
+		&runtime.InvokeResponse{Result: waitingRes(st.Interrupts[0].ID)}, nil)
 	if err != nil || oc.Status != store.RunWaiting {
 		t.Fatalf("main wait: %v %+v", err, oc)
 	}
@@ -284,7 +300,7 @@ func TestChainLimit(t *testing.T) {
 	if _, err := e.st.ResolveInterrupt(ctx, st.Interrupts[0].ID, []byte("s"), "usr_o", rNow); err != nil {
 		t.Fatal(err)
 	}
-	e.rt.res = waitingRes("", store.InterruptApproval) // fake echoes slot id
+	e.rt.res = waitingRes("") // fake echoes slot id
 	e.svc.RunOnce(ctx)
 	run, _ := e.st.GetRun(ctx, st.Run.ID)
 	if run.Status != store.RunFailed || run.ErrorCode != "chain_limit" {
@@ -303,7 +319,7 @@ func TestInterruptsUnavailable(t *testing.T) {
 		t.Fatalf("slots minted without cipher: %d", len(st.Interrupts))
 	}
 	oc, err := e.svc.Complete(ctx, st, 0, 1, "main", "",
-		&runtime.InvokeResponse{Result: waitingRes("int_x", store.InterruptApproval)}, nil)
+		&runtime.InvokeResponse{Result: waitingRes("int_x")}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +337,7 @@ func TestRetrySeq(t *testing.T) {
 	ctx := context.Background()
 	st := startRun(t, e)
 	if _, err := e.svc.Complete(ctx, st, 0, 1, "main", "",
-		&runtime.InvokeResponse{Result: waitingRes(st.Interrupts[0].ID, store.InterruptApproval)}, nil); err != nil {
+		&runtime.InvokeResponse{Result: waitingRes(st.Interrupts[0].ID)}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.st.ResolveInterrupt(ctx, st.Interrupts[0].ID, []byte("s"), "usr_o", rNow); err != nil {
@@ -354,5 +370,22 @@ func TestRetrySeq(t *testing.T) {
 	intr, _ := e.st.GetInterrupt(ctx, st.Interrupts[0].ID)
 	if intr.Attempt != 2 || intr.DispatchState != store.DispatchDone {
 		t.Fatalf("interrupt: %+v", intr)
+	}
+}
+
+// A fresh resolution must nudge the dispatch loop instead of waiting
+// for the next Tick.
+func TestResolveWakesDispatchLoop(t *testing.T) {
+	e := newEnv(t, testCipher(t), 0)
+	ctx := context.Background()
+	st := startRun(t, e)
+	slot := st.Interrupts[0]
+	if err := e.svc.Resume(ctx, keyActor(e.usr, slot.ID), slot.ID, json.RawMessage(`{"go":true}`)); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	select {
+	case <-e.svc.wake:
+	case <-time.After(time.Second):
+		t.Fatal("resolve did not wake the dispatch loop")
 	}
 }

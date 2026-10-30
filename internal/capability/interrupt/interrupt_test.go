@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,7 +12,6 @@ import (
 
 	"calcside/internal/capability"
 	"calcside/internal/secrets"
-	"calcside/internal/serving"
 	"calcside/internal/types"
 )
 
@@ -76,31 +76,22 @@ func toJSON(v starlark.Value) ([]byte, error) {
 	return json.Marshal(jv)
 }
 
-func compile(t *testing.T, raw string) *serving.Schema {
-	t.Helper()
-	s, err := serving.CompileSchema([]byte(raw), serving.Limits{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s
-}
-
 func armedGate(obs capability.Observer) *capability.Gate {
 	g := capability.NewGate(capability.GateOwner{}, nil, obs)
 	g.Arm(capability.ExecContext{ExecID: "e1"})
 	return g
 }
 
-func host(handlers map[string]*serving.Schema) *Host {
+func host(handlers ...string) *Host {
 	return &Host{
-		RunID:    "run_1",
-		Step:     0,
-		Handlers: handlers,
-		Secrets:  secrets.NewSet(),
-		ToJSON:   toJSON,
+		RunID:     "run_1",
+		Step:      0,
+		IsHandler: func(n string) bool { return slices.Contains(handlers, n) },
+		Secrets:   secrets.NewSet(),
+		ToJSON:    toJSON,
 		Slots: []Slot{
-			{ID: "int_1", ConsoleURL: "https://c/int_1"},
-			{ID: "int_2", ConsoleURL: "https://c/int_2", CallbackURL: "https://cb/int_2", Token: "cb_secret_tok"},
+			{ID: "int_1", ResumeURL: "https://x/int_1/resume", Token: "tok_1"},
+			{ID: "int_2", ResumeURL: "https://x/int_2/resume", Token: "tok_2"},
 		},
 	}
 }
@@ -140,8 +131,8 @@ func dict(t *testing.T, pairs ...any) *starlark.Dict {
 	return d
 }
 
-func TestRunIDAndNewApproval(t *testing.T) {
-	h := host(nil)
+func TestRunIDAndNew(t *testing.T) {
+	h := host()
 	obs := &recObserver{}
 	mod := Binding(h, armedGate(obs))
 	thread := &starlark.Thread{Name: "t"}
@@ -151,14 +142,8 @@ func TestRunIDAndNewApproval(t *testing.T) {
 	if err != nil || rid.(starlark.String) != "run_1" {
 		t.Fatalf("run_id: %v %v", rid, err)
 	}
-
-	kwargs := []starlark.Tuple{
-		{starlark.String("title"), starlark.String("Approve it")},
-		{starlark.String("assignees"), starlark.NewList([]starlark.Value{starlark.String("usr_a")})},
-		{starlark.String("expires_in_s"), starlark.MakeInt(60)},
-	}
 	newFn := attr(t, mod, "new")
-	v, err := starlark.Call(thread, newFn, starlark.Tuple{starlark.String("approval")}, kwargs)
+	v, err := starlark.Call(thread, newFn, nil, []starlark.Tuple{{starlark.String("expires_in_s"), starlark.MakeInt(60)}})
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -170,117 +155,63 @@ func TestRunIDAndNewApproval(t *testing.T) {
 		}
 		return v
 	}
-	if string(get("id").(starlark.String)) != "int_1" || string(get("kind").(starlark.String)) != "approval" ||
-		string(get("console_url").(starlark.String)) != "https://c/int_1" {
-		t.Fatalf("bad new result")
-	}
-	if get("callback_url") != nil || get("callback_token") != nil {
-		t.Fatal("approval leaked callback fields")
+	if get("id") != starlark.String("int_1") || get("resume_url") != starlark.String("https://x/int_1/resume") ||
+		get("resume_token") != starlark.String("tok_1") || get("kind") != nil {
+		t.Fatalf("bad new result: %v", d)
 	}
 	if e, ok := get("expires_in_s").(starlark.Int); !ok {
 		t.Fatalf("expires_in_s not echoed: %v", get("expires_in_s"))
 	} else if i, _ := e.Int64(); i != 60 {
 		t.Fatalf("expires_in_s=%d", i)
 	}
-	if _, ok := h.reservations["int_1"]; !ok {
-		t.Fatal("reservation not recorded")
+	if _, err := starlark.Call(thread, newFn, nil, nil); err != nil {
+		t.Fatal(err)
 	}
-
-	// The second slot is a callback and carries url+token.
-	v, err = starlark.Call(thread, newFn, starlark.Tuple{starlark.String("callback")}, nil)
-	if err != nil {
-		t.Fatalf("new callback: %v", err)
-	}
-	d = v.(*starlark.Dict)
-	get = func(k string) starlark.Value {
-		v, ok, _ := d.Get(starlark.String(k))
-		if !ok {
-			return nil
-		}
-		return v
-	}
-	if string(get("callback_url").(starlark.String)) != "https://cb/int_2" ||
-		string(get("callback_token").(starlark.String)) != "cb_secret_tok" {
-		t.Fatalf("callback fields missing")
-	}
-
-	// No slots left.
-	if _, err := starlark.Call(thread, newFn, starlark.Tuple{starlark.String("approval")}, nil); err == nil ||
+	if _, err := starlark.Call(thread, newFn, nil, nil); err == nil ||
 		!strings.Contains(err.Error(), "interrupt limit for this step reached") {
 		t.Fatalf("expected slot limit error, got %v", err)
 	}
-
-	// Audit recorded allowed ops with JSON-able metadata only.
-	var kinds []string
+	var ops []string
 	for _, r := range obs.recs {
 		if r.Call.Capability != Name || r.Decision != types.DecisionAllow {
 			t.Fatalf("bad record: %+v", r)
 		}
-		kinds = append(kinds, string(r.Call.Op))
+		ops = append(ops, string(r.Call.Op))
 	}
-	if strings.Join(kinds, ",") != "run_id,new,new,new" {
-		t.Fatalf("ops: %v", kinds)
+	if strings.Join(ops, ",") != "run_id,new,new,new" {
+		t.Fatalf("ops: %v", ops)
 	}
 }
 
 func TestNewValidation(t *testing.T) {
-	h := host(nil)
-	mod := Binding(h, armedGate(nil))
+	mod := Binding(host(), armedGate(nil))
 	thread := &starlark.Thread{Name: "t"}
-	newFn := attr(t, mod, "new")
-	call := func(kind string, kwargs ...starlark.Tuple) error {
-		_, err := starlark.Call(thread, newFn, starlark.Tuple{starlark.String(kind)}, kwargs)
-		return err
-	}
 	kw := func(k string, v starlark.Value) starlark.Tuple { return starlark.Tuple{starlark.String(k), v} }
-
-	if err := call("bogus"); err == nil {
-		t.Fatal("bad kind accepted")
+	for _, bad := range []starlark.Tuple{
+		kw("expires_in_s", starlark.MakeInt(0)),
+		kw("expires_in_s", starlark.MakeInt(2592001)),
+		kw("expires_in_s", starlark.String("1")),
+		kw("fire_in_s", starlark.MakeInt(5)),
+		kw("kind", starlark.String("approval")),
+	} {
+		if _, err := starlark.Call(thread, attr(t, mod, "new"), nil, []starlark.Tuple{bad}); err == nil {
+			t.Fatalf("accepted %v", bad)
+		}
 	}
-	if err := call("timer"); err == nil || !strings.Contains(err.Error(), "fire_in_s") {
-		t.Fatalf("timer without fire_in_s: %v", err)
-	}
-	if err := call("approval", kw("fire_in_s", starlark.MakeInt(5))); err == nil {
-		t.Fatal("approval accepted fire_in_s")
-	}
-	if err := call("timer", kw("fire_in_s", starlark.MakeInt(5)), kw("expires_in_s", starlark.MakeInt(5))); err == nil {
-		t.Fatal("timer accepted expires_in_s")
-	}
-	if err := call("timer", kw("fire_in_s", starlark.MakeInt(5)), kw("event_schema", dict(t))); err == nil {
-		t.Fatal("timer accepted event_schema")
-	}
-	if err := call("approval", kw("expires_in_s", starlark.MakeInt(0))); err == nil {
-		t.Fatal("zero expires_in_s accepted")
-	}
-	if err := call("approval", kw("expires_in_s", starlark.MakeInt(2592001))); err == nil {
-		t.Fatal("oversized expires_in_s accepted")
-	}
-	if err := call("approval", kw("title", starlark.String(strings.Repeat("x", 201)))); err == nil {
-		t.Fatal("long title accepted")
-	}
-	if err := call("approval", kw("assignees", starlark.NewList([]starlark.Value{starlark.String("bob")}))); err == nil {
-		t.Fatal("non-usr assignee accepted")
-	}
-	if err := call("approval", kw("event_schema", dict(t, "type", starlark.String("string")))); err == nil {
-		t.Fatal("non-object event_schema accepted")
-	}
-	if err := call("timer", kw("fire_in_s", starlark.MakeInt(60))); err != nil {
-		t.Fatalf("valid timer rejected: %v", err)
+	empty := Binding(&Host{RunID: "run_1", Secrets: secrets.NewSet()}, armedGate(nil))
+	if _, err := starlark.Call(thread, attr(t, empty, "new"), nil, nil); err == nil ||
+		!strings.Contains(err.Error(), "--secret-key") {
+		t.Fatalf("no slots: %v", err)
 	}
 }
 
 func TestWaitFlow(t *testing.T) {
-	handlers := map[string]*serving.Schema{
-		"on_ok":  compile(t, `{"type":"object","required":["k"],"properties":{"k":{"type":"string"}}}`),
-		"on_exp": compile(t, `{"type":"object","required":["k"],"properties":{"k":{"type":"string"}}}`),
-	}
-	h := host(handlers)
+	h := host("on_ok", "on_exp")
 	mod := Binding(h, armedGate(nil))
 	thread := &starlark.Thread{Name: "t"}
-	newFn := attr(t, mod, "new")
 	waitFn := attr(t, mod, "wait")
 
-	if _, err := starlark.Call(thread, newFn, starlark.Tuple{starlark.String("approval")}, nil); err != nil {
+	if _, err := starlark.Call(thread, attr(t, mod, "new"), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	kw := func(k string, v starlark.Value) starlark.Tuple { return starlark.Tuple{starlark.String(k), v} }
@@ -292,18 +223,23 @@ func TestWaitFlow(t *testing.T) {
 		t.Fatal("wait on unreserved id accepted")
 	}
 
-	// Undeclared handler fails.
+	// A name that is not a handler function fails, for handler and
+	// on_expire alike.
 	if _, err := starlark.Call(thread, waitFn, starlark.Tuple{starlark.String("int_1")}, []starlark.Tuple{
 		kw("handler", starlark.String("nope")), kw("context", dict(t)),
 	}); err == nil {
-		t.Fatal("undeclared handler accepted")
+		t.Fatal("unknown handler accepted")
 	}
-
-	// Context missing a required field fails.
 	if _, err := starlark.Call(thread, waitFn, starlark.Tuple{starlark.String("int_1")}, []starlark.Tuple{
-		kw("handler", starlark.String("on_ok")), kw("context", dict(t)),
+		kw("handler", starlark.String("on_ok")), kw("on_expire", starlark.String("nope")), kw("context", dict(t)),
 	}); err == nil {
-		t.Fatal("invalid context accepted")
+		t.Fatal("unknown on_expire accepted")
+	}
+	// Context must be a dict.
+	if _, err := starlark.Call(thread, waitFn, starlark.Tuple{starlark.String("int_1")}, []starlark.Tuple{
+		kw("handler", starlark.String("on_ok")), kw("context", starlark.String("x")),
+	}); err == nil {
+		t.Fatal("non-dict context accepted")
 	}
 
 	// A valid wait records Waiting and unwinds with ErrWait.
@@ -317,7 +253,7 @@ func TestWaitFlow(t *testing.T) {
 	}
 	w := h.Waiting
 	if w == nil || w.InterruptID != "int_1" || w.Handler != "on_ok" || w.OnExpire != "on_exp" ||
-		w.Kind != "approval" || string(w.Context) != `{"k":"v"}` {
+		string(w.Context) != `{"k":"v"}` {
 		t.Fatalf("bad waiting: %+v", w)
 	}
 }
@@ -325,15 +261,12 @@ func TestWaitFlow(t *testing.T) {
 func TestWaitRejectsSecretContext(t *testing.T) {
 	secs := secrets.NewSet()
 	secs.Add("TOK", []byte("s3cr3t"), nil)
-	h := host(map[string]*serving.Schema{
-		"on_ok": compile(t, `{"type":"object"}`),
-	})
+	h := host("on_ok")
 	h.Secrets = secs
 	mod := Binding(h, armedGate(nil))
 	thread := &starlark.Thread{Name: "t"}
-	newFn := attr(t, mod, "new")
 	waitFn := attr(t, mod, "wait")
-	if _, err := starlark.Call(thread, newFn, starlark.Tuple{starlark.String("approval")}, nil); err != nil {
+	if _, err := starlark.Call(thread, attr(t, mod, "new"), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	kw := func(k string, v starlark.Value) starlark.Tuple { return starlark.Tuple{starlark.String(k), v} }

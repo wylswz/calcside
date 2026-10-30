@@ -153,13 +153,6 @@ func NewServingRelease(workspaceID, userID string, spec json.RawMessage, policie
 	if srcTotal > 1<<20 || assetTotal > 8<<20 {
 		return nil, fmt.Errorf("%w: aggregate size out of bounds", ErrInvalidServingRecord)
 	}
-	// Handler declarations are validated and canonicalized like the
-	// contract schemas: they are release metadata and part of the
-	// content hash.
-	canonHandlers, err := canonicalizeHandlerSpecs(program.Handlers)
-	if err != nil {
-		return nil, err
-	}
 	prog := cloneProgram(program)
 	if prog.Entrypoint == "" {
 		prog.Entrypoint = "main.star"
@@ -182,7 +175,6 @@ func NewServingRelease(workspaceID, userID string, spec json.RawMessage, policie
 		Program: runtime.ProgramBundle{
 			Entrypoint: prog.Entrypoint, Sources: prog.Sources, Assets: prog.Assets,
 			InputSchema: canonSchema["input_schema"], OutputSchema: canonSchema["output_schema"],
-			Handlers: canonHandlers,
 		},
 	})
 	if err != nil {
@@ -191,7 +183,6 @@ func NewServingRelease(workspaceID, userID string, spec json.RawMessage, policie
 	sum := sha256.Sum256(frame)
 	prog.InputSchema = json.RawMessage(canonSchema["input_schema"])
 	prog.OutputSchema = json.RawMessage(canonSchema["output_schema"])
-	prog.Handlers = canonHandlers
 	return &ServingRelease{
 		ID:          string(PrefixServingRelease) + hex.EncodeToString(sum[:]),
 		WorkspaceID: workspaceID,
@@ -239,12 +230,6 @@ func cloneProgram(p runtime.ProgramBundle) runtime.ProgramBundle {
 	}
 	for k, v := range p.Assets {
 		out.Assets[k] = append([]byte(nil), v...)
-	}
-	if p.Handlers != nil {
-		out.Handlers = make(map[string]runtime.HandlerSpec, len(p.Handlers))
-		for k, v := range p.Handlers {
-			out.Handlers[k] = runtime.HandlerSpec{ContextSchema: append(json.RawMessage(nil), v.ContextSchema...)}
-		}
 	}
 	return out
 }

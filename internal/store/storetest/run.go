@@ -2,14 +2,12 @@ package storetest
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
-	"calcside/internal/runtime"
 	"calcside/internal/store"
 )
 
@@ -110,7 +108,7 @@ func RunRuns(t *testing.T, s store.Store) {
 			t.Fatalf("steps: %v %+v", err, steps)
 		}
 		intrs, err := s.ListInterrupts(ctx, store.InterruptFilter{WorkspaceID: "ws_1", RunID: "run_l1"})
-		if err != nil || len(intrs) != 1 || intrs[0].Status != store.InterruptSlotReserved || intrs[0].Kind != "" {
+		if err != nil || len(intrs) != 1 || intrs[0].Status != store.InterruptSlotReserved {
 			t.Fatalf("interrupts: %v %+v", err, intrs)
 		}
 		if _, err := s.ListRuns(ctx, store.RunFilter{}); err == nil {
@@ -126,9 +124,8 @@ func RunRuns(t *testing.T, s store.Store) {
 
 		exp := rNow.Add(time.Hour)
 		out := waitOutcome(r, 0, &store.WaitCommit{
-			InterruptID: slots[0].ID, Kind: store.InterruptApproval, Title: "go?",
-			Assignees: []string{"usr_a"}, EventSchema: json.RawMessage(`{"type":"object"}`),
-			Handler: "on_ok", OnExpire: "on_exp", Context: []byte("ctx"),
+			InterruptID: slots[0].ID,
+			Handler:     "on_ok", OnExpire: "on_exp", Context: []byte("ctx"),
 			ExpiresAt: &exp,
 		})
 		if err := s.FinishStep(ctx, out, nil); err != nil {
@@ -139,9 +136,9 @@ func RunRuns(t *testing.T, s store.Store) {
 			t.Fatalf("run: %+v", run)
 		}
 		i0, _ := s.GetInterrupt(ctx, slots[0].ID)
-		if i0.Status != store.InterruptPending || i0.Kind != store.InterruptApproval ||
-			i0.Title != "go?" || i0.Handler != "on_ok" || i0.OnExpire != "on_exp" ||
-			i0.ExpiresAt == nil || len(i0.Assignees) != 1 || string(i0.EventSchema) == "" || string(i0.Context) != "ctx" {
+		if i0.Status != store.InterruptPending ||
+			i0.Handler != "on_ok" || i0.OnExpire != "on_exp" ||
+			i0.ExpiresAt == nil || string(i0.Context) != "ctx" {
 			t.Fatalf("interrupt: %+v", i0)
 		}
 		i1, _ := s.GetInterrupt(ctx, slots[1].ID)
@@ -165,11 +162,11 @@ func RunRuns(t *testing.T, s store.Store) {
 			t.Fatalf("early resolve: %v %v", early, err)
 		}
 		out := waitOutcome(r, 0, &store.WaitCommit{
-			InterruptID: slots[0].ID, Kind: store.InterruptApproval,
-			Handler: "on_ok", Context: []byte("c"),
+			InterruptID: slots[0].ID,
+			Handler:     "on_ok", Context: []byte("c"),
 		})
-		if err := s.FinishStep(ctx, out, func(kind string, schema json.RawMessage, event []byte) bool {
-			return kind == store.InterruptApproval && string(event) == `{"ok":true}`
+		if err := s.FinishStep(ctx, out, func(event []byte) bool {
+			return string(event) == `{"ok":true}`
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -187,11 +184,10 @@ func RunRuns(t *testing.T, s store.Store) {
 			t.Fatal(err)
 		}
 		out := waitOutcome(r, 0, &store.WaitCommit{
-			InterruptID: slots[0].ID, Kind: store.InterruptApproval,
-			EventSchema: json.RawMessage(`{"type":"object"}`),
+			InterruptID: slots[0].ID,
 			Handler:     "on_ok", Context: []byte("c"),
 		})
-		if err := s.FinishStep(ctx, out, func(string, json.RawMessage, []byte) bool { return false }); err != nil {
+		if err := s.FinishStep(ctx, out, func([]byte) bool { return false }); err != nil {
 			t.Fatal(err)
 		}
 		i, _ := s.GetInterrupt(ctx, slots[0].ID)
@@ -204,7 +200,7 @@ func RunRuns(t *testing.T, s store.Store) {
 		r, st, slots := mkRun("run_r", "ws_1", rNow, 1)
 		start(t, s, r, st, slots)
 		out := waitOutcome(r, 0, &store.WaitCommit{
-			InterruptID: slots[0].ID, Kind: store.InterruptApproval, Handler: "on_ok", Context: []byte("c"),
+			InterruptID: slots[0].ID, Handler: "on_ok", Context: []byte("c"),
 		})
 		if err := s.FinishStep(ctx, out, nil); err != nil {
 			t.Fatal(err)
@@ -229,7 +225,7 @@ func RunRuns(t *testing.T, s store.Store) {
 		r, st, slots := mkRun("run_rc", "ws_1", rNow, 1)
 		start(t, s, r, st, slots)
 		out := waitOutcome(r, 0, &store.WaitCommit{
-			InterruptID: slots[0].ID, Kind: store.InterruptApproval, Handler: "on_ok", Context: []byte("c"),
+			InterruptID: slots[0].ID, Handler: "on_ok", Context: []byte("c"),
 		})
 		if err := s.FinishStep(ctx, out, nil); err != nil {
 			t.Fatal(err)
@@ -265,7 +261,7 @@ func RunRuns(t *testing.T, s store.Store) {
 			start(t, s, r, st, slots)
 			boundKey(t, s, "key_"+r.ID, slots[0].ID)
 			out := waitOutcome(r, 0, &store.WaitCommit{
-				InterruptID: slots[0].ID, Kind: store.InterruptApproval, Handler: "on_ok", Context: []byte("c"),
+				InterruptID: slots[0].ID, Handler: "on_ok", Context: []byte("c"),
 			})
 			if err := s.FinishStep(ctx, out, nil); err != nil {
 				t.Fatal(err)
@@ -334,8 +330,8 @@ func RunRuns(t *testing.T, s store.Store) {
 		r, st, slots := mkRun("run_x1", "ws_1", rNow, 1)
 		start(t, s, r, st, slots)
 		if err := s.FinishStep(ctx, waitOutcome(r, 0, &store.WaitCommit{
-			InterruptID: slots[0].ID, Kind: store.InterruptApproval,
-			Handler: "on_ok", OnExpire: "on_exp", Context: []byte("c"), ExpiresAt: &exp,
+			InterruptID: slots[0].ID,
+			Handler:     "on_ok", OnExpire: "on_exp", Context: []byte("c"), ExpiresAt: &exp,
 		}), nil); err != nil {
 			t.Fatal(err)
 		}
@@ -374,8 +370,8 @@ func RunRuns(t *testing.T, s store.Store) {
 		start(t, s, r2, st2, slots2)
 		boundKey(t, s, "key_x2", slots2[0].ID)
 		if err := s.FinishStep(ctx, waitOutcome(r2, 0, &store.WaitCommit{
-			InterruptID: slots2[0].ID, Kind: store.InterruptApproval,
-			Handler: "on_ok", Context: []byte("c"), ExpiresAt: &exp,
+			InterruptID: slots2[0].ID,
+			Handler:     "on_ok", Context: []byte("c"), ExpiresAt: &exp,
 		}), nil); err != nil {
 			t.Fatal(err)
 		}
@@ -392,43 +388,6 @@ func RunRuns(t *testing.T, s store.Store) {
 		}
 	})
 
-	t.Run("fire_timer", func(t *testing.T) {
-		fire := rNow.Add(-time.Second)
-		r, st, slots := mkRun("run_t", "ws_1", rNow, 1)
-		start(t, s, r, st, slots)
-		if err := s.FinishStep(ctx, waitOutcome(r, 0, &store.WaitCommit{
-			InterruptID: slots[0].ID, Kind: store.InterruptTimer,
-			Handler: "on_tick", Context: []byte("c"), FireAt: &fire,
-		}), nil); err != nil {
-			t.Fatal(err)
-		}
-		ok, err := s.FireTimer(ctx, slots[0].ID, rNow)
-		if err != nil || !ok {
-			t.Fatalf("fire: %v %v", ok, err)
-		}
-		i, _ := s.GetInterrupt(ctx, slots[0].ID)
-		if i.Status != store.InterruptResolved || i.ResolvedBy != store.ResolvedByTimer ||
-			i.DispatchState != store.DispatchQueued {
-			t.Fatalf("fired: %+v", i)
-		}
-		if ok, _ := s.FireTimer(ctx, slots[0].ID, rNow); ok {
-			t.Fatal("second fire committed")
-		}
-		// ExpireInterrupt must not touch timers.
-		fire2 := rNow.Add(-time.Second)
-		r3, st3, slots3 := mkRun("run_t2", "ws_1", rNow, 1)
-		start(t, s, r3, st3, slots3)
-		if err := s.FinishStep(ctx, waitOutcome(r3, 0, &store.WaitCommit{
-			InterruptID: slots3[0].ID, Kind: store.InterruptTimer,
-			Handler: "on_tick", Context: []byte("c"), FireAt: &fire2, ExpiresAt: &fire2,
-		}), nil); err != nil {
-			t.Fatal(err)
-		}
-		if ok, _ := s.ExpireInterrupt(ctx, slots3[0].ID, rNow); ok {
-			t.Fatal("timer expired")
-		}
-	})
-
 	t.Run("claim_defer_start_recover", func(t *testing.T) {
 		// Three resolved interrupts → three queued dispatches.
 		var ids []string
@@ -436,7 +395,7 @@ func RunRuns(t *testing.T, s store.Store) {
 			r, st, slots := mkRun(fmt.Sprintf("run_d%d", i), "ws_1", rNow.Add(time.Duration(i)*time.Second), 1)
 			start(t, s, r, st, slots)
 			if err := s.FinishStep(ctx, waitOutcome(r, 0, &store.WaitCommit{
-				InterruptID: slots[0].ID, Kind: store.InterruptApproval, Handler: "on_ok", Context: []byte("c"),
+				InterruptID: slots[0].ID, Handler: "on_ok", Context: []byte("c"),
 			}), nil); err != nil {
 				t.Fatal(err)
 			}
@@ -567,7 +526,7 @@ func RunRuns(t *testing.T, s store.Store) {
 		start(t, s, r, st, slots)
 		boundKey(t, s, "key_c", slots[0].ID)
 		if err := s.FinishStep(ctx, waitOutcome(r, 0, &store.WaitCommit{
-			InterruptID: slots[0].ID, Kind: store.InterruptApproval, Handler: "on_ok", Context: []byte("c"),
+			InterruptID: slots[0].ID, Handler: "on_ok", Context: []byte("c"),
 		}), nil); err != nil {
 			t.Fatal(err)
 		}
@@ -594,7 +553,7 @@ func RunRuns(t *testing.T, s store.Store) {
 		r, st, slots := mkRun("run_rt", "ws_1", rNow, 1)
 		start(t, s, r, st, slots)
 		if err := s.FinishStep(ctx, waitOutcome(r, 0, &store.WaitCommit{
-			InterruptID: slots[0].ID, Kind: store.InterruptApproval, Handler: "on_ok", Context: []byte("c"),
+			InterruptID: slots[0].ID, Handler: "on_ok", Context: []byte("c"),
 		}), nil); err != nil {
 			t.Fatal(err)
 		}
@@ -635,103 +594,6 @@ func RunRuns(t *testing.T, s store.Store) {
 		}
 		if ok, err := s.RetryRun(ctx, r2.ID, rNow); err != nil || ok {
 			t.Fatalf("main retry: %v %v", ok, err)
-		}
-	})
-
-	t.Run("release_handlers", func(t *testing.T) {
-		b1 := sBundle()
-		b2 := sBundle()
-		b2.Handlers = map[string]runtime.HandlerSpec{
-			"on_ok": {ContextSchema: json.RawMessage(`{"type":"object","required":["k"],"properties":{"k":{"type":"string"}}}`)},
-		}
-		r1, err := store.NewServingRelease("ws_1", "usr_1", sSpec(), runtime.PolicyBundle{}, b1, sNow)
-		if err != nil {
-			t.Fatal(err)
-		}
-		r2, err := store.NewServingRelease("ws_1", "usr_1", sSpec(), runtime.PolicyBundle{}, b2, sNow)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if r1.ID == r2.ID {
-			t.Fatal("handlers not part of the content hash")
-		}
-		if err := s.CreateServingRelease(ctx, r2); err != nil {
-			t.Fatal(err)
-		}
-		got, err := s.GetServingRelease(ctx, "ws_1", r2.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		h := got.Program.Handlers["on_ok"]
-		if len(h.ContextSchema) == 0 || !jsonBytesContain(json.RawMessage(h.ContextSchema), `"required"`) {
-			t.Fatalf("handlers round-trip: %s", h.ContextSchema)
-		}
-		// Invalid handler declarations are rejected.
-		for _, bad := range []map[string]runtime.HandlerSpec{
-			{"main": {}},
-			{"_x": {}},
-			{"1bad": {}},
-			{"on_ok": {ContextSchema: json.RawMessage(`{"type":"string"}`)}},
-			{"on_ok": {ContextSchema: json.RawMessage(`{"type":"object","pattern":"x"}`)}},
-		} {
-			b := sBundle()
-			b.Handlers = bad
-			if _, err := store.NewServingRelease("ws_1", "usr_1", sSpec(), runtime.PolicyBundle{}, b, sNow); err == nil {
-				t.Fatalf("bad handlers accepted: %v", bad)
-			}
-		}
-	})
-
-	t.Run("application_handlers", func(t *testing.T) {
-		u, err := s.UpsertUserByEmail(ctx, "ha@x.com", "HA", "sub-ha")
-		if err != nil {
-			t.Fatal(err)
-		}
-		spec := json.RawMessage(`{"ttl_seconds":300}`)
-		handlers := json.RawMessage(`{"on_ok":{"context_schema":{"type":"object","required":["k"],"properties":{"k":{"type":"string"}}}},"on_exp":{}}`)
-		a, err := store.NewApplication("ws_1", u.ID, "handlers", "code", spec, nil, nil, handlers, rNow)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := s.CreateApplication(ctx, a); err != nil {
-			t.Fatal(err)
-		}
-		got, err := s.GetApplication(ctx, a.ID)
-		if err != nil || string(got.Handlers) == "" {
-			t.Fatalf("round-trip: %v %s", err, got.Handlers)
-		}
-		var m map[string]json.RawMessage
-		if err := json.Unmarshal(got.Handlers, &m); err != nil || len(m) != 2 {
-			t.Fatalf("handlers shape: %s", got.Handlers)
-		}
-		// Draft CAS update preserves/updates handlers.
-		next := &store.Application{
-			ID: a.ID, WorkspaceID: a.WorkspaceID, UserID: a.UserID,
-			Name: "handlers", Code: "code2", Spec: spec,
-			Handlers:  json.RawMessage(`{"h2":{}}`),
-			UpdatedAt: rNow,
-		}
-		ok, err := s.UpdateApplicationDraft(ctx, next, 1)
-		if err != nil || !ok {
-			t.Fatalf("draft update: %v %v", ok, err)
-		}
-		got, _ = s.GetApplication(ctx, a.ID)
-		if string(got.Handlers) != `{"h2":{}}` {
-			t.Fatalf("updated handlers: %s", got.Handlers)
-		}
-		// Validation rejects.
-		for _, bad := range []json.RawMessage{
-			json.RawMessage(`[]`),
-			json.RawMessage(`{"_x":{}}`),
-			json.RawMessage(`{"main":{}}`),
-			json.RawMessage(`{"1bad":{}}`),
-			json.RawMessage(`{"on_ok":{"context_schema":{"type":"string"}}}`),
-			json.RawMessage(`{"on_ok":{"context_schema":{"type":"object","pattern":"x"}}}`),
-			json.RawMessage(`{"on_ok":{"bogus":true}}`),
-		} {
-			if _, err := store.NewApplication("ws_1", u.ID, "b", "", spec, nil, nil, bad, rNow); err == nil {
-				t.Fatalf("bad handlers accepted: %s", bad)
-			}
 		}
 	})
 }

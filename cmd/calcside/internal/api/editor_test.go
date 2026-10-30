@@ -41,8 +41,37 @@ func TestEditorMetadata(t *testing.T) {
 			t.Errorf("blocked builtin offered: %s", name)
 		}
 	}
-	if _, ok := body["capabilities"].([]any); !ok {
+	caps, ok := body["capabilities"].([]any)
+	if !ok {
 		t.Fatalf("missing capability docs: %v", body)
+	}
+	// interrupt is auto-granted to application programs: editors must
+	// see its ops even though specs can never grant it.
+	var intr map[string]any
+	for _, c := range caps {
+		if m, _ := c.(map[string]any); m != nil && m["name"] == "interrupt" {
+			intr = m
+		}
+	}
+	if intr == nil {
+		t.Fatalf("missing interrupt capability doc: %v", caps)
+	}
+	ops := map[string][]string{}
+	for _, o := range intr["ops"].([]any) {
+		m := o.(map[string]any)
+		var params []string
+		if ps, _ := m["params"].([]any); ps != nil {
+			for _, p := range ps {
+				params = append(params, p.(string))
+			}
+		}
+		ops[m["name"].(string)] = params
+	}
+	if len(ops) != 3 {
+		t.Fatalf("interrupt ops: %v", ops)
+	}
+	if len(ops["new"]) != 1 || ops["new"][0] != "expires_in_s=None" || len(ops["wait"]) < 2 || ops["wait"][0] != "id" {
+		t.Fatalf("interrupt op params: %v", ops)
 	}
 }
 

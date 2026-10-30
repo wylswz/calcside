@@ -152,6 +152,7 @@ const appMetadata: EditorMetadata = {
     { name: 'fs', ops: [{ name: 'read', params: ['path'], doc: 'Read a file' }, { name: 'list', params: ['dir'] }] },
     { name: 'net', ops: [{ name: 'get', params: ['url'] }] },
     { name: 'io', ops: [{ name: 'println', params: ['value'] }] },
+    { name: 'interrupt', ops: [{ name: 'run_id', doc: 'Return the run id' }, { name: 'new', params: ['expires_in_s=None'] }, { name: 'wait', params: ['id', 'handler', 'on_expire=None', 'context'] }] },
     { name: 'ext', ops: [{ name: 'register', params: ['alias'] }] },
   ],
 }
@@ -171,6 +172,10 @@ test('application spec derives the same symbol surface as a live instance', () =
   assert.equal(s['fs.read']?.kind, 'function')
   assert.ok(s.fs && !s.net && !s['net.get'], 'ungranted capability offered')
   assert.equal(s['io.println']?.detail, '(value)', 'io is always granted')
+  assert.equal(s['interrupt.new']?.detail, '(expires_in_s=None)', 'interrupt is always granted')
+  assert.deepEqual(s['interrupt.new']?.params, ['expires_in_s?'])
+  assert.deepEqual(s['interrupt.wait']?.params, ['id', 'handler', 'on_expire?', 'context'])
+  assert.equal(s['interrupt.run_id']?.kind, 'function')
   assert.ok(!s.ext?.params, 'ext is not a plain capability')
   assert.equal(s['ext.tav.search']?.detail, '(q)')
   assert.equal(s['ext.tav.search']?.doc, 'Web search')
@@ -191,4 +196,13 @@ test('application symbols drive the shared completion source', async () => {
   const source = starlarkCompletions(ctx)
   assert.ok((await complete(source, 'fs.'))?.options.some((o) => o.label === 'read'))
   assert.equal(await complete(source, 'net.'), null)
+})
+
+test('interrupt ops complete with keyword parameter hints', async () => {
+  const source = starlarkCompletions(applicationSymbols({}, appMetadata))
+  const members = (await complete(source, 'interrupt.'))?.options.map((o) => o.label) ?? []
+  assert.deepEqual([...members].sort(), ['new', 'run_id', 'wait'])
+  assert.ok((await complete(source, 'interrupt.new('))?.options.some((o) => o.label === 'expires_in_s='))
+  const waitKw = (await complete(source, 'interrupt.wait(req["id"], '))?.options.map((o) => o.label) ?? []
+  for (const kw of ['handler=', 'on_expire=', 'context=']) assert.ok(waitKw.includes(kw), kw)
 })

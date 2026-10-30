@@ -75,7 +75,7 @@ func ceiling(a service.Actor) Action {
 // than a.WorkspaceID is invisible.
 // interruptBound reports whether the actor is a key bound to an
 // interrupt (int_…): those tokens are handed to external systems and
-// are admitted on the callback route only — every other path is 404.
+// are admitted on the resume route only — every other path is 404.
 func interruptBound(a service.Actor) bool {
 	return strings.HasPrefix(a.KeyBoundID, string(store.PrefixInterrupt))
 }
@@ -418,19 +418,24 @@ func (c *Checker) Interrupts(ctx context.Context, a service.Actor) (store.Interr
 	return f, nil
 }
 
-// InterruptCallback authenticates the interrupt-bound key on the
-// callback route: the key must be bound to exactly this interrupt.
-func (c *Checker) InterruptCallback(ctx context.Context, a service.Actor, id string) (*store.Interrupt, error) {
+// InterruptToken reports whether the actor is the key bound to exactly
+// this interrupt (its resume token) and loads the interrupt. Any other
+// interrupt-bound key is hidden; ok=false means the caller must be
+// authorized as a regular actor instead.
+func (c *Checker) InterruptToken(ctx context.Context, a service.Actor, id string) (i *store.Interrupt, ok bool, err error) {
 	hidden := service.NotFound("interrupt not found")
-	if !a.ViaKey() || a.KeyBoundID != id {
-		return nil, hidden
+	if !interruptBound(a) {
+		return nil, false, nil
 	}
-	i, err := c.st.GetInterrupt(ctx, id)
+	if !a.ViaKey() || a.KeyBoundID != id {
+		return nil, false, hidden
+	}
+	i, err = c.st.GetInterrupt(ctx, id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return nil, hidden
+			return nil, false, hidden
 		}
-		return nil, service.Internal(err)
+		return nil, false, service.Internal(err)
 	}
-	return i, nil
+	return i, true, nil
 }

@@ -732,15 +732,12 @@ func TestReplicaInterruptWaiting(t *testing.T) {
 	now := time.Now()
 	n := newNode(t, Options{Limits: defaultLimits()}, &now)
 	bundle := prepareBundle(`def main(input):
-    req = interrupt.new("approval", title = "go?", expires_in_s = 30)
+    req = interrupt.new(expires_in_s = 30)
     interrupt.wait(req["id"], handler = "on_ok", context = {"order_id": "o1"})
 
 def on_ok(ctx):
     return {"status": "ok"}
 `, nil)
-	bundle.Handlers = map[string]runtime.HandlerSpec{
-		"on_ok": {ContextSchema: json.RawMessage(`{"type":"object","required":["order_id"],"properties":{"order_id":{"type":"string"}}}`)},
-	}
 	req := prepReq(n, bundle)
 	resp, err := n.m.Prepare(context.Background(), req)
 	if err != nil || resp.Result.Error != nil {
@@ -749,7 +746,7 @@ def on_ok(ctx):
 
 	inv := invokeReq(req, `{}`)
 	inv.RunID = "run_1"
-	inv.Interrupts = []runtime.InterruptSlot{{ID: "int_1", ConsoleURL: "https://console/int_1"}}
+	inv.Interrupts = []runtime.InterruptSlot{{ID: "int_1"}}
 	out, err := n.m.Invoke(context.Background(), inv)
 	if err != nil {
 		t.Fatalf("invoke: %v", err)
@@ -758,8 +755,8 @@ def on_ok(ctx):
 		t.Fatalf("expected waiting, got err=%+v out=%s", out.Result.Error, out.Result.Output)
 	}
 	w := out.Result.Waiting
-	if w == nil || w.InterruptID != "int_1" || w.Handler != "on_ok" || w.Kind != "approval" ||
-		w.Title != "go?" || w.ExpiresInS != 30 || string(w.Context) != `{"order_id":"o1"}` {
+	if w == nil || w.InterruptID != "int_1" || w.Handler != "on_ok" ||
+		w.ExpiresInS != 30 || string(w.Context) != `{"order_id":"o1"}` {
 		t.Fatalf("bad waiting: %+v", w)
 	}
 

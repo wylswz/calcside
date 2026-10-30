@@ -55,31 +55,13 @@ func interruptModel(v *runsvc.InterruptView) gen.Interrupt {
 	m := gen.Interrupt{
 		Id: i.ID, RunId: i.RunID, ApplicationId: i.ApplicationID,
 		ApplicationName: v.ApplicationName, Status: i.Status,
-		CanResolve: v.CanResolve, CreatedAt: i.CreatedAt,
-	}
-	if i.Kind != "" {
-		m.Kind = &i.Kind
-	}
-	if i.Title != "" {
-		m.Title = &i.Title
+		CanResume: v.CanResume, CreatedAt: i.CreatedAt,
 	}
 	if i.Handler != "" {
 		m.Handler = &i.Handler
 	}
-	if len(i.Assignees) > 0 {
-		as := i.Assignees
-		m.Assignees = &as
-	}
-	if len(v.AssigneeLabels) > 0 {
-		al := v.AssigneeLabels
-		m.AssigneeLabels = &al
-	}
 	if v.ResolvedByLabel != "" {
 		m.ResolvedByLabel = &v.ResolvedByLabel
-	}
-	if len(i.EventSchema) > 0 {
-		s := string(i.EventSchema)
-		m.EventSchema = &s
 	}
 	if i.OnExpire != "" {
 		m.OnExpire = &i.OnExpire
@@ -87,17 +69,14 @@ func interruptModel(v *runsvc.InterruptView) gen.Interrupt {
 	if i.ExpiresAt != nil {
 		m.ExpiresAt = i.ExpiresAt
 	}
-	if i.FireAt != nil {
-		m.FireAt = i.FireAt
-	}
 	if i.ResolvedBy != "" {
 		m.ResolvedBy = &i.ResolvedBy
 	}
 	if i.ResolvedAt != nil {
 		m.ResolvedAt = i.ResolvedAt
 	}
-	if v.CallbackURL != "" {
-		m.CallbackUrl = &v.CallbackURL
+	if v.ResumeURL != "" {
+		m.ResumeUrl = &v.ResumeURL
 	}
 	if v.ContextJSON != "" {
 		m.ContextJson = &v.ContextJSON
@@ -136,15 +115,9 @@ func (r getInterruptResp) VisitGetInterruptResponse(w http.ResponseWriter) error
 	return r.write(w)
 }
 
-type resolveInterruptResp struct{ rawJSON }
+type resumeInterruptResp struct{ rawJSON }
 
-func (r resolveInterruptResp) VisitResolveInterruptResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
-
-type interruptCallbackResp struct{ rawJSON }
-
-func (r interruptCallbackResp) VisitInterruptCallbackResponse(w http.ResponseWriter) error {
+func (r resumeInterruptResp) VisitResumeInterruptResponse(w http.ResponseWriter) error {
 	return r.write(w)
 }
 
@@ -248,13 +221,13 @@ func (s *strictImpl) ListInterrupts(ctx context.Context, req gen.ListInterruptsR
 		return listInterruptsResp{*e}, nil
 	}
 	var status, before string
-	var resolvable bool
+	var resumable bool
 	var limit int
 	if req.Params.Status != nil {
 		status = *req.Params.Status
 	}
-	if req.Params.Resolvable != nil {
-		resolvable = *req.Params.Resolvable
+	if req.Params.Resumable != nil {
+		resumable = *req.Params.Resumable
 	}
 	if req.Params.Before != nil {
 		before = *req.Params.Before
@@ -262,7 +235,7 @@ func (s *strictImpl) ListInterrupts(ctx context.Context, req gen.ListInterruptsR
 	if req.Params.Limit != nil {
 		limit = int(*req.Params.Limit)
 	}
-	views, next, err := s.d.Run.ListInterrupts(ctx, actorOf(p), status, resolvable, before, limit)
+	views, next, err := s.d.Run.ListInterrupts(ctx, actorOf(p), status, resumable, before, limit)
 	if err != nil {
 		return listInterruptsResp{fail(err)}, nil
 	}
@@ -291,37 +264,19 @@ func (s *strictImpl) GetInterrupt(ctx context.Context, req gen.GetInterruptReque
 	return getInterruptResp{rawJSON{http.StatusOK, gen.InterruptResponse{Interrupt: &m}}}, nil
 }
 
-func (s *strictImpl) ResolveInterrupt(ctx context.Context, req gen.ResolveInterruptRequestObject) (gen.ResolveInterruptResponseObject, error) {
+func (s *strictImpl) ResumeInterrupt(ctx context.Context, req gen.ResumeInterruptRequestObject) (gen.ResumeInterruptResponseObject, error) {
 	ctx = realCtx(ctx)
 	p, e := needAuth(ctx)
 	if e != nil {
-		return resolveInterruptResp{*e}, nil
+		return resumeInterruptResp{*e}, nil
 	}
 	if req.Body == nil {
-		return resolveInterruptResp{fail(service.BadRequest("body required"))}, nil
+		return resumeInterruptResp{fail(service.BadRequest("body required"))}, nil
 	}
-	v, err := s.d.Run.ResolveInterrupt(ctx, actorOf(p), req.Id, json.RawMessage(req.Body.Event))
-	if err != nil {
-		return resolveInterruptResp{fail(err)}, nil
-	}
-	m := interruptModel(v)
-	return resolveInterruptResp{rawJSON{http.StatusOK, gen.InterruptResponse{Interrupt: &m}}}, nil
-}
-
-func (s *strictImpl) InterruptCallback(ctx context.Context, req gen.InterruptCallbackRequestObject) (gen.InterruptCallbackResponseObject, error) {
-	ctx = realCtx(ctx)
-	p, e := needAuth(ctx)
-	if e != nil {
-		return interruptCallbackResp{*e}, nil
-	}
-	a := actorOf(p)
-	if req.Body == nil {
-		return interruptCallbackResp{fail(service.BadRequest("body required"))}, nil
-	}
-	if err := s.d.Run.Callback(ctx, a, req.Id, []byte(*req.Body)); err != nil {
-		return interruptCallbackResp{fail(err)}, nil
+	if err := s.d.Run.Resume(ctx, actorOf(p), req.Id, json.RawMessage(*req.Body)); err != nil {
+		return resumeInterruptResp{fail(err)}, nil
 	}
 	status := "accepted"
-	return interruptCallbackResp{rawJSON{http.StatusAccepted,
-		gen.InterruptCallbackResponse{Status: &status}}}, nil
+	return resumeInterruptResp{rawJSON{http.StatusAccepted,
+		gen.InterruptResumeResponse{Status: &status}}}, nil
 }

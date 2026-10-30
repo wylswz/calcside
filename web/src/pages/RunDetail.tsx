@@ -3,12 +3,12 @@ import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getRun, cancelRun, retryRun, Interrupt, currentWorkspace } from '../api'
 import { Button, Confirm, Loading, Notice, PageHeader, TimeLeft } from '../components/ui'
-import { ResolveForm } from '../components/ResolveForm'
-import { deadlineOf, interruptTitle, resolverLabel } from '../interrupts'
+import { ResumeForm } from '../components/ResumeForm'
+import { deadlineOf, interruptTitle, resolverLabel, runPhase } from '../interrupts'
 
 // One durable run (EP-0016): status header with deadline, Cancel/Retry
 // actions behind named Confirms (F2), the pending interrupt with a
-// ResolveForm, and the step list. Polling updates rows in place;
+// ResumeForm, and the step list. Polling updates rows in place;
 // selections and the waiting card keep their boxes (C3/S3).
 export default function RunDetail() {
 	const { id: appId, runId } = useParams<{ id: string; runId: string }>()
@@ -21,13 +21,16 @@ export default function RunDetail() {
 	const q = useQuery({
 		queryKey: ['run', runId],
 		queryFn: () => getRun(runId!),
-		refetchInterval: 5000,
+		// 1s while a handler is running, 5s otherwise (S4 stable slot)
+		refetchInterval: (q) => (q.state.data && runPhase(q.state.data).phase === 'running' ? 1000 : 5000),
 		enabled: runId != null,
 	})
 	const run = q.data?.run
 	const steps = q.data?.steps ?? []
 	const intrs = q.data?.interrupts ?? []
-	const pending = intrs.find((i) => i.status === 'pending')
+	const phase = q.data ? runPhase(q.data) : undefined
+	const pending = phase?.phase === 'waiting' ? phase.interrupt : undefined
+	const runningHandler = phase?.phase === 'running' ? phase.handler : undefined
 	const deadline = pending ? deadlineOf(pending) : undefined
 
 	if (q.isLoading) return <Loading />
@@ -62,23 +65,23 @@ export default function RunDetail() {
 				<Notice tone="warning">Run failed — {run.error_code}</Notice>
 			)}
 
-			{pending && (
+			{(pending || phase?.phase === 'running') && (
 				<section className="app-card">
-					<div className="app-card-head"><span className="app-card-title">Waiting on — {interruptTitle(pending)}</span></div>
+					<div className="app-card-head"><span className="app-card-title">{pending ? `Waiting on — ${interruptTitle(pending)}` : `Running — ${runningHandler ?? 'handler'}`}</span></div>
 					<div className="app-card-body">
-						{pending.assignees && pending.assignees.length > 0 && (
-							<dl className="app-kv">
-								<dt className="app-dim">Assignees</dt>
-								<dd>{(pending.assignee_labels ?? pending.assignees).join(', ')}</dd>
-							</dl>
-						)}
-						{pending.context_json && <pre className="app-out-pre mt-2">{pending.context_json}</pre>}
-						{pending.can_resolve ? (
-							<ResolveForm interrupt={pending}
-								scope={{ userId: me?.user.id ?? '', workspaceId: ws }}
-								onResolved={() => qc.invalidateQueries({ queryKey: ['run', runId] })} />
+						{pending?.context_json && <pre className="app-out-pre mt-2">{pending.context_json}</pre>}
+						{pending?.resume_url && <p className="text-xs text-sec mt-2">External systems resume with <span className="app-mono">POST {pending.resume_url}</span> and the interrupt's resume_token.</p>}
+						{pending ? (
+							pending.can_resume ? (
+								<ResumeForm interrupt={pending}
+									scope={{ userId: me?.user.id ?? '', workspaceId: ws }}
+									onResumed={() => qc.invalidateQueries({ queryKey: ['run', runId] })} />
+							) : (
+								<p className="text-sm text-body">Waiting to be resumed.</p>
+							)
 						) : (
-							<p className="text-sm text-body">Waiting for a decision{pending.assignees?.length ? ` from ${(pending.assignee_labels ?? pending.assignees).join(', ')}` : ''}.</p>
+							// S3: the card keeps its box while the handler runs.
+							<p className="text-sm text-body" aria-live="polite">Running {runningHandler ?? 'handler'}…</p>
 						)}
 					</div>
 				</section>

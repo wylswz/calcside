@@ -911,7 +911,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/interrupts/{id}/resolve": {
+    "/api/v1/interrupts/{id}/resume": {
         parameters: {
             query?: never;
             header?: never;
@@ -920,23 +920,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["resolveInterrupt"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/interrupts/{id}/callback": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["interruptCallback"];
+        /** @description Resume a pending interrupt with a JSON object event; the run's declared handler is called with it. The first resume wins, later ones get 409 already_resolved. Authorized by the interrupt's resume_token (Bearer or ?token=) or by a caller with Run on the application. */
+        post: operations["resumeInterrupt"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1558,8 +1543,6 @@ export interface components {
             /** @description optional pinned JSON Schema text; null = default open object */
             input_schema?: string | null;
             output_schema?: string | null;
-            /** @description handler declarations document {name: {context_schema?}}, raw JSON preserved byte-for-byte */
-            handlers?: string | null;
             /** Format: int64 */
             version: number;
             /** Format: int64 */
@@ -1587,7 +1570,6 @@ export interface components {
             spec?: components["schemas"]["RawJSON"];
             input_schema?: string | null;
             output_schema?: string | null;
-            handlers?: string | null;
         };
         ApplicationUpdateRequest: {
             /** Format: int64 */
@@ -1597,7 +1579,6 @@ export interface components {
             spec?: components["schemas"]["RawJSON"];
             input_schema?: string | null;
             output_schema?: string | null;
-            handlers?: string | null;
         };
         ApplicationPublishRequest: {
             /** Format: int64 */
@@ -1619,8 +1600,6 @@ export interface components {
         };
         InterruptWaiting: {
             interrupt_id: string;
-            kind: string;
-            title?: string;
             console_url: string;
         };
         Run: {
@@ -1662,26 +1641,19 @@ export interface components {
             run_id: string;
             application_id: string;
             application_name: string;
-            kind?: string;
             status: string;
-            title?: string;
-            assignees?: string[];
-            event_schema?: string;
             handler?: string;
             on_expire?: string;
             /** Format: date-time */
             expires_at?: string;
-            /** Format: date-time */
-            fire_at?: string;
             resolved_by?: string;
             resolved_by_label?: string;
-            assignee_labels?: string[];
             /** Format: date-time */
             resolved_at?: string;
             /** Format: date-time */
             created_at: string;
-            can_resolve: boolean;
-            callback_url?: string;
+            can_resume: boolean;
+            resume_url?: string;
             context_json?: string;
             event_json?: string;
         };
@@ -1700,10 +1672,7 @@ export interface components {
         InterruptResponse: {
             interrupt?: components["schemas"]["Interrupt"];
         };
-        InterruptResolveRequest: {
-            event: components["schemas"]["RawJSON"];
-        };
-        InterruptCallbackResponse: {
+        InterruptResumeResponse: {
             status?: string;
         };
     };
@@ -3654,7 +3623,7 @@ export interface operations {
         parameters: {
             query?: {
                 status?: string;
-                resolvable?: boolean;
+                resumable?: boolean;
                 before?: string;
                 limit?: number;
             };
@@ -3701,38 +3670,7 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
-    resolveInterrupt: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: components["parameters"]["IdPath"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["InterruptResolveRequest"];
-            };
-        };
-        responses: {
-            /** @description resolved interrupt */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InterruptResponse"];
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-        };
-    };
-    interruptCallback: {
+    resumeInterrupt: {
         parameters: {
             query?: {
                 token?: string;
@@ -3749,15 +3687,18 @@ export interface operations {
             };
         };
         responses: {
-            /** @description event accepted */
+            /** @description event accepted; the handler is dispatched */
             202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InterruptCallbackResponse"];
+                    "application/json": components["schemas"]["InterruptResumeResponse"];
                 };
             };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
             413: components["responses"]["Error"];

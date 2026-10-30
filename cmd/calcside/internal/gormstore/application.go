@@ -21,7 +21,6 @@ type applicationRow struct {
 	Spec                 string     `gorm:"not null"`
 	InputSchema          *string    `gorm:""`
 	OutputSchema         *string    `gorm:""`
-	Handlers             *string    `gorm:""`
 	Version              int64      `gorm:"not null"`
 	PublishedVersion     int64      `gorm:"not null"`
 	PersistentInstanceID string     `gorm:"not null"`
@@ -47,9 +46,6 @@ func (r *applicationRow) toDomain() *store.Application {
 	if r.OutputSchema != nil {
 		a.OutputSchema = json.RawMessage(*r.OutputSchema)
 	}
-	if r.Handlers != nil {
-		a.Handlers = json.RawMessage(*r.Handlers)
-	}
 	return a
 }
 
@@ -69,10 +65,6 @@ func appToRow(a *store.Application) *applicationRow {
 	if a.OutputSchema != nil {
 		s := string(a.OutputSchema)
 		r.OutputSchema = &s
-	}
-	if a.Handlers != nil {
-		s := string(a.Handlers)
-		r.Handlers = &s
 	}
 	return r
 }

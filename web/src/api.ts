@@ -254,10 +254,10 @@ export async function retryRun(id: string): Promise<{ runs?: Run[] }> {
 	return api.post(`/api/v1/runs/${encodeURIComponent(id)}/retry`)
 }
 
-export async function listInterrupts(params: { status?: string; resolvable?: boolean; before?: string; limit?: number } = {}): Promise<{ interrupts?: Interrupt[]; next_before?: string }> {
+export async function listInterrupts(params: { status?: string; resumable?: boolean; before?: string; limit?: number } = {}): Promise<{ interrupts?: Interrupt[]; next_before?: string }> {
 	const q = new URLSearchParams()
 	if (params.status) q.set('status', params.status)
-	if (params.resolvable) q.set('resolvable', 'true')
+	if (params.resumable) q.set('resumable', 'true')
 	if (params.before) q.set('before', params.before)
 	if (params.limit) q.set('limit', String(params.limit))
 	const s = q.toString()
@@ -268,8 +268,9 @@ export async function getInterrupt(id: string): Promise<{ interrupt?: Interrupt 
 	return api.get(`/api/v1/interrupts/${encodeURIComponent(id)}`)
 }
 
-// resolveInterrupt sends the event body verbatim — resolution events
-// may carry high-precision numbers (C4/jsonPrecise convention).
-export async function resolveInterrupt(id: string, eventJson: string): Promise<{ interrupt?: Interrupt }> {
-	return api.postRawJson(`/api/v1/interrupts/${encodeURIComponent(id)}/resolve`, `{"event":${eventJson}}`)
+// resumeInterrupt posts the event body verbatim — events may carry
+// high-precision numbers (C4/jsonPrecise convention). The same route
+// accepts the interrupt's resume_token from external systems.
+export async function resumeInterrupt(id: string, eventJson: string): Promise<{ status?: string }> {
+	return api.postRawJson(`/api/v1/interrupts/${encodeURIComponent(id)}/resume`, eventJson)
 }

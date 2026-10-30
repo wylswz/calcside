@@ -17,22 +17,14 @@ const waitProg = `def on_ok(h):
 def on_exp(h):
     return {"ok": False}
 def main(input):
-    i = interrupt.new("approval", title="ship it")
+    i = interrupt.new()
     interrupt.wait(i["id"], handler="on_ok", on_expire="on_exp", context={"x": 1})
     return {"unreachable": True}
 `
 
-const timerProg = `def on_tick(h):
-    return {"tick": True}
-def main(input):
-    i = interrupt.new("timer", fire_in_s=1)
-    interrupt.wait(i["id"], handler="on_tick", context={})
-    return {"unreachable": True}
-`
-
-// mkApp creates an application with handlers and returns its id.
-func mkApp(e *env, cookies []*http.Cookie, code, handlers string) string {
-	body := `{"name":"w", "code": ` + jsonStr(code) + `, "handlers": ` + jsonStr(handlers) + `}`
+// mkApp creates an application and returns its id.
+func mkApp(e *env, cookies []*http.Cookie, code string) string {
+	body := `{"name":"w", "code": ` + jsonStr(code) + `}`
 	c, m, _ := e.req("POST", "/api/v1/applications", body,
 		map[string]string{"X-Requested-With": "calcside"}, cookies)
 	if c != 200 {
@@ -50,9 +42,9 @@ func testRun(e *env, cookies []*http.Cookie, appID string) map[string]any {
 	return m
 }
 
-// TestApprovalFlow covers the durable run path end to end: wait →
-// resolve → dispatch → success, with the record surfaces populated.
-func TestApprovalFlow(t *testing.T) {
+// TestResumeFlow covers the durable run path end to end: wait →
+// resume → dispatch → success, with the record surfaces populated.
+func TestResumeFlow(t *testing.T) {
 	c, err := vaultcipher.NewCipher("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +52,7 @@ func TestApprovalFlow(t *testing.T) {
 	e := newEnvWith(t, c)
 	cookies := login(e, "a@x.com")
 	csrf := map[string]string{"X-Requested-With": "calcside"}
-	appID := mkApp(e, cookies, waitProg, `{"on_ok":{},"on_exp":{}}`)
+	appID := mkApp(e, cookies, waitProg)
 
 	m := testRun(e, cookies, appID)
 	if m["run_status"] != "waiting" {
@@ -72,7 +64,7 @@ func TestApprovalFlow(t *testing.T) {
 	if runID == "" || intID == "" || !strings.Contains(waiting["console_url"].(string), "/inbox?interrupt="+intID) {
 		t.Fatalf("waiting: %v", m)
 	}
-	if waiting["kind"] != "approval" || waiting["title"] != "ship it" {
+	if waiting["kind"] != nil {
 		t.Fatalf("waiting fields: %v", waiting)
 	}
 
@@ -93,7 +85,8 @@ func TestApprovalFlow(t *testing.T) {
 	if i0 == nil {
 		t.Fatalf("no pending interrupt: %v", m)
 	}
-	if i0["status"] != "pending" || i0["can_resolve"] != true || i0["context_json"] != `{"x":1}` {
+	if i0["status"] != "pending" || i0["can_resume"] != true || i0["context_json"] != `{"x":1}` ||
+		!strings.HasSuffix(i0["resume_url"].(string), "/api/v1/interrupts/"+intID+"/resume") {
 		t.Fatalf("interrupt view: %v", i0)
 	}
 
@@ -102,21 +95,22 @@ func TestApprovalFlow(t *testing.T) {
 	if code != 200 || len(m["runs"].([]any)) != 1 {
 		t.Fatalf("list runs: %d %v", code, m)
 	}
-	code, m, _ = e.req("GET", "/api/v1/interrupts?status=pending&resolvable=true", "", nil, cookies)
+	code, m, _ = e.req("GET", "/api/v1/interrupts?status=pending&resumable=true", "", nil, cookies)
 	if code != 200 || len(m["interrupts"].([]any)) != 1 {
 		t.Fatalf("inbox: %d %v", code, m)
 	}
 
-	// Resolve → second resolve conflicts.
-	code, m, _ = e.req("POST", "/api/v1/interrupts/"+intID+"/resolve",
-		`{"event":{"approved":true}}`, csrf, cookies)
-	if code != 200 {
-		t.Fatalf("resolve: %d %v", code, m)
+	// Resume (session needs CSRF) → second resume conflicts.
+	if code, _, _ = e.req("POST", "/api/v1/interrupts/"+intID+"/resume", `{"approved":true}`, nil, cookies); code != 403 {
+		t.Fatalf("resume without csrf: %d", code)
 	}
-	code, m, _ = e.req("POST", "/api/v1/interrupts/"+intID+"/resolve",
-		`{"event":{"approved":true}}`, csrf, cookies)
+	code, m, _ = e.req("POST", "/api/v1/interrupts/"+intID+"/resume", `{"approved":true}`, csrf, cookies)
+	if code != 202 {
+		t.Fatalf("resume: %d %v", code, m)
+	}
+	code, m, _ = e.req("POST", "/api/v1/interrupts/"+intID+"/resume", `{"approved":true}`, csrf, cookies)
 	if code != 409 || m["error"].(map[string]any)["code"] != "already_resolved" {
-		t.Fatalf("second resolve: %d %v", code, m)
+		t.Fatalf("second resume: %d %v", code, m)
 	}
 
 	// Dispatch → handler step → run succeeded with handler output.
@@ -140,13 +134,13 @@ func TestApprovalFlow(t *testing.T) {
 }
 
 // TestCancelRun: a waiting run is cancelled, its interrupt cancelled and
-// the bound callback key revoked.
+// the bound resume key revoked.
 func TestCancelRun(t *testing.T) {
 	c, _ := vaultcipher.NewCipher("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	e := newEnvWith(t, c)
 	cookies := login(e, "a@x.com")
 	csrf := map[string]string{"X-Requested-With": "calcside"}
-	appID := mkApp(e, cookies, waitProg, `{"on_ok":{},"on_exp":{}}`)
+	appID := mkApp(e, cookies, waitProg)
 	m := testRun(e, cookies, appID)
 	runID := m["run_id"].(string)
 	intID := m["waiting"].(map[string]any)["interrupt_id"].(string)
@@ -166,28 +160,14 @@ func TestCancelRun(t *testing.T) {
 	}
 }
 
-// TestInterruptExpiryAndTimer exercises the dispatcher's due list on an
-// injectable clock.
-func TestInterruptExpiryAndTimer(t *testing.T) {
+// TestInterruptExpiry exercises the dispatcher's due list on an
+// injectable clock: waitProg has on_expire, so the expiry handler runs
+// and the run succeeds.
+func TestInterruptExpiry(t *testing.T) {
 	c, _ := vaultcipher.NewCipher("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	e := newEnvWith(t, c)
 	cookies := login(e, "a@x.com")
-
-	// Timer fires → handler dispatched → succeeded.
-	appID := mkApp(e, cookies, timerProg, `{"on_tick":{}}`)
-	m := testRun(e, cookies, appID)
-	runID := m["run_id"].(string)
-	e.now = func() time.Time { return time.Now().Add(2 * time.Second) }
-	e.runs.RunOnce(context.Background())
-	e.runs.RunOnce(context.Background())
-	run, _ := e.st.GetRun(context.Background(), runID)
-	if run.Status != store.RunSucceeded {
-		t.Fatalf("timer run: %+v", run)
-	}
-
-	// Approval past expiry without on_expire resolution → run expired.
-	// waitProg has on_expire: the dispatch runs the expiry handler → succeeded.
-	appID2 := mkApp(e, cookies, waitProg, `{"on_ok":{},"on_exp":{}}`)
+	appID2 := mkApp(e, cookies, waitProg)
 	m2 := testRun(e, cookies, appID2)
 	runID2 := m2["run_id"].(string)
 	e.now = func() time.Time { return time.Now().Add(8 * 24 * time.Hour) }
@@ -199,9 +179,9 @@ func TestInterruptExpiryAndTimer(t *testing.T) {
 	}
 }
 
-// TestCallbackAuth: the callback route accepts only the interrupt-bound
-// key — early on a reserved slot, and rejects others.
-func TestCallbackAuth(t *testing.T) {
+// TestResumeTokenAuth: the interrupt's own token resumes it, early on
+// a reserved slot; other tokens and sessions cannot see the slot.
+func TestResumeTokenAuth(t *testing.T) {
 	c, _ := vaultcipher.NewCipher("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	e := newEnvWith(t, c)
 	cookies := login(e, "a@x.com")
@@ -228,23 +208,23 @@ func TestCallbackAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Session → 404 (bound-key only route).
-	code, _, _ := e.req("POST", "/api/v1/interrupts/int_cb/callback", `{"x":1}`,
+	// Session → 404 (a reserved slot is invisible to regular callers).
+	code, _, _ := e.req("POST", "/api/v1/interrupts/int_cb/resume", `{"x":1}`,
 		map[string]string{"X-Requested-With": "calcside"}, cookies)
 	if code != 404 {
-		t.Fatalf("session callback: %d", code)
+		t.Fatalf("session resume: %d", code)
 	}
 	// Early accept on the reserved slot → 202.
-	code, m, _ := e.req("POST", "/api/v1/interrupts/int_cb/callback", `{"x":1}`,
+	code, m, _ := e.req("POST", "/api/v1/interrupts/int_cb/resume", `{"x":1}`,
 		map[string]string{"Authorization": "Bearer " + secret}, nil)
 	if code != 202 {
 		t.Fatalf("callback: %d %v", code, m)
 	}
 	// Second early resolution → 409.
-	code, m, _ = e.req("POST", "/api/v1/interrupts/int_cb/callback", `{"x":2}`,
+	code, m, _ = e.req("POST", "/api/v1/interrupts/int_cb/resume", `{"x":2}`,
 		map[string]string{"Authorization": "Bearer " + secret}, nil)
 	if code != 409 {
-		t.Fatalf("dup callback: %d %v", code, m)
+		t.Fatalf("dup resume: %d %v", code, m)
 	}
 	// Wrong key → 404.
 	secret2, key2 := auth.NewAPIKey(u.ID, "other", nil)
@@ -253,17 +233,16 @@ func TestCallbackAuth(t *testing.T) {
 	if err := e.st.CreateAPIKey(ctx, key2); err != nil {
 		t.Fatal(err)
 	}
-	code, _, _ = e.req("POST", "/api/v1/interrupts/int_cb/callback", `{"x":3}`,
+	code, _, _ = e.req("POST", "/api/v1/interrupts/int_cb/resume", `{"x":3}`,
 		map[string]string{"Authorization": "Bearer " + secret2}, nil)
 	if code != 404 {
 		t.Fatalf("wrong key: %d", code)
 	}
 	// ?token= also authenticates.
-	code, _, _ = e.req("POST", "/api/v1/interrupts/int_cb/callback?token="+secret, `{"x":4}`,
+	code, _, _ = e.req("POST", "/api/v1/interrupts/int_cb/resume?token="+secret, `{"x":4}`,
 		nil, nil)
-	if code != 409 && code != 404 {
-		// already resolved → 409; path works (not 401).
-		t.Fatalf("token callback: %d", code)
+	if code != 409 {
+		t.Fatalf("token query resume: %d", code)
 	}
 }
 
@@ -282,7 +261,7 @@ func TestRunIsolation(t *testing.T) {
 	ws := store.PersonalWorkspaceID(au.ID)
 	_ = e.st.AddMember(ctx, &store.Member{WorkspaceID: ws, UserID: vu.ID, Role: store.RoleViewer})
 
-	appID := mkApp(e, cookiesA, waitProg, `{"on_ok":{},"on_exp":{}}`)
+	appID := mkApp(e, cookiesA, waitProg)
 	m := testRun(e, cookiesA, appID)
 	runID := m["run_id"].(string)
 	intID := m["waiting"].(map[string]any)["interrupt_id"].(string)
@@ -296,7 +275,7 @@ func TestRunIsolation(t *testing.T) {
 	}
 	// …but not resolve/cancel/retry.
 	for _, tc := range []struct{ name, method, path, body string }{
-		{"resolve", "POST", "/api/v1/interrupts/" + intID + "/resolve", `{"event":{"approved":true}}`},
+		{"resume", "POST", "/api/v1/interrupts/" + intID + "/resume", `{"approved":true}`},
 		{"cancel", "POST", "/api/v1/runs/" + runID + "/cancel", `{}`},
 		{"retry", "POST", "/api/v1/runs/" + runID + "/retry", `{}`},
 	} {
@@ -316,9 +295,10 @@ func TestRunIsolation(t *testing.T) {
 	}
 }
 
-// TestApprovalAssignees: an assigned approval is resolvable only by the
-// assignee; the owner sees can_resolve=false.
-func TestApprovalAssignees(t *testing.T) {
+// TestResumeAccess: a pending interrupt resumes with Run access on the
+// app; members without it see can_resume=false. Any JSON object event
+// is accepted.
+func TestResumeAccess(t *testing.T) {
 	c, _ := vaultcipher.NewCipher("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 	e := newEnvWith(t, c)
 	ctx := context.Background()
@@ -327,62 +307,33 @@ func TestApprovalAssignees(t *testing.T) {
 	csrf := map[string]string{"X-Requested-With": "calcside"}
 	uu, _ := e.st.GetUserByEmail(ctx, "u@x.com")
 	au, _ := e.st.GetUserByEmail(ctx, "a@x.com")
-	// The assignee must be a workspace member to resolve.
-	_ = e.st.AddMember(ctx, &store.Member{WorkspaceID: store.PersonalWorkspaceID(au.ID), UserID: uu.ID, Role: store.RoleEditor})
+	_ = e.st.AddMember(ctx, &store.Member{WorkspaceID: store.PersonalWorkspaceID(au.ID), UserID: uu.ID, Role: store.RoleViewer})
 
-	code := `def on_ok(h):
-    return {"ok": True}
-def main(input):
-    i = interrupt.new("approval", assignees=["` + uu.ID + `"])
-    interrupt.wait(i["id"], handler="on_ok", context={})
-    return {}
-`
-	appID := mkApp(e, cookiesA, code, `{"on_ok":{}}`)
+	appID := mkApp(e, cookiesA, waitProg)
 	m := testRun(e, cookiesA, appID)
 	intID := m["waiting"].(map[string]any)["interrupt_id"].(string)
 
-	// Owner (non-assignee) sees can_resolve=false and resolve → 403.
-	code_, m, _ := e.req("GET", "/api/v1/interrupts/"+intID, "", nil, cookiesA)
-	if code_ != 200 || m["interrupt"].(map[string]any)["can_resolve"] != false {
-		t.Fatalf("owner view: %d %v", code_, m)
+	// Viewer member sees can_resume=false and resume → 403.
+	code_, m, _ := e.req("GET", "/api/v1/interrupts/"+intID, "", nil, cookiesU)
+	if code_ != 200 || m["interrupt"].(map[string]any)["can_resume"] != false {
+		t.Fatalf("viewer view: %d %v", code_, m)
 	}
-	if code, _, _ := e.req("POST", "/api/v1/interrupts/"+intID+"/resolve",
-		`{"event":{"approved":true}}`, csrf, cookiesA); code != 403 {
-		t.Fatalf("non-assignee resolve: %d", code)
+	if code, _, _ := e.req("POST", "/api/v1/interrupts/"+intID+"/resume",
+		`{"approved":true}`, csrf, cookiesU); code != 403 {
+		t.Fatalf("viewer resume: %d", code)
 	}
-	// The assignee resolves.
-	if code, _, _ := e.req("POST", "/api/v1/interrupts/"+intID+"/resolve",
-		`{"event":{"approved":true}}`, csrf, cookiesU); code != 200 {
-		t.Fatalf("assignee resolve: %d", code)
+	// Non-object events are rejected; the owner resumes with any object.
+	if code, _, _ := e.req("POST", "/api/v1/interrupts/"+intID+"/resume", `[1,2]`, csrf, cookiesA); code != 400 {
+		t.Fatalf("array event: %d", code)
 	}
-}
-
-// TestHandlersPrecision: handlers travel as raw JSON text — integers
-// above 2^53 inside context schemas round-trip byte-exact.
-func TestHandlersPrecision(t *testing.T) {
-	e := newEnv(t)
-	cookies := login(e, "a@x.com")
-	csrf := map[string]string{"X-Requested-With": "calcside"}
-	handlers := `{"on_ok":{"context_schema":{"type":"object","properties":{"n":{"enum":[9007199254740993]}},"required":["n"]}}}`
-	_, m, _ := e.req("POST", "/api/v1/applications",
-		`{"name":"prec", "code":"def main(i): return {}", "handlers": `+jsonStr(handlers)+`}`, csrf, cookies)
-	app := m["application"].(map[string]any)
-	got, _ := app["handlers"].(string)
-	if !strings.Contains(got, "9007199254740993") {
-		t.Fatalf("create handlers: %v", app)
-	}
-	code, m, _ := e.req("GET", "/api/v1/applications/"+app["id"].(string), "", nil, cookies)
-	if code != 200 {
-		t.Fatalf("get: %d", code)
-	}
-	got, _ = m["application"].(map[string]any)["handlers"].(string)
-	if !strings.Contains(got, "9007199254740993") {
-		t.Fatalf("rounded: %v", got)
+	if code, _, _ := e.req("POST", "/api/v1/interrupts/"+intID+"/resume",
+		`{"anything":"goes","list":[1,2]}`, csrf, cookiesA); code != 202 {
+		t.Fatalf("owner resume: %d", code)
 	}
 }
 
 // TestInterruptKeyIsolation: an int_-bound key reaches only the
-// callback route.
+// resume route.
 func TestInterruptKeyIsolation(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
@@ -406,7 +357,6 @@ func TestInterruptKeyIsolation(t *testing.T) {
 		{"run", "GET", "/api/v1/runs/run_x"},
 		{"interrupts", "GET", "/api/v1/interrupts"},
 		{"interrupt", "GET", "/api/v1/interrupts/int_x"},
-		{"resolve", "POST", "/api/v1/interrupts/int_x/resolve"},
 		{"members", "GET", "/api/v1/workspaces/" + ws + "/members"},
 	} {
 		code, _, _ := e.req(tc.method, tc.path, `{"event":{}}`, hdr, nil)
@@ -414,11 +364,10 @@ func TestInterruptKeyIsolation(t *testing.T) {
 			t.Fatalf("int_ key on %s: %d", tc.name, code)
 		}
 	}
-	// And its own callback (404 for a nonexistent interrupt but not
-	// auth-rejected — 404 is the only allowed outcome either way).
-	code, _, _ := e.req("POST", "/api/v1/interrupts/int_x/callback", `{"x":1}`, hdr, nil)
+	// Its own resume route: 404 for a nonexistent interrupt, never 401.
+	code, _, _ := e.req("POST", "/api/v1/interrupts/int_x/resume", `{"x":1}`, hdr, nil)
 	if code != 404 {
-		t.Fatalf("own callback: %d", code)
+		t.Fatalf("own resume: %d", code)
 	}
 	// MCP also refuses it.
 	code, _, _ = e.req("POST", "/mcp", `{}`, hdr, nil)

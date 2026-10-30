@@ -86,7 +86,6 @@ type CreateRequest struct {
 	Spec         json.RawMessage
 	InputSchema  json.RawMessage
 	OutputSchema json.RawMessage
-	Handlers     json.RawMessage
 }
 
 type UpdateRequest struct {
@@ -96,7 +95,6 @@ type UpdateRequest struct {
 	Spec         json.RawMessage
 	InputSchema  json.RawMessage
 	OutputSchema json.RawMessage
-	Handlers     json.RawMessage
 }
 
 func specOr(raw json.RawMessage) json.RawMessage {
@@ -136,7 +134,7 @@ func (s *Service) Create(ctx context.Context, a service.Actor, r CreateRequest) 
 	if err != nil {
 		return nil, fail(err)
 	}
-	app, err := store.NewApplication(a.WorkspaceID, a.UserID, name, code, spec, r.InputSchema, r.OutputSchema, r.Handlers, s.o.Now())
+	app, err := store.NewApplication(a.WorkspaceID, a.UserID, name, code, spec, r.InputSchema, r.OutputSchema, s.o.Now())
 	if err != nil {
 		return nil, fail(err)
 	}
@@ -185,15 +183,10 @@ func (s *Service) Update(ctx context.Context, a service.Actor, id string, r Upda
 	if err != nil {
 		return nil, fail(err)
 	}
-	handlers := app.Handlers
-	if r.Handlers != nil {
-		handlers = r.Handlers
-	}
 	next := &store.Application{
 		ID: app.ID, WorkspaceID: app.WorkspaceID, UserID: app.UserID,
 		Name: name, Code: r.Code, Spec: norm,
 		InputSchema: r.InputSchema, OutputSchema: r.OutputSchema,
-		Handlers:  handlers,
 		UpdatedAt: s.o.Now().UTC(),
 	}
 	if err := store.ValidateApplication(next); err != nil {

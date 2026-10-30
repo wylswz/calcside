@@ -16,20 +16,15 @@ import (
 // access.Checker decisions; sealed fields are opened for View callers
 // and never exposed through list routes.
 
-// approvalDefaultEventSchema constrains manual approval resolutions.
-var approvalDefaultEventSchema = json.RawMessage(
-	`{"type":"object","properties":{"approved":{"type":"boolean"},"note":{"type":"string"}},"required":["approved"]}`)
-
 // InterruptView is one interrupt as the API renders it.
 type InterruptView struct {
 	Interrupt       *store.Interrupt
 	ApplicationName string
-	CanResolve      bool
-	CallbackURL     string
+	CanResume       bool
+	ResumeURL       string
 	ContextJSON     string
 	EventJSON       string
 	ResolvedByLabel string
-	AssigneeLabels  []string
 }
 
 // RunDetail bundles a run with its steps and interrupts.
@@ -40,6 +35,15 @@ type RunDetail struct {
 	OutputJSON string
 }
 
+// nudge wakes the dispatch loop after a fresh resolution so a handler
+// is dispatched without waiting for the next Tick.
+func (s *Service) nudge() {
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+}
+
 func (s *Service) appName(ctx context.Context, id string) string {
 	a, err := s.o.Store.GetApplication(ctx, id)
 	if err != nil {
@@ -48,34 +52,22 @@ func (s *Service) appName(ctx context.Context, id string) string {
 	return a.Name
 }
 
-// canResolve applies the resolve authorization for one interrupt:
-// approval → Run on the app + assignee membership (or no assignees);
-// callback → Configure; timer → never.
-func (s *Service) canResolve(ctx context.Context, a service.Actor, i *store.Interrupt) bool {
+// canResume reports whether a regular actor may resume the interrupt:
+// it is pending and the actor has Run on the application.
+func (s *Service) canResume(ctx context.Context, a service.Actor, i *store.Interrupt) bool {
 	if i.Status != store.InterruptPending {
 		return false
 	}
-	switch i.Kind {
-	case store.InterruptApproval:
-		if len(i.Assignees) > 0 {
-			found := false
-			for _, u := range i.Assignees {
-				if u == a.UserID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return false
-			}
-		}
-		_, err := s.o.Access.Application(ctx, a, i.ApplicationID, access.Run)
-		return err == nil
-	case store.InterruptCallback:
-		_, err := s.o.Access.Application(ctx, a, i.ApplicationID, access.Configure)
-		return err == nil
-	}
-	return false
+	_, err := s.o.Access.Application(ctx, a, i.ApplicationID, access.Run)
+	return err == nil
+}
+
+// committed reports whether a slot was turned into an interrupt by
+// wait; reserved and never-waited (cancelled) slots carry no handler.
+func committed(i *store.Interrupt) bool { return i.Handler != "" }
+
+func (s *Service) resumeURL(id string) string {
+	return s.o.ConsoleOrigin + "/api/v1/interrupts/" + id + "/resume"
 }
 
 // labelFor renders a usr_ id as username-or-email for workspace
@@ -101,15 +93,12 @@ func (s *Service) labelFor(ctx context.Context, wsID, id string) string {
 func (s *Service) view(ctx context.Context, a service.Actor, i *store.Interrupt, detail bool) (*InterruptView, error) {
 	v := &InterruptView{Interrupt: i,
 		ApplicationName: s.appName(ctx, i.ApplicationID),
-		CanResolve:      s.canResolve(ctx, a, i)}
+		CanResume:       s.canResume(ctx, a, i)}
 	if i.ResolvedBy != "" {
 		v.ResolvedByLabel = s.labelFor(ctx, i.WorkspaceID, i.ResolvedBy)
 	}
-	for _, id := range i.Assignees {
-		v.AssigneeLabels = append(v.AssigneeLabels, s.labelFor(ctx, i.WorkspaceID, id))
-	}
-	if i.Kind == store.InterruptCallback && i.Status == store.InterruptPending {
-		v.CallbackURL = s.o.ConsoleOrigin + "/api/v1/interrupts/" + i.ID + "/callback"
+	if i.Status == store.InterruptPending {
+		v.ResumeURL = s.resumeURL(i.ID)
 	}
 	if detail {
 		if pt, err := s.open(i.Context, "interrupt-context:"+i.ID); err == nil && len(pt) > 0 {
@@ -157,8 +146,8 @@ func (s *Service) GetRun(ctx context.Context, a service.Actor, id string) (*RunD
 	}
 	d := &RunDetail{Run: r, Steps: steps}
 	for _, i := range intrs {
-		if i.Kind == "" {
-			continue // never committed: reserved or cancelled slot
+		if !committed(i) {
+			continue // reserved or never-waited slot
 		}
 		v, err := s.view(ctx, a, i, true)
 		if err != nil {
@@ -208,11 +197,11 @@ func (s *Service) RetryRun(ctx context.Context, a service.Actor, id string) (*st
 	return s.o.Store.GetRun(ctx, r.ID)
 }
 
-// ListInterrupts is the workspace inbox. resolvable=true keeps only
-// interrupts the caller could resolve right now, paging the store
+// ListInterrupts is the workspace inbox. resumable=true keeps only
+// interrupts the caller could resume right now, paging the store
 // (status applied, ≤1000 rows scanned) until the page fills; the
 // returned cursor continues the scan.
-func (s *Service) ListInterrupts(ctx context.Context, a service.Actor, status string, resolvable bool, before string, limit int) ([]*InterruptView, string, error) {
+func (s *Service) ListInterrupts(ctx context.Context, a service.Actor, status string, resumable bool, before string, limit int) ([]*InterruptView, string, error) {
 	f, err := s.o.Access.Interrupts(ctx, a)
 	if err != nil {
 		return nil, "", err
@@ -236,12 +225,12 @@ func (s *Service) ListInterrupts(ctx context.Context, a service.Actor, status st
 		for _, i := range intrs {
 			next = i.ID // deepest row scanned; cursor continues here
 			scanned++
-			if i.Kind != "" {
+			if committed(i) {
 				v, err := s.view(ctx, a, i, false)
 				if err != nil {
 					return nil, "", err
 				}
-				if !resolvable || v.CanResolve {
+				if !resumable || v.CanResume {
 					if len(out) < limit {
 						out = append(out, v)
 					}
@@ -251,14 +240,14 @@ func (s *Service) ListInterrupts(ctx context.Context, a service.Actor, status st
 				break
 			}
 		}
-		if !resolvable || len(out) >= limit || len(intrs) < f.Limit || scanned >= 1000 {
+		if !resumable || len(out) >= limit || len(intrs) < f.Limit || scanned >= 1000 {
 			break
 		}
 		f.Before = next
 	}
 	// The cursor is offered only when more rows may exist beyond the
 	// scan — a full store page or a filled result page.
-	if len(out) >= limit || (resolvable && scanned >= 1000) {
+	if len(out) >= limit || (resumable && scanned >= 1000) {
 		return out, next, nil
 	}
 	return out, "", nil
@@ -271,83 +260,56 @@ func (s *Service) GetInterrupt(ctx context.Context, a service.Actor, id string) 
 		return nil, err
 	}
 	// Never-committed slots are invisible to the console.
-	if i.Kind == "" {
+	if !committed(i) {
 		return nil, service.NotFound("interrupt not found")
 	}
 	return s.view(ctx, a, i, true)
 }
 
-// ResolveInterrupt applies a human or operator resolution.
-func (s *Service) ResolveInterrupt(ctx context.Context, a service.Actor, id string, event json.RawMessage) (*InterruptView, error) {
-	i, err := s.o.Access.Interrupt(ctx, a, id, access.View)
-	if err != nil {
-		return nil, err
-	}
-	switch i.Status {
-	case store.InterruptSlotReserved:
-		return nil, service.NotFound("interrupt not found")
-	case store.InterruptPending:
-	default:
-		return nil, service.Errf(types.ErrCodeAlreadyResolved, "interrupt already resolved")
-	}
-	if !s.canResolve(ctx, a, i) {
-		return nil, service.Forbidden("forbidden")
-	}
-	schema := i.EventSchema
-	if len(schema) == 0 && i.Kind == store.InterruptApproval {
-		schema = approvalDefaultEventSchema
-	}
-	if err := s.validateEvent(schema, event); err != nil {
-		return nil, service.BadRequest("invalid event")
-	}
-	sealed, err := s.sealOK(event, "interrupt-event:"+i.ID)
-	if err != nil {
-		return nil, service.Internal(err)
-	}
-	if _, err := s.o.Store.ResolveInterrupt(ctx, i.ID, sealed, a.UserID, s.o.Now().UTC()); err != nil {
-		if errors.Is(err, store.ErrConflict) {
-			return nil, service.Errf(types.ErrCodeAlreadyResolved, "interrupt already resolved")
-		}
-		return nil, service.Internal(err)
-	}
-	s.auditEvent(i.WorkspaceID, a.UserID, i.RunID, "resolve", "interrupt resolved "+i.ID)
-	i2, err := s.o.Store.GetInterrupt(ctx, i.ID)
-	if err != nil {
-		return nil, service.Internal(err)
-	}
-	return s.view(ctx, a, i2, true)
-}
-
-// Callback accepts a raw event body authenticated only by the
-// interrupt-bound key. Pending: kind must be callback. Reserved: the
-// event is stored early and validated at commit.
-func (s *Service) Callback(ctx context.Context, a service.Actor, id string, event []byte) error {
-	i, err := s.o.Access.InterruptCallback(ctx, a, id)
+// Resume records the single resolution of an interrupt with a JSON
+// object event and wakes the dispatcher. The interrupt's own resume
+// token may resume it even while still reserved (the step has not
+// reached wait yet; the event is applied when wait commits). Any other
+// caller needs Run on the application and a pending interrupt. First
+// resume wins; later ones get already_resolved.
+func (s *Service) Resume(ctx context.Context, a service.Actor, id string, event json.RawMessage) error {
+	i, byToken, err := s.o.Access.InterruptToken(ctx, a, id)
 	if err != nil {
 		return err
 	}
-	switch i.Status {
-	case store.InterruptPending:
-		if i.Kind != store.InterruptCallback {
+	resolvedBy := store.ResolvedByToken
+	if !byToken {
+		resolvedBy = a.UserID
+		if i, err = s.o.Access.Interrupt(ctx, a, id, access.View); err != nil {
+			return err
+		}
+		if !committed(i) {
 			return service.NotFound("interrupt not found")
 		}
-		if err := s.validateEvent(i.EventSchema, event); err != nil {
-			return service.BadRequest("invalid event")
+	}
+	switch {
+	case i.Status == store.InterruptPending:
+		if !byToken && !s.canResume(ctx, a, i) {
+			return service.Forbidden("forbidden")
 		}
-	case store.InterruptSlotReserved:
-		// early resolution; shape checked, kind/schema validated at commit
+	case i.Status == store.InterruptSlotReserved && byToken:
 	default:
 		return service.Errf(types.ErrCodeAlreadyResolved, "interrupt already resolved")
+	}
+	if err := s.validateEvent(event); err != nil {
+		return service.BadRequest("event must be a JSON object")
 	}
 	sealed, err := s.sealOK(event, "interrupt-event:"+i.ID)
 	if err != nil {
 		return service.Internal(err)
 	}
-	if _, err := s.o.Store.ResolveInterrupt(ctx, i.ID, sealed, "callback", s.o.Now().UTC()); err != nil {
+	if _, err := s.o.Store.ResolveInterrupt(ctx, i.ID, sealed, resolvedBy, s.o.Now().UTC()); err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			return service.Errf(types.ErrCodeAlreadyResolved, "interrupt already resolved")
 		}
 		return service.Internal(err)
 	}
+	s.auditEvent(i.WorkspaceID, a.UserID, i.RunID, "resume", "interrupt resumed "+i.ID)
+	s.nudge()
 	return nil
 }
