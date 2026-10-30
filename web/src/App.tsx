@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Route, Routes, Link, NavLink, Navigate, useNavigate, useMatch } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { api, loadAuthConfig, User, AuthConfig, AuthKind } from './api'
+import { api, loadAuthConfig, currentWorkspace, wsPath, User, AuthConfig, AuthKind } from './api'
 import WorkspaceSwitcher from './components/WorkspaceSwitcher'
 import WorkspaceTabs, { WorkspaceRedirect } from './pages/WorkspaceTabs'
 import Login from './pages/Login'
@@ -9,6 +9,8 @@ import Instances from './pages/Instances'
 import Applications from './pages/Applications'
 import NewApplication from './pages/NewApplication'
 import ApplicationDetail from './pages/ApplicationDetail'
+import Inbox from './pages/Inbox'
+import RunDetail from './pages/RunDetail'
 import NewInstance from './pages/NewInstance'
 import InstanceDetail from './pages/InstanceDetail'
 import ArtifactPreviewPage from './pages/ArtifactPreview'
@@ -33,9 +35,24 @@ function useMe(onBackendRetrying: (retrying: boolean) => void) {
 const navWork = [
   { to: '/', label: 'Instances', end: true },
   { to: '/applications', label: 'Applications' },
+  { to: '/inbox', label: 'Inbox' },
   { to: '/audit', label: 'Audit' },
   { to: '/workspace', label: 'Workspace' },
 ]
+
+// The inbox badge slot always renders — tabular figures at a reserved
+// width, empty at zero — so the nav never shifts when the count moves
+// (S3/S4).
+function InboxBadge() {
+  const ws = currentWorkspace() ?? ''
+  const q = useQuery({
+    queryKey: ['inbox-count', ws],
+    queryFn: () => api.get<{ interrupts?: unknown[] }>(wsPath('/api/v1/interrupts?status=pending&resolvable=true')),
+    refetchInterval: 5000,
+  })
+  const n = q.data?.interrupts?.length ?? 0
+  return <span className="inbox-count" aria-live="off">{n > 0 ? n : ''}</span>
+}
 
 const navCls = ({ isActive }: { isActive: boolean }) =>
   `relative flex items-center gap-1.5 whitespace-nowrap text-sm transition-colors ${isActive ? 'text-ink after:absolute after:inset-x-0 after:-bottom-px after:h-[3px] after:bg-accent' : 'text-sec hover:text-ink'}`
@@ -96,7 +113,7 @@ export default function App() {
           <nav className="console-nav flex flex-1 items-stretch gap-5 overflow-x-auto sm:gap-7">
             {navWork.map((n) => (
               <NavLink key={n.to} to={n.to} end={n.end} className={navCls}>
-                {n.label}
+                {n.label}{n.to === '/inbox' && <InboxBadge />}
               </NavLink>
             ))}
           </nav>
@@ -121,6 +138,8 @@ export default function App() {
           <Route path="/applications" element={<Applications />} />
           <Route path="/applications/new" element={<NewApplication />} />
           <Route path="/applications/:id" element={<ApplicationDetail />} />
+          <Route path="/applications/:id/runs/:runId" element={<RunDetail />} />
+          <Route path="/inbox" element={<Inbox />} />
           <Route path="/workspace" element={<WorkspaceTabs />} />
           <Route path="/workspace/:tab" element={<WorkspaceTabs />} />
           <Route path="/keys" element={<Navigate to="/workspace/keys" replace />} />

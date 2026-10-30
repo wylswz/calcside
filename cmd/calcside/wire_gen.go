@@ -104,7 +104,15 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		cleanup()
 		return nil, nil, err
 	}
-	applicationService, err := provideApplicationService(store, runtime, sandboxService, checker, recorder, cfg)
+	runService, err := provideRunService(store, runtime, sandboxService, checker, recorder, cipher, cfg)
+	if err != nil {
+		cleanup4()
+		cleanup3()
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
+	applicationService, err := provideApplicationService(store, runtime, sandboxService, checker, recorder, cfg, runService)
 	if err != nil {
 		cleanup4()
 		cleanup3()
@@ -128,6 +136,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		Anonymous:   user,
 		Previews:    artifactPreviews,
 		Application: applicationService,
+		Run:         runService,
 	}
 	googleFlow, err := provideGoogle(ctx, cfg)
 	if err != nil {
@@ -150,6 +159,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		Server:  server,
 		Sandbox: sandboxService,
 		Serving: servingService,
+		Runs:    runService,
 	}
 	return mainApplication, func() {
 		cleanup4()

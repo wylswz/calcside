@@ -27,7 +27,7 @@ func RunApplications(t *testing.T, s store.Store) {
 		OutputSchema: json.RawMessage(`{"type":"object"}`)}
 
 	t.Run("create_get_list", func(t *testing.T) {
-		a, err := store.NewApplication("ws_1", u.ID, "svc", "def main(i): return i", spec, nil, nil, time.Now())
+		a, err := store.NewApplication("ws_1", u.ID, "svc", "def main(i): return i", spec, nil, nil, nil, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -56,7 +56,7 @@ func RunApplications(t *testing.T, s store.Store) {
 	})
 
 	t.Run("cross_workspace_isolation", func(t *testing.T) {
-		a, _ := store.NewApplication("ws_2", u.ID, "svc2", "", spec, nil, nil, time.Now())
+		a, _ := store.NewApplication("ws_2", u.ID, "svc2", "", spec, nil, nil, nil, time.Now())
 		if err := s.CreateApplication(ctx, a); err != nil {
 			t.Fatal(err)
 		}
@@ -72,7 +72,7 @@ func RunApplications(t *testing.T, s store.Store) {
 	})
 
 	t.Run("draft_cas", func(t *testing.T) {
-		a, _ := store.NewApplication("ws_1", u.ID, "cas", "v1", spec, nil, nil, time.Now())
+		a, _ := store.NewApplication("ws_1", u.ID, "cas", "v1", spec, nil, nil, nil, time.Now())
 		s.CreateApplication(ctx, a)
 		a.Code = "v2"
 		ok, err := s.UpdateApplicationDraft(ctx, a, 1)
@@ -98,7 +98,7 @@ func RunApplications(t *testing.T, s store.Store) {
 	t.Run("schema_validation", func(t *testing.T) {
 		// $ref is rejected at the constructor and at the store layer.
 		if _, err := store.NewApplication("ws_1", u.ID, "bad", "", spec,
-			json.RawMessage(`{"$ref":"x"}`), nil, time.Now()); err == nil {
+			json.RawMessage(`{"$ref":"x"}`), nil, nil, time.Now()); err == nil {
 			t.Fatal("$ref schema accepted at constructor")
 		}
 		bad := &store.Application{WorkspaceID: "ws_1", UserID: u.ID, Name: "bad",
@@ -107,7 +107,7 @@ func RunApplications(t *testing.T, s store.Store) {
 			t.Fatal("$ref schema accepted at store")
 		}
 		big, _ := store.NewApplication("ws_1", u.ID, "big", "", spec,
-			json.RawMessage(`{"type":"object","minimum":9007199254740993}`), nil, time.Now())
+			json.RawMessage(`{"type":"object","minimum":9007199254740993}`), nil, nil, time.Now())
 		if err := s.CreateApplication(ctx, big); err != nil {
 			t.Fatalf("bigint schema rejected: %v", err)
 		}
@@ -118,7 +118,7 @@ func RunApplications(t *testing.T, s store.Store) {
 	})
 
 	t.Run("publish_and_delete", func(t *testing.T) {
-		a, _ := store.NewApplication("ws_1", u.ID, "pub", "def main(i): return i", spec, nil, nil, time.Now())
+		a, _ := store.NewApplication("ws_1", u.ID, "pub", "def main(i): return i", spec, nil, nil, nil, time.Now())
 		if err := s.CreateApplication(ctx, a); err != nil {
 			t.Fatal(err)
 		}

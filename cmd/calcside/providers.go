@@ -19,6 +19,7 @@ import (
 	"calcside/cmd/calcside/internal/service/access"
 	appsvc "calcside/cmd/calcside/internal/service/application"
 	policysvc "calcside/cmd/calcside/internal/service/policy"
+	runsvc "calcside/cmd/calcside/internal/service/run"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/serving"
 	"calcside/cmd/calcside/internal/vaultcipher"
@@ -39,6 +40,8 @@ type application struct {
 	Sandbox *sandbox.Service
 	// Serving is the persistent-instance scheduler.
 	Serving *serving.Service
+	// Runs is the EP-0016 durable-run dispatcher.
+	Runs *runsvc.Service
 }
 
 func provideStore(ctx context.Context, cfg config.Config) (store.Store, func(), error) {
@@ -301,9 +304,19 @@ func provideExtCatalog(opts *capext.Options) capext.CatalogProvider {
 // checker. The instance quota doubles as the application quota until a
 // dedicated flag exists.
 func provideApplicationService(st store.Store, rt runtime.Runtime, sb *sandbox.Service,
-	ac *access.Checker, rec appsvc.AuditSink, cfg config.Config) (*appsvc.Service, error) {
+	ac *access.Checker, rec appsvc.AuditSink, cfg config.Config, rs *runsvc.Service) (*appsvc.Service, error) {
 	return appsvc.New(appsvc.Options{
-		Store: st, Runtime: rt, Sandbox: sb, Access: ac, Audit: rec,
+		Store: st, Runtime: rt, Sandbox: sb, Access: ac, Audit: rec, Runs: rs,
 		MaxPerUser: cfg.MaxInstancesPerUser,
+	})
+}
+
+// provideRunService wires the durable-run lifecycle: Begin/Complete for
+// Test/Invoke plus the background dispatch loop started by serve.
+func provideRunService(st store.Store, rt runtime.Runtime, sb *sandbox.Service,
+	ac *access.Checker, rec runsvc.AuditSink, c *vaultcipher.Cipher, cfg config.Config) (*runsvc.Service, error) {
+	return runsvc.New(runsvc.Options{
+		Store: st, Runtime: rt, Sandbox: sb, Access: ac, Audit: rec,
+		Cipher: c, ConsoleOrigin: cfg.ConsoleOrigin,
 	})
 }

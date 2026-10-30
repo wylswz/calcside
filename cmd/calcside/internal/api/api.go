@@ -29,6 +29,7 @@ import (
 	"calcside/cmd/calcside/internal/service/iam"
 	llmprovidersvc "calcside/cmd/calcside/internal/service/llmprovider"
 	policysvc "calcside/cmd/calcside/internal/service/policy"
+	runsvc "calcside/cmd/calcside/internal/service/run"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/vault"
 	workspacesvc "calcside/cmd/calcside/internal/service/workspace"
@@ -48,6 +49,7 @@ type Deps struct {
 	Catalog     *catalog.Service
 	Sandbox     *sandbox.Service
 	Application *application.Service
+	Run         *runsvc.Service
 	Workspace   *workspacesvc.Service
 	Access      *access.Checker
 	Previews    *ArtifactPreviews
@@ -91,6 +93,17 @@ func (d Deps) authMiddleware() gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		// The interrupt callback accepts its bound key as Bearer or
+		// ?token= and is exempt from CSRF (bearer-only route).
+		cb := strings.HasPrefix(c.Request.URL.Path, "/api/v1/interrupts/") &&
+			strings.HasSuffix(c.Request.URL.Path, "/callback")
+		if cb && !hasBearer(c.Request) {
+			if tok := c.Request.URL.Query().Get("token"); tok != "" {
+				r := c.Request.Clone(c.Request.Context())
+				r.Header.Set("Authorization", "Bearer "+tok)
+				c.Request = r
+			}
+		}
 		p, err := d.Auth.Resolve(c.Request.Context(), c.Request)
 		if err != nil {
 			// Dev mode: a stale session cookie from an earlier
@@ -108,7 +121,7 @@ func (d Deps) authMiddleware() gin.HandlerFunc {
 		if p == nil && d.Dev && d.Anonymous != nil {
 			p = &auth.Principal{User: d.Anonymous, Kind: types.AuthAnonymous}
 		}
-		if p != nil && auth.NeedsCSRF(p) &&
+		if p != nil && auth.NeedsCSRF(p) && !cb &&
 			c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
 			if !auth.CSRFHeaderOK(c.Request) {
 				writeErr(c.Writer, http.StatusForbidden, types.ErrCodeCSRF, "missing X-Requested-With header")
@@ -134,6 +147,9 @@ func bodyLimit() gin.HandlerFunc {
 		limit := int64(maxBodyBytes)
 		if strings.HasSuffix(c.Request.URL.Path, "/exec") {
 			limit = sandbox.MaxCodeBytes + 1024
+		}
+		if strings.HasSuffix(c.Request.URL.Path, "/callback") {
+			limit = 64<<10 + 1024
 		}
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
 		c.Next()

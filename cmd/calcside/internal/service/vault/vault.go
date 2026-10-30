@@ -32,6 +32,10 @@ func (s *Service) Enabled() bool { return s.cipher != nil }
 
 func (s *Service) ready(ctx context.Context, a service.Actor) error {
 	if err := s.access.Workspace(ctx, a, a.WorkspaceID, access.Configure); err != nil {
+		var se *service.Error
+		if errors.As(err, &se) && se.Code == types.ErrCodeNotFound {
+			return se // hidden resources stay hidden (int_-bound keys)
+		}
 		// Same message as the API-keys gate: the wire contract reuses
 		// it for secrets even though the wording mentions keys.
 		return service.Forbidden("session required to manage API keys")

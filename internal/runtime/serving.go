@@ -28,6 +28,15 @@ type ProgramBundle struct {
 	// declared inside the Starlark sources.
 	InputSchema  json.RawMessage `json:"input_schema"`
 	OutputSchema json.RawMessage `json:"output_schema"`
+	// Handlers declares the named handler entries a run may dispatch
+	// to, each with an optional context schema.
+	Handlers map[string]HandlerSpec `json:"handlers,omitempty"`
+}
+
+// HandlerSpec declares one interrupt handler: the function name (the
+// map key) and the schema its stored context must satisfy.
+type HandlerSpec struct {
+	ContextSchema json.RawMessage `json:"context_schema,omitempty"`
 }
 
 // PrepareRequest asks a node to compile, pure-init and register an
@@ -64,8 +73,36 @@ type ProgramResult struct {
 	Output     json.RawMessage `json:"output,omitempty"`
 	Stdout     string          `json:"stdout,omitempty"`
 	Error      *ProgramError   `json:"error,omitempty"`
+	Waiting    *ProgramWaiting `json:"waiting,omitempty"`
 	DurationMs int64           `json:"duration_ms"`
 	Steps      uint64          `json:"steps"`
+}
+
+// ProgramWaiting reports that a step ended on interrupt.wait: the
+// reserved interrupt id, the handler to dispatch on resolution, the
+// optional on_expire handler, and the stored context. Context carries
+// program data for the next step and is never logged.
+type ProgramWaiting struct {
+	InterruptID string          `json:"interrupt_id"`
+	Handler     string          `json:"handler"`
+	OnExpire    string          `json:"on_expire,omitempty"`
+	Context     json.RawMessage `json:"context"`
+	Kind        string          `json:"kind"`
+	Title       string          `json:"title,omitempty"`
+	Assignees   []string        `json:"assignees,omitempty"`
+	EventSchema json.RawMessage `json:"event_schema,omitempty"`
+	ExpiresInS  int64           `json:"expires_in_s,omitempty"`
+	FireInS     int64           `json:"fire_in_s,omitempty"`
+}
+
+// InterruptSlot is a pre-reserved interrupt identity the API mints and
+// hands to a step; interrupt.new claims the next unused slot. Token is
+// the callback bearer credential: a secret, never logged.
+type InterruptSlot struct {
+	ID          string `json:"id"`
+	ConsoleURL  string `json:"console_url"`
+	CallbackURL string `json:"callback_url"`
+	Token       string `json:"token"`
 }
 
 // PrepareResponse reports the prepare outcome. Result success implies
@@ -95,6 +132,15 @@ type InvokeRequest struct {
 	InvokeID   string          `json:"invoke_id"`
 	Input      json.RawMessage `json:"input"`
 	TimeoutMs  int64           `json:"timeout_ms,omitempty"`
+	// Entry selects the entry function: "" or "main" is main with the
+	// input schema; otherwise a declared handler name and Input is the
+	// full handler-context JSON object built by the API.
+	Entry string `json:"entry,omitempty"`
+	// RunID, Step and Interrupts carry the run's identity and the
+	// pre-reserved interrupt slots interrupt.new may claim this step.
+	RunID      string          `json:"run_id,omitempty"`
+	Step       int             `json:"step,omitempty"`
+	Interrupts []InterruptSlot `json:"interrupts,omitempty"`
 }
 
 // InvokeResponse reports one invoke. Audit carries this call's records
@@ -161,10 +207,12 @@ func (r PrepareRequest) LogValue() slog.Value {
 	)
 }
 
-// String renders invoke metadata only -- never the input body.
+// String renders invoke metadata only -- never the input body,
+// handler context or interrupt tokens.
 func (r InvokeRequest) String() string {
-	return fmt.Sprintf("invoke{instance=%s invoke=%s release=%s gen=%d epoch=%d owner=%s actor=%s input_bytes=%d}",
-		r.InstanceID, r.InvokeID, r.ReleaseID, r.Generation, r.Epoch, r.Owner.UserID, r.Actor.UserID, len(r.Input))
+	return fmt.Sprintf("invoke{instance=%s invoke=%s release=%s gen=%d epoch=%d owner=%s actor=%s input_bytes=%d entry=%s run_id=%s step=%d interrupts=%d}",
+		r.InstanceID, r.InvokeID, r.ReleaseID, r.Generation, r.Epoch, r.Owner.UserID, r.Actor.UserID, len(r.Input),
+		r.Entry, r.RunID, r.Step, len(r.Interrupts))
 }
 
 // LogValue renders invoke metadata only.
@@ -178,6 +226,10 @@ func (r InvokeRequest) LogValue() slog.Value {
 		slog.String("user_id", r.Owner.UserID),
 		slog.String("actor_id", r.Actor.UserID),
 		slog.Int("input_bytes", len(r.Input)),
+		slog.String("entry", r.Entry),
+		slog.String("run_id", r.RunID),
+		slog.Int("step", r.Step),
+		slog.Int("interrupts", len(r.Interrupts)),
 	)
 }
 

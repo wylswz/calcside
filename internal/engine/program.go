@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/big"
 	"path"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -18,6 +19,7 @@ import (
 
 	"calcside/internal/capability"
 	capfs "calcside/internal/capability/fs"
+	capinterrupt "calcside/internal/capability/interrupt"
 	"calcside/internal/secrets"
 	"calcside/internal/serving"
 	"calcside/internal/types"
@@ -35,6 +37,19 @@ type ProgramConfig struct {
 	InputSchema  json.RawMessage
 	OutputSchema json.RawMessage
 	JSONLimits   serving.Limits
+	// Handlers declares the named handler entries a run may dispatch
+	// to: handler name -> raw context schema. A nil/empty schema means
+	// the default unconstrained object schema.
+	Handlers map[string]json.RawMessage
+}
+
+// InterruptSlot is the engine-local mirror of an API-minted,
+// pre-reserved interrupt identity handed to a step.
+type InterruptSlot struct {
+	ID          string
+	ConsoleURL  string
+	CallbackURL string
+	Token       string
 }
 
 // ProgramCall parameterizes one prepare or invoke.
@@ -43,6 +58,15 @@ type ProgramCall struct {
 	ActorID    string
 	ActorEmail string
 	Timeout    time.Duration // <=0 selects the default 30s
+	// Entry selects the entry function on invoke: "" or "main" calls
+	// main with the schema-validated input; otherwise a declared
+	// handler name and the input is the full handler context object.
+	Entry string
+	// RunID, Step and Interrupts carry the run identity and the
+	// pre-reserved interrupt slots interrupt.new may claim.
+	RunID      string
+	Step       int
+	Interrupts []InterruptSlot
 }
 
 // ProgramError is a classified program failure. Messages are generic:
@@ -55,10 +79,14 @@ type ProgramError struct {
 // ProgramResult is the outcome of one call; Output is only set on
 // success. Stdout is bounded and secret-redacted.
 type ProgramResult struct {
-	ID         string
-	Output     json.RawMessage
-	Stdout     string
-	Error      *ProgramError
+	ID     string
+	Output json.RawMessage
+	Stdout string
+	Error  *ProgramError
+	// Waiting is set when the step ended on interrupt.wait: the
+	// reserved interrupt id, the handler to dispatch and the stored
+	// context. Waiting and Error are mutually exclusive.
+	Waiting    *capinterrupt.Waiting
 	DurationMs int64
 	Steps      uint64
 }
@@ -74,9 +102,21 @@ type Program struct {
 	assets       map[string][]byte
 	inputSchema  *serving.Schema
 	outputSchema *serving.Schema
+	handlers     map[string]*serving.Schema
 	limits       serving.Limits
 	predeclared  []string // sorted name set captured at prepare
 }
+
+// programMaxHandlers bounds the declared handler table.
+const programMaxHandlers = 32
+
+// handlerNamePattern is the Starlark identifier shape for handler
+// names; `_`-prefixed names and `main` are additionally rejected.
+var handlerNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// defaultContextSchema is the unconstrained object schema used when a
+// handler declaration omits context_schema.
+var defaultContextSchema = json.RawMessage(`{"type":"object","additionalProperties":true}`)
 
 const (
 	defaultProgramTimeout = 30 * time.Second
@@ -178,6 +218,11 @@ func (e *Engine) PrepareProgram(ctx context.Context, config ProgramConfig, deps 
 		return nil, res
 	}
 
+	// Program sessions always predeclare `interrupt` so the compiled
+	// name set matches every invoke; the prepare host carries no run
+	// and the disarmed gate denies any top-level call.
+	deps.Interrupt = interruptHost(prog, call, deps.Secrets)
+
 	scope, perr = e.enterCall(ctx, call, deps, creation)
 	if perr != nil {
 		res.Error = perr
@@ -227,7 +272,10 @@ func (e *Engine) PrepareProgram(ctx context.Context, config ProgramConfig, deps 
 	// Pure init: gate stays disarmed; denied calls fail the prepare.
 	globals, ierr := prog.initModules(scope.thread, s.Predeclared)
 	if ierr == nil {
-		ierr = checkMain(globals)
+		ierr = checkEntry(globals, "main")
+	}
+	if ierr == nil {
+		ierr = checkHandlers(globals, prog.handlers)
 	}
 	if ierr != nil {
 		res.Error = initFailureErr(scope.ctx, scope.thread, scope.maxSteps)
@@ -294,17 +342,57 @@ func (e *Engine) InvokeProgram(ctx context.Context, program *Program, input json
 		res.Error = invalidProgramf("call ID is required")
 		return res
 	}
-	// Input validation and conversion run before any session work.
-	if err := program.inputSchema.Validate(input); err != nil {
-		res.Error = progErr("invalid_input", "input does not match the contract")
-		return res
+	// Entry selection and input validation run before any session
+	// work. main takes the schema-validated input; a declared handler
+	// takes the full handler-context object, whose `context` member is
+	// validated against the handler's schema. The input schema is not
+	// applied to handler entries.
+	entry := call.Entry
+	var handlerSchema *serving.Schema
+	if entry == "" || entry == "main" {
+		entry = "main"
+	} else {
+		sch, ok := program.handlers[entry]
+		if !ok {
+			res.Error = progErr("invalid_input", "unknown entry")
+			return res
+		}
+		handlerSchema = sch
+	}
+	var arg starlark.Value
+	if handlerSchema == nil {
+		if err := program.inputSchema.Validate(input); err != nil {
+			res.Error = progErr("invalid_input", "input does not match the contract")
+			return res
+		}
 	}
 	decoded, err := serving.DecodeJSON(input, program.limits)
 	if err != nil {
 		res.Error = progErr("invalid_input", "input is not valid bounded JSON")
 		return res
 	}
-	arg, err := decodedJSONToStarlark(decoded)
+	if handlerSchema != nil {
+		obj, ok := decoded.(map[string]any)
+		if !ok {
+			res.Error = progErr("invalid_input", "input does not match the contract")
+			return res
+		}
+		ctxObj, ok := obj["context"].(map[string]any)
+		if !ok {
+			res.Error = progErr("invalid_input", "input does not match the contract")
+			return res
+		}
+		ctxRaw, err := json.Marshal(ctxObj)
+		if err != nil {
+			res.Error = progErr("invalid_input", "input is not valid bounded JSON")
+			return res
+		}
+		if err := handlerSchema.Validate(ctxRaw); err != nil {
+			res.Error = progErr("invalid_input", "context does not match the contract")
+			return res
+		}
+	}
+	arg, err = decodedJSONToStarlark(decoded)
 	if err != nil {
 		res.Error = progErr("invalid_input", "input is not representable as a JSON value")
 		return res
@@ -313,6 +401,21 @@ func (e *Engine) InvokeProgram(ctx context.Context, program *Program, input json
 		res.Error = perr
 		return res
 	}
+
+	// Callback tokens are per-call secrets: redact them from stdout,
+	// output and audit like any other secret, without naming them.
+	if len(call.Interrupts) > 0 {
+		var tokens [][]byte
+		for _, s := range call.Interrupts {
+			if s.Token != "" {
+				tokens = append(tokens, []byte(s.Token))
+			}
+		}
+		if len(tokens) > 0 {
+			deps.Secrets = deps.Secrets.WithRedactions(tokens...)
+		}
+	}
+	deps.Interrupt = interruptHost(program, call, deps.Secrets)
 
 	var perr *ProgramError
 	scope, perr = e.enterCall(ctx, call, deps, creation)
@@ -346,23 +449,37 @@ func (e *Engine) InvokeProgram(ctx context.Context, program *Program, input json
 
 	globals, err := program.initModules(scope.thread, s.Predeclared)
 	if err == nil {
-		err = checkMain(globals)
+		err = checkEntry(globals, "main")
+	}
+	if err == nil {
+		err = checkHandlers(globals, program.handlers)
 	}
 	if err != nil {
 		res.Error = initFailureErr(scope.ctx, scope.thread, scope.maxSteps)
 		return res
 	}
 
-	// Arm only around the main call.
+	// Arm only around the entry call.
 	if perr := cancelledProgramErr(scope.ctx); perr != nil {
 		res.Error = perr
 		return res
 	}
 	s.Gate.Arm(s.execContext(call.ID))
-	out, callErr := starlark.Call(scope.thread, globals["main"], starlark.Tuple{arg}, nil)
+	out, callErr := starlark.Call(scope.thread, globals[entry], starlark.Tuple{arg}, nil)
 	s.Gate.Disarm()
 
 	if callErr != nil {
+		// A successful interrupt.wait unwinds with ErrWait after its
+		// op is audited; the outcome is waiting, never an error.
+		// Cancellation still outranks it.
+		if perr := cancelledProgramErr(scope.ctx); perr != nil {
+			res.Error = perr
+			return res
+		}
+		if host := deps.Interrupt; host != nil && host.Waiting != nil && errors.Is(callErr, capinterrupt.ErrWait) {
+			res.Waiting = host.Waiting
+			return res
+		}
 		ce := classify(scope.ctx, callErr, scope.maxSteps, scope.thread.ExecutionSteps())
 		if ce.Type == types.ErrSyntax {
 			res.Error = invalidProgramf("program does not initialize")
@@ -632,21 +749,57 @@ func (p *Program) initModules(thread *starlark.Thread, pre starlark.StringDict) 
 	return thread.Load(thread, p.entrypoint)
 }
 
-// checkMain verifies the entrypoint globals define main as a function
+// checkEntry verifies the entrypoint globals define name as a function
 // of exactly one positional parameter.
-func checkMain(globals starlark.StringDict) error {
-	v, ok := globals["main"]
+func checkEntry(globals starlark.StringDict, name string) error {
+	v, ok := globals[name]
 	if !ok {
-		return errors.New("entrypoint does not define main")
+		return fmt.Errorf("entrypoint does not define %s", name)
 	}
 	fn, ok := v.(*starlark.Function)
 	if !ok {
-		return errors.New("main is not a function")
+		return fmt.Errorf("%s is not a function", name)
 	}
 	if fn.NumParams() != 1 || fn.NumKwonlyParams() != 0 || fn.HasVarargs() || fn.HasKwargs() {
-		return errors.New("main must take exactly one positional parameter")
+		return fmt.Errorf("%s must take exactly one positional parameter", name)
 	}
 	return nil
+}
+
+// checkHandlers verifies every declared handler is a top-level
+// one-argument function in the entrypoint globals.
+func checkHandlers(globals starlark.StringDict, handlers map[string]*serving.Schema) error {
+	for name := range handlers {
+		if err := checkEntry(globals, name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// interruptHost builds the per-call interrupt capability host: run
+// identity, pre-reserved slots, compiled handler schemas and the
+// call-scoped secret set (already extended with callback tokens).
+func interruptHost(p *Program, call ProgramCall, sec *secrets.Set) *capinterrupt.Host {
+	h := &capinterrupt.Host{
+		RunID:    call.RunID,
+		Step:     call.Step,
+		Handlers: p.handlers,
+		Limits:   p.limits,
+		Secrets:  sec,
+		ToJSON: func(v starlark.Value) ([]byte, error) {
+			return MarshalJSONValue(v, p.limits)
+		},
+	}
+	for _, s := range call.Interrupts {
+		h.Slots = append(h.Slots, capinterrupt.Slot{
+			ID:          s.ID,
+			ConsoleURL:  s.ConsoleURL,
+			CallbackURL: s.CallbackURL,
+			Token:       s.Token,
+		})
+	}
+	return h
 }
 
 // checkLoadGraph statically rejects missing, non-canonical or cyclic
@@ -784,12 +937,35 @@ func validateProgramConfig(c ProgramConfig) (*Program, *ProgramError) {
 		return nil, invalidProgramf("invalid output_schema")
 	}
 
+	if len(c.Handlers) > programMaxHandlers {
+		return nil, invalidProgramf("too many declared handlers")
+	}
+	handlers := make(map[string]*serving.Schema, len(c.Handlers))
+	for name, raw := range c.Handlers {
+		if !handlerNamePattern.MatchString(name) || strings.HasPrefix(name, "_") || name == "main" {
+			return nil, invalidProgramf("invalid handler name")
+		}
+		if len(raw) == 0 {
+			raw = defaultContextSchema
+		}
+		var obj map[string]any
+		if err := json.Unmarshal(raw, &obj); err != nil || obj == nil || obj["type"] != "object" {
+			return nil, invalidProgramf("invalid handler context schema")
+		}
+		sch, err := serving.CompileSchema(raw, c.JSONLimits)
+		if err != nil {
+			return nil, invalidProgramf("invalid handler context schema")
+		}
+		handlers[name] = sch
+	}
+
 	prog := &Program{
 		entrypoint:   entry,
 		sources:      make(map[string][]byte, len(c.Sources)),
 		assets:       make(map[string][]byte, len(c.Assets)),
 		inputSchema:  inSchema,
 		outputSchema: outSchema,
+		handlers:     handlers,
 		limits:       c.JSONLimits.Effective(),
 	}
 	for name, src := range c.Sources {

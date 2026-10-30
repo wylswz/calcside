@@ -47,6 +47,8 @@ func (s *Service) List(ctx context.Context, a service.Actor, f Filter) ([]*store
 			return nil, err
 		}
 		f.InstanceID = id
+	} else if err := s.access.Workspace(ctx, a, a.WorkspaceID, access.View); err != nil {
+		return nil, err
 	}
 	lst, err := s.st.ListAuditEvents(ctx, store.AuditFilter{
 		WorkspaceID: a.WorkspaceID,

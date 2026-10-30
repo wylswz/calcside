@@ -73,7 +73,17 @@ func ceiling(a service.Actor) Action {
 // check resolves the actor's role in wsID once and applies the hidden
 // vs forbidden rule. Keys live in exactly one workspace: any wsID other
 // than a.WorkspaceID is invisible.
+// interruptBound reports whether the actor is a key bound to an
+// interrupt (int_…): those tokens are handed to external systems and
+// are admitted on the callback route only — every other path is 404.
+func interruptBound(a service.Actor) bool {
+	return strings.HasPrefix(a.KeyBoundID, string(store.PrefixInterrupt))
+}
+
 func (c *Checker) check(ctx context.Context, a service.Actor, wsID string, act Action, hidden error) error {
+	if interruptBound(a) {
+		return hidden
+	}
 	if a.ViaKey() && a.WorkspaceID != wsID {
 		return hidden
 	}
@@ -251,6 +261,9 @@ func (c *Checker) SharedInstances(ctx context.Context, a service.Actor) ([]*stor
 // Memberships lists the workspaces the actor can act in: all of a
 // session's memberships, or the key's one workspace.
 func (c *Checker) Memberships(ctx context.Context, a service.Actor) ([]*store.Membership, error) {
+	if interruptBound(a) {
+		return nil, service.NotFound("workspaces not found")
+	}
 	if a.ViaKey() {
 		w, err := c.st.GetWorkspace(ctx, a.WorkspaceID)
 		if err != nil {
@@ -270,6 +283,9 @@ func (c *Checker) Memberships(ctx context.Context, a service.Actor) ([]*store.Me
 // key. A key bound to a non-instance resource lists nothing — no row
 // ever carries its bound id.
 func (c *Checker) Instances(ctx context.Context, a service.Actor) (store.InstanceFilter, error) {
+	if interruptBound(a) {
+		return store.InstanceFilter{}, service.NotFound("instances not found")
+	}
 	f := store.InstanceFilter{WorkspaceID: a.WorkspaceID}
 	if a.Restricted() {
 		f.KeyID = a.KeyID
@@ -324,4 +340,97 @@ func (c *Checker) Applications(ctx context.Context, a service.Actor) (store.Appl
 		return store.ApplicationFilter{}, err
 	}
 	return f, nil
+}
+
+// Run loads the run and checks act through its owning application with
+// the same rules as Application: a bound/restricted key sees nothing
+// unless bound to that app.
+func (c *Checker) Run(ctx context.Context, a service.Actor, id string, act Action) (*store.Run, error) {
+	hidden := service.NotFound("run not found")
+	if a.Restricted() {
+		return nil, hidden
+	}
+	r, err := c.st.GetRun(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, hidden
+		}
+		return nil, service.Internal(err)
+	}
+	if a.KeyBoundID != "" && a.KeyBoundID != r.ApplicationID {
+		return nil, hidden
+	}
+	if err := c.check(ctx, a, r.WorkspaceID, act, hidden); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// Runs returns the list scope for an application's runs: View on the
+// owning application decides.
+func (c *Checker) Runs(ctx context.Context, a service.Actor, appID string) (*store.Application, error) {
+	return c.Application(ctx, a, appID, View)
+}
+
+// Interrupt loads the interrupt and checks act through its owning
+// application with the same rules as Application.
+func (c *Checker) Interrupt(ctx context.Context, a service.Actor, id string, act Action) (*store.Interrupt, error) {
+	hidden := service.NotFound("interrupt not found")
+	if a.Restricted() {
+		return nil, hidden
+	}
+	i, err := c.st.GetInterrupt(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, hidden
+		}
+		return nil, service.Internal(err)
+	}
+	if a.KeyBoundID != "" && a.KeyBoundID != i.ApplicationID {
+		return nil, hidden
+	}
+	if err := c.check(ctx, a, i.WorkspaceID, act, hidden); err != nil {
+		return nil, err
+	}
+	return i, nil
+}
+
+// Interrupts returns the workspace-scoped list filter for the
+// interrupts inbox. Sessions need workspace View; a key bound to an
+// application lists only that app's interrupts; any other bound or
+// restricted key is hidden. Per-item can_resolve is computed by the
+// service.
+func (c *Checker) Interrupts(ctx context.Context, a service.Actor) (store.InterruptFilter, error) {
+	hidden := service.NotFound("interrupts not found")
+	f := store.InterruptFilter{WorkspaceID: a.WorkspaceID}
+	switch {
+	case a.Restricted():
+		return store.InterruptFilter{}, hidden
+	case a.KeyBoundID != "":
+		if !strings.HasPrefix(a.KeyBoundID, string(store.PrefixApplication)) {
+			return store.InterruptFilter{}, hidden
+		}
+		f.ApplicationID = a.KeyBoundID
+	}
+	if err := c.check(ctx, a, a.WorkspaceID, View, hidden); err != nil {
+		return store.InterruptFilter{}, err
+	}
+	return f, nil
+}
+
+// InterruptCallback authenticates the interrupt-bound key on the
+// callback route: the key must be bound to exactly this interrupt.
+func (c *Checker) InterruptCallback(ctx context.Context, a service.Actor, id string) (*store.Interrupt, error) {
+	hidden := service.NotFound("interrupt not found")
+	if !a.ViaKey() || a.KeyBoundID != id {
+		return nil, hidden
+	}
+	i, err := c.st.GetInterrupt(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, hidden
+		}
+		return nil, service.Internal(err)
+	}
+	return i, nil
 }

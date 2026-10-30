@@ -187,3 +187,36 @@ func TestServingStoppedSupervisor(t *testing.T) {
 		t.Fatalf("child escaped close: %d", s.Count())
 	}
 }
+
+// TestServingWaitingRoundTrip verifies the waiting outcome survives the
+// subprocess transport untouched.
+func TestServingWaitingRoundTrip(t *testing.T) {
+	s := newSupervisor(t, nil)
+	prep := supPrep("rep_w", `def main(input):
+    req = interrupt.new("approval", title = "go?")
+    interrupt.wait(req["id"], handler = "on_ok", context = {"k": "v"})
+
+def on_ok(ctx):
+    return {"status": "ok"}
+`, nil)
+	prep.Program.Handlers = map[string]runtime.HandlerSpec{"on_ok": {}}
+	resp, err := s.Prepare(context.Background(), prep)
+	if err != nil || resp.Result.Error != nil {
+		t.Fatalf("prepare: %v %+v", err, resp.Result.Error)
+	}
+	inv := supInv("rep_w", "inv-w", `{}`)
+	inv.RunID = "run_1"
+	inv.Interrupts = []runtime.InterruptSlot{{ID: "int_1", ConsoleURL: "https://console/int_1"}}
+	out, err := s.Invoke(context.Background(), inv)
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	w := out.Result.Waiting
+	if w == nil || w.InterruptID != "int_1" || w.Handler != "on_ok" || w.Kind != "approval" ||
+		w.Title != "go?" || string(w.Context) != `{"k":"v"}` {
+		t.Fatalf("waiting lost in transport: %+v err=%+v", w, out.Result.Error)
+	}
+	if out.Result.Output != nil || out.Result.Error != nil {
+		t.Fatalf("waiting carried extra outcome: %+v", out.Result)
+	}
+}

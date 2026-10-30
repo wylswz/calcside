@@ -22,6 +22,7 @@ import (
 	"calcside/cmd/calcside/internal/service/iam"
 	llmprovidersvc "calcside/cmd/calcside/internal/service/llmprovider"
 	policysvc "calcside/cmd/calcside/internal/service/policy"
+	runsvc "calcside/cmd/calcside/internal/service/run"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/vault"
 	workspacesvc "calcside/cmd/calcside/internal/service/workspace"
@@ -39,12 +40,14 @@ import (
 )
 
 type env struct {
-	t   *testing.T
-	srv *httptest.Server
-	st  store.Store
-	mgr *instance.Manager
-	sbx *sandbox.Service
-	rec *audit.Recorder
+	t    *testing.T
+	srv  *httptest.Server
+	st   store.Store
+	mgr  *instance.Manager
+	sbx  *sandbox.Service
+	rec  *audit.Recorder
+	runs *runsvc.Service
+	now  func() time.Time
 }
 
 // expire ages an instance out the way the API tier's reaper does:
@@ -123,9 +126,19 @@ func newArtifactEnv(t *testing.T, cipher *vaultcipher.Cipher, global map[string]
 	}
 	t.Cleanup(previews.Close)
 	svc := auth.NewService(st, false)
+	e.now = time.Now
+	runSvc, err := runsvc.New(runsvc.Options{
+		Store: st, Runtime: mgr, Sandbox: e.sbx, Access: ac,
+		Audit: rec, Cipher: cipher, ConsoleOrigin: "http://console.test",
+		Now: func() time.Time { return e.now() },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.runs = runSvc
 	appSvc, err := appsvc.New(appsvc.Options{
 		Store: st, Runtime: mgr, Sandbox: e.sbx, Access: ac,
-		Audit: rec, MaxPerUser: 4,
+		Audit: rec, MaxPerUser: 4, Runs: runSvc,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -136,7 +149,7 @@ func newArtifactEnv(t *testing.T, cipher *vaultcipher.Cipher, global map[string]
 		Policy:      policysvc.New(st, ac), LLMProvider: llmprovidersvc.New(st, ac, &capext.Options{}),
 		Audit:   auditsvc.New(st, ac),
 		Catalog: catalog.New(reg, nil), Sandbox: e.sbx, Access: ac, Workspace: workspacesvc.New(st, ac),
-		Auth: svc, Previews: previews,
+		Auth: svc, Previews: previews, Run: runSvc,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)

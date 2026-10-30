@@ -1345,6 +1345,161 @@ paths:
         '302': { description: redirect to / }
         '400': { $ref: '#/components/responses/Error' }
         '401': { $ref: '#/components/responses/Error' }
+  /api/v1/applications/{id}/runs:
+    get:
+      operationId: listRuns
+      tags: [runs]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: before
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, format: int32, minimum: 1, maximum: 200 }
+      responses:
+        '200':
+          description: run list, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunsResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/runs/{id}:
+    get:
+      operationId: getRun
+      tags: [runs]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: run detail with steps and interrupts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/runs/{id}/cancel:
+    post:
+      operationId: cancelRun
+      tags: [runs]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: cancelled run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunsResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/runs/{id}/retry:
+    post:
+      operationId: retryRun
+      tags: [runs]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: retried run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunsResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/interrupts:
+    get:
+      operationId: listInterrupts
+      tags: [interrupts]
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: resolvable
+          in: query
+          schema: { type: boolean }
+        - name: before
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, format: int32, minimum: 1, maximum: 200 }
+      responses:
+        '200':
+          description: interrupt inbox, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterruptsResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/interrupts/{id}:
+    get:
+      operationId: getInterrupt
+      tags: [interrupts]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: interrupt detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterruptResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/interrupts/{id}/resolve:
+    post:
+      operationId: resolveInterrupt
+      tags: [interrupts]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InterruptResolveRequest'
+      responses:
+        '200':
+          description: resolved interrupt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterruptResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/interrupts/{id}/callback:
+    post:
+      operationId: interruptCallback
+      tags: [interrupts]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: token
+          in: query
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RawJSON'
+      responses:
+        '202':
+          description: event accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterruptCallbackResponse'
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
 components:
   parameters:
     IdPath:
@@ -1393,7 +1548,7 @@ components:
       enum: ['', before, after]
     CapabilityName:
       type: string
-      enum: [fs, net, io, ext]
+      enum: [fs, net, io, ext, interrupt]
     HTTPMethod:
       type: string
       enum: [GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS]
@@ -1402,7 +1557,7 @@ components:
       enum: [vault, inline]
     APIErrorCode:
       type: string
-      enum: [auth_failed, bad_capability, bad_policy, bad_request, bad_secret, bad_spec, conflict, csrf, forbidden, fs_error, internal, method_not_allowed, no_fs, not_found, not_running, secrets_disabled, too_large, too_many, unauthorized]
+      enum: [already_resolved, auth_failed, bad_capability, bad_policy, bad_request, bad_secret, bad_spec, conflict, csrf, forbidden, fs_error, internal, method_not_allowed, no_fs, not_found, not_running, secrets_disabled, too_large, too_many, unauthorized]
     FieldType:
       type: string
       enum: [int, bool, string, string_list, string_map]
@@ -2175,6 +2330,10 @@ components:
         output_schema:
           type: string
           nullable: true
+        handlers:
+          type: string
+          nullable: true
+          description: "handler declarations document {name: {context_schema?}}, raw JSON preserved byte-for-byte"
         version: { type: integer, format: int64, minimum: 1 }
         published_version: { type: integer, format: int64, minimum: 0 }
         persistent_instance_id: { type: string }
@@ -2210,6 +2369,9 @@ components:
         output_schema:
           type: string
           nullable: true
+        handlers:
+          type: string
+          nullable: true
     ApplicationUpdateRequest:
       type: object
       required: [version, name, code]
@@ -2223,6 +2385,9 @@ components:
           type: string
           nullable: true
         output_schema:
+          type: string
+          nullable: true
+        handlers:
           type: string
           nullable: true
     ApplicationPublishRequest:
@@ -2248,6 +2413,121 @@ components:
         output_json:
           type: string
           description: exact raw JSON output text — UI renders this verbatim, never reparses
+        run_id: { type: string }
+        run_status: { type: string }
+        waiting:
+          $ref: '#/components/schemas/InterruptWaiting'
+    # --- EP-0016 runs & interrupts ---
+    InterruptWaiting:
+      type: object
+      required: [interrupt_id, kind, console_url]
+      properties:
+        interrupt_id: { type: string }
+        kind: { type: string }
+        title: { type: string }
+        console_url: { type: string }
+    Run:
+      type: object
+      required: [id, application_id, release_id, user_id, trigger, status, steps, created_at, updated_at]
+      properties:
+        id: { type: string }
+        application_id: { type: string }
+        release_id: { type: string }
+        user_id: { type: string }
+        trigger: { type: string }
+        status: { type: string }
+        steps: { type: integer }
+        interrupt_id: { type: string }
+        error_code: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+    RunDetail:
+      allOf:
+        - $ref: '#/components/schemas/Run'
+        - type: object
+          properties:
+            output_json: { type: string }
+    RunStep:
+      type: object
+      required: [seq, attempt, entry, status, duration_ms, started_at]
+      properties:
+        seq: { type: integer }
+        attempt: { type: integer }
+        entry: { type: string }
+        interrupt_id: { type: string }
+        status: { type: string }
+        error_code: { type: string }
+        duration_ms: { type: integer, format: int64 }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+    Interrupt:
+      type: object
+      required: [id, run_id, application_id, application_name, status, can_resolve, created_at]
+      properties:
+        id: { type: string }
+        run_id: { type: string }
+        application_id: { type: string }
+        application_name: { type: string }
+        kind: { type: string }
+        status: { type: string }
+        title: { type: string }
+        assignees:
+          type: array
+          items: { type: string }
+        event_schema: { type: string }
+        handler: { type: string }
+        on_expire: { type: string }
+        expires_at: { type: string, format: date-time }
+        fire_at: { type: string, format: date-time }
+        resolved_by: { type: string }
+        resolved_by_label: { type: string }
+        assignee_labels:
+          type: array
+          items: { type: string }
+        resolved_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        can_resolve: { type: boolean }
+        callback_url: { type: string }
+        context_json: { type: string }
+        event_json: { type: string }
+    RunsResponse:
+      type: object
+      properties:
+        runs:
+          type: array
+          items: { $ref: '#/components/schemas/Run' }
+    RunResponse:
+      type: object
+      properties:
+        run: { $ref: '#/components/schemas/RunDetail' }
+        steps:
+          type: array
+          items: { $ref: '#/components/schemas/RunStep' }
+        interrupts:
+          type: array
+          items: { $ref: '#/components/schemas/Interrupt' }
+    InterruptsResponse:
+      type: object
+      properties:
+        interrupts:
+          type: array
+          items: { $ref: '#/components/schemas/Interrupt' }
+        next_before: { type: string }
+    InterruptResponse:
+      type: object
+      properties:
+        interrupt: { $ref: '#/components/schemas/Interrupt' }
+    InterruptResolveRequest:
+      type: object
+      required: [event]
+      properties:
+        event:
+          $ref: '#/components/schemas/RawJSON'
+    InterruptCallbackResponse:
+      type: object
+      properties:
+        status: { type: string }
 security:
   - bearerAuth: []
   - cookieAuth: []

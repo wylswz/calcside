@@ -36,3 +36,32 @@ test('first data and a reset are adopted, rows the user caused show at once', ()
   assert.equal(keys(mine.placements), 'd b a')
   assert.equal(keys(hold(mine, at('a'), 'attention', () => false).placements), 'a')
 })
+
+test('keepGone keeps vanished rows in place as placeholders (S3/F1)', () => {
+	const r = reconcile(at('a b c'), at('a c'), { keepGone: true })
+	assert.equal(keys(r.shown), 'a b c')
+	assert.equal(r.shown[1].gone, true)
+	assert.equal(r.gone, 1)
+	assert.equal(r.arrived, 0)
+	// reordering is still measured over present rows only
+	const m = reconcile(at('a b c'), at('c a'), { keepGone: true })
+	assert.equal(m.moved, true)
+	assert.equal(m.gone, 1)
+})
+
+test('reveal clears placeholders: fresh list replaces held order', () => {
+	const before = hold(null, at('a b c'), 'all', () => false)
+	const after = reconcile(before.placements, at('a c'), { keepGone: true })
+	assert.equal(after.shown.length, 3)
+	// reveal() stores fresh placements; the next reconcile drops them
+	const revealed = { placements: at('a c'), reset: 'all' }
+	const r = reconcile(revealed.placements, at('a c'), { keepGone: true })
+	assert.equal(keys(r.shown), 'a c')
+	assert.equal(r.gone, 0)
+})
+
+test('keepGone off keeps existing drop-out behavior', () => {
+	const r = reconcile(at('a b'), at('a'), { keepGone: false })
+	assert.equal(keys(r.shown), 'a')
+	assert.equal(r.gone, 0)
+})

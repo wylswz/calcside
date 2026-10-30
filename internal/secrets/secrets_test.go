@@ -124,3 +124,42 @@ func TestRedactBounded(t *testing.T) {
 		t.Fatal("ignored cancellation")
 	}
 }
+
+func TestWithRedactions(t *testing.T) {
+	base := NewSet()
+	base.Add("TOKEN", []byte("s3cr3t"), rules(t, "x.com"))
+
+	extra := base.WithRedactions([]byte("int_tok_abc"), []byte("second"))
+	if got := extra.Names(); len(got) != 1 || got[0] != "TOKEN" {
+		t.Fatalf("extra leaked into Names: %v", got)
+	}
+	if extra.Lookup("int_tok_abc") != nil {
+		t.Fatal("extra is injectable")
+	}
+	// The receiver is not mutated.
+	if got := base.Names(); len(got) != 1 || got[0] != "TOKEN" {
+		t.Fatalf("receiver mutated: %v", got)
+	}
+
+	text := "tok s3cr3t int_tok_abc " + "c2Vjb25k" // s3cr3t, int_tok_abc, base64(second)
+	got := extra.Redact(text)
+	if strings.Contains(got, "s3cr3t") || strings.Contains(got, "int_tok_abc") || strings.Contains(got, "c2Vjb25k") {
+		t.Fatalf("redaction missed a value: %s", got)
+	}
+	if !strings.Contains(got, "[REDACTED:TOKEN]") || !strings.Contains(got, "[REDACTED]") {
+		t.Fatalf("expected named and unnamed markers: %s", got)
+	}
+	if b := base.Redact(text); !strings.Contains(b, "int_tok_abc") {
+		t.Fatal("receiver gained the extra redaction")
+	}
+	if _, err := extra.RedactBounded(context.Background(), text, 1<<20); err != nil {
+		t.Fatalf("bounded redaction failed: %v", err)
+	}
+
+	// Nil receiver behaves like an empty set.
+	var nilSet *Set
+	got = nilSet.WithRedactions([]byte("tok_xyz")).Redact("a tok_xyz b")
+	if strings.Contains(got, "tok_xyz") || !strings.Contains(got, "[REDACTED]") {
+		t.Fatalf("nil set did not redact extras: %s", got)
+	}
+}

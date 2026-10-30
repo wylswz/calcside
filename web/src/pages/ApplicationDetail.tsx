@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
-import { api, ApiError, Application, workspaces } from '../api'
-import { Button, Confirm, Loading, Notice, PageHeader, SwapLabel } from '../components/ui'
+import { api, ApiError, Application, Interrupt, Run, workspaces } from '../api'
+import { Button, Confirm, Loading, Notice, PageHeader, RevealNew, SwapLabel } from '../components/ui'
 import { cmTheme } from '../components/codemirror'
 import { useApplicationEditor } from '../components/editor'
 import { SpecForm } from '../components/SpecForm'
@@ -11,6 +11,9 @@ import type { DraftError, InstanceDraft, InstanceSpec } from '../instanceDraft'
 import './application.css'
 import { ApplicationCallExamples } from '../components/ApplicationCallExamples'
 import { AppKeyModal } from '../components/AppKeyModal'
+import { ResolveForm } from '../components/ResolveForm'
+import { useHeldOrder } from '../stableList'
+import { fmtDateTime, parseHandlers, serializeHandlers, handlerNameErr, schemaErr, HandlerRow } from '../interrupts'
 
 type Draft = {
   name: string
@@ -21,6 +24,9 @@ type Draft = {
   inText: string
   outOn: boolean
   outText: string
+  // handlers rows carry each context_schema's verbatim JSON text so
+  // schema literals keep precision through save (C2).
+  handlers: HandlerRow[]
 }
 type Saved = { draft: Draft; version: number; fp: string }
 
@@ -41,6 +47,7 @@ function draftOf(a: Application): Draft {
     spec: a.spec_json ?? '{}',
     inOn: a.input_schema != null, inText: a.input_schema ?? '',
     outOn: a.output_schema != null, outText: a.output_schema ?? '',
+    handlers: parseHandlers(a.handlers ?? ''),
   }
 }
 
@@ -155,6 +162,7 @@ function Editor({ app, role, userID, qc }: Props) {
   const [outdated, setOutdated] = useState(false)
   const [busy, setBusy] = useState('')
   const [delOpen, setDelOpen] = useState(false)
+  const [removeHandler, setRemoveHandler] = useState<number | null>(null)
   const [keyOpen, setKeyOpen] = useState(false)
   const [reloadOpen, setReloadOpen] = useState<Application | null>(null)
   const [adv, setAdv] = useState(true)
@@ -218,7 +226,7 @@ function Editor({ app, role, userID, qc }: Props) {
     if (!sameJSON(curParsed, built.spec)) edit({ spec: JSON.stringify(built.spec) })
   }, [])
   type Result = { id: string; output?: unknown; error?: { code: string; message: string }; duration_ms: number; steps: number }
-  type RunView = { result: Result; output_json?: string }
+  type RunView = { result: Result; output_json?: string; run_id?: string; run_status?: string; waiting?: { interrupt_id: string; kind: string; title?: string; console_url: string } }
   // The Invoke card owns its own input/result; neither touches the draft.
   const [callInput, setCallInput] = useState(DEFAULT_INPUT)
   const [callRun, setCallRun] = useState<RunView | null>(null)
@@ -233,7 +241,8 @@ function Editor({ app, role, userID, qc }: Props) {
     const spec = d.spec.trim() || 'null'
     const ins = d.inOn && d.inText.trim() ? JSON.stringify(d.inText) : 'null'
     const outs = d.outOn && d.outText.trim() ? JSON.stringify(d.outText) : 'null'
-    const body = `{"version":${fromVersion},"name":${JSON.stringify(d.name)},"code":${JSON.stringify(d.code)},"spec":${spec},"input_schema":${ins},"output_schema":${outs}}`
+    const hd = d.handlers.length ? JSON.stringify(serializeHandlers(d.handlers)) : 'null'
+    const body = `{"version":${fromVersion},"name":${JSON.stringify(d.name)},"code":${JSON.stringify(d.code)},"spec":${spec},"input_schema":${ins},"output_schema":${outs},"handlers":${hd}}`
     const r = await api.putRawJson<{ application: Application }>(`/api/v1/applications/${app.id}`, body)
     return r.application ?? null
   }
@@ -418,6 +427,14 @@ function Editor({ app, role, userID, qc }: Props) {
                 {run ? (run.output_json ?? (run.result.error ? `error: ${run.result.error.code} — ${run.result.error.message}` : '')) : 'Run to see output'}
               </pre>
               {outdated && <p className="app-dim">Result is from before your latest edits.</p>}
+              {run?.waiting && (
+                <div className="app-waiting">
+                  <p className="text-sm font-medium text-body">Waiting — {run.waiting.kind}{run.waiting.title ? ` ${run.waiting.title}` : ''}</p>
+                  <InterruptResolve interruptId={run.waiting.interrupt_id} userId={userID} workspaceId={app.workspace_id}
+                    onDone={() => run.run_id && qc.invalidateQueries({ queryKey: ['run', run.run_id] })} />
+                  {run.run_id && <Link className="link text-xs" to={`/applications/${app.id}/runs/${run.run_id}`}>Open run</Link>}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -462,6 +479,35 @@ function Editor({ app, role, userID, qc }: Props) {
             )}
           </div>
         ))}
+        <div className="app-schema">
+          <span className="app-label">Handlers</span>
+          {draft.handlers.map((h, k) => (
+            <div key={k} className="mb-3 border-l-2 border-line pl-2">
+              <div className="flex items-center gap-2">
+                <input className="app-input w-48" placeholder="handler name" aria-label="handler name"
+                  value={h.name} disabled={view === 'view'}
+                  onChange={(e) => { const rows = draft.handlers.slice(); rows[k] = { ...h, name: e.target.value }; edit({ handlers: rows }) }} />
+                {view === 'edit' && <Button size="sm" variant="danger" onClick={() => setRemoveHandler(k)}>Remove</Button>}
+              </div>
+              {handlerNameErr(h.name, draft.handlers, k) !== '' &&
+                <p className="text-xs text-warn-text">{handlerNameErr(h.name, draft.handlers, k)}</p>}
+              <label className="app-check mt-1">
+                <input type="checkbox" checked={h.on} disabled={view === 'view'}
+                  onChange={(e) => { const rows = draft.handlers.slice(); rows[k] = { ...h, on: e.target.checked }; edit({ handlers: rows }) }} />
+                Context schema
+              </label>
+              {h.on && (
+                <>
+                  <textarea className="app-area" rows={4} spellCheck={false} disabled={view === 'view'}
+                    aria-label="context schema JSON" value={h.text}
+                    onChange={(e) => { const rows = draft.handlers.slice(); rows[k] = { ...h, text: e.target.value }; edit({ handlers: rows }) }} />
+                  {schemaErr(h.text) !== '' && <p className="text-xs text-warn-text">{schemaErr(h.text)}</p>}
+                </>
+              )}
+            </div>
+          ))}
+          {view === 'edit' && <Button size="sm" onClick={() => edit({ handlers: [...draft.handlers, { name: '', on: false, text: '' }] })}>Add handler</Button>}
+        </div>
         </div>
       </details>
 
@@ -484,6 +530,11 @@ function Editor({ app, role, userID, qc }: Props) {
               <pre className="app-out-pre app-call-out" aria-live="polite">
                 {callRun ? (callRun.output_json ?? (callRun.result.error ? `error: ${callRun.result.error.code} — ${callRun.result.error.message}` : '')) : 'Invoke to see output'}
               </pre>
+              {callRun?.waiting && (
+                <p className="text-sm text-body mt-2">Waiting — {callRun.waiting.kind}{callRun.waiting.title ? ` ${callRun.waiting.title}` : ''}
+                  {callRun.run_id && <> · <Link className="link" to={`/applications/${app.id}/runs/${callRun.run_id}`}>Open run</Link></>}
+                </p>
+              )}
             </div>
           </div>
           <div>
@@ -516,8 +567,75 @@ function Editor({ app, role, userID, qc }: Props) {
           This draft was changed by another session. Reload the newer version? Your current edits are kept in this tab until you confirm.
         </Confirm>
       )}
+      <section className="app-card">
+        <div className="app-card-head"><span className="app-card-title">Runs</span></div>
+        <div className="app-card-body"><RunsTable appId={app.id} /></div>
+      </section>
       {keyOpen && <AppKeyModal appId={app.id} appName={app.name} workspaceId={app.workspace_id} onClose={() => setKeyOpen(false)} />}
+      {removeHandler !== null && (
+        <Confirm tone="danger" title={`Remove handler ${draft.handlers[removeHandler].name || '(unnamed)'}?`} confirm="Remove" pending="Removing…"
+          action={async () => { edit({ handlers: draft.handlers.filter((_, k) => k !== removeHandler) }); setRemoveHandler(null) }}
+          onClose={() => setRemoveHandler(null)}>
+          <p className="text-sm text-body">Wait calls naming it will fail until redeployed.</p>
+        </Confirm>
+      )}
       {busy === 'delete' && <Loading />}
+    </div>
+  )
+}
+
+
+// RunsTable lists the application's runs with held order (S5/C3); rows
+// update in place and reordering waits for the reveal affordance.
+function RunsTable({ appId }: { appId: string }) {
+  const q = useQuery({
+    queryKey: ['runs', appId],
+    queryFn: () => api.get<{ runs?: Run[] }>(`/api/v1/applications/${encodeURIComponent(appId)}/runs`),
+    refetchInterval: 5000,
+  })
+  const held = useHeldOrder(q.data?.runs?.map((r) => ({ r })) ?? undefined, ({ r }) => ({ key: r.id, slot: 'runs' }))
+  if (q.isLoading) return <Loading />
+  if (q.isError) return <Notice tone="warning">Could not load runs.</Notice>
+  return (
+    <>
+      <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />
+      {held.rows.length === 0 && held.arrived === 0 && <p className="app-dim">No runs yet.</p>}
+      {held.rows.length > 0 && (
+        <table className="tbl">
+          <thead><tr><th>Status</th><th>Trigger</th><th>Steps</th><th>Started</th><th>Waiting on</th></tr></thead>
+          <tbody>
+            {held.rows.map(({ item: { r } }) => (
+              <tr key={r.id} className="row-hover">
+                <td><Link className="link" to={`/applications/${appId}/runs/${r.id}`}><span className={`app-status app-status-${r.status}`}>{r.status}</span></Link></td>
+                <td className="text-xs text-sec">{r.trigger}</td>
+                <td className="text-xs text-sec">{r.steps}</td>
+                <td className="text-xs text-sec">{r.created_at ? fmtDateTime(r.created_at) : ''}</td>
+                <td className="text-xs text-sec">{r.interrupt_id ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
+  )
+}
+
+// InterruptResolve loads one interrupt and renders the shared
+// ResolveForm inline (used by the Develop waiting box).
+function InterruptResolve({ interruptId, userId, workspaceId, onDone }: {
+  interruptId: string; userId: string; workspaceId: string; onDone: () => void
+}) {
+  const q = useQuery({
+    queryKey: ['interrupt', interruptId],
+    queryFn: () => api.get<{ interrupt?: Interrupt }>(`/api/v1/interrupts/${encodeURIComponent(interruptId)}`),
+    refetchInterval: 5000,
+  })
+  const i = q.data?.interrupt
+  if (!i) return null
+  if (i.status !== 'pending') return <p className="text-xs text-sec mt-1">Resolved{i.resolved_by_label ? ` by ${i.resolved_by_label}` : ''}.</p>
+  return (
+    <div className="mt-1">
+      <ResolveForm interrupt={i} scope={{ userId, workspaceId }} onResolved={onDone} />
     </div>
   )
 }
