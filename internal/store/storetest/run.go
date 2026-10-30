@@ -269,9 +269,18 @@ func RunRuns(t *testing.T, s store.Store) {
 			if _, err := s.ResolveInterrupt(ctx, slots[0].ID, []byte(`{}`), "usr_x", rNow); err != nil {
 				t.Fatal(err)
 			}
-			cl, err := s.ClaimDispatch(ctx, rNow, rNow.Add(time.Minute))
-			if err != nil || cl == nil || cl.ID != slots[0].ID {
-				t.Fatalf("claim: %v %+v", err, cl)
+			// Dispatch is a global queue: earlier subtests leave queued
+			// interrupts in the shared store, so claim until ours surfaces.
+			var cl *store.Interrupt
+			for {
+				var err error
+				cl, err = s.ClaimDispatch(ctx, rNow, rNow.Add(time.Minute))
+				if err != nil {
+					t.Fatalf("claim: %v", err)
+				}
+				if cl.ID == slots[0].ID {
+					break
+				}
 			}
 			step1 := &store.RunStep{RunID: r.ID, Seq: 1, Attempt: 1, Entry: "on_ok",
 				InterruptID: slots[0].ID, Status: store.StepRunning, StartedAt: rNow}
