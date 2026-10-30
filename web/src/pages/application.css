@@ -67,3 +67,10 @@
   background: rgb(var(--paper)); border: 1px solid rgb(var(--line));
   border-radius: 6px; font-size: 12px; white-space: pre; overflow-wrap: normal;
 }
+
+/* Inbox nav count: reserved width, tabular figures — nav never shifts (S3/S4) */
+.inbox-count { display: inline-block; min-width: 1.5em; text-align: center; font-variant-numeric: tabular-nums; color: var(--warn-text, #a35c00); }
+.app-kv { display: grid; grid-template-columns: auto 1fr; gap: .25rem .75rem; font-size: .8rem; }
+.app-kv dt { grid-column: 1; }
+.app-kv dd { grid-column: 2; }
+.row-sel { outline: 1px solid var(--accent, #4f46e5); }

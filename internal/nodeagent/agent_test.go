@@ -194,6 +194,57 @@ func TestStartupPrepareAndExpiry(t *testing.T) {
 	<-done
 }
 
+// A ready report enqueued mid-cycle must sync immediately — not on the
+// next PollInterval tick.
+func TestReadyReportWakesSync(t *testing.T) {
+	ctl := &fakeCtl{}
+	rt := &fakeRT{}
+	exp := time.Now().Add(30 * time.Second)
+	as := assign("rep_1", "pin_1", 1, exp)
+	ctl.syncResp = &runtime.NodeSyncResponse{
+		Assignments: []runtime.ReplicaAssignment{as}, ServerNow: time.Now()}
+	ctl.prepResp = &runtime.NodePrepareResponse{
+		ServerNow: time.Now(),
+		Request: runtime.PrepareRequest{
+			CreateRequest: runtime.CreateRequest{
+				InstanceID: "rep_1", Owner: runtime.Owner{UserID: "u1"},
+				ExpiresAt: exp, Epoch: 1,
+			},
+			ReleaseID: "rel_1", Generation: 1, PrepareID: "prp_1",
+		},
+	}
+	a, err := New(Options{
+		Control: ctl, Runtime: rt, NodeID: "n1", BootID: "b1",
+		Capacity: 4, PollInterval: time.Hour, CallTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		ctl.mu.Lock()
+		var found bool
+		if ctl.lastReq != nil {
+			for _, r := range ctl.lastReq.Reports {
+				if r.State == runtime.NodeReplicaReady {
+					found = true
+				}
+			}
+		}
+		ctl.mu.Unlock()
+		if found {
+			cancel()
+			<-done
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("ready report waited for the poll tick")
+}
+
 func TestStaleBootTerminal(t *testing.T) {
 	ctl := &fakeCtl{regErr: runtime.ErrStaleEpoch}
 	rt := &fakeRT{}

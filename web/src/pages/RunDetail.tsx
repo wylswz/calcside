@@ -1,0 +1,139 @@
+import { useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { getRun, cancelRun, retryRun, Interrupt, currentWorkspace } from '../api'
+import { Button, Confirm, Loading, Notice, PageHeader, TimeLeft } from '../components/ui'
+import { ResumeForm } from '../components/ResumeForm'
+import { deadlineOf, interruptTitle, resolverLabel, runPhase } from '../interrupts'
+
+// One durable run (EP-0016): status header with deadline, Cancel/Retry
+// actions behind named Confirms (F2), the pending interrupt with a
+// ResumeForm, and the step list. Polling updates rows in place;
+// selections and the waiting card keep their boxes (C3/S3).
+export default function RunDetail() {
+	const { id: appId, runId } = useParams<{ id: string; runId: string }>()
+	const qc = useQueryClient()
+	const me = qc.getQueryData<{ user: { id: string } }>(['me'])
+	const ws = currentWorkspace() ?? ''
+	const [confirm, setConfirm] = useState<'' | 'cancel' | 'retry'>('')
+	const [err, setErr] = useState('')
+
+	const q = useQuery({
+		queryKey: ['run', runId],
+		queryFn: () => getRun(runId!),
+		// 1s while a handler is running, 5s otherwise (S4 stable slot)
+		refetchInterval: (q) => (q.state.data && runPhase(q.state.data).phase === 'running' ? 1000 : 5000),
+		enabled: runId != null,
+	})
+	const run = q.data?.run
+	const steps = q.data?.steps ?? []
+	const intrs = q.data?.interrupts ?? []
+	const phase = q.data ? runPhase(q.data) : undefined
+	const pending = phase?.phase === 'waiting' ? phase.interrupt : undefined
+	const runningHandler = phase?.phase === 'running' ? phase.handler : undefined
+	const deadline = pending ? deadlineOf(pending) : undefined
+
+	if (q.isLoading) return <Loading />
+	if (q.isError) return <Notice tone="warning">Could not load run: {(q.error as Error).message}</Notice>
+	if (!run) return <Notice tone="warning">Run not found.</Notice>
+
+	const cancellable = run.status === 'waiting' || run.status === 'unknown'
+	const retryable = run.status === 'unknown'
+
+	return (
+		<div className="app-page">
+			<PageHeader title={
+				<span>Run <span className={`app-status app-status-${run.status}`}>{run.status}</span></span>
+			} actions={<>
+				{cancellable && <Button variant="danger" size="sm" onClick={() => setConfirm('cancel')}>Cancel run</Button>}
+				{retryable && <Button size="sm" onClick={() => setConfirm('retry')}>Retry step</Button>}
+			</>} />
+			<p className="app-dim">
+				<Link to={`/applications/${appId}`} className="link">← {appId}</Link> ·{' '}
+				<span className="app-mono">{run.id}</span>
+				{deadline && <> · <TimeLeft expiresAt={deadline} /></>}
+			</p>
+			{err !== '' && <Notice tone="warning">{err}</Notice>}
+
+			{run.status === 'succeeded' && run.output_json && (
+				<section className="app-card">
+					<div className="app-card-head"><span className="app-card-title">Output</span></div>
+					<div className="app-card-body"><pre className="app-out-pre">{run.output_json}</pre></div>
+				</section>
+			)}
+			{run.status === 'failed' && run.error_code && (
+				<Notice tone="warning">Run failed — {run.error_code}</Notice>
+			)}
+
+			{(pending || phase?.phase === 'running') && (
+				<section className="app-card">
+					<div className="app-card-head"><span className="app-card-title">{pending ? `Waiting on — ${interruptTitle(pending)}` : `Running — ${runningHandler ?? 'handler'}`}</span></div>
+					<div className="app-card-body">
+						{pending?.context_json && <pre className="app-out-pre mt-2">{pending.context_json}</pre>}
+						{pending?.resume_url && <p className="text-xs text-sec mt-2">External systems resume with <span className="app-mono">POST {pending.resume_url}</span> and the interrupt's resume_token.</p>}
+						{pending ? (
+							pending.can_resume ? (
+								<ResumeForm interrupt={pending}
+									scope={{ userId: me?.user.id ?? '', workspaceId: ws }}
+									onResumed={() => qc.invalidateQueries({ queryKey: ['run', runId] })} />
+							) : (
+								<p className="text-sm text-body">Waiting to be resumed.</p>
+							)
+						) : (
+							// S3: the card keeps its box while the handler runs.
+							<p className="text-sm text-body" aria-live="polite">Running {runningHandler ?? 'handler'}…</p>
+						)}
+					</div>
+				</section>
+			)}
+
+			<section className="app-card">
+				<div className="app-card-head"><span className="app-card-title">Steps</span></div>
+				<div className="app-card-body">
+					<table className="tbl">
+						<thead>
+							<tr><th>Seq</th><th>Attempt</th><th>Entry</th><th>Status</th><th>Duration</th><th>Resolver</th></tr>
+						</thead>
+						<tbody>
+							{steps.map((s) => (
+								<tr key={`${s.seq}/${s.attempt}`}>
+									<td className="text-xs">{s.seq}</td>
+									<td className="text-xs">{s.attempt}</td>
+									<td className="text-xs">{s.entry}</td>
+									<td><span className={`app-status app-status-${s.status}`}>{s.status}</span>{s.error_code ? ` · ${s.error_code}` : ''}</td>
+									<td className="text-xs text-sec">{s.duration_ms}ms</td>
+									<td className="text-xs text-sec">{s.interrupt_id ? (intrs.find((i: Interrupt) => i.id === s.interrupt_id)?.resolved_by ? resolverLabel(intrs.find((i) => i.id === s.interrupt_id)!) : s.interrupt_id) : '—'}</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</div>
+			</section>
+
+			{confirm === 'cancel' && (
+				<Confirm tone="danger" title={`Cancel run ${run.id}?`} confirm="Cancel run" pending="Cancelling…"
+					action={async () => {
+						try { await cancelRun(run.id); setErr('') }
+						catch (e) { setErr(e instanceof Error ? e.message : 'cancel failed') }
+						setConfirm('')
+						await qc.invalidateQueries({ queryKey: ['run', runId] })
+					}}
+					onClose={() => setConfirm('')}>
+					<p className="text-sm text-body">Pending interrupts are cancelled and their callback keys revoked.</p>
+				</Confirm>
+			)}
+			{confirm === 'retry' && (
+				<Confirm title={`Retry the failed step of ${run.id}?`} confirm="Retry" pending="Retrying…"
+					action={async () => {
+						try { await retryRun(run.id); setErr('') }
+						catch (e) { setErr(e instanceof Error ? e.message : 'retry failed') }
+						setConfirm('')
+						await qc.invalidateQueries({ queryKey: ['run', runId] })
+					}}
+					onClose={() => setConfirm('')}>
+					<p className="text-sm text-body">The handler may repeat side effects; it runs again with the same interrupt id.</p>
+				</Confirm>
+			)}
+		</div>
+	)
+}

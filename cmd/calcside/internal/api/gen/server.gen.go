@@ -20,6 +20,7 @@ import (
 
 // Defines values for APIErrorCode.
 const (
+	AlreadyResolved  APIErrorCode = "already_resolved"
 	AuthFailed       APIErrorCode = "auth_failed"
 	BadCapability    APIErrorCode = "bad_capability"
 	BadPolicy        APIErrorCode = "bad_policy"
@@ -44,6 +45,8 @@ const (
 // Valid indicates whether the value is a known member of the APIErrorCode enum.
 func (e APIErrorCode) Valid() bool {
 	switch e {
+	case AlreadyResolved:
+		return true
 	case AuthFailed:
 		return true
 	case BadCapability:
@@ -161,22 +164,25 @@ func (e AuthKind) Valid() bool {
 
 // Defines values for CapabilityName.
 const (
-	Ext CapabilityName = "ext"
-	Fs  CapabilityName = "fs"
-	Io  CapabilityName = "io"
-	Net CapabilityName = "net"
+	CapabilityNameExt       CapabilityName = "ext"
+	CapabilityNameFs        CapabilityName = "fs"
+	CapabilityNameInterrupt CapabilityName = "interrupt"
+	CapabilityNameIo        CapabilityName = "io"
+	CapabilityNameNet       CapabilityName = "net"
 )
 
 // Valid indicates whether the value is a known member of the CapabilityName enum.
 func (e CapabilityName) Valid() bool {
 	switch e {
-	case Ext:
+	case CapabilityNameExt:
 		return true
-	case Fs:
+	case CapabilityNameFs:
 		return true
-	case Io:
+	case CapabilityNameInterrupt:
 		return true
-	case Net:
+	case CapabilityNameIo:
+		return true
+	case CapabilityNameNet:
 		return true
 	default:
 		return false
@@ -504,8 +510,11 @@ type ApplicationResponse struct {
 // ApplicationRunResponse defines model for ApplicationRunResponse.
 type ApplicationRunResponse struct {
 	// OutputJson exact raw JSON output text — UI renders this verbatim, never reparses
-	OutputJson *string          `json:"output_json,omitempty"`
-	Result     rt.ProgramResult `json:"result"`
+	OutputJson *string           `json:"output_json,omitempty"`
+	Result     rt.ProgramResult  `json:"result"`
+	RunId      *string           `json:"run_id,omitempty"`
+	RunStatus  *string           `json:"run_status,omitempty"`
+	Waiting    *InterruptWaiting `json:"waiting,omitempty"`
 }
 
 // ApplicationStatus defines model for ApplicationStatus.
@@ -915,6 +924,48 @@ type InstancesResponse struct {
 	Instances *[]Instance `json:"instances,omitempty"`
 }
 
+// Interrupt defines model for Interrupt.
+type Interrupt struct {
+	ApplicationId   string     `json:"application_id"`
+	ApplicationName string     `json:"application_name"`
+	CanResume       bool       `json:"can_resume"`
+	ContextJson     *string    `json:"context_json,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	EventJson       *string    `json:"event_json,omitempty"`
+	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
+	Handler         *string    `json:"handler,omitempty"`
+	Id              string     `json:"id"`
+	OnExpire        *string    `json:"on_expire,omitempty"`
+	ResolvedAt      *time.Time `json:"resolved_at,omitempty"`
+	ResolvedBy      *string    `json:"resolved_by,omitempty"`
+	ResolvedByLabel *string    `json:"resolved_by_label,omitempty"`
+	ResumeUrl       *string    `json:"resume_url,omitempty"`
+	RunId           string     `json:"run_id"`
+	Status          string     `json:"status"`
+}
+
+// InterruptResponse defines model for InterruptResponse.
+type InterruptResponse struct {
+	Interrupt *Interrupt `json:"interrupt,omitempty"`
+}
+
+// InterruptResumeResponse defines model for InterruptResumeResponse.
+type InterruptResumeResponse struct {
+	Status *string `json:"status,omitempty"`
+}
+
+// InterruptWaiting defines model for InterruptWaiting.
+type InterruptWaiting struct {
+	ConsoleUrl  string `json:"console_url"`
+	InterruptId string `json:"interrupt_id"`
+}
+
+// InterruptsResponse defines model for InterruptsResponse.
+type InterruptsResponse struct {
+	Interrupts *[]Interrupt `json:"interrupts,omitempty"`
+	NextBefore *string      `json:"next_before,omitempty"`
+}
+
 // KeysResponse defines model for KeysResponse.
 type KeysResponse struct {
 	Keys *[]APIKey `json:"keys,omitempty"`
@@ -1090,6 +1141,64 @@ type ResourceUsages struct {
 	MemoryUsage int64 `json:"memory_usage"`
 }
 
+// Run defines model for Run.
+type Run struct {
+	ApplicationId string     `json:"application_id"`
+	CreatedAt     time.Time  `json:"created_at"`
+	EndedAt       *time.Time `json:"ended_at,omitempty"`
+	ErrorCode     *string    `json:"error_code,omitempty"`
+	Id            string     `json:"id"`
+	InterruptId   *string    `json:"interrupt_id,omitempty"`
+	ReleaseId     string     `json:"release_id"`
+	Status        string     `json:"status"`
+	Steps         int        `json:"steps"`
+	Trigger       string     `json:"trigger"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+	UserId        string     `json:"user_id"`
+}
+
+// RunDetail defines model for RunDetail.
+type RunDetail struct {
+	ApplicationId string     `json:"application_id"`
+	CreatedAt     time.Time  `json:"created_at"`
+	EndedAt       *time.Time `json:"ended_at,omitempty"`
+	ErrorCode     *string    `json:"error_code,omitempty"`
+	Id            string     `json:"id"`
+	InterruptId   *string    `json:"interrupt_id,omitempty"`
+	OutputJson    *string    `json:"output_json,omitempty"`
+	ReleaseId     string     `json:"release_id"`
+	Status        string     `json:"status"`
+	Steps         int        `json:"steps"`
+	Trigger       string     `json:"trigger"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+	UserId        string     `json:"user_id"`
+}
+
+// RunResponse defines model for RunResponse.
+type RunResponse struct {
+	Interrupts *[]Interrupt `json:"interrupts,omitempty"`
+	Run        *RunDetail   `json:"run,omitempty"`
+	Steps      *[]RunStep   `json:"steps,omitempty"`
+}
+
+// RunStep defines model for RunStep.
+type RunStep struct {
+	Attempt     int        `json:"attempt"`
+	DurationMs  int64      `json:"duration_ms"`
+	EndedAt     *time.Time `json:"ended_at,omitempty"`
+	Entry       string     `json:"entry"`
+	ErrorCode   *string    `json:"error_code,omitempty"`
+	InterruptId *string    `json:"interrupt_id,omitempty"`
+	Seq         int        `json:"seq"`
+	StartedAt   time.Time  `json:"started_at"`
+	Status      string     `json:"status"`
+}
+
+// RunsResponse defines model for RunsResponse.
+type RunsResponse struct {
+	Runs *[]Run `json:"runs,omitempty"`
+}
+
 // Secret defines model for Secret.
 type Secret struct {
 	// AllowedDomains optional; empty = any host permitted by net allow_hosts
@@ -1244,6 +1353,12 @@ type DeleteApplicationParams struct {
 	Version int64 `form:"version" json:"version"`
 }
 
+// ListRunsParams defines parameters for ListRuns.
+type ListRunsParams struct {
+	Before *string `form:"before,omitempty" json:"before,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // ListAuditParams defines parameters for ListAudit.
 type ListAuditParams struct {
 	InstanceId *string    `form:"instance_id,omitempty" json:"instance_id,omitempty"`
@@ -1306,6 +1421,19 @@ type InstancePromptParams struct {
 type PutShareJSONBody struct {
 	Email string     `json:"email"`
 	Role  MemberRole `json:"role"`
+}
+
+// ListInterruptsParams defines parameters for ListInterrupts.
+type ListInterruptsParams struct {
+	Status    *string `form:"status,omitempty" json:"status,omitempty"`
+	Resumable *bool   `form:"resumable,omitempty" json:"resumable,omitempty"`
+	Before    *string `form:"before,omitempty" json:"before,omitempty"`
+	Limit     *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ResumeInterruptParams defines parameters for ResumeInterrupt.
+type ResumeInterruptParams struct {
+	Token *string `form:"token,omitempty" json:"token,omitempty"`
 }
 
 // ListKeysParams defines parameters for ListKeys.
@@ -1413,6 +1541,9 @@ type ExecJSONRequestBody = ExecRequest
 // PutShareJSONRequestBody defines body for PutShare for application/json ContentType.
 type PutShareJSONRequestBody PutShareJSONBody
 
+// ResumeInterruptJSONRequestBody defines body for ResumeInterrupt for application/json ContentType.
+type ResumeInterruptJSONRequestBody = RawJSON
+
 // CreateKeyJSONRequestBody defines body for CreateKey for application/json ContentType.
 type CreateKeyJSONRequestBody = CreateKeyRequest
 
@@ -1475,6 +1606,9 @@ type ServerInterface interface {
 
 	// (POST /api/v1/applications/{id}/publish)
 	PublishApplication(c *gin.Context, id IdPath)
+
+	// (GET /api/v1/applications/{id}/runs)
+	ListRuns(c *gin.Context, id IdPath, params ListRunsParams)
 
 	// (POST /api/v1/applications/{id}/test)
 	TestApplication(c *gin.Context, id IdPath)
@@ -1557,6 +1691,15 @@ type ServerInterface interface {
 	// (DELETE /api/v1/instances/{id}/shares/{user_id})
 	DeleteShare(c *gin.Context, id IdPath, userId string)
 
+	// (GET /api/v1/interrupts)
+	ListInterrupts(c *gin.Context, params ListInterruptsParams)
+
+	// (GET /api/v1/interrupts/{id})
+	GetInterrupt(c *gin.Context, id IdPath)
+
+	// (POST /api/v1/interrupts/{id}/resume)
+	ResumeInterrupt(c *gin.Context, id IdPath, params ResumeInterruptParams)
+
 	// (GET /api/v1/keys)
 	ListKeys(c *gin.Context, params ListKeysParams)
 
@@ -1604,6 +1747,15 @@ type ServerInterface interface {
 
 	// (PUT /api/v1/policies/{id})
 	UpdatePolicy(c *gin.Context, id IdPath)
+
+	// (GET /api/v1/runs/{id})
+	GetRun(c *gin.Context, id IdPath)
+
+	// (POST /api/v1/runs/{id}/cancel)
+	CancelRun(c *gin.Context, id IdPath)
+
+	// (POST /api/v1/runs/{id}/retry)
+	RetryRun(c *gin.Context, id IdPath)
 
 	// (GET /api/v1/secrets)
 	ListSecrets(c *gin.Context, params ListSecretsParams)
@@ -1861,6 +2013,50 @@ func (siw *ServerInterfaceWrapper) PublishApplication(c *gin.Context) {
 	}
 
 	siw.Handler.PublishApplication(c, id)
+}
+
+// ListRuns operation middleware
+func (siw *ServerInterfaceWrapper) ListRuns(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListRunsParams
+
+	// ------------- Optional query parameter "before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "before", c.Request.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter before: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListRuns(c, id, params)
 }
 
 // TestApplication operation middleware
@@ -2558,6 +2754,118 @@ func (siw *ServerInterfaceWrapper) DeleteShare(c *gin.Context) {
 	siw.Handler.DeleteShare(c, id, userId)
 }
 
+// ListInterrupts operation middleware
+func (siw *ServerInterfaceWrapper) ListInterrupts(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListInterruptsParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", c.Request.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter status: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "resumable" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "resumable", c.Request.URL.Query(), &params.Resumable, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter resumable: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "before", c.Request.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter before: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListInterrupts(c, params)
+}
+
+// GetInterrupt operation middleware
+func (siw *ServerInterfaceWrapper) GetInterrupt(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetInterrupt(c, id)
+}
+
+// ResumeInterrupt operation middleware
+func (siw *ServerInterfaceWrapper) ResumeInterrupt(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ResumeInterruptParams
+
+	// ------------- Optional query parameter "token" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "token", c.Request.URL.Query(), &params.Token, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter token: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ResumeInterrupt(c, id, params)
+}
+
 // ListKeys operation middleware
 func (siw *ServerInterfaceWrapper) ListKeys(c *gin.Context) {
 
@@ -2932,6 +3240,81 @@ func (siw *ServerInterfaceWrapper) UpdatePolicy(c *gin.Context) {
 	}
 
 	siw.Handler.UpdatePolicy(c, id)
+}
+
+// GetRun operation middleware
+func (siw *ServerInterfaceWrapper) GetRun(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetRun(c, id)
+}
+
+// CancelRun operation middleware
+func (siw *ServerInterfaceWrapper) CancelRun(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CancelRun(c, id)
+}
+
+// RetryRun operation middleware
+func (siw *ServerInterfaceWrapper) RetryRun(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RetryRun(c, id)
 }
 
 // ListSecrets operation middleware
@@ -3361,6 +3744,13 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/api/v1/secrets", wrapper.CreateSecret)
 	router.DELETE(options.BaseURL+"/api/v1/secrets/:id", wrapper.DeleteSecret)
 	router.PUT(options.BaseURL+"/api/v1/secrets/:id", wrapper.UpdateSecret)
+	router.GET(options.BaseURL+"/api/v1/applications/:id/runs", wrapper.ListRuns)
+	router.GET(options.BaseURL+"/api/v1/runs/:id", wrapper.GetRun)
+	router.POST(options.BaseURL+"/api/v1/runs/:id/cancel", wrapper.CancelRun)
+	router.POST(options.BaseURL+"/api/v1/runs/:id/retry", wrapper.RetryRun)
+	router.GET(options.BaseURL+"/api/v1/interrupts", wrapper.ListInterrupts)
+	router.GET(options.BaseURL+"/api/v1/interrupts/:id", wrapper.GetInterrupt)
+	router.POST(options.BaseURL+"/api/v1/interrupts/:id/resume", wrapper.ResumeInterrupt)
 }
 
 type ErrorJSONResponse ErrorEnvelope
@@ -3864,6 +4254,57 @@ func (response PublishApplication409JSONResponse) VisitPublishApplicationRespons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRunsRequestObject struct {
+	Id     IdPath `json:"id"`
+	Params ListRunsParams
+}
+
+type ListRunsResponseObject interface {
+	VisitListRunsResponse(w http.ResponseWriter) error
+}
+
+type ListRuns200JSONResponse RunsResponse
+
+func (response ListRuns200JSONResponse) VisitListRunsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRuns401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListRuns401JSONResponse) VisitListRunsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRuns404JSONResponse ErrorEnvelope
+
+func (response ListRuns404JSONResponse) VisitListRunsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -5631,6 +6072,214 @@ func (response DeleteShare404JSONResponse) VisitDeleteShareResponse(w http.Respo
 	return err
 }
 
+type ListInterruptsRequestObject struct {
+	Params ListInterruptsParams
+}
+
+type ListInterruptsResponseObject interface {
+	VisitListInterruptsResponse(w http.ResponseWriter) error
+}
+
+type ListInterrupts200JSONResponse InterruptsResponse
+
+func (response ListInterrupts200JSONResponse) VisitListInterruptsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInterrupts401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListInterrupts401JSONResponse) VisitListInterruptsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInterrupts404JSONResponse ErrorEnvelope
+
+func (response ListInterrupts404JSONResponse) VisitListInterruptsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInterruptRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type GetInterruptResponseObject interface {
+	VisitGetInterruptResponse(w http.ResponseWriter) error
+}
+
+type GetInterrupt200JSONResponse InterruptResponse
+
+func (response GetInterrupt200JSONResponse) VisitGetInterruptResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInterrupt401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetInterrupt401JSONResponse) VisitGetInterruptResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInterrupt404JSONResponse ErrorEnvelope
+
+func (response GetInterrupt404JSONResponse) VisitGetInterruptResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeInterruptRequestObject struct {
+	Id     IdPath `json:"id"`
+	Params ResumeInterruptParams
+	Body   *ResumeInterruptJSONRequestBody
+}
+
+type ResumeInterruptResponseObject interface {
+	VisitResumeInterruptResponse(w http.ResponseWriter) error
+}
+
+type ResumeInterrupt202JSONResponse InterruptResumeResponse
+
+func (response ResumeInterrupt202JSONResponse) VisitResumeInterruptResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeInterrupt400JSONResponse struct{ ErrorJSONResponse }
+
+func (response ResumeInterrupt400JSONResponse) VisitResumeInterruptResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeInterrupt401JSONResponse ErrorEnvelope
+
+func (response ResumeInterrupt401JSONResponse) VisitResumeInterruptResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeInterrupt403JSONResponse ErrorEnvelope
+
+func (response ResumeInterrupt403JSONResponse) VisitResumeInterruptResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeInterrupt404JSONResponse ErrorEnvelope
+
+func (response ResumeInterrupt404JSONResponse) VisitResumeInterruptResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeInterrupt409JSONResponse ErrorEnvelope
+
+func (response ResumeInterrupt409JSONResponse) VisitResumeInterruptResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeInterrupt413JSONResponse ErrorEnvelope
+
+func (response ResumeInterrupt413JSONResponse) VisitResumeInterruptResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListKeysRequestObject struct {
 	Params ListKeysParams
 }
@@ -6602,6 +7251,212 @@ func (response UpdatePolicy404JSONResponse) VisitUpdatePolicyResponse(w http.Res
 type UpdatePolicy409JSONResponse ErrorEnvelope
 
 func (response UpdatePolicy409JSONResponse) VisitUpdatePolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRunRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type GetRunResponseObject interface {
+	VisitGetRunResponse(w http.ResponseWriter) error
+}
+
+type GetRun200JSONResponse RunResponse
+
+func (response GetRun200JSONResponse) VisitGetRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRun401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetRun401JSONResponse) VisitGetRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRun404JSONResponse ErrorEnvelope
+
+func (response GetRun404JSONResponse) VisitGetRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelRunRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type CancelRunResponseObject interface {
+	VisitCancelRunResponse(w http.ResponseWriter) error
+}
+
+type CancelRun200JSONResponse RunsResponse
+
+func (response CancelRun200JSONResponse) VisitCancelRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelRun401JSONResponse struct{ ErrorJSONResponse }
+
+func (response CancelRun401JSONResponse) VisitCancelRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelRun403JSONResponse ErrorEnvelope
+
+func (response CancelRun403JSONResponse) VisitCancelRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelRun404JSONResponse ErrorEnvelope
+
+func (response CancelRun404JSONResponse) VisitCancelRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelRun409JSONResponse ErrorEnvelope
+
+func (response CancelRun409JSONResponse) VisitCancelRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RetryRunRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type RetryRunResponseObject interface {
+	VisitRetryRunResponse(w http.ResponseWriter) error
+}
+
+type RetryRun200JSONResponse RunsResponse
+
+func (response RetryRun200JSONResponse) VisitRetryRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RetryRun401JSONResponse struct{ ErrorJSONResponse }
+
+func (response RetryRun401JSONResponse) VisitRetryRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RetryRun403JSONResponse ErrorEnvelope
+
+func (response RetryRun403JSONResponse) VisitRetryRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RetryRun404JSONResponse ErrorEnvelope
+
+func (response RetryRun404JSONResponse) VisitRetryRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RetryRun409JSONResponse ErrorEnvelope
+
+func (response RetryRun409JSONResponse) VisitRetryRunResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -7636,6 +8491,9 @@ type StrictServerInterface interface {
 	// (POST /api/v1/applications/{id}/publish)
 	PublishApplication(ctx context.Context, request PublishApplicationRequestObject) (PublishApplicationResponseObject, error)
 
+	// (GET /api/v1/applications/{id}/runs)
+	ListRuns(ctx context.Context, request ListRunsRequestObject) (ListRunsResponseObject, error)
+
 	// (POST /api/v1/applications/{id}/test)
 	TestApplication(ctx context.Context, request TestApplicationRequestObject) (TestApplicationResponseObject, error)
 
@@ -7717,6 +8575,15 @@ type StrictServerInterface interface {
 	// (DELETE /api/v1/instances/{id}/shares/{user_id})
 	DeleteShare(ctx context.Context, request DeleteShareRequestObject) (DeleteShareResponseObject, error)
 
+	// (GET /api/v1/interrupts)
+	ListInterrupts(ctx context.Context, request ListInterruptsRequestObject) (ListInterruptsResponseObject, error)
+
+	// (GET /api/v1/interrupts/{id})
+	GetInterrupt(ctx context.Context, request GetInterruptRequestObject) (GetInterruptResponseObject, error)
+
+	// (POST /api/v1/interrupts/{id}/resume)
+	ResumeInterrupt(ctx context.Context, request ResumeInterruptRequestObject) (ResumeInterruptResponseObject, error)
+
 	// (GET /api/v1/keys)
 	ListKeys(ctx context.Context, request ListKeysRequestObject) (ListKeysResponseObject, error)
 
@@ -7764,6 +8631,15 @@ type StrictServerInterface interface {
 
 	// (PUT /api/v1/policies/{id})
 	UpdatePolicy(ctx context.Context, request UpdatePolicyRequestObject) (UpdatePolicyResponseObject, error)
+
+	// (GET /api/v1/runs/{id})
+	GetRun(ctx context.Context, request GetRunRequestObject) (GetRunResponseObject, error)
+
+	// (POST /api/v1/runs/{id}/cancel)
+	CancelRun(ctx context.Context, request CancelRunRequestObject) (CancelRunResponseObject, error)
+
+	// (POST /api/v1/runs/{id}/retry)
+	RetryRun(ctx context.Context, request RetryRunRequestObject) (RetryRunResponseObject, error)
 
 	// (GET /api/v1/secrets)
 	ListSecrets(ctx context.Context, request ListSecretsRequestObject) (ListSecretsResponseObject, error)
@@ -8069,6 +8945,33 @@ func (sh *strictHandler) PublishApplication(ctx *gin.Context, id IdPath) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(PublishApplicationResponseObject); ok {
 		if err := validResponse.VisitPublishApplicationResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListRuns operation middleware
+func (sh *strictHandler) ListRuns(ctx *gin.Context, id IdPath, params ListRunsParams) {
+	var request ListRunsRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListRuns(ctx, request.(ListRunsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListRuns")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ListRunsResponseObject); ok {
+		if err := validResponse.VisitListRunsResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {
@@ -8824,6 +9727,92 @@ func (sh *strictHandler) DeleteShare(ctx *gin.Context, id IdPath, userId string)
 	}
 }
 
+// ListInterrupts operation middleware
+func (sh *strictHandler) ListInterrupts(ctx *gin.Context, params ListInterruptsParams) {
+	var request ListInterruptsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListInterrupts(ctx, request.(ListInterruptsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListInterrupts")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ListInterruptsResponseObject); ok {
+		if err := validResponse.VisitListInterruptsResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetInterrupt operation middleware
+func (sh *strictHandler) GetInterrupt(ctx *gin.Context, id IdPath) {
+	var request GetInterruptRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetInterrupt(ctx, request.(GetInterruptRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetInterrupt")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(GetInterruptResponseObject); ok {
+		if err := validResponse.VisitGetInterruptResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ResumeInterrupt operation middleware
+func (sh *strictHandler) ResumeInterrupt(ctx *gin.Context, id IdPath, params ResumeInterruptParams) {
+	var request ResumeInterruptRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	var body ResumeInterruptJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ResumeInterrupt(ctx, request.(ResumeInterruptRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ResumeInterrupt")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ResumeInterruptResponseObject); ok {
+		if err := validResponse.VisitResumeInterruptResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListKeys operation middleware
 func (sh *strictHandler) ListKeys(ctx *gin.Context, params ListKeysParams) {
 	var request ListKeysRequestObject
@@ -9276,6 +10265,84 @@ func (sh *strictHandler) UpdatePolicy(ctx *gin.Context, id IdPath) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(UpdatePolicyResponseObject); ok {
 		if err := validResponse.VisitUpdatePolicyResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRun operation middleware
+func (sh *strictHandler) GetRun(ctx *gin.Context, id IdPath) {
+	var request GetRunRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRun(ctx, request.(GetRunRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRun")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(GetRunResponseObject); ok {
+		if err := validResponse.VisitGetRunResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CancelRun operation middleware
+func (sh *strictHandler) CancelRun(ctx *gin.Context, id IdPath) {
+	var request CancelRunRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.CancelRun(ctx, request.(CancelRunRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CancelRun")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(CancelRunResponseObject); ok {
+		if err := validResponse.VisitCancelRunResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RetryRun operation middleware
+func (sh *strictHandler) RetryRun(ctx *gin.Context, id IdPath) {
+	var request RetryRunRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.RetryRun(ctx, request.(RetryRunRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RetryRun")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(RetryRunResponseObject); ok {
+		if err := validResponse.VisitRetryRunResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

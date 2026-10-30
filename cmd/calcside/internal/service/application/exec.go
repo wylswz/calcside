@@ -8,6 +8,7 @@ import (
 
 	"calcside/cmd/calcside/internal/service"
 	"calcside/cmd/calcside/internal/service/access"
+	runsvc "calcside/cmd/calcside/internal/service/run"
 	"calcside/internal/runtime"
 	"calcside/internal/store"
 	"calcside/internal/types"
@@ -38,6 +39,26 @@ func (s *Service) prepare(ctx context.Context, workspaceID string, req *runtime.
 }
 
 var errNilResult = errors.New("empty runtime response")
+
+// finishRun maps a run outcome onto the wire view.
+func runView(oc *runsvc.Outcome, res runtime.ProgramResult) *RunView {
+	rv := &RunView{Result: res}
+	if oc != nil {
+		rv.RunID = oc.RunID
+		rv.RunStatus = oc.Status
+		rv.Waiting = oc.Waiting
+		if oc.OutputRaw != nil {
+			rv.OutputJSON = string(oc.OutputRaw)
+		} else if res.Output != nil {
+			// Cipher-less runs record without output; the caller
+			// still gets the live result.
+			rv.OutputJSON = string(res.Output)
+		}
+	} else if res.Output != nil {
+		rv.OutputJSON = string(res.Output)
+	}
+	return rv
+}
 
 func (s *Service) owner(ctx context.Context, userID string) (runtime.Owner, error) {
 	u, err := s.o.Store.GetUser(ctx, userID)
@@ -171,14 +192,44 @@ func (s *Service) Test(ctx context.Context, a service.Actor, id string, version 
 	if prep.Result.Error != nil {
 		return &RunView{Result: prep.Result}, nil
 	}
+	// Durable run: pin the release so later handler steps can load it,
+	// then record + invoke + complete the first step.
+	var st *runsvc.Started
+	if s.o.Runs != nil {
+		if err := s.o.Store.CreateServingRelease(ctx, rel); err != nil &&
+			!errors.Is(err, store.ErrConflict) {
+			return nil, fail(err)
+		}
+		st, err = s.o.Runs.Begin(ctx, app, rel, store.RunTriggerTest, a)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var slots []runtime.InterruptSlot
+	var runID string
+	if st != nil {
+		slots, runID = st.Interrupts, st.Run.ID
+	}
 	out, err := s.o.Runtime.Invoke(ctx, &runtime.InvokeRequest{
 		InstanceID: replicaID, Owner: owner,
 		Actor:     runtime.Owner{UserID: a.UserID, Email: a.Email},
 		ReleaseID: rel.ID, Generation: 1, Epoch: prep.Epoch,
 		InvokeID: store.NewID("inv_"), Input: input,
+		RunID: runID, Step: 0, Interrupts: slots,
 	})
 	if out != nil {
 		s.o.Audit.RecordWorkspace(app.WorkspaceID, out.Audit)
+	}
+	if st != nil {
+		oc, cerr := s.o.Runs.Complete(ctx, st, 0, 1, "main", "", out, err)
+		if cerr != nil {
+			return nil, cerr
+		}
+		var res runtime.ProgramResult
+		if out != nil {
+			res = out.Result
+		}
+		return runView(oc, res), nil
 	}
 	if err != nil {
 		return nil, fail(err)
@@ -186,11 +237,7 @@ func (s *Service) Test(ctx context.Context, a service.Actor, id string, version 
 	if out == nil {
 		return nil, fail(errNilResult)
 	}
-	rv := &RunView{Result: out.Result}
-	if out.Result.Output != nil {
-		rv.OutputJSON = string(out.Result.Output)
-	}
-	return rv, nil
+	return runView(nil, out.Result), nil
 }
 
 // Invoke runs the published application against its fenced live replica.
@@ -207,14 +254,42 @@ func (s *Service) Invoke(ctx context.Context, a service.Actor, id string, input 
 	if err != nil {
 		return nil, err
 	}
+	var st *runsvc.Started
+	if s.o.Runs != nil {
+		rel, rerr := s.o.Store.GetServingRelease(ctx, app.WorkspaceID, rep.ReleaseID)
+		if rerr != nil {
+			return nil, fail(rerr)
+		}
+		st, err = s.o.Runs.Begin(ctx, app, rel, store.RunTriggerInvoke, a)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var slots []runtime.InterruptSlot
+	var runID string
+	if st != nil {
+		slots, runID = st.Interrupts, st.Run.ID
+	}
 	out, err := s.o.Runtime.Invoke(ctx, &runtime.InvokeRequest{
 		InstanceID: rep.ID, Owner: owner,
 		Actor:     runtime.Owner{UserID: a.UserID, Email: a.Email},
 		ReleaseID: rep.ReleaseID, Generation: rep.Generation, Epoch: rep.Epoch,
 		InvokeID: store.NewID("inv_"), Input: input,
+		RunID: runID, Step: 0, Interrupts: slots,
 	})
 	if out != nil {
 		s.o.Audit.RecordWorkspace(app.WorkspaceID, out.Audit)
+	}
+	if st != nil {
+		oc, cerr := s.o.Runs.Complete(ctx, st, 0, 1, "main", "", out, err)
+		if cerr != nil {
+			return nil, cerr
+		}
+		var res runtime.ProgramResult
+		if out != nil {
+			res = out.Result
+		}
+		return runView(oc, res), nil
 	}
 	if err != nil {
 		return nil, fail(err)
@@ -222,9 +297,5 @@ func (s *Service) Invoke(ctx context.Context, a service.Actor, id string, input 
 	if out == nil {
 		return nil, fail(errNilResult)
 	}
-	rv := &RunView{Result: out.Result}
-	if out.Result.Output != nil {
-		rv.OutputJSON = string(out.Result.Output)
-	}
-	return rv, nil
+	return runView(nil, out.Result), nil
 }

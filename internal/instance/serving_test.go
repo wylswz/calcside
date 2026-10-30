@@ -727,3 +727,49 @@ func TestReplicaPendingCreateNamespace(t *testing.T) {
 		t.Fatalf("count %d", n.m.Count())
 	}
 }
+
+func TestReplicaInterruptWaiting(t *testing.T) {
+	now := time.Now()
+	n := newNode(t, Options{Limits: defaultLimits()}, &now)
+	bundle := prepareBundle(`def main(input):
+    req = interrupt.new(expires_in_s = 30)
+    interrupt.wait(req["id"], handler = "on_ok", context = {"order_id": "o1"})
+
+def on_ok(ctx):
+    return {"status": "ok"}
+`, nil)
+	req := prepReq(n, bundle)
+	resp, err := n.m.Prepare(context.Background(), req)
+	if err != nil || resp.Result.Error != nil {
+		t.Fatalf("prepare: %v %+v", err, resp.Result.Error)
+	}
+
+	inv := invokeReq(req, `{}`)
+	inv.RunID = "run_1"
+	inv.Interrupts = []runtime.InterruptSlot{{ID: "int_1"}}
+	out, err := n.m.Invoke(context.Background(), inv)
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	if out.Result.Error != nil || out.Result.Output != nil {
+		t.Fatalf("expected waiting, got err=%+v out=%s", out.Result.Error, out.Result.Output)
+	}
+	w := out.Result.Waiting
+	if w == nil || w.InterruptID != "int_1" || w.Handler != "on_ok" ||
+		w.ExpiresInS != 30 || string(w.Context) != `{"order_id":"o1"}` {
+		t.Fatalf("bad waiting: %+v", w)
+	}
+
+	// A handler entry receives the full handler context.
+	inv2 := invokeReq(req, `{"interrupt_id":"int_1","context":{"order_id":"o9"},"event":{"approved":true}}`)
+	inv2.Entry = "on_ok"
+	inv2.RunID = "run_1"
+	inv2.Step = 1
+	out2, err := n.m.Invoke(context.Background(), inv2)
+	if err != nil || out2.Result.Error != nil {
+		t.Fatalf("handler invoke: %v %+v", err, out2.Result.Error)
+	}
+	if !strings.Contains(string(out2.Result.Output), `"status":"ok"`) {
+		t.Fatalf("handler output: %s", out2.Result.Output)
+	}
+}

@@ -71,6 +71,18 @@ func runDTO(rv *application.RunView) gen.ApplicationRunResponse {
 	if rv.OutputJSON != "" {
 		out.OutputJson = &rv.OutputJSON
 	}
+	if rv.RunID != "" {
+		out.RunId = &rv.RunID
+	}
+	if rv.RunStatus != "" {
+		out.RunStatus = &rv.RunStatus
+	}
+	if rv.Waiting != nil {
+		w := rv.Waiting
+		out.Waiting = &gen.InterruptWaiting{
+			InterruptId: w.InterruptID, ConsoleUrl: w.ConsoleURL,
+		}
+	}
 	return out
 }
 

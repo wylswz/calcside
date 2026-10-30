@@ -64,8 +64,9 @@ type Agent struct {
 	slots   int
 	closing bool
 
-	wg  sync.WaitGroup
-	sem chan struct{}
+	wg   sync.WaitGroup
+	sem  chan struct{}
+	wake chan struct{} // buffered(1); a queued report nudges the poll loop
 }
 
 // New validates options.
@@ -92,7 +93,7 @@ func New(o Options) (*Agent, error) {
 		o.MaxConcurrentPrepares = o.Capacity
 	}
 	return &Agent{o: o, managed: map[string]*managed{}, retired: map[string]struct{}{},
-		sem: make(chan struct{}, o.MaxConcurrentPrepares)}, nil
+		sem: make(chan struct{}, o.MaxConcurrentPrepares), wake: make(chan struct{}, 1)}, nil
 }
 
 // LeaseDeadline converts an API lease to a local monotonic deadline.
@@ -182,6 +183,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-tick.C:
+		case <-a.wake: // a fresh report (e.g. replica ready) syncs now
 		}
 	}
 }

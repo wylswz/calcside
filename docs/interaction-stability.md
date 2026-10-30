@@ -212,3 +212,14 @@ and local horizontal scrolling (S1/S3). Copy failures are visible without
 discarding text (P5). Snippet unit tests capture the actual curl arguments,
 Python request bytes and JavaScript fetch body without network access;
 all preserve the exact JSON input, including large integers.
+
+### Interrupts (EP-0016)
+
+- **S3/S4**: the nav inbox badge is a reserved-width tabular-figures slot that renders empty at zero (`InboxBadge`); the Develop/Invoke progress area (`RunProgress`/`useRunProgress`: waiting → running → terminal, `runPhase`) occupies the same output region as the result and the run page keeps its Waiting card box through the running phase; a row resumed since the last reveal keeps its box as an inert "Resolved by … · View run" placeholder (`keepGone` in `useHeldOrder`/`reconcile`, single-interrupt fetch fills the resolver label, "No longer waiting · View run" while it lands) until the reveal affordance — which appears whenever placeholders exist even with zero arrivals — clears it. e2e `interrupts.spec.ts` measures the waiting box through a resume and a resumed row's box across polling.
+- **S5/C3**: inbox and application Runs tables use `useHeldOrder` + `RevealNew`; selections live in `?interrupt=` so polling can't drop them (C4 deep links fetch by id outside the page).
+- **C2**: ResumeForm drafts (event text) are keyed by user+workspace+interrupt (`resumeDraftKey`) and survive polling/refetch/navigation; confirms never discard input.
+- **P1/S4**: SwapLabel Resume/Resuming…/Resumed — running handler…; inputs disable while a resume is in flight and stay disabled while the handler runs.
+- **P5/F3/C2**: server `already_resolved` renders "Already resumed by <label> at <time>" in place with typed input preserved; form never claims success on failure.
+- **F2**: Resume, Cancel run and Retry step all pass named Confirms that show the exact event JSON (and the handler it calls) or consequence text.
+- **P3**: resolving never navigates; lists and run pages refetch in place.
+- **P6**: interrupts carry no presentation fields — rows label as `→ handler`; the application Settings card has no handler declarations.

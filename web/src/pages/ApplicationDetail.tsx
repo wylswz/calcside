@@ -2,15 +2,18 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
-import { api, ApiError, Application, workspaces } from '../api'
-import { Button, Confirm, Loading, Notice, PageHeader, SwapLabel } from '../components/ui'
+import { api, ApiError, Application, Run, workspaces } from '../api'
+import { Button, Confirm, Loading, Notice, PageHeader, RevealNew, SwapLabel } from '../components/ui'
 import { cmTheme } from '../components/codemirror'
 import { useApplicationEditor } from '../components/editor'
+import { RunProgress, useRunProgress } from '../components/RunProgress'
 import { SpecForm } from '../components/SpecForm'
 import type { DraftError, InstanceDraft, InstanceSpec } from '../instanceDraft'
 import './application.css'
 import { ApplicationCallExamples } from '../components/ApplicationCallExamples'
 import { AppKeyModal } from '../components/AppKeyModal'
+import { useHeldOrder } from '../stableList'
+import { fmtDateTime, type RunPhase } from '../interrupts'
 
 type Draft = {
   name: string
@@ -28,7 +31,7 @@ const DEFAULT_INPUT = '{\n  "name": "world"\n}'
 
 const statusHint: Record<string, string> = {
   draft: 'Not published.',
-  preparing: 'Deploying…',
+  preparing: 'Deploying… Invoke will be enabled when ready.',
   degraded: 'Deployment unhealthy.',
   disabled: 'Deployment disabled.',
 }
@@ -125,7 +128,8 @@ export default function ApplicationDetail() {
   const q = useQuery({
     queryKey: ['application', id],
     queryFn: () => api.get<{ application: Application }>(`/api/v1/applications/${id}`).then((r) => r.application),
-    refetchInterval: 5000,
+    // poll faster while a publish is deploying so Invoke unblocks sooner
+    refetchInterval: (q) => (q.state.data?.status === 'preparing' ? 1000 : 5000),
     retry: false,
   })
   if (q.isLoading || !me?.user) return <Loading />
@@ -156,6 +160,7 @@ function Editor({ app, role, userID, qc }: Props) {
   const [busy, setBusy] = useState('')
   const [delOpen, setDelOpen] = useState(false)
   const [keyOpen, setKeyOpen] = useState(false)
+  const [published, setPublished] = useState(false)
   const [reloadOpen, setReloadOpen] = useState<Application | null>(null)
   const [adv, setAdv] = useState(true)
   // SpecForm remount key: bumped on reset so a corrupt stored spec is
@@ -218,7 +223,7 @@ function Editor({ app, role, userID, qc }: Props) {
     if (!sameJSON(curParsed, built.spec)) edit({ spec: JSON.stringify(built.spec) })
   }, [])
   type Result = { id: string; output?: unknown; error?: { code: string; message: string }; duration_ms: number; steps: number }
-  type RunView = { result: Result; output_json?: string }
+  type RunView = { result: Result; output_json?: string; run_id?: string; run_status?: string; waiting?: { interrupt_id: string; console_url: string } }
   // The Invoke card owns its own input/result; neither touches the draft.
   const [callInput, setCallInput] = useState(DEFAULT_INPUT)
   const [callRun, setCallRun] = useState<RunView | null>(null)
@@ -342,7 +347,10 @@ function Editor({ app, role, userID, qc }: Props) {
     const s = await attemptSave()
     if (!s) return
     await api.post<{ application: Application }>(`/api/v1/applications/${s.app2.id}/publish`, { version: s.app2.version })
-    if (mounted.current) qc.invalidateQueries({ queryKey: ['application', app.id] })
+    if (mounted.current) {
+      setPublished(true)
+      qc.invalidateQueries({ queryKey: ['application', app.id] })
+    }
   })
 
   const onInvoke = () => guarded('invoke', async () => {
@@ -370,6 +378,21 @@ function Editor({ app, role, userID, qc }: Props) {
     setSpecKey((k) => k + 1)
   }
 
+  // Follow each unfinished run to its real outcome: the handler's
+  // return value is the application's output (S4 — the Output pre
+  // keeps its box while the phase label changes).
+  const devPhase = useRunProgress(run?.run_id && !run.output_json && !run.result.error ? run.run_id : undefined).phase
+  const callPhase = useRunProgress(callRun?.run_id && !callRun.output_json && !callRun.result.error ? callRun.run_id : undefined).phase
+  const preText = (r: RunView | null, p: RunPhase | undefined, placeholder: string): string => {
+    if (!r) return placeholder
+    if (r.output_json) return r.output_json
+    if (r.result.error) return `error: ${r.result.error.code} — ${r.result.error.message}`
+    if (!p) return r.waiting ? 'Waiting to be resumed…' : ''
+    if (p.phase === 'succeeded') return p.output ?? ''
+    if (p.phase === 'waiting') return `Waiting to resume ${p.interrupt.handler ?? 'handler'}…`
+    if (p.phase === 'running') return `Running ${p.handler ?? 'handler'}…`
+    return `error: ${p.phase}${p.errorCode ? ` — ${p.errorCode}` : ''}`
+  }
   const ready = app.status === 'ready'
   const saveState = busy === 'save' ? 'Saving…' : saveFailed ? "Couldn't save" : fpDirty ? 'Unsaved' : 'Saved'
   return (
@@ -415,9 +438,14 @@ function Editor({ app, role, userID, qc }: Props) {
             <div className="app-out">
               <span className="app-label">Output</span>
               <pre className="app-out-pre" aria-live="polite">
-                {run ? (run.output_json ?? (run.result.error ? `error: ${run.result.error.code} — ${run.result.error.message}` : '')) : 'Run to see output'}
+                {preText(run, devPhase, 'Run to see output')}
               </pre>
               {outdated && <p className="app-dim">Result is from before your latest edits.</p>}
+              {run?.run_id && !run.output_json && !run.result.error && (
+                <RunProgress runId={run.run_id} appId={app.id} inline
+                  scope={{ userId: userID, workspaceId: app.workspace_id }}
+                  fallbackWaiting={run.waiting ?? undefined} />
+              )}
             </div>
           </div>
         </div>
@@ -425,6 +453,11 @@ function Editor({ app, role, userID, qc }: Props) {
           {specErrs.length > 0 && <Notice tone="warning">{specErrs[0].section}: {specErrs[0].message}</Notice>}
           {warn && <Notice tone="warning">{warn}</Notice>}
           {storeFailed && <Notice tone="warning">Not saved to this tab.</Notice>}
+          {published && (
+            <Notice><SwapLabel
+              show={app.status === 'preparing' ? 'Published — deploying. Invoke becomes available when status is ready.' : 'Published.'}
+              options={['Published — deploying. Invoke becomes available when status is ready.', 'Published.']} /></Notice>
+          )}
           {corrupt && (
             <Notice tone="warning">
               Saved editor state for this application is unreadable.
@@ -482,8 +515,13 @@ function Editor({ app, role, userID, qc }: Props) {
             <div className="app-out">
               <span className="app-label">Output</span>
               <pre className="app-out-pre app-call-out" aria-live="polite">
-                {callRun ? (callRun.output_json ?? (callRun.result.error ? `error: ${callRun.result.error.code} — ${callRun.result.error.message}` : '')) : 'Invoke to see output'}
+                {preText(callRun, callPhase, 'Invoke to see output')}
               </pre>
+              {callRun?.run_id && !callRun.output_json && !callRun.result.error && (
+                <RunProgress runId={callRun.run_id} appId={app.id} inline
+                  scope={{ userId: userID, workspaceId: app.workspace_id }}
+                  fallbackWaiting={callRun.waiting ?? undefined} />
+              )}
             </div>
           </div>
           <div>
@@ -516,8 +554,48 @@ function Editor({ app, role, userID, qc }: Props) {
           This draft was changed by another session. Reload the newer version? Your current edits are kept in this tab until you confirm.
         </Confirm>
       )}
+      <section className="app-card">
+        <div className="app-card-head"><span className="app-card-title">Runs</span></div>
+        <div className="app-card-body"><RunsTable appId={app.id} /></div>
+      </section>
       {keyOpen && <AppKeyModal appId={app.id} appName={app.name} workspaceId={app.workspace_id} onClose={() => setKeyOpen(false)} />}
       {busy === 'delete' && <Loading />}
     </div>
+  )
+}
+
+
+// RunsTable lists the application's runs with held order (S5/C3); rows
+// update in place and reordering waits for the reveal affordance.
+function RunsTable({ appId }: { appId: string }) {
+  const q = useQuery({
+    queryKey: ['runs', appId],
+    queryFn: () => api.get<{ runs?: Run[] }>(`/api/v1/applications/${encodeURIComponent(appId)}/runs`),
+    refetchInterval: 5000,
+  })
+  const held = useHeldOrder(q.data?.runs?.map((r) => ({ r })) ?? undefined, ({ r }) => ({ key: r.id, slot: 'runs' }))
+  if (q.isLoading) return <Loading />
+  if (q.isError) return <Notice tone="warning">Could not load runs.</Notice>
+  return (
+    <>
+      <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />
+      {held.rows.length === 0 && held.arrived === 0 && <p className="app-dim">No runs yet.</p>}
+      {held.rows.length > 0 && (
+        <table className="tbl">
+          <thead><tr><th>Status</th><th>Trigger</th><th>Steps</th><th>Started</th><th>Waiting on</th></tr></thead>
+          <tbody>
+            {held.rows.map(({ item: { r } }) => (
+              <tr key={r.id} className="row-hover">
+                <td><Link className="link" to={`/applications/${appId}/runs/${r.id}`}><span className={`app-status app-status-${r.status}`}>{r.status}</span></Link></td>
+                <td className="text-xs text-sec">{r.trigger}</td>
+                <td className="text-xs text-sec">{r.steps}</td>
+                <td className="text-xs text-sec">{r.created_at ? fmtDateTime(r.created_at) : ''}</td>
+                <td className="text-xs text-sec">{r.interrupt_id ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
   )
 }

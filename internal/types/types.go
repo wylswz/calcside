@@ -161,10 +161,13 @@ const (
 	CapNet CapabilityName = "net"
 	CapIO  CapabilityName = "io"
 	CapExt CapabilityName = "ext"
+	// CapInterrupt is the application-run interrupt capability
+	// (EP-0016): granted automatically to application programs.
+	CapInterrupt CapabilityName = "interrupt"
 )
 
 func AllCapabilityNames() []CapabilityName {
-	return []CapabilityName{CapFS, CapNet, CapIO, CapExt}
+	return []CapabilityName{CapFS, CapNet, CapIO, CapExt, CapInterrupt}
 }
 
 func (n CapabilityName) Valid() bool { return valid(n, AllCapabilityNames()) }
@@ -260,6 +263,7 @@ func (s *SecretSource) UnmarshalText(b []byte) error {
 type APIErrorCode string
 
 const (
+	ErrCodeAlreadyResolved  APIErrorCode = "already_resolved"
 	ErrCodeAuthFailed       APIErrorCode = "auth_failed"
 	ErrCodeBadCapability    APIErrorCode = "bad_capability"
 	ErrCodeBadPolicy        APIErrorCode = "bad_policy"
@@ -283,7 +287,7 @@ const (
 
 func AllAPIErrorCodes() []APIErrorCode {
 	return []APIErrorCode{
-		ErrCodeAuthFailed, ErrCodeBadCapability, ErrCodeBadPolicy, ErrCodeBadRequest,
+		ErrCodeAlreadyResolved, ErrCodeAuthFailed, ErrCodeBadCapability, ErrCodeBadPolicy, ErrCodeBadRequest,
 		ErrCodeBadSecret, ErrCodeBadSpec, ErrCodeConflict, ErrCodeCSRF, ErrCodeForbidden,
 		ErrCodeFSError, ErrCodeInternal, ErrCodeMethodNotAllowed, ErrCodeNoFS,
 		ErrCodeNotFound, ErrCodeNotRunning, ErrCodeSecretsDisabled, ErrCodeTooLarge,

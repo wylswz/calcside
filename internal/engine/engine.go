@@ -25,6 +25,7 @@ import (
 	"go.starlark.net/syntax"
 
 	"calcside/internal/capability"
+	capinterrupt "calcside/internal/capability/interrupt"
 	capio "calcside/internal/capability/io"
 	"calcside/internal/secrets"
 	"calcside/internal/stdlib"
@@ -207,6 +208,11 @@ type SessionDeps struct {
 	Observer capability.Observer
 	// Secrets backs secret injection and the `secrets` global; may be nil.
 	Secrets *secrets.Set
+	// Interrupt, when non-nil, grants the `interrupt` predeclared
+	// module bound to this per-call host. Only the program serving path
+	// sets it; instance exec sessions leave it nil and never see the
+	// binding (extensions never receive it either).
+	Interrupt *capinterrupt.Host
 }
 
 // NewSession builds the gate, capability bindings and predeclared
@@ -306,6 +312,11 @@ func NewSession(d SessionDeps, c SessionCreation) (*Session, error) {
 	if s.Out == nil {
 		s.Out = capio.NewBuffer(c.MaxOutputBytes)
 	}
+	// interrupt is granted by the caller (the program path), never by
+	// the spec, and is deliberately kept out of the ext bindings map.
+	if d.Interrupt != nil {
+		predeclared[string(capinterrupt.Name)] = capinterrupt.Binding(d.Interrupt, gate)
+	}
 	var docs []capability.HelpEntry
 	for _, name := range names {
 		f, ok := d.Registry.Get(types.CapabilityName(name))
@@ -313,6 +324,9 @@ func NewSession(d SessionDeps, c SessionCreation) (*Session, error) {
 			continue
 		}
 		docs = append(docs, f.Help(caps[name])...)
+	}
+	if d.Interrupt != nil {
+		docs = append(docs, capinterrupt.Factory().Help(nil)...)
 	}
 	stdlib.BindHelp(predeclared, docs)
 	predeclared["print"] = capio.PrintBuiltin(s.Out, gate)

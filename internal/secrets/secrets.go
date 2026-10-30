@@ -51,6 +51,9 @@ type Secret struct {
 // Set is a per-instance collection of resolved secrets (memory only).
 type Set struct {
 	m map[string]*Secret
+	// extra holds values that are redacted like secrets but unnamed:
+	// they never appear in Names/Lookup and cannot be injected.
+	extra [][]byte
 }
 
 // NewSet builds an empty set.
@@ -78,6 +81,26 @@ func (s *Set) Names() []string {
 
 // Lookup returns the secret for name or nil.
 func (s *Set) Lookup(name string) *Secret { return s.m[name] }
+
+// WithRedactions returns a new Set sharing the receiver's entries plus
+// the extra values redacted by Redact/RedactBounded under a fixed
+// marker. The extras are unnamed: absent from Names and Lookup, never
+// injectable. A nil receiver is treated as empty; the receiver is not
+// mutated.
+func (s *Set) WithRedactions(values ...[]byte) *Set {
+	out := &Set{m: map[string]*Secret{}}
+	if s != nil {
+		for n, sec := range s.m {
+			out.m[n] = sec
+		}
+	}
+	for _, v := range values {
+		cp := make([]byte, len(v))
+		copy(cp, v)
+		out.extra = append(out.extra, cp)
+	}
+	return out
+}
 
 // Value is the plaintext (never exposed to Starlark).
 func (sec *Secret) Value() []byte { return sec.value }
@@ -167,6 +190,23 @@ func (s *Set) Redact(str string) string {
 			str = strings.ReplaceAll(str, v, "[REDACTED:"+name+"]")
 		}
 	}
+	return s.redactExtra(str)
+}
+
+// redactExtra scrubs the unnamed values WithRedactions added, longest
+// first, under a fixed marker.
+func (s *Set) redactExtra(str string) string {
+	if str == "" {
+		return str
+	}
+	vals := make([][]byte, len(s.extra))
+	copy(vals, s.extra)
+	sort.SliceStable(vals, func(i, j int) bool { return len(vals[i]) > len(vals[j]) })
+	for _, v := range vals {
+		for _, enc := range variants(v) {
+			str = strings.ReplaceAll(str, enc, "[REDACTED]")
+		}
+	}
 	return str
 }
 
@@ -226,16 +266,38 @@ func (s *Set) RedactBounded(ctx context.Context, str string, limit int) (string,
 	sort.SliceStable(names, func(i, j int) bool { return len(s.m[names[i]].value) > len(s.m[names[j]].value) })
 	for _, name := range names {
 		for _, v := range variants(s.m[name].value) {
-			if err := ctx.Err(); err != nil {
+			var err error
+			str, err = replaceBounded(ctx, str, v, "[REDACTED:"+name+"]", limit)
+			if err != nil {
 				return "", err
 			}
-			replacement := "[REDACTED:" + name + "]"
-			delta := len(replacement) - len(v)
-			if delta > 0 && strings.Count(str, v) > (limit-len(str))/delta {
-				return "", errors.New("redacted output exceeds byte limit")
+		}
+	}
+	vals := make([][]byte, len(s.extra))
+	copy(vals, s.extra)
+	sort.SliceStable(vals, func(i, j int) bool { return len(vals[i]) > len(vals[j]) })
+	for _, v := range vals {
+		for _, enc := range variants(v) {
+			var err error
+			str, err = replaceBounded(ctx, str, enc, "[REDACTED]", limit)
+			if err != nil {
+				return "", err
 			}
-			str = strings.ReplaceAll(str, v, replacement)
 		}
 	}
 	return str, ctx.Err()
+}
+
+// replaceBounded applies one bounded substitution: the replacement is
+// refused when it could grow the string past limit, and the context is
+// consulted each step.
+func replaceBounded(ctx context.Context, str, v, replacement string, limit int) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	delta := len(replacement) - len(v)
+	if delta > 0 && strings.Count(str, v) > (limit-len(str))/delta {
+		return "", errors.New("redacted output exceeds byte limit")
+	}
+	return strings.ReplaceAll(str, v, replacement), nil
 }

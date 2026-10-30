@@ -58,6 +58,13 @@ func serve(cfg config.Config) error {
 		waitServing()
 	}()
 
+	// The run dispatcher stops first at shutdown so in-flight handler
+	// dispatches drain before audit flush/store close.
+	if app.Runs != nil {
+		app.Runs.Start()
+		defer app.Runs.Stop()
+	}
+
 	srv := app.Server
 	shutdownDone := make(chan struct{})
 	go func() {

@@ -45,6 +45,9 @@ func New(st store.Store, ac *access.Checker) *Service {
 }
 
 func (s *Service) List(ctx context.Context, a service.Actor) ([]*Policy, error) {
+	if err := s.access.Workspace(ctx, a, a.WorkspaceID, access.View); err != nil {
+		return nil, err
+	}
 	lst, err := s.st.ListPolicies(ctx, a.WorkspaceID)
 	if err != nil {
 		return nil, service.Internal(err)

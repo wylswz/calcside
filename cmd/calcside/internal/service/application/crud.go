@@ -12,6 +12,7 @@ import (
 
 	"calcside/cmd/calcside/internal/service"
 	"calcside/cmd/calcside/internal/service/access"
+	runsvc "calcside/cmd/calcside/internal/service/run"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/internal/runtime"
 	"calcside/internal/store"
@@ -21,11 +22,14 @@ import (
 const scaffold = "def main(input):\n    # Accept a JSON object and return a JSON object.\n    output = {\"message\": \"Hello, \" + str(input.get(\"name\", \"world\"))}\n    return output\n"
 
 type Options struct {
-	Store      store.Store
-	Runtime    runtime.Runtime
-	Access     *access.Checker
-	Sandbox    *sandbox.Service
-	Audit      AuditSink
+	Store   store.Store
+	Runtime runtime.Runtime
+	Access  *access.Checker
+	Sandbox *sandbox.Service
+	Audit   AuditSink
+	// Runs, when set, records durable runs and dispatches handlers
+	// (EP-0016). Nil keeps tests ephemeral.
+	Runs       *runsvc.Service
 	MaxPerUser int
 	Now        func() time.Time
 }
@@ -71,6 +75,9 @@ type View struct {
 type RunView struct {
 	Result     runtime.ProgramResult `json:"result"`
 	OutputJSON string                `json:"output_json,omitempty"`
+	RunID      string                `json:"run_id,omitempty"`
+	RunStatus  string                `json:"run_status,omitempty"`
+	Waiting    *runsvc.WaitingRef    `json:"waiting,omitempty"`
 }
 
 type CreateRequest struct {
@@ -182,6 +189,9 @@ func (s *Service) Update(ctx context.Context, a service.Actor, id string, r Upda
 		InputSchema: r.InputSchema, OutputSchema: r.OutputSchema,
 		UpdatedAt: s.o.Now().UTC(),
 	}
+	if err := store.ValidateApplication(next); err != nil {
+		return nil, service.BadRequest("invalid application")
+	}
 	ok, err := s.o.Store.UpdateApplicationDraft(ctx, next, r.Version)
 	if err != nil {
 		return nil, fail(err)
@@ -240,6 +250,19 @@ func (s *Service) Delete(ctx context.Context, a service.Actor, id string, versio
 	// Keys bound to this application die with it.
 	if err := s.o.Store.RevokeBoundKeys(ctx, id); err != nil {
 		return fail(err)
+	}
+	// Still-open runs are cancelled with the app.
+	if s.o.Runs != nil {
+		for _, st := range []string{store.RunWaiting, store.RunUnknown} {
+			runs, err := s.o.Store.ListRuns(ctx, store.RunFilter{
+				WorkspaceID: app.WorkspaceID, ApplicationID: app.ID, Status: st, Limit: 200})
+			if err != nil {
+				return fail(err)
+			}
+			for _, r := range runs {
+				_, _ = s.o.Store.CancelRun(ctx, r.ID, s.o.Now().UTC())
+			}
+		}
 	}
 	return nil
 }

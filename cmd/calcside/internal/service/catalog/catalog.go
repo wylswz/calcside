@@ -9,6 +9,7 @@ import (
 
 	"calcside/internal/capability"
 	"calcside/internal/capability/ext"
+	capinterrupt "calcside/internal/capability/interrupt"
 	"calcside/internal/completion"
 	"calcside/internal/stdlib"
 	"calcside/internal/types"
@@ -106,6 +107,15 @@ func (s *Service) Editor() EditorMetadata {
 				}
 			}
 		}
+	}
+	// interrupt is granted to application programs automatically and
+	// never registered, so document it for editors only.
+	if f := capinterrupt.Factory(); f != nil {
+		caps = append(caps, CapabilityDoc{
+			Name:         string(f.Name()),
+			Ops:          f.Ops(),
+			ConfigFields: f.ConfigFields(),
+		})
 	}
 	return EditorMetadata{Rego: EditorSymbols(), Capabilities: caps, Utilities: stdlib.Symbols()}
 }

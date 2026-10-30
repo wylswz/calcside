@@ -815,6 +815,119 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/applications/{id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancelRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["retryRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/interrupts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listInterrupts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/interrupts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getInterrupt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/interrupts/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Resume a pending interrupt with a JSON object event; the run's declared handler is called with it. The first resume wins, later ones get 409 already_resolved. Authorized by the interrupt's resume_token (Bearer or ?token=) or by a caller with Run on the application. */
+        post: operations["resumeInterrupt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -833,13 +946,13 @@ export interface components {
          */
         Phase: "" | "before" | "after";
         /** @enum {string} */
-        CapabilityName: "fs" | "net" | "io" | "ext";
+        CapabilityName: "fs" | "net" | "io" | "ext" | "interrupt";
         /** @enum {string} */
         HTTPMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
         /** @enum {string} */
         SecretSource: "vault" | "inline";
         /** @enum {string} */
-        APIErrorCode: "auth_failed" | "bad_capability" | "bad_policy" | "bad_request" | "bad_secret" | "bad_spec" | "conflict" | "csrf" | "forbidden" | "fs_error" | "internal" | "method_not_allowed" | "no_fs" | "not_found" | "not_running" | "secrets_disabled" | "too_large" | "too_many" | "unauthorized";
+        APIErrorCode: "already_resolved" | "auth_failed" | "bad_capability" | "bad_policy" | "bad_request" | "bad_secret" | "bad_spec" | "conflict" | "csrf" | "forbidden" | "fs_error" | "internal" | "method_not_allowed" | "no_fs" | "not_found" | "not_running" | "secrets_disabled" | "too_large" | "too_many" | "unauthorized";
         /** @enum {string} */
         FieldType: "int" | "bool" | "string" | "string_list" | "string_map";
         /** @enum {string} */
@@ -1481,6 +1594,86 @@ export interface components {
             result: unknown;
             /** @description exact raw JSON output text — UI renders this verbatim, never reparses */
             output_json?: string;
+            run_id?: string;
+            run_status?: string;
+            waiting?: components["schemas"]["InterruptWaiting"];
+        };
+        InterruptWaiting: {
+            interrupt_id: string;
+            console_url: string;
+        };
+        Run: {
+            id: string;
+            application_id: string;
+            release_id: string;
+            user_id: string;
+            trigger: string;
+            status: string;
+            steps: number;
+            interrupt_id?: string;
+            error_code?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            ended_at?: string;
+        };
+        RunDetail: components["schemas"]["Run"] & {
+            output_json?: string;
+        };
+        RunStep: {
+            seq: number;
+            attempt: number;
+            entry: string;
+            interrupt_id?: string;
+            status: string;
+            error_code?: string;
+            /** Format: int64 */
+            duration_ms: number;
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            ended_at?: string;
+        };
+        Interrupt: {
+            id: string;
+            run_id: string;
+            application_id: string;
+            application_name: string;
+            status: string;
+            handler?: string;
+            on_expire?: string;
+            /** Format: date-time */
+            expires_at?: string;
+            resolved_by?: string;
+            resolved_by_label?: string;
+            /** Format: date-time */
+            resolved_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            can_resume: boolean;
+            resume_url?: string;
+            context_json?: string;
+            event_json?: string;
+        };
+        RunsResponse: {
+            runs?: components["schemas"]["Run"][];
+        };
+        RunResponse: {
+            run?: components["schemas"]["RunDetail"];
+            steps?: components["schemas"]["RunStep"][];
+            interrupts?: components["schemas"]["Interrupt"][];
+        };
+        InterruptsResponse: {
+            interrupts?: components["schemas"]["Interrupt"][];
+            next_before?: string;
+        };
+        InterruptResponse: {
+            interrupt?: components["schemas"]["Interrupt"];
+        };
+        InterruptResumeResponse: {
+            status?: string;
         };
     };
     responses: {
@@ -3323,6 +3516,194 @@ export interface operations {
             401: components["responses"]["Error"];
         };
     };
+    listRuns: {
+        parameters: {
+            query?: {
+                before?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description run list, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunsResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description run detail with steps and interrupts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    cancelRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description cancelled run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunsResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    retryRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description retried run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunsResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    listInterrupts: {
+        parameters: {
+            query?: {
+                status?: string;
+                resumable?: boolean;
+                before?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description interrupt inbox, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterruptsResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getInterrupt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description interrupt detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterruptResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    resumeInterrupt: {
+        parameters: {
+            query?: {
+                token?: string;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RawJSON"];
+            };
+        };
+        responses: {
+            /** @description event accepted; the handler is dispatched */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterruptResumeResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+        };
+    };
 }
 type FlattenedDeepRequired<T> = {
     [K in keyof T]-?: FlattenedDeepRequired<T[K] extends unknown[] | undefined | null ? Extract<T[K], unknown[]>[number] : T[K]>;
@@ -3340,10 +3721,10 @@ export const execStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["
 export const execErrorTypeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExecErrorType"]> = ["syntax", "runtime", "policy_denied", "out_of_scope", "timeout", "step_limit", "memory_limit"];
 export const decisionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Decision"]> = ["allow", "deny"];
 export const phaseValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Phase"]> = ["", "before", "after"];
-export const capabilityNameValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CapabilityName"]> = ["fs", "net", "io", "ext"];
+export const capabilityNameValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CapabilityName"]> = ["fs", "net", "io", "ext", "interrupt"];
 export const hTTPMethodValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HTTPMethod"]> = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
 export const secretSourceValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SecretSource"]> = ["vault", "inline"];
-export const aPIErrorCodeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["APIErrorCode"]> = ["auth_failed", "bad_capability", "bad_policy", "bad_request", "bad_secret", "bad_spec", "conflict", "csrf", "forbidden", "fs_error", "internal", "method_not_allowed", "no_fs", "not_found", "not_running", "secrets_disabled", "too_large", "too_many", "unauthorized"];
+export const aPIErrorCodeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["APIErrorCode"]> = ["already_resolved", "auth_failed", "bad_capability", "bad_policy", "bad_request", "bad_secret", "bad_spec", "conflict", "csrf", "forbidden", "fs_error", "internal", "method_not_allowed", "no_fs", "not_found", "not_running", "secrets_disabled", "too_large", "too_many", "unauthorized"];
 export const fieldTypeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["FieldType"]> = ["int", "bool", "string", "string_list", "string_map"];
 export const authKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AuthKind"]> = ["session", "api_key", "anonymous"];
 export const artifactPreviewKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ArtifactPreview"]["kind"]> = ["text", "csv", "json", "html"];

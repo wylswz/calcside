@@ -306,11 +306,23 @@ func (m *Manager) Invoke(ctx context.Context, req *runtime.InvokeRequest) (*runt
 	deps := r.deps
 	deps.Context = callCtx
 	deps.Observer = sink
+	slots := make([]engine.InterruptSlot, len(req.Interrupts))
+	for i, s := range req.Interrupts {
+		slots[i] = engine.InterruptSlot{
+			ID:        s.ID,
+			ResumeURL: s.ResumeURL,
+			Token:     s.Token,
+		}
+	}
 	res := m.eng.InvokeProgram(callCtx, prog, req.Input, deps, r.creation, engine.ProgramCall{
 		ID:         req.InvokeID,
 		ActorID:    actor.UserID,
 		ActorEmail: actor.Email,
 		Timeout:    dur,
+		Entry:      req.Entry,
+		RunID:      req.RunID,
+		Step:       req.Step,
+		Interrupts: slots,
 	})
 	resp := &runtime.InvokeResponse{Result: programResultOf(res)}
 	// The run token is released after draining so no next call's ops
@@ -501,6 +513,15 @@ func programResultOf(res engine.ProgramResult) runtime.ProgramResult {
 	}
 	if res.Error != nil {
 		out.Error = &runtime.ProgramError{Code: res.Error.Code, Message: res.Error.Message}
+	}
+	if res.Waiting != nil {
+		out.Waiting = &runtime.ProgramWaiting{
+			InterruptID: res.Waiting.InterruptID,
+			Handler:     res.Waiting.Handler,
+			OnExpire:    res.Waiting.OnExpire,
+			Context:     res.Waiting.Context,
+			ExpiresInS:  res.Waiting.ExpiresInS,
+		}
 	}
 	return out
 }

@@ -64,6 +64,12 @@ func (a *Agent) enqueueReport(m *managed, state, code string, audit runtime.Audi
 	}
 	m.reserved--
 	a.reports = append(a.reports, &r)
+	// Nudge the poll loop so a ready/stopped report ships immediately
+	// instead of waiting a full PollInterval.
+	select {
+	case a.wake <- struct{}{}:
+	default:
+	}
 }
 
 // reportBatch and ackReports require a.mu.

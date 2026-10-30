@@ -21,6 +21,7 @@ var statusByCode = map[types.APIErrorCode]int{
 	types.ErrCodeCSRF:            http.StatusForbidden,
 	types.ErrCodeNotFound:        http.StatusNotFound,
 	types.ErrCodeConflict:        http.StatusConflict,
+	types.ErrCodeAlreadyResolved: http.StatusConflict,
 	types.ErrCodeNotRunning:      http.StatusConflict,
 	types.ErrCodeTooLarge:        http.StatusRequestEntityTooLarge,
 	types.ErrCodeTooMany:         http.StatusTooManyRequests,

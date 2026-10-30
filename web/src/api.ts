@@ -228,3 +228,49 @@ async function request(method: 'get' | 'post' | 'put' | 'patch' | 'delete', path
   }
   return { data, response }
 }
+
+// --- EP-0016: runs & interrupts ---
+
+export type Run = components['schemas']['Run']
+export type RunDetail = components['schemas']['RunDetail']
+export type RunStep = components['schemas']['RunStep']
+export type Interrupt = components['schemas']['Interrupt']
+export type InterruptWaiting = components['schemas']['InterruptWaiting']
+
+export async function listRuns(appId: string): Promise<Run[]> {
+	const r = await api.get<{ runs?: Run[] }>(`/api/v1/applications/${encodeURIComponent(appId)}/runs`)
+	return r.runs ?? []
+}
+
+export async function getRun(id: string): Promise<{ run?: RunDetail; steps?: RunStep[]; interrupts?: Interrupt[] }> {
+	return api.get(`/api/v1/runs/${encodeURIComponent(id)}`)
+}
+
+export async function cancelRun(id: string): Promise<{ runs?: Run[] }> {
+	return api.post(`/api/v1/runs/${encodeURIComponent(id)}/cancel`)
+}
+
+export async function retryRun(id: string): Promise<{ runs?: Run[] }> {
+	return api.post(`/api/v1/runs/${encodeURIComponent(id)}/retry`)
+}
+
+export async function listInterrupts(params: { status?: string; resumable?: boolean; before?: string; limit?: number } = {}): Promise<{ interrupts?: Interrupt[]; next_before?: string }> {
+	const q = new URLSearchParams()
+	if (params.status) q.set('status', params.status)
+	if (params.resumable) q.set('resumable', 'true')
+	if (params.before) q.set('before', params.before)
+	if (params.limit) q.set('limit', String(params.limit))
+	const s = q.toString()
+	return api.get(wsPath(`/api/v1/interrupts${s ? '?' + s : ''}`))
+}
+
+export async function getInterrupt(id: string): Promise<{ interrupt?: Interrupt }> {
+	return api.get(`/api/v1/interrupts/${encodeURIComponent(id)}`)
+}
+
+// resumeInterrupt posts the event body verbatim — events may carry
+// high-precision numbers (C4/jsonPrecise convention). The same route
+// accepts the interrupt's resume_token from external systems.
+export async function resumeInterrupt(id: string, eventJson: string): Promise<{ status?: string }> {
+	return api.postRawJson(`/api/v1/interrupts/${encodeURIComponent(id)}/resume`, eventJson)
+}

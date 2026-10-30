@@ -175,7 +175,8 @@ export function docSymbols(doc: string): CompletionSymbol[] {
 
 // applicationSymbols builds the instance-style completion context for a
 // spec without a live session: universe + utilities + granted
-// capabilities (io is always granted — internal/engine/engine.go) +
+// capabilities (io is always granted — internal/engine/engine.go;
+// interrupt is granted to application programs automatically) +
 // ext aliases resolved against the catalog + the document's own
 // definitions.
 export function applicationSymbols(spec: unknown, metadata?: EditorMetadata, catalog?: ExtensionInfo[], doc = ''): InstanceContext {
@@ -187,14 +188,24 @@ export function applicationSymbols(spec: unknown, metadata?: EditorMetadata, cat
     { name: 'secrets', kind: 'namespace' },
   ]
   const caps = (s.capabilities && typeof s.capabilities === 'object' && !Array.isArray(s.capabilities) ? s.capabilities : {}) as Record<string, any>
-  const granted = new Set([...Object.keys(caps), 'io'])
+  const granted = new Set([...Object.keys(caps), 'io', 'interrupt'])
+  // parameterOptions only accepts bare names + `?`: turn op signature
+  // `name=default` into `name?` and drop *args/**kwargs forms; detail
+  // keeps the verbatim signature.
+  const norm = (list?: string[]) => (list ?? []).map((p) => {
+    const eq = p.indexOf('=')
+    const n = (eq >= 0 ? p.slice(0, eq) : p).trim()
+    if (!n || n.startsWith('*')) return ''
+    return eq >= 0 ? n + '?' : n
+  }).filter(Boolean)
   const ops = (name: string, list: { name?: string; params?: string[]; doc?: string }[] | undefined) => {
     symbols.push({ name, kind: 'namespace' })
     for (const op of list ?? []) {
       if (!op.name) continue
+      const params = norm(op.params)
       symbols.push({
         name: `${name}.${op.name}`, kind: 'function',
-        ...(op.params ? { params: op.params } : {}),
+        ...(params.length ? { params } : {}),
         detail: op.params ? `(${op.params.join(', ')})` : '(...)',
         ...(op.doc ? { doc: op.doc } : {}),
       })
@@ -214,9 +225,10 @@ export function applicationSymbols(spec: unknown, metadata?: EditorMetadata, cat
       const entry = catalog?.find((e) => e.source === source)
       if (entry) for (const op of entry.ops ?? []) {
         if (!op.name) continue
+        const params = norm(op.params)
         symbols.push({
           name: `ext.${alias}.${op.name}`, kind: 'function',
-          ...(op.params ? { params: op.params } : {}),
+          ...(params.length ? { params } : {}),
           detail: op.params ? `(${op.params.join(', ')})` : '(...)',
           ...(op.doc ? { doc: op.doc } : {}),
         })
