@@ -3,7 +3,7 @@
 - **Status:** Draft
 - **Created:** 2026-10-27
 - **Area:** Starlark engine, capability gate, resource limits, audit
-- **Related:** [EP-0002](0002-standard-library-utilities.md), [EP-0003](0003-community-extensions.md)
+- **Related:** [EP-0002](0002-standard-library-utilities.md), [EP-0003](0003-community-extensions.md), [EP-0001](0001-record-replay.md) (record / replay), [EP-0016](0016-application-interrupts.md) (interrupts)
 
 ## Summary
 
@@ -164,13 +164,20 @@ The combinators add no capability permission of their own.
 - Gate-adjacent shared state must be audited for concurrent use before
   enabling: hooks, observers, the output buffer, quotas, the VFS, extension
   caches and any thread-locals or captured Go state.
-- The filesystem and network are shared and are **not** snapshotted or
-  transactional. Effect order across tasks is nondeterministic; there are
-  no retries and no rollback. Two tasks writing the same path conflict;
-  scripts should write independent paths and return data explicitly.
-- Output shares the exec's bounded buffer: writes stay synchronized and
-  secret-redacted, but line/chunk interleaving order is unspecified and is
-  not input order.
+- The network is shared and not transactional. Effect order across tasks
+  is nondeterministic; there are no retries and no rollback.
+- The VFS is **read-only inside tasks** in v1: write ops fail with a clear
+  error. A task that could observe another task's writes would make its
+  behavior depend on scheduling, which no recording can reproduce (see
+  *Record / replay*). Tasks return data explicitly; the parent writes.
+  A later version may give each task a copy-on-write overlay merged at
+  join in input order, with a deterministic error when two tasks write the
+  same path.
+- Output goes to a **per-task buffer**, secret-redacted, and the buffers
+  are appended to the exec's bounded buffer at join in input order. The
+  output cap is applied in that order, so truncation is deterministic.
+- `interrupt.wait` (EP-0016) is rejected inside tasks: only the step's
+  main thread may end the step.
 
 ## Failure and cancellation
 
@@ -214,6 +221,26 @@ Nested `map`/`amap` inside a task thread is explicitly rejected in v1 with
 a clear error: a recursive pool could deadlock or multiply budgets. Nesting
 is future work and requires a shared scheduler and shared budget.
 
+## Record / replay
+
+Recording (EP-0001) must reproduce a map exactly although tasks run in
+parallel. The contract above keeps every task's observable world
+deterministic except for scheduling-dependent outcomes, which EP-0001
+records:
+
+- External calls inside a task are addressed `map[i]/task[j]/call[k]`, by
+  input position, never by completion order.
+- Each task's outcome is recorded: `completed`, `failed` with its error, or
+  `cancelled` with its call count, steps and output bytes at cancellation.
+  The map's primary error is recorded as observed.
+- Before-hook decisions for calls inside tasks are recorded, because
+  shared counters near the Gate make which task is denied
+  scheduling-dependent.
+- Replay runs tasks sequentially in input order against those records;
+  no parallelism is needed when every external value comes from the tape.
+
+The aggregate step budget therefore also reports per-task steps.
+
 ## Interpreter prerequisites
 
 Closures cannot be reconstructed through the exported `go.starlark.net`
@@ -253,8 +280,11 @@ re-executing source to rebuild functions, and process-per-task isolation.
   denials, audit records, redaction and the same exec actor.
 - Fail-fast cancel/join with no post-return events; child timeout and the
   aggregate step budget are not multiplied by concurrency.
-- Output cap under interleaved writes; pool/task cap; nested-call
-  rejection; worker/subprocess integration under `-race`.
+- Output joined in input order and capped deterministically; VFS writes
+  rejected inside tasks; pool/task cap; nested-call rejection;
+  worker/subprocess integration under `-race`.
+- Record a map with a mid-run failure and cancelled siblings, then replay
+  it sequentially and assert identical output, error and steps.
 
 ## Alternatives considered
 
