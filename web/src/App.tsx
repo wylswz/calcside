@@ -16,7 +16,7 @@ import InstanceDetail from './pages/InstanceDetail'
 import ArtifactPreviewPage from './pages/ArtifactPreview'
 import Audit from './pages/Audit'
 import Profile from './pages/Profile'
-import { Button, Loading, Notice, SignalMark } from './components/ui'
+import { Button, Loading, Notice } from './components/ui'
 
 function useMe(onBackendRetrying: (retrying: boolean) => void) {
   return useQuery({
@@ -119,8 +119,8 @@ export default function App() {
           </nav>
           <div className="ml-auto flex items-center gap-3 sm:gap-4">
             {dev && (
-              <span className="console-dev inline-flex items-center gap-1.5 rounded-md bg-warn/10 px-2 py-1 text-xs font-medium text-warn-text">
-                <SignalMark signal="failed" />dev · anonymous
+              <span className="console-dev inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2 py-1 text-xs font-medium text-sec">
+                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-mute" />dev · anonymous
               </span>
             )}
             <WorkspaceSwitcher />

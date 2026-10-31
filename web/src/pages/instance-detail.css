@@ -9,8 +9,8 @@
   font-size: 14px; line-height: 22px;
 }
 
-/* type scale: body 14/22 · title 28/34 · section 18/26 · sub 14/22 · meta 12/18 */
-.instance-detail h1 { font-size: 28px; line-height: 34px; font-weight: 600; letter-spacing: -0.025em; }
+/* type scale: body 14/22 · title 30/36 · section 18/26 · sub 14/22 · meta 12/18 */
+.instance-detail h1 { font-size: 30px; line-height: 36px; font-weight: 600; letter-spacing: -0.025em; }
 .instance-detail h2 { font-size: 18px; line-height: 26px; font-weight: 600; }
 .instance-detail .side-col h2 { font-size: 16px; line-height: 22px; }
 .instance-detail .side-label { font-size: 14px; font-weight: 500; }
@@ -32,7 +32,6 @@ body:has(.instance-detail) .console-dev {
   font-size: 12px; border: 0; text-transform: none; letter-spacing: normal;
   color: rgb(var(--sec)); padding: 0;
 }
-body:has(.instance-detail) .console-dev .fill-warn { fill: #f97316; }
 body:has(.instance-detail) .console-profile { font-size: 13px; color: rgb(var(--sec)); }
 
 /* next-action strip — shallow white surface, tinted signal tile */
@@ -86,7 +85,6 @@ body:has(.instance-detail) .console-profile { font-size: 13px; color: rgb(var(--
 }
 
 /* tables — natural-case thin headers, comfortable rows */
-.instance-detail .tbl { font-size: 13px; line-height: 20px; }
 .instance-detail .tbl thead th {
   border-top: 0; border-bottom: 1px solid var(--detail-edge);
   background: transparent; color: rgb(var(--sec));
