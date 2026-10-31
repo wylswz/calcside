@@ -1,6 +1,7 @@
 package fs
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -150,5 +151,131 @@ func TestPrompt(t *testing.T) {
 	}
 	if help[1].Name != "fs.read" || !strings.Contains(help[1].Text, "fs.read(path)") {
 		t.Fatalf("help missing op entry: %+v", help[1])
+	}
+}
+
+func TestWriteBytes(t *testing.T) {
+	v := NewVFS(Config{QuotaBytes: 1 << 20, MaxFiles: 100})
+	content := []byte{0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 'a', 'b'}
+	e, replaced, err := v.WriteBytes("bin.dat", content, false)
+	if err != nil || replaced || e.Path != "/work/bin.dat" || e.Size != int64(len(content)) {
+		t.Fatalf("WriteBytes: %+v replaced=%v err=%v", e, replaced, err)
+	}
+	got, _ := v.Read("bin.dat")
+	if got != string(content) {
+		t.Fatalf("byte equality lost: %q", got)
+	}
+	// Mutating the caller's slice must not corrupt stored bytes.
+	content[0] = 'X'
+	if got, _ := v.Read("bin.dat"); []byte(got)[0] == 'X' {
+		t.Fatal("WriteBytes kept a reference to caller memory")
+	}
+	// create-only conflicts
+	if _, _, err := v.WriteBytes("bin.dat", []byte("y"), false); !errors.Is(err, ErrExist) {
+		t.Fatalf("expected ErrExist, got %v", err)
+	}
+	e, replaced, err = v.WriteBytes("bin.dat", []byte("y"), true)
+	if err != nil || !replaced || e.Size != 1 {
+		t.Fatalf("overwrite: %+v replaced=%v err=%v", e, replaced, err)
+	}
+	// empty body is a valid empty file
+	e, replaced, err = v.WriteBytes("empty.csv", nil, false)
+	if err != nil || e.Size != 0 {
+		t.Fatalf("empty write: %+v err=%v", e, err)
+	}
+	// directories and the root are not writable files
+	if err := v.Mkdir("/work/d"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := v.WriteBytes("/work/d", []byte("x"), true); !errors.Is(err, ErrIsDir) {
+		t.Fatalf("dir target: expected ErrIsDir, got %v", err)
+	}
+	if _, _, err := v.WriteBytes("/work", []byte("x"), true); !errors.Is(err, ErrIsDir) {
+		t.Fatalf("root target: expected ErrIsDir, got %v", err)
+	}
+	// traversal still rejects
+	if _, _, err := v.WriteBytes("../x", []byte("x"), false); err == nil {
+		t.Fatal("traversal allowed")
+	}
+}
+
+func TestWriteBytesQuotaDelta(t *testing.T) {
+	v := NewVFS(Config{QuotaBytes: 10, MaxFiles: 100})
+	if _, _, err := v.WriteBytes("f", []byte("12345678"), false); err != nil {
+		t.Fatal(err)
+	}
+	// Overwrite charges the delta: 8 -> 10 fits, 8 -> 11 does not.
+	if _, _, err := v.WriteBytes("f", []byte("0123456789"), true); err != nil {
+		t.Fatalf("delta overwrite: %v", err)
+	}
+	if _, _, err := v.WriteBytes("f", make([]byte, 11), true); !errors.Is(err, ErrQuota) {
+		t.Fatalf("expected ErrQuota, got %v", err)
+	}
+	got, _ := v.Read("f")
+	if got != "0123456789" {
+		t.Fatalf("failed overwrite corrupted file: %q", got)
+	}
+}
+
+func TestWriteBytesReadOnly(t *testing.T) {
+	v := NewVFS(Config{QuotaBytes: 1 << 20, MaxFiles: 100, ReadOnly: true})
+	if _, _, err := v.WriteBytes("f", []byte("x"), true); !errors.Is(err, ErrReadOnly) {
+		t.Fatalf("expected ErrReadOnly, got %v", err)
+	}
+}
+
+// denyHook denies every gated call on the given phase.
+type denyHook struct{ phase string }
+
+func (h denyHook) Name() string { return "deny" }
+func (h denyHook) Before(ctx context.Context, c *capability.Call) error {
+	if h.phase == "before" {
+		return errors.New("no")
+	}
+	return nil
+}
+func (h denyHook) After(ctx context.Context, c *capability.Call, r *capability.Result) error {
+	if h.phase == "after" {
+		return errors.New("no")
+	}
+	return nil
+}
+
+func armedGate(t *testing.T, hooks []capability.Hook) *capability.Gate {
+	t.Helper()
+	g := capability.NewGate(capability.GateOwner{InstanceID: "i", UserID: "u"}, hooks, nil)
+	g.Arm(capability.ExecContext{ExecID: "console", InstanceID: "i", UserID: "u"})
+	return g
+}
+
+func TestAccessorWrite(t *testing.T) {
+	ctx := context.Background()
+	v := NewVFS(Config{QuotaBytes: 1 << 20, MaxFiles: 100})
+	res, err := NewAccessor(v, armedGate(t, nil)).Write(ctx, "a.csv", []byte("x,y\n1,2\n"), false)
+	if err != nil || !res.Committed || res.Replaced || res.Entry.Path != "/work/a.csv" {
+		t.Fatalf("write: %+v err=%v", res, err)
+	}
+	if _, err := NewAccessor(v, armedGate(t, nil)).Write(ctx, "a.csv", []byte("z"), false); err == nil {
+		t.Fatal("create-only overwrite allowed")
+	}
+	// A before-hook denial leaves nothing committed.
+	res, err = NewAccessor(v, armedGate(t, []capability.Hook{denyHook{phase: "before"}})).Write(ctx, "b.csv", []byte("x"), false)
+	var denied *capability.DeniedError
+	if !errors.As(err, &denied) || res.Committed {
+		t.Fatalf("before deny: %+v err=%v", res, err)
+	}
+	// An after-hook denial reports the error but the write landed.
+	res, err = NewAccessor(v, armedGate(t, []capability.Hook{denyHook{phase: "after"}})).Write(ctx, "b.csv", []byte("x"), false)
+	if !errors.As(err, &denied) || !res.Committed {
+		t.Fatalf("after deny: %+v err=%v", res, err)
+	}
+	if got, _ := v.Read("b.csv"); got != "x" {
+		t.Fatalf("committed write missing: %q", got)
+	}
+	// Disarmed gate: out of scope, nothing committed.
+	g := capability.NewGate(capability.GateOwner{}, nil, nil)
+	res, err = NewAccessor(v, g).Write(ctx, "c.csv", []byte("x"), false)
+	if !errors.Is(err, capability.ErrOutOfScope) || res.Committed {
+		t.Fatalf("out of scope: %+v err=%v", res, err)
 	}
 }

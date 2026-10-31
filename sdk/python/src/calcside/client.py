@@ -84,6 +84,25 @@ def _exec_result(data: dict[str, Any]) -> ExecResult:
     )
 
 
+# Reads are bounded at the server's 1 MiB upload ceiling plus one byte
+# so a caller-streamed file fails client-side instead of being
+# truncated into a silently different file.
+_MAX_UPLOAD = 1 << 20
+
+
+def _file_bytes(content: bytes | bytearray | str | Any) -> bytes:
+    if isinstance(content, str):
+        return content.encode("utf-8")
+    if isinstance(content, (bytes, bytearray)):
+        return bytes(content)
+    if not hasattr(content, "read"):
+        raise TypeError("content must be bytes, str, or a readable file-like object")
+    data = content.read(_MAX_UPLOAD + 1)
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+    return bytes(data)
+
+
 def _raise_for_status(resp: httpx.Response) -> None:
     if resp.status_code < 400:
         return
@@ -181,6 +200,30 @@ class Client:
         """Directory listing (``entries``) or file ``content``."""
         return self._req(
             "GET", f"/api/v1/instances/{instance_id}/files", params={"path": path}
+        ).json()
+
+    def upload_file(
+        self,
+        instance_id: str,
+        path: str,
+        content: bytes | bytearray | str | Any,
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """Upload one file into the instance filesystem (max 1 MiB).
+
+        ``content`` accepts ``bytes``/``bytearray``/``str`` (encoded as
+        UTF-8) or a readable file-like object opened by the caller — a
+        local path is never sent to the server. Existing files raise
+        ``CalcsideError(409, "conflict")`` unless ``overwrite`` is true.
+        Returns the write receipt ``{path, size, mtime, replaced}``.
+        """
+        body = _file_bytes(content)
+        return self._req(
+            "PUT",
+            f"/api/v1/instances/{instance_id}/files",
+            params={"path": path, "overwrite": "true" if overwrite else "false"},
+            content=body,
+            headers={"Content-Type": "application/octet-stream"},
         ).json()
 
     def preview_artifact(
@@ -334,6 +377,25 @@ class AsyncClient:
         return (
             await self._req(
                 "GET", f"/api/v1/instances/{instance_id}/files", params={"path": path}
+            )
+        ).json()
+
+    async def upload_file(
+        self,
+        instance_id: str,
+        path: str,
+        content: bytes | bytearray | str | Any,
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """Async counterpart of :meth:`Client.upload_file`."""
+        body = _file_bytes(content)
+        return (
+            await self._req(
+                "PUT",
+                f"/api/v1/instances/{instance_id}/files",
+                params={"path": path, "overwrite": "true" if overwrite else "false"},
+                content=body,
+                headers={"Content-Type": "application/octet-stream"},
             )
         ).json()
 

@@ -277,7 +277,8 @@ export interface paths {
             cookie?: never;
         };
         get: operations["files"];
-        put?: never;
+        /** @description Upload one file into the instance's virtual filesystem. The body is the file's raw bytes (max 1 MiB); `path` is the explicit destination under /work. Existing files are rejected with 409 conflict unless `overwrite=true`. Runs the same Gate/policy/quota checks as a scripted fs.write and is audited identically. */
+        put: operations["uploadFile"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1334,6 +1335,15 @@ export interface components {
             path?: string;
             content?: string;
         };
+        /** @description Upload receipt: normalized virtual path, size, mtime and whether an existing file was replaced. Never contains the uploaded contents. */
+        WriteResult: {
+            path: string;
+            /** Format: int64 */
+            size: number;
+            /** Format: int64 */
+            mtime: number;
+            replaced: boolean;
+        };
         /** @description live globals snapshot; values are reprs, secret-scrubbed */
         InstanceInspect: {
             variables: {
@@ -2199,6 +2209,43 @@ export interface operations {
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    uploadFile: {
+        parameters: {
+            query: {
+                /** @description Destination path under /work (relative paths resolve there). */
+                path: string;
+                /** @description Replace an existing file. Default false returns 409 on conflict. */
+                overwrite?: boolean;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Write receipt — never contains the uploaded contents. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WriteResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            413: components["responses"]["Error"];
         };
     };
     artifactConfig: {

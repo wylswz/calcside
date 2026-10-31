@@ -127,6 +127,22 @@ func (c *Client) Browse(ctx context.Context, req *runtime.BrowseRequest) (*runti
 	})
 }
 
+// Write forwards an upload to the owning node. It mutates instance
+// state, so it never retries transparently — a lost answer leaves an
+// uncertain outcome, same as exec.
+func (c *Client) Write(ctx context.Context, req *runtime.WriteRequest) (*runtime.WriteResponse, error) {
+	d, err := c.router.routed(ctx, req.InstanceID)
+	if err != nil {
+		return nil, err
+	}
+	out, err := d.Write(ctx, req)
+	if err != nil {
+		c.dropIfDead(req.InstanceID, err)
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *Client) Prompt(ctx context.Context, req *runtime.PromptRequest) (*runtime.PromptResponse, error) {
 	return retryOnStaleRoute(c, ctx, req.InstanceID, func() (*runtime.PromptResponse, error) {
 		d, err := c.router.routed(ctx, req.InstanceID)

@@ -20,7 +20,8 @@ import (
 	"calcside/internal/types"
 )
 
-const root = "/work"
+// Root is the VFS mount point; every instance file lives under it.
+const Root = "/work"
 
 // Config configures one instance's fs capability.
 type Config struct {
@@ -52,7 +53,7 @@ type VFS struct {
 
 func NewVFS(cfg Config) *VFS {
 	v := &VFS{nodes: map[string]*node{}, cfg: cfg, now: time.Now}
-	v.nodes[root] = &node{isDir: true, mtime: v.now()}
+	v.nodes[Root] = &node{isDir: true, mtime: v.now()}
 	return v
 }
 
@@ -66,10 +67,10 @@ func Resolve(p string) (string, error) {
 	if strings.HasPrefix(p, "/") {
 		full = path.Clean(p)
 	} else {
-		full = path.Clean(path.Join(root, p))
+		full = path.Clean(path.Join(Root, p))
 	}
-	if full != root && !strings.HasPrefix(full, root+"/") {
-		return "", fmt.Errorf("fs: path %q escapes %s", p, root)
+	if full != Root && !strings.HasPrefix(full, Root+"/") {
+		return "", fmt.Errorf("fs: path %q escapes %s", p, Root)
 	}
 	return full, nil
 }
@@ -88,13 +89,13 @@ var (
 )
 
 func (v *VFS) mkdirAllLocked(p string) error {
-	if p == root {
+	if p == Root {
 		return nil
 	}
 	// Ensure each ancestor exists as a dir, creating as needed.
 	var missing []string
 	cur := p
-	for cur != root {
+	for cur != Root {
 		if n, ok := v.nodes[cur]; ok {
 			if !n.isDir {
 				return fmt.Errorf("%w: %s", ErrNotDir, cur)
@@ -153,6 +154,56 @@ func (v *VFS) Write(p, content string, appendMode bool) (int, error) {
 	v.nodes[full] = &node{content: []byte(content), mtime: v.now()}
 	v.bytes += add
 	return len(content), nil
+}
+
+// WriteBytes stores raw bytes at path, creating parent dirs. When
+// overwrite is false an existing file (but not a directory) fails with
+// ErrExist; when true it is replaced. The returned bool reports whether
+// an existing file was replaced. Quota and file-count checks run under
+// the same mutation lock as Write — an overwrite is charged the size
+// delta and a failed write leaks nothing.
+func (v *VFS) WriteBytes(p string, content []byte, overwrite bool) (Entry, bool, error) {
+	full, err := Resolve(p)
+	if err != nil {
+		return Entry{}, false, err
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.cfg.ReadOnly {
+		return Entry{}, false, ErrReadOnly
+	}
+	if full == Root {
+		return Entry{}, false, ErrIsDir
+	}
+	n, exists := v.nodes[full]
+	if exists && n.isDir {
+		return Entry{}, false, ErrIsDir
+	}
+	if exists && !overwrite {
+		return Entry{}, false, ErrExist
+	}
+	var removed int64
+	if exists {
+		removed = int64(len(n.content))
+	}
+	if v.bytes-removed+int64(len(content)) > v.cfg.QuotaBytes {
+		return Entry{}, false, ErrQuota
+	}
+	if !exists && v.files+1 > v.cfg.MaxFiles {
+		return Entry{}, false, ErrMaxFiles
+	}
+	if err := v.mkdirAllLocked(path.Dir(full)); err != nil {
+		return Entry{}, false, err
+	}
+	stored := make([]byte, len(content))
+	copy(stored, content)
+	v.nodes[full] = &node{content: stored, mtime: v.now()}
+	v.bytes += int64(len(content)) - removed
+	if !exists {
+		v.files++
+	}
+	e, _ := v.statLocked(full)
+	return e, exists, nil
 }
 
 func (v *VFS) Read(p string) (string, error) {
@@ -306,7 +357,7 @@ func (v *VFS) Delete(p string, recursive bool) (int, error) {
 	if v.cfg.ReadOnly {
 		return 0, ErrReadOnly
 	}
-	if full == root {
+	if full == Root {
 		return 0, ErrRootDelete
 	}
 	n, ok := v.nodes[full]
@@ -705,7 +756,7 @@ func bindFS(v *VFS, gate *capability.Gate) starlark.Value {
 			return c.args, c.body, nil
 		},
 		OpList: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
-			p := root
+			p := Root
 			if err := starlark.UnpackArgs(string(OpList), args, kwargs, "dir?", &p); err != nil {
 				return nil, nil, err
 			}
@@ -716,7 +767,7 @@ func bindFS(v *VFS, gate *capability.Gate) starlark.Value {
 			return c.args, c.body, nil
 		},
 		OpWalk: func(args starlark.Tuple, kwargs []starlark.Tuple) (map[string]any, capability.OpBody, error) {
-			p := root
+			p := Root
 			if err := starlark.UnpackArgs(string(OpWalk), args, kwargs, "dir?", &p); err != nil {
 				return nil, nil, err
 			}
@@ -775,6 +826,42 @@ func dictOf(m map[string]starlark.Value) *starlark.Dict {
 		_ = d.SetKey(starlark.String(k), v)
 	}
 	return d
+}
+
+// WriteResult is the receipt of a gated byte write. Committed reports
+// whether the VFS mutation landed: a before-hook denial or a storage
+// error leaves Committed false, while an after-hook denial returns the
+// error with Committed true — the file is already there.
+type WriteResult struct {
+	Entry     Entry
+	Replaced  bool
+	Committed bool
+}
+
+// Write stores content at path through the same fs.write gate call a
+// script issues, so console uploads are policy-checked and audited
+// identically. Gate metadata carries path and byte count only.
+func (a *Accessor) Write(ctx context.Context, path string, content []byte, overwrite bool) (WriteResult, error) {
+	var res WriteResult
+	full, err := Resolve(path)
+	if err != nil {
+		return res, err
+	}
+	c := call{
+		args: map[string]any{"path": full, "bytes": len(content)},
+		body: func(ctx context.Context) (starlark.Value, map[string]any, error) {
+			e, replaced, err := a.v.WriteBytes(path, content, overwrite)
+			if err != nil {
+				return nil, nil, err
+			}
+			res.Entry, res.Replaced, res.Committed = e, replaced, true
+			return entryDict(e), map[string]any{"bytes": len(content)}, nil
+		},
+	}
+	if err := a.invoke(ctx, OpWrite, c); err != nil {
+		return res, err
+	}
+	return res, nil
 }
 
 func (a *Accessor) ListBounded(ctx context.Context, dir string, limit int) ([]Entry, error) {

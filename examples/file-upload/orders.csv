@@ -1,0 +1,17 @@
+order_id,date,region,product,quantity,unit_price
+1001,2026-10-01,north,apples,12,0.55
+1002,2026-10-01,south,pears,7,0.80
+1003,2026-10-02,north,apples,20,0.55
+1004,2026-10-02,east,grapes,5,1.20
+1005,2026-10-03,west,pears,9,0.80
+1006,2026-10-03,south,apples,15,0.55
+1007,2026-10-04,north,grapes,11,1.20
+1008,2026-10-04,east,apples,6,0.55
+1009,2026-10-05,west,grapes,14,1.20
+1010,2026-10-05,south,pears,18,0.80
+1011,2026-10-06,north,pears,4,0.80
+1012,2026-10-06,east,grapes,22,1.20
+1013,2026-10-07,west,apples,10,0.55
+1014,2026-10-07,south,grapes,8,1.20
+1015,2026-10-08,north,apples,16,0.55
+1016,2026-10-08,east,pears,13,0.80

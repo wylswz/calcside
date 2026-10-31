@@ -84,10 +84,11 @@ export function TimeLeft({ expiresAt }: { expiresAt: string }) {
   return <span className="whitespace-nowrap text-xs text-sec">{text} left</span>
 }
 
-export function Icon({ name, className = '' }: { name: 'preview' | 'download' | 'refresh' | 'back' | 'folder' | 'file' | 'code' | 'play' | 'stop' | 'desktop' | 'mobile' | 'chevron'; className?: string }) {
+export function Icon({ name, className = '' }: { name: 'preview' | 'download' | 'upload' | 'refresh' | 'back' | 'folder' | 'file' | 'code' | 'play' | 'stop' | 'desktop' | 'mobile' | 'chevron'; className?: string }) {
   const paths = {
     preview: <><path d="M2 10s3-6 8-6 8 6 8 6-3 6-8 6-8-6-8-6Z" /><circle cx="10" cy="10" r="2.5" /></>,
     download: <><path d="M10 2v10m-4-4 4 4 4-4M3 13v4h14v-4" /></>,
+    upload: <><path d="M10 12V2m-4 4 4-4 4 4M3 13v4h14v-4" /></>,
     refresh: <><path d="M17 8a7 7 0 1 0-1 7M17 3v5h-5" /></>,
     back: <path d="m9 4-6 6 6 6M3 10h14" />,
     folder: <path d="M2 5h6l2 2h8v10H2Z" />,

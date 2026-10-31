@@ -13,7 +13,7 @@ import (
 
 func CheckExportPath(full string, seen map[string]string) error {
 	invalid := errors.New("artifact path is not portable or collides with another selected path")
-	if path.Clean(full) != full || full != root && !strings.HasPrefix(full, root+"/") || !utf8.ValidString(full) {
+	if path.Clean(full) != full || full != Root && !strings.HasPrefix(full, Root+"/") || !utf8.ValidString(full) {
 		return invalid
 	}
 	parts := strings.Split(strings.TrimPrefix(full, "/"), "/")

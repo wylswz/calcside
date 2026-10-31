@@ -22,6 +22,8 @@ import (
 const (
 	BadCapability ErrorEnvelopeErrorKind = "bad_capability"
 	BadSpec       ErrorEnvelopeErrorKind = "bad_spec"
+	Conflict      ErrorEnvelopeErrorKind = "conflict"
+	Denied        ErrorEnvelopeErrorKind = "denied"
 	FsError       ErrorEnvelopeErrorKind = "fs_error"
 	Internal      ErrorEnvelopeErrorKind = "internal"
 	NoCapability  ErrorEnvelopeErrorKind = "no_capability"
@@ -29,6 +31,8 @@ const (
 	NotFound      ErrorEnvelopeErrorKind = "not_found"
 	NotOwner      ErrorEnvelopeErrorKind = "not_owner"
 	NotRunning    ErrorEnvelopeErrorKind = "not_running"
+	QuotaExceeded ErrorEnvelopeErrorKind = "quota_exceeded"
+	ReadOnly      ErrorEnvelopeErrorKind = "read_only"
 	StaleEpoch    ErrorEnvelopeErrorKind = "stale_epoch"
 	TooMany       ErrorEnvelopeErrorKind = "too_many"
 )
@@ -39,6 +43,10 @@ func (e ErrorEnvelopeErrorKind) Valid() bool {
 	case BadCapability:
 		return true
 	case BadSpec:
+		return true
+	case Conflict:
+		return true
+	case Denied:
 		return true
 	case FsError:
 		return true
@@ -53,6 +61,10 @@ func (e ErrorEnvelopeErrorKind) Valid() bool {
 	case NotOwner:
 		return true
 	case NotRunning:
+		return true
+	case QuotaExceeded:
+		return true
+	case ReadOnly:
 		return true
 	case StaleEpoch:
 		return true
@@ -161,6 +173,12 @@ type PromptRequest = rt.PromptRequest
 // PromptResponse defines model for PromptResponse.
 type PromptResponse = rt.PromptResponse
 
+// WriteRequest defines model for WriteRequest.
+type WriteRequest = rt.WriteRequest
+
+// WriteResponse defines model for WriteResponse.
+type WriteResponse = rt.WriteResponse
+
 // Error defines model for Error.
 type Error = ErrorEnvelope
 
@@ -193,6 +211,9 @@ type RuntimePrepareJSONRequestBody = PrepareRequest
 
 // RuntimePromptJSONRequestBody defines body for RuntimePrompt for application/json ContentType.
 type RuntimePromptJSONRequestBody = PromptRequest
+
+// RuntimeWriteJSONRequestBody defines body for RuntimeWrite for application/json ContentType.
+type RuntimeWriteJSONRequestBody = WriteRequest
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -443,6 +464,24 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /runtime/v1/prompt (the `RuntimePrompt` operationId).
 	RuntimePrompt(ctx context.Context, body RuntimePromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RuntimeWriteWithBody Write one bounded file into the instance VFS.
+	//
+	// A console file upload. Mutates instance state: never retried transparently by the caller — a lost answer leaves the outcome uncertain, which the receipt's committed flag reports once the request reaches the instance again. Once the instance is reached, the write receipt and audit batch always travel in the 200 response alongside an optional error, so a gated or failed write is still persisted. Content is base64 inside this JSON contract and bounded before admission.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /runtime/v1/write (the `RuntimeWrite` operationId).
+	RuntimeWriteWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RuntimeWrite Write one bounded file into the instance VFS.
+	//
+	// A console file upload. Mutates instance state: never retried transparently by the caller — a lost answer leaves the outcome uncertain, which the receipt's committed flag reports once the request reaches the instance again. Once the instance is reached, the write receipt and audit batch always travel in the 200 response alongside an optional error, so a gated or failed write is still persisted. Content is base64 inside this JSON contract and bounded before admission.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /runtime/v1/write (the `RuntimeWrite` operationId).
+	RuntimeWrite(ctx context.Context, body RuntimeWriteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // RuntimeBrowseWithBody List a directory or read one file in the instance VFS.
@@ -811,6 +850,44 @@ func (c *Client) RuntimePromptWithBody(ctx context.Context, contentType string, 
 // Corresponds with POST /runtime/v1/prompt (the `RuntimePrompt` operationId).
 func (c *Client) RuntimePrompt(ctx context.Context, body RuntimePromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRuntimePromptRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RuntimeWriteWithBody Write one bounded file into the instance VFS.
+//
+// A console file upload. Mutates instance state: never retried transparently by the caller — a lost answer leaves the outcome uncertain, which the receipt's committed flag reports once the request reaches the instance again. Once the instance is reached, the write receipt and audit batch always travel in the 200 response alongside an optional error, so a gated or failed write is still persisted. Content is base64 inside this JSON contract and bounded before admission.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /runtime/v1/write (the `RuntimeWrite` operationId).
+func (c *Client) RuntimeWriteWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRuntimeWriteRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RuntimeWrite Write one bounded file into the instance VFS.
+//
+// A console file upload. Mutates instance state: never retried transparently by the caller — a lost answer leaves the outcome uncertain, which the receipt's committed flag reports once the request reaches the instance again. Once the instance is reached, the write receipt and audit batch always travel in the 200 response alongside an optional error, so a gated or failed write is still persisted. Content is base64 inside this JSON contract and bounded before admission.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /runtime/v1/write (the `RuntimeWrite` operationId).
+func (c *Client) RuntimeWrite(ctx context.Context, body RuntimeWriteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRuntimeWriteRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1221,6 +1298,46 @@ func NewRuntimePromptRequestWithBody(server string, contentType string, body io.
 	return req, nil
 }
 
+// NewRuntimeWriteRequest calls the generic RuntimeWrite builder with application/json body
+func NewRuntimeWriteRequest(server string, body RuntimeWriteJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRuntimeWriteRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewRuntimeWriteRequestWithBody constructs an http.Request for the RuntimeWrite method, with any body, and a specified content type
+func NewRuntimeWriteRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/runtime/v1/write")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -1440,6 +1557,24 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /runtime/v1/prompt (the `RuntimePrompt` operationId).
 	RuntimePromptWithResponse(ctx context.Context, body RuntimePromptJSONRequestBody, reqEditors ...RequestEditorFn) (*RuntimePromptResponse, error)
+
+	// RuntimeWriteWithBodyWithResponse Write one bounded file into the instance VFS.
+	//
+	// A console file upload. Mutates instance state: never retried transparently by the caller — a lost answer leaves the outcome uncertain, which the receipt's committed flag reports once the request reaches the instance again. Once the instance is reached, the write receipt and audit batch always travel in the 200 response alongside an optional error, so a gated or failed write is still persisted. Content is base64 inside this JSON contract and bounded before admission.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /runtime/v1/write (the `RuntimeWrite` operationId).
+	RuntimeWriteWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RuntimeWriteResponse, error)
+
+	// RuntimeWriteWithResponse Write one bounded file into the instance VFS.
+	//
+	// A console file upload. Mutates instance state: never retried transparently by the caller — a lost answer leaves the outcome uncertain, which the receipt's committed flag reports once the request reaches the instance again. Once the instance is reached, the write receipt and audit batch always travel in the 200 response alongside an optional error, so a gated or failed write is still persisted. Content is base64 inside this JSON contract and bounded before admission.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /runtime/v1/write (the `RuntimeWrite` operationId).
+	RuntimeWriteWithResponse(ctx context.Context, body RuntimeWriteJSONRequestBody, reqEditors ...RequestEditorFn) (*RuntimeWriteResponse, error)
 }
 
 type RuntimeBrowseResponse struct {
@@ -1922,6 +2057,54 @@ func (r RuntimePromptResponse) ContentType() string {
 	return ""
 }
 
+type RuntimeWriteResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *WriteResponse
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RuntimeWriteResponse) GetJSON200() *WriteResponse {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RuntimeWriteResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RuntimeWriteResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RuntimeWriteResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RuntimeWriteResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RuntimeWriteResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // RuntimeBrowseWithBodyWithResponse List a directory or read one file in the instance VFS.
 //
 // Read-only; may be retried. list_only requests never read file contents.
@@ -2216,6 +2399,36 @@ func (c *ClientWithResponses) RuntimePromptWithResponse(ctx context.Context, bod
 		return nil, err
 	}
 	return ParseRuntimePromptResponse(rsp)
+}
+
+// RuntimeWriteWithBodyWithResponse Write one bounded file into the instance VFS.
+//
+// A console file upload. Mutates instance state: never retried transparently by the caller — a lost answer leaves the outcome uncertain, which the receipt's committed flag reports once the request reaches the instance again. Once the instance is reached, the write receipt and audit batch always travel in the 200 response alongside an optional error, so a gated or failed write is still persisted. Content is base64 inside this JSON contract and bounded before admission.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /runtime/v1/write (the `RuntimeWrite` operationId).
+func (c *ClientWithResponses) RuntimeWriteWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RuntimeWriteResponse, error) {
+	rsp, err := c.RuntimeWriteWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRuntimeWriteResponse(rsp)
+}
+
+// RuntimeWriteWithResponse Write one bounded file into the instance VFS.
+//
+// A console file upload. Mutates instance state: never retried transparently by the caller — a lost answer leaves the outcome uncertain, which the receipt's committed flag reports once the request reaches the instance again. Once the instance is reached, the write receipt and audit batch always travel in the 200 response alongside an optional error, so a gated or failed write is still persisted. Content is base64 inside this JSON contract and bounded before admission.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /runtime/v1/write (the `RuntimeWrite` operationId).
+func (c *ClientWithResponses) RuntimeWriteWithResponse(ctx context.Context, body RuntimeWriteJSONRequestBody, reqEditors ...RequestEditorFn) (*RuntimeWriteResponse, error) {
+	rsp, err := c.RuntimeWrite(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRuntimeWriteResponse(rsp)
 }
 
 // ParseRuntimeBrowseResponse parses an HTTP response from a RuntimeBrowseWithResponse call
@@ -2548,6 +2761,39 @@ func ParseRuntimePromptResponse(rsp *http.Response) (*RuntimePromptResponse, err
 	return response, nil
 }
 
+// ParseRuntimeWriteResponse parses an HTTP response from a RuntimeWriteWithResponse call
+func ParseRuntimeWriteResponse(rsp *http.Response) (*RuntimeWriteResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RuntimeWriteResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WriteResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// RuntimeBrowse List a directory or read one file in the instance VFS.
@@ -2580,6 +2826,9 @@ type ServerInterface interface {
 	// RuntimePrompt Render the per-capability prompt fragments for an instance.
 	// (POST /runtime/v1/prompt)
 	RuntimePrompt(c *gin.Context)
+	// RuntimeWrite Write one bounded file into the instance VFS.
+	// (POST /runtime/v1/write)
+	RuntimeWrite(c *gin.Context)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -2721,6 +2970,19 @@ func (siw *ServerInterfaceWrapper) RuntimePrompt(c *gin.Context) {
 	siw.Handler.RuntimePrompt(c)
 }
 
+// RuntimeWrite operation middleware
+func (siw *ServerInterfaceWrapper) RuntimeWrite(c *gin.Context) {
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RuntimeWrite(c)
+}
+
 // GinServerOptions provides options for the Gin server.
 type GinServerOptions struct {
 	BaseURL      string
@@ -2755,6 +3017,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/runtime/v1/keepalive", wrapper.RuntimeKeepalive)
 	router.POST(options.BaseURL+"/runtime/v1/delete", wrapper.RuntimeDelete)
 	router.POST(options.BaseURL+"/runtime/v1/browse", wrapper.RuntimeBrowse)
+	router.POST(options.BaseURL+"/runtime/v1/write", wrapper.RuntimeWrite)
 	router.POST(options.BaseURL+"/runtime/v1/export", wrapper.RuntimeExport)
 	router.POST(options.BaseURL+"/runtime/v1/prompt", wrapper.RuntimePrompt)
 	router.POST(options.BaseURL+"/runtime/v1/inspect", wrapper.RuntimeInspect)
@@ -3152,6 +3415,45 @@ func (response RuntimePromptdefaultJSONResponse) VisitRuntimePromptResponse(w ht
 	return err
 }
 
+type RuntimeWriteRequestObject struct {
+	Body *RuntimeWriteJSONRequestBody
+}
+
+type RuntimeWriteResponseObject interface {
+	VisitRuntimeWriteResponse(w http.ResponseWriter) error
+}
+
+type RuntimeWrite200JSONResponse WriteResponse
+
+func (response RuntimeWrite200JSONResponse) VisitRuntimeWriteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RuntimeWritedefaultJSONResponse struct {
+	Body       ErrorEnvelope
+	StatusCode int
+}
+
+func (response RuntimeWritedefaultJSONResponse) VisitRuntimeWriteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// RuntimeBrowse List a directory or read one file in the instance VFS.
@@ -3184,6 +3486,9 @@ type StrictServerInterface interface {
 	// RuntimePrompt Render the per-capability prompt fragments for an instance.
 	// (POST /runtime/v1/prompt)
 	RuntimePrompt(ctx context.Context, request RuntimePromptRequestObject) (RuntimePromptResponseObject, error)
+	// RuntimeWrite Write one bounded file into the instance VFS.
+	// (POST /runtime/v1/write)
+	RuntimeWrite(ctx context.Context, request RuntimeWriteRequestObject) (RuntimeWriteResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx *gin.Context, request any) (any, error)
@@ -3546,6 +3851,37 @@ func (sh *strictHandler) RuntimePrompt(ctx *gin.Context) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(RuntimePromptResponseObject); ok {
 		if err := validResponse.VisitRuntimePromptResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RuntimeWrite operation middleware
+func (sh *strictHandler) RuntimeWrite(ctx *gin.Context) {
+	var request RuntimeWriteRequestObject
+
+	var body RuntimeWriteJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.RuntimeWrite(ctx, request.(RuntimeWriteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RuntimeWrite")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(RuntimeWriteResponseObject); ok {
+		if err := validResponse.VisitRuntimeWriteResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

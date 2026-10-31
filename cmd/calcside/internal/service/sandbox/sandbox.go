@@ -142,6 +142,14 @@ func fail(err error) error {
 		return service.NotFound(err.Error())
 	case errors.Is(err, runtime.ErrFS):
 		return service.Errf(types.ErrCodeFSError, "%s", err.Error())
+	case errors.Is(err, runtime.ErrConflict):
+		return service.Errf(types.ErrCodeConflict, "%s", err.Error())
+	case errors.Is(err, runtime.ErrQuota):
+		return service.Errf(types.ErrCodeTooLarge, "%s", err.Error())
+	case errors.Is(err, runtime.ErrFSReadOnly):
+		return service.Errf(types.ErrCodeConflict, "%s", err.Error())
+	case errors.Is(err, runtime.ErrDenied):
+		return service.Errf(types.ErrCodeForbidden, "%s", err.Error())
 	case errors.Is(err, runtime.ErrBadSpec):
 		return service.Errf(types.ErrCodeBadSpec, "%s", err.Error())
 	default:

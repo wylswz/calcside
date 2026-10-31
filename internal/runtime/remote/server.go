@@ -145,6 +145,14 @@ func (s strict) RuntimeBrowse(ctx context.Context, req gen.RuntimeBrowseRequestO
 	return gen.RuntimeBrowse200JSONResponse(*resp), nil
 }
 
+func (s strict) RuntimeWrite(ctx context.Context, req gen.RuntimeWriteRequestObject) (gen.RuntimeWriteResponseObject, error) {
+	resp, err := s.rt.Write(requestContext(ctx), req.Body)
+	if err != nil {
+		return gen.RuntimeWritedefaultJSONResponse{Body: envelope(err), StatusCode: statusOf(err)}, nil
+	}
+	return gen.RuntimeWrite200JSONResponse(*resp), nil
+}
+
 func (s strict) RuntimePrompt(ctx context.Context, req gen.RuntimePromptRequestObject) (gen.RuntimePromptResponseObject, error) {
 	resp, err := s.rt.Prompt(requestContext(ctx), req.Body)
 	if err != nil {

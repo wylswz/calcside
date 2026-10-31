@@ -533,6 +533,18 @@ func (s *Supervisor) Browse(ctx context.Context, req *runtime.BrowseRequest) (*r
 	return call(s, req.InstanceID, func(p *proc) (*runtime.BrowseResponse, error) { return p.rt.Browse(ctx, req) })
 }
 
+// Write forwards an upload to the instance child. A committed write
+// renews the child's lease exactly like an exec.
+func (s *Supervisor) Write(ctx context.Context, req *runtime.WriteRequest) (*runtime.WriteResponse, error) {
+	return call(s, req.InstanceID, func(p *proc) (*runtime.WriteResponse, error) {
+		resp, err := p.rt.Write(ctx, req)
+		if err == nil && resp != nil && resp.Committed {
+			p.renew(req.RenewedExpiresAt)
+		}
+		return resp, err
+	})
+}
+
 func (s *Supervisor) Prompt(ctx context.Context, req *runtime.PromptRequest) (*runtime.PromptResponse, error) {
 	return call(s, req.InstanceID, func(p *proc) (*runtime.PromptResponse, error) { return p.rt.Prompt(ctx, req) })
 }

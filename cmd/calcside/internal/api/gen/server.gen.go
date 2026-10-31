@@ -1330,6 +1330,14 @@ type WorkspacesResponse struct {
 	Workspaces *[]Workspace `json:"workspaces,omitempty"`
 }
 
+// WriteResult Upload receipt: normalized virtual path, size, mtime and whether an existing file was replaced. Never contains the uploaded contents.
+type WriteResult struct {
+	Mtime    int64  `json:"mtime"`
+	Path     string `json:"path"`
+	Replaced bool   `json:"replaced"`
+	Size     int64  `json:"size"`
+}
+
 // IdPath defines model for IdPath.
 type IdPath = string
 
@@ -1409,6 +1417,15 @@ type FilesParams struct {
 
 	// ListOnly Only list directories; never read file contents. Used by path completion.
 	ListOnly *bool `form:"list_only,omitempty" json:"list_only,omitempty"`
+}
+
+// UploadFileParams defines parameters for UploadFile.
+type UploadFileParams struct {
+	// Path Destination path under /work (relative paths resolve there).
+	Path string `form:"path" json:"path"`
+
+	// Overwrite Replace an existing file. Default false returns 409 on conflict.
+	Overwrite *bool `form:"overwrite,omitempty" json:"overwrite,omitempty"`
 }
 
 // InstancePromptParams defines parameters for InstancePrompt.
@@ -1672,6 +1689,9 @@ type ServerInterface interface {
 
 	// (GET /api/v1/instances/{id}/files)
 	Files(c *gin.Context, id IdPath, params FilesParams)
+
+	// (PUT /api/v1/instances/{id}/files)
+	UploadFile(c *gin.Context, id IdPath, params UploadFileParams)
 
 	// (GET /api/v1/instances/{id}/inspect)
 	InstanceInspect(c *gin.Context, id IdPath)
@@ -2582,6 +2602,50 @@ func (siw *ServerInterfaceWrapper) Files(c *gin.Context) {
 	}
 
 	siw.Handler.Files(c, id, params)
+}
+
+// UploadFile operation middleware
+func (siw *ServerInterfaceWrapper) UploadFile(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params UploadFileParams
+
+	// ------------- Required query parameter "path" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "path", c.Request.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter path: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "overwrite" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "overwrite", c.Request.URL.Query(), &params.Overwrite, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter overwrite: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.UploadFile(c, id, params)
 }
 
 // InstanceInspect operation middleware
@@ -3700,6 +3764,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/api/v1/instances/:id/keepalive", wrapper.Keepalive)
 	router.POST(options.BaseURL+"/api/v1/instances/:id/exec", wrapper.Exec)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/files", wrapper.Files)
+	router.PUT(options.BaseURL+"/api/v1/instances/:id/files", wrapper.UploadFile)
 	router.GET(options.BaseURL+"/api/v1/artifacts/config", wrapper.ArtifactConfig)
 	router.POST(options.BaseURL+"/api/v1/instances/:id/artifacts/preview", wrapper.PreviewArtifact)
 	router.POST(options.BaseURL+"/api/v1/instances/:id/artifacts/export", wrapper.ExportArtifacts)
@@ -5653,6 +5718,114 @@ func (response Files409JSONResponse) VisitFilesResponse(w http.ResponseWriter) e
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UploadFileRequestObject struct {
+	Id     IdPath `json:"id"`
+	Params UploadFileParams
+	Body   io.Reader
+}
+
+type UploadFileResponseObject interface {
+	VisitUploadFileResponse(w http.ResponseWriter) error
+}
+
+type UploadFile200JSONResponse WriteResult
+
+func (response UploadFile200JSONResponse) VisitUploadFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UploadFile400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UploadFile400JSONResponse) VisitUploadFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UploadFile401JSONResponse ErrorEnvelope
+
+func (response UploadFile401JSONResponse) VisitUploadFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UploadFile403JSONResponse ErrorEnvelope
+
+func (response UploadFile403JSONResponse) VisitUploadFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UploadFile404JSONResponse ErrorEnvelope
+
+func (response UploadFile404JSONResponse) VisitUploadFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UploadFile409JSONResponse ErrorEnvelope
+
+func (response UploadFile409JSONResponse) VisitUploadFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UploadFile413JSONResponse ErrorEnvelope
+
+func (response UploadFile413JSONResponse) VisitUploadFileResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -8557,6 +8730,9 @@ type StrictServerInterface interface {
 	// (GET /api/v1/instances/{id}/files)
 	Files(ctx context.Context, request FilesRequestObject) (FilesResponseObject, error)
 
+	// (PUT /api/v1/instances/{id}/files)
+	UploadFile(ctx context.Context, request UploadFileRequestObject) (UploadFileResponseObject, error)
+
 	// (GET /api/v1/instances/{id}/inspect)
 	InstanceInspect(ctx context.Context, request InstanceInspectRequestObject) (InstanceInspectResponseObject, error)
 
@@ -9555,6 +9731,35 @@ func (sh *strictHandler) Files(ctx *gin.Context, id IdPath, params FilesParams) 
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(FilesResponseObject); ok {
 		if err := validResponse.VisitFilesResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UploadFile operation middleware
+func (sh *strictHandler) UploadFile(ctx *gin.Context, id IdPath, params UploadFileParams) {
+	var request UploadFileRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	request.Body = ctx.Request.Body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.UploadFile(ctx, request.(UploadFileRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UploadFile")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(UploadFileResponseObject); ok {
+		if err := validResponse.VisitUploadFileResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

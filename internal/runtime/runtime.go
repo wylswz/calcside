@@ -38,6 +38,18 @@ var (
 	ErrNoSuchPath = errors.New("runtime: no such path")
 	// ErrFS is any other filesystem failure during a browse.
 	ErrFS = errors.New("runtime: filesystem error")
+	// ErrConflict means the write target already exists and the
+	// request did not opt into replacing it.
+	ErrConflict = errors.New("runtime: path already exists")
+	// ErrQuota is a write the instance filesystem cannot admit: byte
+	// quota or file-count limit.
+	ErrQuota = errors.New("runtime: filesystem quota exceeded")
+	// ErrFSReadOnly is a write against a read-only instance filesystem.
+	ErrFSReadOnly = errors.New("runtime: filesystem is read-only")
+	// ErrDenied is a hook or policy veto of a gated operation. On a
+	// write, the receipt's Committed flag says whether the denial ran
+	// before or after the mutation landed.
+	ErrDenied = errors.New("runtime: denied by policy")
 )
 
 // Error pairs a stable kind with a message that is safe to surface to
@@ -83,6 +95,7 @@ type Runtime interface {
 	Keepalive(ctx context.Context, req *KeepaliveRequest) (*KeepaliveResponse, error)
 	Delete(ctx context.Context, req *DeleteRequest) (*DeleteResponse, error)
 	Browse(ctx context.Context, req *BrowseRequest) (*BrowseResponse, error)
+	Write(ctx context.Context, req *WriteRequest) (*WriteResponse, error)
 	Export(ctx context.Context, req *ExportRequest) (*ExportResponse, error)
 	Prompt(ctx context.Context, req *PromptRequest) (*PromptResponse, error)
 	Inspect(ctx context.Context, req *InspectRequest) (*InspectResponse, error)

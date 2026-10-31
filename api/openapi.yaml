@@ -378,6 +378,44 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
+    put:
+      operationId: uploadFile
+      tags: [instances]
+      description: >-
+        Upload one file into the instance's virtual filesystem. The body is the
+        file's raw bytes (max 1 MiB); `path` is the explicit destination under
+        /work. Existing files are rejected with 409 conflict unless
+        `overwrite=true`. Runs the same Gate/policy/quota checks as a scripted
+        fs.write and is audited identically.
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: path
+          in: query
+          required: true
+          description: Destination path under /work (relative paths resolve there).
+          schema: { type: string, minLength: 1, maxLength: 1024 }
+        - name: overwrite
+          in: query
+          description: Replace an existing file. Default false returns 409 on conflict.
+          schema: { type: boolean, default: false }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        '200':
+          description: Write receipt — never contains the uploaded contents.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WriteResult'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
   /api/v1/artifacts/config:
     get:
       operationId: artifactConfig
@@ -2042,6 +2080,17 @@ components:
           items: { $ref: '#/components/schemas/FileEntry' }
         path: { type: string }
         content: { type: string }
+    WriteResult:
+      type: object
+      description: >-
+        Upload receipt: normalized virtual path, size, mtime and whether an
+        existing file was replaced. Never contains the uploaded contents.
+      required: [path, size, mtime, replaced]
+      properties:
+        path: { type: string }
+        size: { type: integer, format: int64 }
+        mtime: { type: integer, format: int64 }
+        replaced: { type: boolean }
     InstanceInspect:
       type: object
       required: [variables]
