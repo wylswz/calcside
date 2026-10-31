@@ -1,6 +1,6 @@
 /* Scoped application pages — never leaks outside .app-page. */
 .app-page .app-dim { color: rgb(var(--sec)); font-size: 13px }
-.app-page .app-mono { font-family: inherit; font-size: 12px; overflow-wrap: anywhere }
+.app-page .app-mono { font-size: 12px; overflow-wrap: anywhere }
 .app-page .app-label { display: block; font-size: 12px; color: rgb(var(--sec)); margin: 12px 0 4px }
 .app-page .app-input {
   width: 100%; max-width: 480px; padding: 6px 8px; font: inherit;
@@ -29,7 +29,7 @@
 .app-page details.app-card > .app-card-body { border-top: 1px solid rgb(var(--line)); padding-top: 16px }
 .app-page .app-status { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid rgb(var(--line)) }
 .app-page .app-status-ready { color: rgb(var(--accent)); border-color: rgb(var(--accent)) }
-.app-page .app-status-degraded { color: #b45309; border-color: #b45309 }
+.app-page .app-status-degraded { color: rgb(var(--warn-text)); border-color: rgb(var(--warn-text)) }
 .app-page .app-status-disabled { color: rgb(var(--sec)) }
 /* fieldset is layout-transparent: it only toggles descendant controls
    for the read-only view, never draws its own box (S1). */
@@ -69,8 +69,5 @@
 }
 
 /* Inbox nav count: reserved width, tabular figures — nav never shifts (S3/S4) */
-.inbox-count { display: inline-block; min-width: 1.5em; text-align: center; font-variant-numeric: tabular-nums; color: var(--warn-text, #a35c00); }
-.app-kv { display: grid; grid-template-columns: auto 1fr; gap: .25rem .75rem; font-size: .8rem; }
-.app-kv dt { grid-column: 1; }
-.app-kv dd { grid-column: 2; }
-.row-sel { outline: 1px solid var(--accent, #4f46e5); }
+.inbox-count { display: inline-block; min-width: 1.5em; text-align: center; font-variant-numeric: tabular-nums; color: rgb(var(--warn-text)); }
+.row-sel { outline: 1px solid rgb(var(--accent)); }

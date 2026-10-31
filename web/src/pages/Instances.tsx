@@ -56,9 +56,7 @@ export default function Instances() {
         actions={<>
           <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />
           {role != null && role !== 'viewer' && <Button variant="primary" onClick={() => nav('/instances/new')}>New instance</Button>}
-        </>}>
-        Set the boundary, connect an agent, and follow its work.
-      </PageHeader>
+        </>} />
       {isLoading && <Loading />}
       {data && all.length === 0 && (
         <div className="rounded-xl border border-line bg-surface px-6 py-10 text-center">

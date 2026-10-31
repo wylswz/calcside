@@ -64,7 +64,7 @@ export default function Keys({ bare }: { bare?: boolean }) {
       {bare && <div className="mb-4 flex items-center justify-between"><p className="text-xs text-sec" /><Button variant="primary" onClick={startNew}>New key</Button></div>}
 {!bare && <PageHeader title="API keys"
         actions={<Button variant="primary" onClick={startNew}>New key</Button>}>
-        Bearer tokens (<code className="font-mono text-ink">cs_…</code>) for the SDK and agents. A restricted key may only create and use instances from its instance spec; the secret is shown once at creation.
+        Bearer tokens (<code className="font-mono text-ink">cs_…</code>) for the SDK and agents. Restricted keys create and use instances from their spec.
       </PageHeader>}
       <div className="tbl-wrap">
         <table className="tbl">

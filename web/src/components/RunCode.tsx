@@ -75,7 +75,9 @@ export function RunCode({ inst, running, setRunning, onRan }: {
         <div className="editor-footer flex flex-wrap gap-x-4 border-t border-line px-3 py-2 text-xs text-sec">
           <span>Ctrl+Space to complete</span>
           {editor.error ? <span className="text-warn-text">Live completions unavailable</span> :
-            <span>{running ? 'Using cached symbols while code runs' : editor.isFetching ? 'Refreshing symbols…' : inst.status !== 'running' ? 'Instance is not running' : 'Suggestions use this instance’s runtime'}</span>}
+            running ? <span>Using cached symbols while code runs</span> :
+            editor.isFetching ? <span>Refreshing symbols…</span> :
+            inst.status !== 'running' ? <span>Instance is not running</span> : null}
           {editor.truncated && <span className="text-warn-text">Symbol limit reached; some suggestions omitted</span>}
           <button className="text-btn ml-auto" onClick={() => editor.refetch()} disabled={running || inst.status !== 'running' || editor.isFetching}>refresh symbols</button>
         </div>

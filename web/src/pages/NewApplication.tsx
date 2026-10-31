@@ -55,7 +55,7 @@ export default function NewApplication() {
     <div className="instance-builder">
       <PageHeader title="New application">
         <KindSelect current="application" onDirty={() => ((name !== '' || specDirty || rawDirty) ? setDiscard(true) : nav('/instances/new'))} />
-        <span className="app-dim">A durable JSON function: callers POST a JSON object to main(input) and get one back. Edit code after creating.</span>
+        <span>Callers POST a JSON object to main(input).</span>
       </PageHeader>
       <div className="builder-work-panel">
         <SpecForm ref={form} application workspaceId={dest.id} onSpecChange={onSpec} onRawDirtyChange={setRawDirty}

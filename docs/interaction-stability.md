@@ -127,7 +127,7 @@ Every invariant has an owner mechanism, in order of preference:
 |---|---|---|
 | S1 | `material.css` paint-only states; static CSS/Tailwind check; e2e "controls keep their box under hover and press" | enforced |
 | S2 | shared `Menu` (Radix); S1; e2e "the More menu stays where it opened" | enforced |
-| S3 | fixed reveal slot (`RevealNew`); e2e "palette controls stay put", Run code toggle test | partial — builder and detail only |
+| S3 | fixed reveal slot (`RevealNew`); e2e "palette controls stay put", run editor placement test | partial — builder and detail only |
 | S4 | `SwapLabel` and `RevealNew`; static label check; e2e "Show latest" and "Show N new" | enforced for state/request-driven labels and counters |
 | S5 | `useHeldOrder` + "Show N new"/"Show latest"; `stableList` unit tests; e2e activity and instance list | enforced for polled lists |
 | S6 | scroll-locked `Modal`; e2e "opening a dialog does not shift the page" | enforced for dialogs |

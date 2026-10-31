@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, InstanceInspect, ResourceUsages } from '../api'
 import { EmptyRow, Notice, SectionTitle, SwapLabel } from './ui'
@@ -61,23 +61,30 @@ function MemoryBlock({ resources, history }: { resources?: ResourceUsages; histo
 }
 
 // StatePanel shows the instance's live state: variables (reprs) and
-// memory accounting.
-export function StatePanel({ id, running, busy, capNames = [] }: { id: string; running: boolean; busy: boolean; capNames?: string[] }) {
-  const [auto, setAuto] = useState(true)
+// memory accounting. It never polls: the parent passes a revision that
+// changes with each execution, and only then does state refresh.
+export function StatePanel({ id, running, revision, capNames = [] }: { id: string; running: boolean; revision?: string; capNames?: string[] }) {
   const [filter, setFilter] = useState('')
   const [showBuiltins, setShowBuiltins] = useState(false)
   const [history, setHistory] = useState<number[]>([])
-  const { data, error, refetch, isFetching, dataUpdatedAt } = useQuery({
+  const { data, error, refetch } = useQuery({
     queryKey: ['inspect', id],
     queryFn: () => api.get<InstanceInspect>(`/api/v1/instances/${id}/inspect`),
     enabled: running,
     retry: false,
-    refetchInterval: auto && !busy ? 3000 : false,
   })
+  // A changed revision marks a new execution. Refetching keeps the old
+  // data on screen, so rows never disappear while the new snapshot arrives.
+  const seen = useRef(revision)
+  useEffect(() => {
+    if (!running || revision === undefined || seen.current === revision) return
+    seen.current = revision
+    refetch()
+  }, [revision, running, refetch])
   useEffect(() => {
     const usage = data?.resources?.memory_usage
     if (usage !== undefined) setHistory((h) => [...h, usage].slice(-HISTORY_LEN))
-  }, [data, dataUpdatedAt])
+  }, [data])
   const q = filter.trim().toLowerCase()
   const allNames = Object.keys(data?.variables ?? {})
   const builtinCount = allNames.filter((n) => isBuiltinGlobal(n, data?.variables?.[n] ?? '', capNames)).length
@@ -87,19 +94,7 @@ export function StatePanel({ id, running, busy, capNames = [] }: { id: string; r
     .sort()
   return (
     <section aria-label="State" className="space-y-5">
-      <SectionTitle aside={
-        <>
-          {dataUpdatedAt > 0 && <span className="text-mute">updated {new Date(dataUpdatedAt).toLocaleTimeString()}</span>}
-          <label className="flex items-center gap-1.5 text-sec">
-            <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} disabled={!running} />
-            auto-refresh
-          </label>
-          <button className="text-btn" onClick={() => refetch()} disabled={!running}>
-            <SwapLabel show={isFetching ? 'refreshing…' : 'refresh'} options={['refresh', 'refreshing…']} />
-          </button>
-        </>
-      }>State</SectionTitle>
-      {busy && auto && <p className="text-xs text-mute">paused while code runs</p>}
+      <SectionTitle>State</SectionTitle>
       {!running && <p className="text-xs text-mute">instance is not running — nothing to inspect</p>}
       {error && <Notice tone="warning">{(error as Error).message}</Notice>}
       {data && (
@@ -118,7 +113,7 @@ export function StatePanel({ id, running, busy, capNames = [] }: { id: string; r
             </div>
             <div className="tbl-wrap">
               <table className="tbl tbl-compact">
-                <tbody className="font-mono">
+                <tbody>
                   {names.map((name) => (
                     <tr key={name} className="row-hover">
                       <td className="w-px whitespace-nowrap align-top text-ink"><code>{name}</code></td>

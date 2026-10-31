@@ -21,7 +21,7 @@ export default function Profile({ user }: { user: User }) {
 
   return (
     <div className="max-w-xl">
-      <PageHeader title="Profile">Your account and sign-in settings.</PageHeader>
+      <PageHeader title="Profile" />
       <SectionTitle>Account</SectionTitle>
       <dl className="mb-10 grid grid-cols-[auto_1fr] gap-x-8 gap-y-3 text-sm">
         <dt className="text-sec">Name</dt><dd className="text-ink">{user.name || '—'}</dd>

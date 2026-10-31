@@ -132,7 +132,7 @@ function ProviderForm({ provider, entries, secrets, onClose }: {
             </Field>
           )
         })}
-        {secretFields.length > 0 && <p className="text-xs text-sec">Secrets are stored as workspace references. Add one under <strong>Secrets</strong> if the list is empty.</p>}
+        {secretFields.length > 0 && <p className="text-xs text-sec">Secrets are workspace references; add one under <strong>Secrets</strong>.</p>}
         {name && !NAME_RE.test(name) && <p className="text-xs text-warn-text">Name allows letters, digits, _ . - (max 64), starting with a letter or digit.</p>}
       </div>
     </Modal>
@@ -170,7 +170,7 @@ export default function Providers({ bare }: { bare?: boolean }) {
     <div>
       {bare && <div className="mb-4 flex items-center justify-between"><p className="text-xs text-sec" /><Button variant="primary" disabled={!canEdit} onClick={() => setShowNew(true)}>New provider</Button></div>}
       {!bare && <PageHeader title="LLM providers" actions={canEdit && <Button variant="primary" onClick={() => setShowNew(true)}>New provider</Button>}>
-        Named provider extensions for the <code className="font-mono text-ink">llm</code> capability ext. Provider metadata supplies the default model catalogue; instances select a provider and one of its models.
+        Named extensions for the <code className="font-mono text-ink">llm</code> capability; each supplies default models that instances can select.
       </PageHeader>}
       <div className="tbl-wrap">
         <table className="tbl">

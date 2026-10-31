@@ -63,7 +63,7 @@ export default function NewInstance() {
     <div className="instance-builder">
       <PageHeader title={from ? 'Create similar' : 'New instance'}>
         <KindSelect current="instance" onDirty={() => (specDirty ? setDiscard(true) : nav('/applications/new'))} />
-        <span className="app-dim">{from ? 'Copy configuration only. Files and state stay in the original instance.' : 'Choose what the agent can access. Connect it after creation.'}</span>
+        {from && <span>Copy configuration only. Files and state stay in the original instance.</span>}
       </PageHeader>
       <div className="builder-work-panel">
         <SpecForm key={from ?? 'new'} ref={form} initial={from ? src.data?.spec : undefined} onSpecChange={reviewCb} workspaceId={dest.id}
