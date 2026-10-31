@@ -5,12 +5,10 @@ WIRE_PACKAGES := ./internal/node ./cmd/calcside ./cmd/calcside-worker
 
 .PHONY: build test test-cgroup test-cgroup-host lint web dev serve-dev tidy gen gen-check wire wire-check migrate-new migrate-hash migrate-validate migrate-apply migrate-status test-postgres sdk-test sdk-lint docker-env benchmark benchmark-smoke helm-lint
 
-# First-run compose setup: generate docker/.env with a random shared
-# key, or copy docker/.env.example to fill in yourself.
+# First-run compose setup: generate docker/.env from .env.example
+# with random secrets, or copy docker/.env.example to fill in yourself.
 docker-env:
-	@if [ -f docker/.env ]; then echo "docker/.env already exists"; exit 0; fi; \
-	echo "CALCSIDE_WORKER_SHARED_KEY=$$(openssl rand -base64 32)" > docker/.env; \
-	echo "wrote docker/.env (gitignored)"
+	@docker/init-env.sh
 
 build: web $(BINARIES)
 
