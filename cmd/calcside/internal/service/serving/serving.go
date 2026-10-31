@@ -18,11 +18,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
-	"sync"
 	"time"
 	"unicode/utf8"
 
+	"calcside/cmd/calcside/internal/scheduler"
 	"calcside/internal/runtime"
 	"calcside/internal/store"
 )
@@ -54,23 +53,17 @@ type Options struct {
 	// Secrets resolves release vault refs at prepare time; may be nil
 	// only when no release can carry secrets.
 	Secrets SecretResolver
-	// Nodes is the configured node allowlist: node id -> trusted
-	// address. A worker's declared address is never used.
-	Nodes map[string]string
+	// Scheduler owns the node allowlist, placement and replica claims.
+	Scheduler *scheduler.Scheduler
 	// GlobalPolicies are the server's own policy modules, applied
 	// alongside (never instead of) the release's.
 	GlobalPolicies map[string]string
 	Now            func() time.Time
-	LeaseDuration  time.Duration
-	NodeTTL        time.Duration
 }
 
 // Service implements runtime.NodeControl.
 type Service struct {
 	o Options
-
-	reconcileMu sync.Mutex
-	lastID      string
 }
 
 var _ runtime.NodeControl = (*Service)(nil)
@@ -80,23 +73,12 @@ func New(o Options) (*Service, error) {
 	if o.Store == nil {
 		return nil, fmt.Errorf("%w: store required", errInternal)
 	}
+	if o.Scheduler == nil {
+		return nil, fmt.Errorf("%w: scheduler required", errInternal)
+	}
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	if o.LeaseDuration <= 0 {
-		o.LeaseDuration = 30 * time.Second
-	}
-	if o.NodeTTL <= 0 {
-		o.NodeTTL = 45 * time.Second
-	}
-	if o.LeaseDuration >= o.NodeTTL {
-		return nil, fmt.Errorf("%w: lease must be below node ttl", errInternal)
-	}
-	nodes := map[string]string{}
-	for k, v := range o.Nodes {
-		nodes[k] = v
-	}
-	o.Nodes = nodes
 	pol := map[string]string{}
 	for k, v := range o.GlobalPolicies {
 		pol[k] = v
@@ -129,14 +111,14 @@ func (s *Service) RegisterNode(ctx context.Context, req *runtime.NodeRegisterReq
 		req.Capacity < 1 || req.Capacity > maxCapacity {
 		return nil, bad("invalid node registration")
 	}
-	addr, ok := s.o.Nodes[req.NodeID]
+	addr, ok := s.o.Scheduler.Addr(req.NodeID)
 	if !ok {
 		return nil, bad("unknown node")
 	}
 	now := s.o.Now()
 	n, err := s.o.Store.RegisterServingNode(ctx, &store.ServingNode{
 		NodeID: req.NodeID, BootID: req.BootID, Addr: addr,
-		Capacity: req.Capacity, HeartbeatUntil: now.Add(s.o.NodeTTL),
+		Capacity: req.Capacity, HeartbeatUntil: now.Add(s.o.Scheduler.NodeTTL()),
 	}, now)
 	if errors.Is(err, store.ErrConflict) {
 		return nil, stale()
@@ -206,7 +188,7 @@ func (s *Service) SyncNode(ctx context.Context, req *runtime.NodeSyncRequest) (*
 		len(req.Inventory) > maxCapacity || len(req.Reports) > maxReports {
 		return nil, bad("invalid sync")
 	}
-	if _, ok := s.o.Nodes[req.Node.NodeID]; !ok {
+	if !s.o.Scheduler.Known(req.Node.NodeID) {
 		return nil, bad("unknown node")
 	}
 	if req.Capacity < 1 || req.Capacity > maxCapacity {
@@ -287,7 +269,7 @@ func (s *Service) SyncNode(ctx context.Context, req *runtime.NodeSyncRequest) (*
 	// Heartbeat the CURRENT tuple first — a stale boot gets nothing.
 	ok, err := s.o.Store.HeartbeatServingNode(ctx, store.ServingNodeFence{
 		NodeID: req.Node.NodeID, BootID: req.Node.BootID, Incarnation: req.Node.Incarnation,
-	}, now, now.Add(s.o.NodeTTL), req.Capacity)
+	}, now, now.Add(s.o.Scheduler.NodeTTL()), req.Capacity)
 	if err != nil {
 		return nil, errInternal
 	}
@@ -370,7 +352,7 @@ func (s *Service) SyncNode(ctx context.Context, req *runtime.NodeSyncRequest) (*
 	var out []runtime.ReplicaAssignment
 	for _, row := range rows {
 		if _, ok := invRows[row.ID]; ok {
-			until := now.Add(s.o.LeaseDuration)
+			until := now.Add(s.o.Scheduler.LeaseDuration())
 			ren, err := s.o.Store.RenewServingReplica(ctx, store.ServingReplicaFence{
 				ReplicaID: row.ID, InstanceID: row.InstanceID, ReleaseID: row.ReleaseID,
 				NodeID: row.NodeID, BootID: row.BootID, NodeIncarnation: row.NodeIncarnation,
@@ -416,113 +398,11 @@ func (s *Service) SyncNode(ctx context.Context, req *runtime.NodeSyncRequest) (*
 	}, nil
 }
 
-// rendezvousKey orders nodes deterministically per instance so
-// placement is stable across API and worker boots.
-func rendezvousKey(instanceID, nodeID string) []byte {
-	h := sha256.Sum256([]byte(instanceID + "\x00" + nodeID))
-	return h[:]
-}
-
-// Reconcile is the scheduler pass: one process-local winner, CAS
-// authority for cross-process races. It claims at most one replica per
-// enabled instance whose lease is dead and backoff elapsed.
+// Reconcile runs one scheduler pass over persistent instances. The
+// scheduler serializes passes and claims at most one replica.
 func (s *Service) Reconcile(ctx context.Context) error {
-	if !s.reconcileMu.TryLock() {
-		return nil
-	}
-	defer s.reconcileMu.Unlock()
-
-	nodes, err := s.o.Store.ListServingNodes(ctx, s.o.Now())
-	if err != nil {
-		return errInternal
-	}
-	candidates := nodes[:0]
-	for _, n := range nodes {
-		if addr, ok := s.o.Nodes[n.NodeID]; ok {
-			n.Addr = addr // configured address wins, never the stored one
-			candidates = append(candidates, n)
-		}
-	}
-	// One pass processes at most one 200-row page so reconcile work is
-	// bounded; an empty tail page wraps the cursor once, then the next
-	// pass resumes from the head.
-	page, err := s.o.Store.ListPersistentInstances(ctx, s.lastID, pageSize)
-	if err != nil {
-		return errInternal
-	}
-	if len(page) == 0 && s.lastID != "" {
-		s.lastID = ""
-		page, err = s.o.Store.ListPersistentInstances(ctx, "", pageSize)
-		if err != nil {
-			return errInternal
-		}
-	}
-	for _, inst := range page {
-		s.lastID = inst.ID
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if err := s.claimOne(ctx, inst, candidates); err != nil {
-			return ctxErr(ctx, err)
-		}
-	}
-	return nil
-}
-
-// claimOne attempts to place one dead-or-absent instance.
-func (s *Service) claimOne(ctx context.Context, inst *store.PersistentInstance, nodes []*store.ServingNode) error {
-	if !inst.Enabled || len(nodes) == 0 {
-		return nil
-	}
-	now := s.o.Now()
-	if inst.RetryAfter != nil && now.Before(*inst.RetryAfter) {
-		return nil
-	}
-	// An unexpired non-terminal replica owns the instance — even a
-	// dead-boot lease must expire before handoff.
-	cur, err := s.o.Store.GetCurrentServingReplica(ctx, inst.ID)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return errInternal
-	}
-	if err == nil && cur.LeaseUntil.After(now) &&
-		(cur.State == store.ServingReplicaPreparing || cur.State == store.ServingReplicaReady) {
-		return nil
-	}
-	// Rendezvous order: stable placement, deterministic fallback.
-	ordered := append([]*store.ServingNode(nil), nodes...)
-	sort.Slice(ordered, func(i, j int) bool {
-		ki, kj := rendezvousKey(inst.ID, ordered[i].NodeID), rendezvousKey(inst.ID, ordered[j].NodeID)
-		for x := range ki {
-			if ki[x] != kj[x] {
-				return ki[x] > kj[x]
-			}
-		}
-		return ordered[i].NodeID < ordered[j].NodeID
-	})
-	for _, n := range ordered {
-		until := now.Add(s.o.LeaseDuration)
-		if until.After(n.HeartbeatUntil) {
-			until = n.HeartbeatUntil
-		}
-		if !until.After(now) {
-			continue
-		}
-		_, err := s.o.Store.ClaimServingReplica(ctx, store.ServingReplicaClaim{
-			InstanceID: inst.ID, ReleaseID: inst.ReleaseID,
-			NodeID: n.NodeID, BootID: n.BootID, ReplicaID: store.NewID(store.PrefixServingReplica),
-			NodeIncarnation: n.Incarnation, Generation: inst.Generation,
-			ExpectedEpoch: inst.LastEpoch, Now: now, LeaseUntil: until,
-		})
-		if errors.Is(err, store.ErrConflict) {
-			continue // lost the CAS or full node: next candidate
-		}
-		if errors.Is(err, store.ErrNotFound) {
-			return nil // instance vanished mid-pass
-		}
-		if err != nil {
-			return errInternal
-		}
-		return nil // claimed: exactly one winner per pass
+	if err := s.o.Scheduler.Reconcile(ctx); err != nil {
+		return ctxErr(ctx, errInternal)
 	}
 	return nil
 }
@@ -535,7 +415,7 @@ func (s *Service) PrepareReplica(ctx context.Context, req *runtime.NodePrepareRe
 		req.Node.Incarnation <= 0 || !validID(req.Assignment.ReplicaID) {
 		return nil, bad("invalid prepare request")
 	}
-	if _, known := s.o.Nodes[req.Node.NodeID]; !known {
+	if !s.o.Scheduler.Known(req.Node.NodeID) {
 		return nil, bad("unknown node")
 	}
 	now := s.o.Now()

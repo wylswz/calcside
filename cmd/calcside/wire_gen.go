@@ -34,7 +34,12 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		return nil, nil, err
 	}
 	checker := access.New(store)
-	runtime, cleanup2, err := provideRuntime(cfg, store)
+	scheduler, err := provideScheduler(cfg, store)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	runtime, cleanup2, err := provideRuntime(cfg, store, scheduler)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
@@ -146,7 +151,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		cleanup()
 		return nil, nil, err
 	}
-	servingService, err := provideServingService(cfg, store, service, v)
+	servingService, err := provideServingService(store, service, v, scheduler)
 	if err != nil {
 		cleanup4()
 		cleanup3()

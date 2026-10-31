@@ -10,11 +10,17 @@ import (
 	"calcside/internal/runtime/remote"
 )
 
+// Picker chooses a node for a fresh deployment. The API's scheduler
+// owns this decision; routing existing work stays in the router.
+type Picker interface {
+	Pick(ctx context.Context) (placement.NodeRef, error)
+}
+
 // Client is a runtime.Runtime that forwards each operation to the node
 // owning the instance. The wire is remote.Direct — the same signed
 // protocol the supervisor speaks to instance children — so this file
-// holds only the contract's per-method semantics: placement decisions
-// live in the router, retry rules live here.
+// holds only the contract's per-method semantics: routing lives in the
+// router, retry rules live here.
 //
 // Retry semantics follow the contract: only Keepalive, Browse, Prompt,
 // Inspect and Export re-resolve and retry once on a stale route;
@@ -25,8 +31,10 @@ type Client struct {
 	Key []byte
 	// NodeID identifies this API node in request signatures.
 	NodeID string
-	// Nodes lists live workers; used to pick a Create target and to map
-	// a bound node_id to its address.
+	// Picker chooses the node for a fresh deployment.
+	Picker Picker
+	// Nodes lists live workers; used to map a bound node_id to its
+	// address and to resolve routes at runtime.
 	Nodes func(ctx context.Context) ([]placement.NodeRef, error)
 	// Resolve returns the authoritative binding for an instance —
 	// typically the node_id/lease_epoch columns on its row. Used on
@@ -39,12 +47,13 @@ type Client struct {
 
 var _ runtime.Runtime = (*Client)(nil)
 
-func NewClient(key []byte, nodeID string, nodes func(context.Context) ([]placement.NodeRef, error), resolve func(context.Context, string) (*placement.Binding, error)) *Client {
+func NewClient(key []byte, nodeID string, picker Picker, nodes func(context.Context) ([]placement.NodeRef, error), resolve func(context.Context, string) (*placement.Binding, error)) *Client {
 	c := &Client{
-		Key: key, NodeID: nodeID, Nodes: nodes, Resolve: resolve,
+		Key: key, NodeID: nodeID, Picker: picker, Nodes: nodes, Resolve: resolve,
 		HTTP: &http.Client{},
 	}
 	c.router = &router{
+		picker:  picker,
 		nodes:   func(ctx context.Context) ([]placement.NodeRef, error) { return c.Nodes(ctx) },
 		resolve: func(ctx context.Context, id string) (*placement.Binding, error) { return c.Resolve(ctx, id) },
 		http:    func() *http.Client { return c.HTTP },

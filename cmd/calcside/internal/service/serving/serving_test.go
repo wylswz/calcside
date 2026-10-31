@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"calcside/cmd/calcside/internal/scheduler"
 	"calcside/internal/runtime"
 	"calcside/internal/store"
 	"calcside/internal/store/storetest"
@@ -41,11 +42,17 @@ func newSvc(t *testing.T, clock *fakeNow) (*Service, store.Store, *fakeSecrets) 
 	}
 	t.Cleanup(func() { st.Close() })
 	sec := &fakeSecrets{}
+	sch, err := scheduler.New(scheduler.Options{
+		Store: st, Nodes: map[string]string{"n1": "addr1", "n2": "addr2"},
+		Now: clock.Now, LeaseDuration: 10 * time.Second, NodeTTL: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	svc, err := New(Options{
-		Store: st, Secrets: sec,
-		Nodes:          map[string]string{"n1": "addr1", "n2": "addr2"},
+		Store: st, Secrets: sec, Scheduler: sch,
 		GlobalPolicies: map[string]string{"g": "package g"},
-		Now:            clock.Now, LeaseDuration: 10 * time.Second, NodeTTL: 30 * time.Second,
+		Now:            clock.Now,
 	})
 	if err != nil {
 		t.Fatal(err)

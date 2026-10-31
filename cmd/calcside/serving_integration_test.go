@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"calcside/cmd/calcside/internal/extensions"
+	"calcside/cmd/calcside/internal/scheduler"
 	"calcside/cmd/calcside/internal/service/serving"
 	"calcside/internal/node"
 	"calcside/internal/nodeagent"
@@ -212,10 +213,16 @@ func TestServingRestart(t *testing.T) {
 			u, inst := seedServing(t, st)
 
 			newSvc := func(st store.Store) *serving.Service {
-				svc, err := serving.New(serving.Options{
+				now := func() time.Time { return time.Now().Add(2 * time.Hour) }
+				sch, err := scheduler.New(scheduler.Options{
 					Store: st, Nodes: map[string]string{"worker-test": "configured-worker"},
-					LeaseDuration: lease, NodeTTL: ttl,
-					Now: func() time.Time { return time.Now().Add(2 * time.Hour) },
+					LeaseDuration: lease, NodeTTL: ttl, Now: now,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				svc, err := serving.New(serving.Options{
+					Store: st, Scheduler: sch, Now: now,
 				})
 				if err != nil {
 					t.Fatal(err)

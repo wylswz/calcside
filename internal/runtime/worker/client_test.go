@@ -47,18 +47,38 @@ func newWorker(t *testing.T, key []byte) (addr string) {
 	return strings.TrimPrefix(srv.URL, "http://")
 }
 
+type testPlacement struct {
+	nodes   []placement.NodeRef
+	resolve func(context.Context, string) (*placement.Binding, error)
+}
+
+func (p *testPlacement) Pick(context.Context) (placement.NodeRef, error) {
+	return p.nodes[0], nil
+}
+
+func (p *testPlacement) Nodes(context.Context) ([]placement.NodeRef, error) {
+	return p.nodes, nil
+}
+
+func (p *testPlacement) Resolve(ctx context.Context, id string) (*placement.Binding, error) {
+	if p.resolve == nil {
+		return nil, placement.ErrNotBound
+	}
+	return p.resolve(ctx, id)
+}
+
 func newClient(addr string, bindings map[string]*placement.Binding) *worker.Client {
-	return worker.NewClient(testKey, "api-1",
-		func(context.Context) ([]placement.NodeRef, error) {
-			return []placement.NodeRef{{NodeID: "w1", Addr: addr}}, nil
-		},
-		func(_ context.Context, id string) (*placement.Binding, error) {
+	p := &testPlacement{
+		nodes: []placement.NodeRef{{NodeID: "w1", Addr: addr}},
+		resolve: func(_ context.Context, id string) (*placement.Binding, error) {
 			b, ok := bindings[id]
 			if !ok {
 				return nil, placement.ErrNotBound
 			}
 			return b, nil
-		})
+		},
+	}
+	return worker.NewClient(testKey, "api-1", p, p.Nodes, p.Resolve)
 }
 
 func createReq(id string) *runtime.CreateRequest {
@@ -188,11 +208,8 @@ func TestRemoteAuth(t *testing.T) {
 	}
 
 	// Wrong key: same.
-	rt := worker.NewClient([]byte("wrong-key-wrong-key-wrong-key!"), "api-1",
-		func(context.Context) ([]placement.NodeRef, error) {
-			return []placement.NodeRef{{NodeID: "w1", Addr: addr}}, nil
-		},
-		nil)
+	p := &testPlacement{nodes: []placement.NodeRef{{NodeID: "w1", Addr: addr}}}
+	rt := worker.NewClient([]byte("wrong-key-wrong-key-wrong-key!"), "api-1", p, p.Nodes, p.Resolve)
 	if _, err := rt.Create(context.Background(), createReq("ins_x")); err == nil {
 		t.Fatal("expected auth failure")
 	}

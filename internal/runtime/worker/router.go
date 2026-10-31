@@ -5,18 +5,16 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
-	"sync/atomic"
 
 	"calcside/internal/placement"
-	"calcside/internal/runtime"
 	"calcside/internal/runtime/remote"
 )
 
-// router owns the routing half of Client: which node owns an instance,
-// and the remote.Direct bound to each node address. Dependencies arrive
-// as accessors over Client's fields so post-construction overrides
-// (tests swapping HTTP or Resolve) keep working.
+// router owns the runtime half of Client: which node owns an instance,
+// and the remote.Direct bound to each node address. Fresh placement is
+// delegated to Picker; this type only caches and forwards.
 type router struct {
+	picker  Picker
 	nodes   func(ctx context.Context) ([]placement.NodeRef, error)
 	resolve func(ctx context.Context, instanceID string) (*placement.Binding, error)
 	http    func() *http.Client
@@ -25,7 +23,6 @@ type router struct {
 	mu      sync.Mutex
 	routes  map[string]routeEnt
 	directs map[string]*remote.Direct // per node addr
-	rr      atomic.Uint64
 }
 
 type routeEnt struct {
@@ -35,14 +32,10 @@ type routeEnt struct {
 
 // pick selects a live node for a fresh Create/Prepare placement.
 func (r *router) pick(ctx context.Context) (placement.NodeRef, *remote.Direct, error) {
-	nodes, err := r.nodes(ctx)
+	node, err := r.picker.Pick(ctx)
 	if err != nil {
 		return placement.NodeRef{}, nil, err
 	}
-	if len(nodes) == 0 {
-		return placement.NodeRef{}, nil, runtime.Errf(runtime.ErrTooMany, "no live worker nodes")
-	}
-	node := nodes[r.rr.Add(1)%uint64(len(nodes))]
 	return node, r.forNode(node.Addr), nil
 }
 

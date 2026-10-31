@@ -31,7 +31,7 @@ func (f *fakeNodes) list(ctx context.Context) ([]placement.NodeRef, error) {
 
 // servingClient builds a Client whose node URL points at a real
 // manager behind httptest+Direct, or at nil nodes.
-func servingClient(t *testing.T, m *instance.Manager, resolveErr error, nodesCalls *atomic.Int64) (*Client, *httptest.Server) {
+func servingClient(t *testing.T, m *instance.Manager, resolveErr error, nodesCalls *atomic.Int64) (*Client, *httptest.Server, *testPlacement) {
 	t.Helper()
 	var srv *httptest.Server
 	var addr, nodeID string
@@ -41,25 +41,18 @@ func servingClient(t *testing.T, m *instance.Manager, resolveErr error, nodesCal
 		addr = strings.TrimPrefix(srv.URL, "http://")
 		nodeID = "w1"
 	}
-	nc := nodesCalls
-	if nc == nil {
-		nc = &atomic.Int64{}
+	p := &testPlacement{nodesCalls: nodesCalls}
+	if m != nil {
+		p.nodes = []placement.NodeRef{{NodeID: nodeID, Addr: addr}}
 	}
-	cl := NewClient(wkey, "api",
-		func(ctx context.Context) ([]placement.NodeRef, error) {
-			nc.Add(1)
-			if m == nil {
-				return nil, nil
-			}
-			return []placement.NodeRef{{NodeID: nodeID, Addr: addr}}, nil
-		},
-		func(ctx context.Context, id string) (*placement.Binding, error) {
-			if resolveErr != nil {
-				return nil, resolveErr
-			}
-			return &placement.Binding{NodeID: nodeID}, nil
-		})
-	return cl, srv
+	p.resolve = func(ctx context.Context, id string) (*placement.Binding, error) {
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		return &placement.Binding{NodeID: nodeID}, nil
+	}
+	cl := NewClient(wkey, "api", p, p.Nodes, p.Resolve)
+	return cl, srv, p
 }
 
 func servingSpec() json.RawMessage {
@@ -77,7 +70,7 @@ func TestClientPrepareInvokeRoundtrip(t *testing.T) {
 	})
 	t.Cleanup(m.StopReaper)
 	nc := &atomic.Int64{}
-	cl, _ := servingClient(t, m, errors.New("resolve must not be called"), nc)
+	cl, _, _ := servingClient(t, m, errors.New("resolve must not be called"), nc)
 	ctx := context.Background()
 
 	prep := &runtime.PrepareRequest{
@@ -134,9 +127,9 @@ func TestClientPrepareFailureNoRoute(t *testing.T) {
 		Limits: capability.ServerLimits{MaxFSQuotaBytes: 256 << 20}})
 	t.Cleanup(m.StopReaper)
 	resolved := &atomic.Int64{}
-	cl, _ := servingClient(t, m, nil, nil)
+	cl, _, p := servingClient(t, m, nil, nil)
 	// resolve counts calls so we can prove no cached route exists.
-	cl.Resolve = func(ctx context.Context, id string) (*placement.Binding, error) {
+	p.resolve = func(ctx context.Context, id string) (*placement.Binding, error) {
 		resolved.Add(1)
 		return nil, errors.New("unbound")
 	}
@@ -174,7 +167,7 @@ def main(i): return {}`)},
 
 func TestClientNoNodesNoRetry(t *testing.T) {
 	nc := &atomic.Int64{}
-	cl, _ := servingClient(t, nil, nil, nc)
+	cl, _, _ := servingClient(t, nil, nil, nc)
 	_, err := cl.Prepare(context.Background(), &runtime.PrepareRequest{
 		CreateRequest: runtime.CreateRequest{InstanceID: "x", Owner: runtime.Owner{UserID: "u"},
 			Spec: servingSpec(), ExpiresAt: time.Now().Add(60e9)},
