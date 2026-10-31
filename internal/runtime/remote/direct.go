@@ -119,6 +119,14 @@ func (d *Direct) Browse(ctx context.Context, req *runtime.BrowseRequest) (*runti
 	return UnwrapResponse(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
 }
 
+func (d *Direct) Write(ctx context.Context, req *runtime.WriteRequest) (*runtime.WriteResponse, error) {
+	resp, err := d.cl.RuntimeWriteWithResponse(ctx, *req)
+	if err != nil {
+		return nil, err
+	}
+	return UnwrapResponse(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
+}
+
 func (d *Direct) Prompt(ctx context.Context, req *runtime.PromptRequest) (*runtime.PromptResponse, error) {
 	resp, err := d.cl.RuntimePromptWithResponse(ctx, *req)
 	if err != nil {

@@ -20,6 +20,8 @@ import (
 const (
 	BadCapability ErrorEnvelopeErrorKind = "bad_capability"
 	BadSpec       ErrorEnvelopeErrorKind = "bad_spec"
+	Conflict      ErrorEnvelopeErrorKind = "conflict"
+	Denied        ErrorEnvelopeErrorKind = "denied"
 	FsError       ErrorEnvelopeErrorKind = "fs_error"
 	Internal      ErrorEnvelopeErrorKind = "internal"
 	NoCapability  ErrorEnvelopeErrorKind = "no_capability"
@@ -27,6 +29,8 @@ const (
 	NotFound      ErrorEnvelopeErrorKind = "not_found"
 	NotOwner      ErrorEnvelopeErrorKind = "not_owner"
 	NotRunning    ErrorEnvelopeErrorKind = "not_running"
+	QuotaExceeded ErrorEnvelopeErrorKind = "quota_exceeded"
+	ReadOnly      ErrorEnvelopeErrorKind = "read_only"
 	StaleEpoch    ErrorEnvelopeErrorKind = "stale_epoch"
 	TooMany       ErrorEnvelopeErrorKind = "too_many"
 )
@@ -37,6 +41,10 @@ func (e ErrorEnvelopeErrorKind) Valid() bool {
 	case BadCapability:
 		return true
 	case BadSpec:
+		return true
+	case Conflict:
+		return true
+	case Denied:
 		return true
 	case FsError:
 		return true
@@ -51,6 +59,10 @@ func (e ErrorEnvelopeErrorKind) Valid() bool {
 	case NotOwner:
 		return true
 	case NotRunning:
+		return true
+	case QuotaExceeded:
+		return true
+	case ReadOnly:
 		return true
 	case StaleEpoch:
 		return true

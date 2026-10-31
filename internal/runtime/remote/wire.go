@@ -90,6 +90,14 @@ func kindOf(err error) string {
 		return "fs_error"
 	case errors.Is(err, runtime.ErrStaleEpoch):
 		return "stale_epoch"
+	case errors.Is(err, runtime.ErrConflict):
+		return "conflict"
+	case errors.Is(err, runtime.ErrQuota):
+		return "quota_exceeded"
+	case errors.Is(err, runtime.ErrFSReadOnly):
+		return "read_only"
+	case errors.Is(err, runtime.ErrDenied):
+		return "denied"
 	default:
 		return "internal"
 	}
@@ -118,6 +126,14 @@ func errorOf(kind, msg string) error {
 		sentinel = runtime.ErrFS
 	case "stale_epoch":
 		sentinel = runtime.ErrStaleEpoch
+	case "conflict":
+		sentinel = runtime.ErrConflict
+	case "quota_exceeded":
+		sentinel = runtime.ErrQuota
+	case "read_only":
+		sentinel = runtime.ErrFSReadOnly
+	case "denied":
+		sentinel = runtime.ErrDenied
 	default:
 		sentinel = runtime.Errf(errInternal, "%s", "")
 	}
@@ -138,8 +154,10 @@ func statusOf(err error) int {
 		return http.StatusConflict
 	case "bad_spec", "bad_capability", "no_capability", "not_running":
 		return http.StatusBadRequest
-	case "stale_epoch":
+	case "stale_epoch", "conflict", "read_only", "denied":
 		return http.StatusConflict
+	case "quota_exceeded":
+		return http.StatusRequestEntityTooLarge
 	default:
 		return http.StatusInternalServerError
 	}

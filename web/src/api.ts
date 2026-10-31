@@ -185,6 +185,32 @@ export const api = {
     return { blob: data, filename, redacted: response.headers.get('X-Calcside-Redacted') === 'true', fileCount: Number(response.headers.get('X-Calcside-File-Count') || 0) }
   },
   get: async <T>(path: string): Promise<T> => call<T>('get', path),
+  // uploadFile PUTs raw bytes to /files. XHR is used because fetch
+  // cannot report request-body upload progress; bytes sent still is not
+  // commit complete — callers show a finalizing state until the receipt.
+  uploadFile: (instanceId: string, path: string, body: Blob, opts: { overwrite?: boolean; onProgress?: (loaded: number, total: number) => void; signal?: AbortSignal } = {}): Promise<{ path: string; size: number; mtime: number; replaced: boolean }> =>
+    new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      const q = `path=${encodeURIComponent(path)}&overwrite=${opts.overwrite ? 'true' : 'false'}`
+      xhr.open('PUT', `/api/v1/instances/${encodeURIComponent(instanceId)}/files?${q}`)
+      xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+      xhr.setRequestHeader('X-Requested-With', 'calcside')
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable) opts.onProgress?.(e.loaded, e.total) }
+      xhr.onload = () => {
+        try {
+          const data = JSON.parse(xhr.responseText || '{}')
+          if (xhr.status >= 200 && xhr.status < 300) resolve(data)
+          else {
+            const e = data?.error
+            reject(new ApiError(xhr.status, (e?.code ?? '') as ApiErrorCode | '', e?.message ?? xhr.statusText))
+          }
+        } catch { reject(new ApiError(xhr.status, '', xhr.statusText || 'Upload failed')) }
+      }
+      xhr.onerror = () => reject(new ApiError(0, '', 'Network error during upload'))
+      xhr.onabort = () => reject(new ApiError(0, '', 'Upload cancelled'))
+      opts.signal?.addEventListener('abort', () => xhr.abort(), { once: true })
+      xhr.send(body)
+    }),
   // postRawJson sends an already-serialized JSON body verbatim —
   // high-precision numbers must never round-trip through JSON.parse.
   postRawJson: async <T>(path: string, raw: string): Promise<T> => rawJson<T>('POST', path, raw),

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"calcside/cmd/calcside/internal/service"
 	"calcside/cmd/calcside/internal/service/access"
 	auditsvc "calcside/cmd/calcside/internal/service/audit"
+	"calcside/internal/runtime"
 	"calcside/internal/store"
 	"calcside/internal/types"
 )
@@ -188,6 +190,10 @@ func (r execResp) VisitExecResponse(w http.ResponseWriter) error { return r.writ
 type filesResp struct{ rawJSON }
 
 func (r filesResp) VisitFilesResponse(w http.ResponseWriter) error { return r.write(w) }
+
+type uploadFileResp struct{ rawJSON }
+
+func (r uploadFileResp) VisitUploadFileResponse(w http.ResponseWriter) error { return r.write(w) }
 
 type instancePromptResp struct{ rawJSON }
 
@@ -906,6 +912,31 @@ func (s *strictImpl) Files(ctx context.Context, req gen.FilesRequestObject) (gen
 		return filesResp{rawJSON{200, dto.FilesDir{Entries: dto.NewFileEntries(v.Entries)}}}, nil
 	}
 	return filesResp{rawJSON{200, dto.FilesFile{Path: v.Path, Content: v.Content}}}, nil
+}
+
+// uploadFile serves PUT /instances/{id}/files?path=...&overwrite=... —
+// the raw request body is the file's bytes. The middleware body cap
+// already bounds admission; the +1 limit reader detects the overflow
+// here so a missing or wrong Content-Length cannot truncate silently.
+func (s *strictImpl) UploadFile(ctx context.Context, req gen.UploadFileRequestObject) (gen.UploadFileResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return uploadFileResp{*e}, nil
+	}
+	if req.Params.Path == "" {
+		return uploadFileResp{rawJSON{http.StatusBadRequest, errEnv(types.ErrCodeBadRequest, "path is required")}}, nil
+	}
+	body, err := io.ReadAll(io.LimitReader(req.Body, runtime.MaxUploadBytes+1))
+	if err != nil || int64(len(body)) > runtime.MaxUploadBytes {
+		return uploadFileResp{rawJSON{http.StatusRequestEntityTooLarge, errEnv(types.ErrCodeTooLarge, "file exceeds 1 MiB upload limit")}}, nil
+	}
+	v, err := s.d.Sandbox.WriteFile(ctx, actorOf(p), req.Id, req.Params.Path, body,
+		req.Params.Overwrite != nil && *req.Params.Overwrite)
+	if err != nil {
+		return uploadFileResp{fail(err)}, nil
+	}
+	return uploadFileResp{rawJSON{200, dto.WriteResult{Path: v.Path, Size: v.Size, Mtime: v.Mtime, Replaced: v.Replaced}}}, nil
 }
 
 func (s *strictImpl) ListExecutions(ctx context.Context, req gen.ListExecutionsRequestObject) (gen.ListExecutionsResponseObject, error) {

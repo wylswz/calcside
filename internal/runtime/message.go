@@ -224,6 +224,52 @@ type BrowseResponse struct {
 	Audit   AuditBatch  `json:"audit"`
 }
 
+// MaxUploadBytes bounds one upload's raw content. The public route
+// caps the octet-stream body at the same value; inside this JSON
+// contract base64 expands it to ~1.37MiB, which still fits the 4MiB
+// worker body limit with envelope headroom.
+const MaxUploadBytes = 1 << 20
+
+// WriteRequest is one bounded file upload into the instance VFS. The
+// bytes are raw at the public boundary and base64 inside this JSON
+// contract; callers bound the payload before it reaches a node.
+type WriteRequest struct {
+	InstanceID string `json:"instance_id"`
+	Owner      Owner  `json:"owner"`
+	Actor      Owner  `json:"actor,omitempty"`
+	Path       string `json:"path"`
+	Overwrite  bool   `json:"overwrite,omitempty"`
+	Content    []byte `json:"content"`
+	// RenewedExpiresAt is the sliding TTL deadline the API tier has
+	// computed for after a successful write; failures do not renew.
+	RenewedExpiresAt time.Time `json:"renewed_expires_at"`
+	Epoch            int64     `json:"epoch,omitempty"`
+}
+
+func (r *WriteRequest) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("instance_id", r.InstanceID),
+		slog.String("path", r.Path),
+		slog.Int("content_bytes", len(r.Content)),
+	)
+}
+
+// WriteResponse is the write receipt. Like Export, every outcome the
+// instance produced — including a gated failure — arrives on the 200
+// response so the audit batch is never dropped by an error envelope;
+// Error is nil only on success. Committed reports whether the VFS
+// mutation landed, distinguishing an after-hook denial (file already
+// exists) from a pre-commit failure.
+type WriteResponse struct {
+	Path      string         `json:"path,omitempty"`
+	Size      int64          `json:"size"`
+	Mtime     int64          `json:"mtime"`
+	Replaced  bool           `json:"replaced"`
+	Committed bool           `json:"committed"`
+	Error     *ArtifactError `json:"error,omitempty"`
+	Audit     AuditBatch     `json:"audit"`
+}
+
 type PromptRequest struct {
 	InstanceID string `json:"instance_id"`
 	Owner      Owner  `json:"owner"`

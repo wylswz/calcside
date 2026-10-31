@@ -239,4 +239,13 @@ type FilesFile struct {
 	Content string `json:"content"`
 }
 
+// WriteResult is the upload receipt: it reports where the bytes landed
+// without echoing them.
+type WriteResult struct {
+	Path     string `json:"path"`
+	Size     int64  `json:"size"`
+	Mtime    int64  `json:"mtime"`
+	Replaced bool   `json:"replaced"`
+}
+
 type CompletionContext = completion.Context

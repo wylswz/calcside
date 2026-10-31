@@ -1,9 +1,75 @@
 # EP-0005: Upload files into an instance's virtual filesystem
 
-- **Status:** Draft
+- **Status:** Implemented (v1, chunked transfer still future work)
 - **Created:** 2026-10-05
+- **Revised:** 2026-10-31 — added implementation research; no code has shipped.
+- **Revised:** 2026-10-31 — first increment shipped end to end.
 - **Area:** Public/worker APIs, runtime, instance manager, fs capability, web, Python SDK
 - **Related:** [EP-0002](0002-standard-library-utilities.md), [EP-0006](0006-pluggable-instance-vfs.md), [EP-0001](0001-record-replay.md), [EP-0007](0007-artifact-preview-and-download.md)
+
+## Implementation status
+
+As of 2026-10-31 the bounded single-file upload is implemented end to
+end: `PUT /api/v1/instances/{id}/files?path=...&overwrite=...`
+(`application/octet-stream`, 1 MiB ceiling) routes through
+`worker.Client` -> `remote.Direct` -> `subproc.Supervisor` ->
+`instance.Manager.Write` into a gated `fs.write` call on the VFS, with a
+receipt-style `WriteResponse` (error + audit + `Committed` on the 200
+path), conflict/quota/read-only/denied codes, create-only default,
+sliding-TTL renewal on committed writes, SDK `upload_file`
+(sync+async), and a console upload queue (button + drop target +
+progress + overwrite confirm) in `ArtifactBrowser`. Text browse now
+rejects non-UTF-8/NUL file contents explicitly. Chunked transfer and
+record/replay interaction remain open. The research table below is
+kept for the follow-up increments.
+
+| Requirement | Current state | Location |
+|---|---|---|
+| `PUT /instances/{id}/files` | Absent; only `GET .../files` exists | `api/openapi.yaml` (`/api/v1/instances/{id}/files`) |
+| Runtime write contract | `runtime.Runtime` exposes Create/Exec/Keepalive/Delete/**Browse**/Export/Prompt/Inspect only | `internal/runtime/runtime.go` |
+| Cross-hop forwarding | Browse is implemented in the worker client, `remote.Direct`, `subproc.Supervisor`, and `instance.Manager`; a write must follow the same four hops | `internal/runtime/message.go`, `internal/runtime/remote/direct.go`, `internal/runtime/subproc/supervisor.go`, `internal/runtime/instance/browse.go` |
+| Byte-oriented fs write | `VFS.Write` takes a string and always replaces; `Accessor` has Read/Stat/List/ListBounded but no write | `internal/capability/fs/fs.go` |
+| Gate/policy/audit | `withConsole` already arms a console `fs` session; browse returns audit on gated failures except `ErrNoCapability` | `internal/runtime/instance/instance.go` (`withConsole`), `internal/runtime/instance/browse.go` |
+| Body limits | Public mutating bodies are capped at 1 MiB; worker HMAC bodies at 4 MiB (16 MiB for prepare) | `cmd/calcside/internal/api/api.go` (`maxBodyBytes`, `bodyLimit`), `internal/runtime/remote/server.go` |
+| Stable errors | No conflict/quota/read-only/upload-too-large sentinels; `sandbox.fail` defaults to `bad_spec` | `internal/runtime/runtime.go`, `cmd/calcside/internal/service/sandbox/sandbox.go`, `internal/types/types.go` |
+| Binary-safe preview | `GET .../files` returns a Go string; JSON encoding replaces invalid UTF-8 with U+FFFD. Only artifact export rejects non-UTF-8 | `internal/runtime/instance/browse.go`, `internal/runtime/instance/artifacts.go` |
+| SDK | `files()` only; no upload method | `sdk/python/src/calcside/client.py` |
+| Console | `ArtifactBrowser` lists, previews and downloads; no upload, drop target, queue or progress | `web/src/components/Artifacts.tsx`, `web/src/pages/InstanceDetail.tsx` |
+| Route authorization coverage | A new operation must be registered or `TestRouteCoverage` fails | `cmd/calcside/internal/api/workspaces_test.go` |
+| Record/replay interaction | EP-0001 is still a draft and no recorder exists, so the "reject uploads while recording" guard has nothing to hook into yet | `docs/proposals/0001-record-replay.md` |
+
+Constraints confirmed by the research:
+
+- The memory VFS already charges an overwrite as `new size - old size` under its
+  mutation lock, so upload quota needs no second counter in the HTTP handler.
+- One MiB of raw bytes becomes roughly 1.37 MiB after base64 in the internal
+  JSON contract and still fits the 4 MiB worker limit; larger uploads must not
+  be implemented by raising that limit.
+- `withConsole` takes `ExecMu` without honoring cancellation, while
+  `lockRequest` polls with the request context. Upload must consume the bounded
+  public body first, then take the instance locks in the same order as export
+  (`requestMu` -> `ExecMu` -> `artifactMu`) and re-check liveness/epoch after
+  taking them.
+- A successful write should renew the sliding TTL through `RenewedExpiresAt`,
+  as exec does; browse does not renew today.
+- An after-hook denial happens after the bytes may be committed. The write
+  receipt therefore needs an explicit committed/pre-commit distinction, not
+  only a generic error envelope.
+- Deployments can lower the public ceiling only if it becomes configuration; the
+  artifact limits today are constants and `MaxFSQuotaBytes` is hard-coded.
+- No store migration is needed for v1.
+
+Proposed delivery order: (1) `VFS.WriteBytes` with create-only/overwrite and
+tests; (2) runtime request/response, worker schema, generated adapters, and all
+forwarding implementations; (3) service/API route, access action, error
+mapping, admission bounds and audit-on-error tests; (4) reject non-UTF-8/NUL
+file preview; (5) SDK sync/async upload; (6) console upload queue and browser
+coverage; chunked transfer remains a separate increment.
+
+Decisions still needed before coding: whether upload requires `Run` rather than
+`View`; whether the first ceiling is a constant or a deployment setting; and
+whether a committed-but-errored write returns a 200 receipt (like artifact
+export) or a 4xx with an extended error envelope.
 
 ## Summary
 

@@ -187,6 +187,34 @@ paths:
                 $ref: '#/components/schemas/BrowseResponse'
         default:
           $ref: '#/components/responses/Error'
+  /runtime/v1/write:
+    post:
+      operationId: runtimeWrite
+      summary: Write one bounded file into the instance VFS.
+      description: >
+        A console file upload. Mutates instance state: never retried
+        transparently by the caller — a lost answer leaves the outcome
+        uncertain, which the receipt's committed flag reports once the
+        request reaches the instance again. Once the instance is
+        reached, the write receipt and audit batch always travel in the
+        200 response alongside an optional error, so a gated or failed
+        write is still persisted. Content is base64 inside this JSON
+        contract and bounded before admission.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WriteRequest'
+      responses:
+        '200':
+          description: Write receipt plus audit batch, error or success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WriteResponse'
+        default:
+          $ref: '#/components/responses/Error'
   /runtime/v1/export:
     post:
       operationId: runtimeExport
@@ -388,6 +416,10 @@ components:
                 - no_such_path
                 - fs_error
                 - stale_epoch
+                - conflict
+                - quota_exceeded
+                - read_only
+                - denied
                 - internal
             message:
               type: string
@@ -486,6 +518,14 @@ components:
     BrowseResponse:
       type: object
       x-go-type: rt.BrowseResponse
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    WriteRequest:
+      type: object
+      x-go-type: rt.WriteRequest
+      x-go-type-import: {name: rt, path: calcside/internal/runtime}
+    WriteResponse:
+      type: object
+      x-go-type: rt.WriteResponse
       x-go-type-import: {name: rt, path: calcside/internal/runtime}
     ExportRequest:
       type: object

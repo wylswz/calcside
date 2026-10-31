@@ -1011,3 +1011,85 @@ func TestPasswordChangeRequiresLocalSession(t *testing.T) {
 		t.Fatalf("anonymous account changed password: %d", code)
 	}
 }
+
+func TestFileUpload(t *testing.T) {
+	e := newEnv(t)
+	cookies := login(e, "a@x.com")
+	csrf := map[string]string{"X-Requested-With": "calcside"}
+	_, m, _ := e.req("POST", "/api/v1/keys", `{"name":"k"}`, csrf, cookies)
+	bearer := map[string]string{"Authorization": "Bearer " + m["secret"].(string)}
+	_, m, _ = e.req("POST", "/api/v1/instances", `{"capabilities":{"fs":{}}}`, bearer, nil)
+	instID := m["instance"].(map[string]any)["id"].(string)
+
+	csv := "name,qty\napples,3\npears,5\n"
+	code, m, _ := e.req("PUT", "/api/v1/instances/"+instID+"/files?path=/work/orders.csv", csv, bearer, nil)
+	if code != 200 || m["path"] != "/work/orders.csv" || m["replaced"] != false {
+		t.Fatalf("upload: %d %v", code, m)
+	}
+	// bytes readable through browse and a script
+	code, m, _ = e.req("GET", "/api/v1/instances/"+instID+"/files?path=/work/orders.csv", "", bearer, nil)
+	if code != 200 || m["content"] != csv {
+		t.Fatalf("read back: %d %v", code, m)
+	}
+	code, m, _ = e.req("POST", "/api/v1/instances/"+instID+"/exec", `{"code":"print(fs.read('orders.csv'))"}`, bearer, nil)
+	if code != 200 || m["output"] != csv+"\n" {
+		t.Fatalf("script read: %d %v", code, m)
+	}
+	// create-only conflicts; overwrite replaces
+	code, m, _ = e.req("PUT", "/api/v1/instances/"+instID+"/files?path=/work/orders.csv", "a,b\n", bearer, nil)
+	if code != 409 || m["error"].(map[string]any)["code"] != "conflict" {
+		t.Fatalf("conflict: %d %v", code, m)
+	}
+	code, m, _ = e.req("PUT", "/api/v1/instances/"+instID+"/files?path=/work/orders.csv&overwrite=true", "a,b\n", bearer, nil)
+	if code != 200 || m["replaced"] != true {
+		t.Fatalf("overwrite: %d %v", code, m)
+	}
+	// empty body is a valid empty file
+	code, m, _ = e.req("PUT", "/api/v1/instances/"+instID+"/files?path=empty.csv", "", bearer, nil)
+	if code != 200 || m["size"] != float64(0) || m["path"] != "/work/empty.csv" {
+		t.Fatalf("empty upload: %d %v", code, m)
+	}
+	// escapes and directory targets are rejected
+	code, _, _ = e.req("PUT", "/api/v1/instances/"+instID+"/files?path=../etc/x", "x", bearer, nil)
+	if code != 400 {
+		t.Fatalf("traversal: %d", code)
+	}
+	code, _, _ = e.req("PUT", "/api/v1/instances/"+instID+"/files?path=/work", "x", bearer, nil)
+	if code != 400 {
+		t.Fatalf("dir target: %d", code)
+	}
+	// binary uploads are stored; text browse declines them
+	code, _, _ = e.req("PUT", "/api/v1/instances/"+instID+"/files?path=/work/blob.bin", "\x89PNG\x00\xff", bearer, nil)
+	if code != 200 {
+		t.Fatalf("binary upload: %d", code)
+	}
+	code, m, _ = e.req("GET", "/api/v1/instances/"+instID+"/files?path=/work/blob.bin", "", bearer, nil)
+	if code != 400 {
+		t.Fatalf("binary browse: %d %v", code, m)
+	}
+	// oversized body -> 413 before forwarding
+	code, _, _ = e.req("PUT", "/api/v1/instances/"+instID+"/files?path=/work/big", strings.Repeat("x", 1<<20+1), bearer, nil)
+	if code != 413 {
+		t.Fatalf("oversize: %d", code)
+	}
+	// audit recorded the console fs.write
+	e.rec.Close()
+	e.rec = nil
+	code, m, _ = e.req("GET", "/api/v1/audit?instance_id="+instID, "", bearer, nil)
+	if code != 200 {
+		t.Fatalf("audit: %d", code)
+	}
+	found := false
+	for _, ev := range m["events"].([]any) {
+		e2 := ev.(map[string]any)
+		if e2["capability"] == "fs" && e2["op"] == "write" && e2["exec_id"] == "console" {
+			found = true
+			if strings.Contains(e2["args"].(string), "apples") {
+				t.Fatal("file contents leaked into audit args")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no console fs.write audit event")
+	}
+}
