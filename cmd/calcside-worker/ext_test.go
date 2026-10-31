@@ -117,16 +117,16 @@ func TestEnsureBlocksUntilInstalled(t *testing.T) {
 	}
 }
 
-// A canceled caller waiting inside the fetch must not reach the inner
-// runtime — WithRuntime rechecks ctx before delegating.
+// A canceled caller waiting inside the fetch must not register an
+// instance — WithRuntime rechecks ctx before delegating.
 func TestCanceledEnsureNeverCreates(t *testing.T) {
 	fetch := func(ctx context.Context, source, sum string) (map[string][]byte, string, error) {
 		<-ctx.Done()
 		return nil, "", ctx.Err()
 	}
 	c, _ := extcache.New(t.TempDir(), fetch, 0)
-	inner := newCountRuntime()
-	rt := extcache.WithRuntime(inner, c)
+	m := newManager(t)
+	rt := extcache.WithRuntime(m, c)
 	sum, _ := extartifact.TreeHash(map[string][]byte{"a": []byte("b")})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -134,13 +134,13 @@ func TestCanceledEnsureNeverCreates(t *testing.T) {
 	if err == nil || resp != nil {
 		t.Fatal("canceled create ran")
 	}
-	if inner.creates.Load() != 0 {
-		t.Fatal("inner runtime reached while canceled")
+	if m.Count() != 0 {
+		t.Fatal("canceled create registered an instance")
 	}
 }
 
 // Mismatched sums, malformed refs, oversized bodies and bad HMAC all
-// fail closed — nothing reaches the inner runtime.
+// fail closed — no instance is registered.
 func TestFetchFailuresFailClosed(t *testing.T) {
 	files := map[string][]byte{"a": []byte("b")}
 	sum, _ := extartifact.TreeHash(files)
@@ -162,13 +162,13 @@ func TestFetchFailuresFailClosed(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, _ := extcache.New(t.TempDir(), tc.fetch, 0)
-			inner := newCountRuntime()
-			rt := extcache.WithRuntime(inner, c)
+			m := newManager(t)
+			rt := extcache.WithRuntime(m, c)
 			if _, err := rt.Prepare(context.Background(), &runtime.PrepareRequest{CreateRequest: runtime.CreateRequest{Spec: tc.spec}}); err == nil {
 				t.Fatal("expected failure")
 			}
-			if inner.preps.Load() != 0 {
-				t.Fatal("inner runtime reached on failure")
+			if m.Count() != 0 {
+				t.Fatal("failed fetch registered an instance")
 			}
 		})
 	}
@@ -232,27 +232,16 @@ func TestAuthenticatedFetchAndOversize(t *testing.T) {
 	}
 }
 
-// countRuntime counts calls through a real Manager — the tests assert
-// the inner runtime was never reached, so it wraps the real thing
-// rather than scripting one.
-type countRuntime struct {
-	*instance.Manager
-	creates, preps atomic.Int32
-}
-
-func newCountRuntime() *countRuntime {
-	return &countRuntime{Manager: instance.New(instance.Options{
+// newManager is the real execution fixture: a node that registers any
+// request reaching it, so tests can assert a rejected fetch left no
+// instance behind.
+func newManager(t *testing.T) *instance.Manager {
+	t.Helper()
+	m := instance.New(instance.Options{
 		Engine: engine.New(8), Registry: capability.NewRegistry(),
-	})}
-}
-
-func (c *countRuntime) Create(ctx context.Context, req *runtime.CreateRequest) (*runtime.CreateResponse, error) {
-	c.creates.Add(1)
-	return c.Manager.Create(ctx, req)
-}
-func (c *countRuntime) Prepare(ctx context.Context, req *runtime.PrepareRequest) (*runtime.PrepareResponse, error) {
-	c.preps.Add(1)
-	return c.Manager.Prepare(ctx, req)
+	})
+	t.Cleanup(m.StopReaper)
+	return m
 }
 
 // The configured timeout bounds the fetch even when the caller's
@@ -280,8 +269,8 @@ func TestEnsureDeadlineAlwaysBounded(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			inner := newCountRuntime()
-			rt := extcache.WithRuntime(inner, c)
+			m := newManager(t)
+			rt := extcache.WithRuntime(m, c)
 			pctx := context.Background()
 			if tc.parentTimeout > 0 {
 				var cancel context.CancelFunc
@@ -301,8 +290,8 @@ func TestEnsureDeadlineAlwaysBounded(t *testing.T) {
 			case <-time.After(2 * time.Second):
 				t.Fatal("Ensure did not honor the configured timeout")
 			}
-			if inner.creates.Load() != 0 {
-				t.Fatal("inner runtime reached after deadline failure")
+			if m.Count() != 0 {
+				t.Fatal("deadline failure registered an instance")
 			}
 		})
 	}
