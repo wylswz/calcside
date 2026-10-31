@@ -12,7 +12,7 @@ import (
 	capio "calcside/internal/capability/io"
 	capnet "calcside/internal/capability/net"
 	"calcside/internal/engine"
-	"calcside/internal/instance"
+	"calcside/internal/runtime/instance"
 )
 
 // Config mirrors the execution-relevant part of the API/worker flags.

@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,71 +18,46 @@ import (
 	"calcside/cmd/calcside/internal/service/vault"
 	"calcside/cmd/calcside/internal/vaultcipher"
 	"calcside/internal/capability"
+	"calcside/internal/engine"
 	"calcside/internal/runtime"
+	"calcside/internal/runtime/instance"
+	"calcside/internal/runtime/remote"
 	"calcside/internal/store"
 	"calcside/internal/store/storetest"
 	"calcside/internal/types"
 )
 
-// fakeRuntime is a scripted runtime.Runtime: Prepare always succeeds
-// and Invoke returns the queued result, echoing the requested entry.
-type fakeRuntime struct {
-	res      runtime.ProgramResult
-	invokeE  error
-	prepareE error
-	invokes  []*runtime.InvokeRequest
+var rtTestKey = []byte("run-test-shared-key-0123456789ab")
+
+// gateRT fails requests to a path suffix — a real transport error, the
+// only invoke failure the contract cannot classify.
+type gateRT struct {
+	base   http.RoundTripper
+	suffix string
+	fail   atomic.Bool
 }
 
-func (f *fakeRuntime) Create(ctx context.Context, r *runtime.CreateRequest) (*runtime.CreateResponse, error) {
-	return &runtime.CreateResponse{}, nil
-}
-func (f *fakeRuntime) Exec(ctx context.Context, r *runtime.ExecRequest) (*runtime.ExecResponse, error) {
-	return &runtime.ExecResponse{}, nil
-}
-func (f *fakeRuntime) Keepalive(ctx context.Context, r *runtime.KeepaliveRequest) (*runtime.KeepaliveResponse, error) {
-	return &runtime.KeepaliveResponse{}, nil
-}
-func (f *fakeRuntime) Delete(ctx context.Context, r *runtime.DeleteRequest) (*runtime.DeleteResponse, error) {
-	return &runtime.DeleteResponse{}, nil
-}
-func (f *fakeRuntime) Browse(ctx context.Context, r *runtime.BrowseRequest) (*runtime.BrowseResponse, error) {
-	return &runtime.BrowseResponse{}, nil
-}
-func (f *fakeRuntime) Export(ctx context.Context, r *runtime.ExportRequest) (*runtime.ExportResponse, error) {
-	return &runtime.ExportResponse{}, nil
-}
-func (f *fakeRuntime) Prompt(ctx context.Context, r *runtime.PromptRequest) (*runtime.PromptResponse, error) {
-	return &runtime.PromptResponse{}, nil
-}
-func (f *fakeRuntime) Inspect(ctx context.Context, r *runtime.InspectRequest) (*runtime.InspectResponse, error) {
-	return &runtime.InspectResponse{}, nil
-}
-func (f *fakeRuntime) Prepare(ctx context.Context, r *runtime.PrepareRequest) (*runtime.PrepareResponse, error) {
-	return &runtime.PrepareResponse{Epoch: 1, Result: runtime.ProgramResult{}}, f.prepareE
-}
-func (f *fakeRuntime) Invoke(ctx context.Context, r *runtime.InvokeRequest) (*runtime.InvokeResponse, error) {
-	f.invokes = append(f.invokes, r)
-	res := f.res
-	if res.Waiting != nil && len(r.Interrupts) > 0 {
-		// The program waits on the first slot it was offered.
-		res.Waiting.InterruptID = r.Interrupts[0].ID
+func (g *gateRT) RoundTrip(r *http.Request) (*http.Response, error) {
+	if g.fail.Load() && strings.HasSuffix(r.URL.Path, g.suffix) {
+		return nil, errors.New("gate: transport failure")
 	}
-	return &runtime.InvokeResponse{Result: res}, f.invokeE
+	return g.base.RoundTrip(r)
 }
-
-var _ runtime.Runtime = (*fakeRuntime)(nil)
 
 var rNow = time.Now().UTC().Truncate(time.Second)
 
 type tenv struct {
-	st  store.Store
-	svc *Service
-	rt  *fakeRuntime
-	app *store.Application
-	rel *store.ServingRelease
-	usr *store.User
+	st   store.Store
+	svc  *Service
+	gate *gateRT
+	app  *store.Application
+	rel  *store.ServingRelease
+	usr  *store.User
 }
 
+// newEnv wires the service to a real execution path — a Manager behind
+// the signed worker protocol — so dispatch behavior comes from real
+// prepares/invokes, not a scripted runtime.
 func newEnv(t *testing.T, cipher *vaultcipher.Cipher, maxSteps int) *tenv {
 	t.Helper()
 	st, err := store.Open(context.Background(), "sqlite", storetest.SQLite(t))
@@ -87,8 +66,19 @@ func newEnv(t *testing.T, cipher *vaultcipher.Cipher, maxSteps int) *tenv {
 	}
 	t.Cleanup(func() { st.Close() })
 	ac := access.New(st)
-	rt := &fakeRuntime{}
 	reg := capability.NewRegistry()
+	mgr := instance.New(instance.Options{
+		Engine: engine.New(8), Registry: reg,
+		Limits: capability.ServerLimits{MaxTTL: time.Hour},
+	})
+	t.Cleanup(mgr.StopReaper)
+	srv := httptest.NewServer(remote.NewHandler(mgr, rtTestKey))
+	t.Cleanup(srv.Close)
+	gate := &gateRT{base: http.DefaultTransport, suffix: "/invoke"}
+	rt, err := remote.NewDirect(srv.URL, &http.Client{Transport: gate}, rtTestKey, "run-test")
+	if err != nil {
+		t.Fatal(err)
+	}
 	vaultSvc := vault.New(st, cipher, ac)
 	sbx := sandbox.New(sandbox.Options{
 		Store: st, Runtime: rt, Secrets: vaultSvc, Access: ac,
@@ -116,20 +106,32 @@ func newEnv(t *testing.T, cipher *vaultcipher.Cipher, maxSteps int) *tenv {
 	if err := st.CreateApplication(ctx, app); err != nil {
 		t.Fatal(err)
 	}
-	bundle := runtime.ProgramBundle{
-		Sources:      map[string][]byte{"main.star": []byte("def main(i):\n    interrupt.new()\n")},
-		InputSchema:  json.RawMessage(`{"type":"object","additionalProperties":true}`),
-		OutputSchema: json.RawMessage(`{"type":"object","additionalProperties":true}`),
-	}
 	rel, err := store.NewServingRelease(app.WorkspaceID, u.ID, json.RawMessage(`{}`),
-		runtime.PolicyBundle{}, bundle, rNow)
+		runtime.PolicyBundle{}, echoBundle(), rNow)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := st.CreateServingRelease(ctx, rel); err != nil {
 		t.Fatal(err)
 	}
-	return &tenv{st: st, svc: svc, rt: rt, app: app, rel: rel, usr: u}
+	return &tenv{st: st, svc: svc, gate: gate, app: app, rel: rel, usr: u}
+}
+
+// echoBundle is a program whose handler returns what it was invoked
+// with: dispatch correctness is verified on the run output, not on a
+// captured request.
+func echoBundle() runtime.ProgramBundle {
+	return runtime.ProgramBundle{
+		Sources: map[string][]byte{"main.star": []byte(`def main(i):
+    req = interrupt.new()
+    interrupt.wait(req["id"], handler = "on_ok", context = {"x": 1})
+
+def on_ok(i):
+    return {"run_id": interrupt.run_id(), "input": i}
+`)},
+		InputSchema:  json.RawMessage(`{"type":"object","additionalProperties":true}`),
+		OutputSchema: json.RawMessage(`{"type":"object","additionalProperties":true}`),
+	}
 }
 
 func testCipher(t *testing.T) *vaultcipher.Cipher {
@@ -205,30 +207,38 @@ func TestEarlyTokenResumeCommit(t *testing.T) {
 	}
 	alreadyResolved(t, e.svc.Resume(ctx, keyActor(e.usr, slot.ID), slot.ID, json.RawMessage(`{"go":2}`)))
 
-	// Dispatch runs the handler; its return value is the run output.
-	e.rt.res = runtime.ProgramResult{Output: json.RawMessage(`{"done":true}`)}
+	// Dispatch runs the handler; the program echoes its input, so the
+	// run output proves the entry, the run fence and the handler input.
 	e.svc.RunOnce(ctx)
 	run, _ := e.st.GetRun(ctx, st.Run.ID)
 	if run.Status != store.RunSucceeded || run.Steps != 2 {
 		t.Fatalf("dispatched run: %+v", run)
 	}
 	d, err := e.svc.GetRun(ctx, actor(e.usr), st.Run.ID)
-	if err != nil || d.OutputJSON != `{"done":true}` {
-		t.Fatalf("run output: %v %+v", err, d)
-	}
-	inv := e.rt.invokes[0]
-	if inv.Entry != "on_ok" || inv.RunID != st.Run.ID {
-		t.Fatalf("invoke: %+v", inv)
-	}
-	var input map[string]any
-	if err := json.Unmarshal(inv.Input, &input); err != nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	if input["event"] == nil || input["resolution"] != "resolved" || input["resolved_by"] != "token" {
-		t.Fatalf("handler input: %s", inv.Input)
+	var out struct {
+		RunID string         `json:"run_id"`
+		Input map[string]any `json:"input"`
 	}
-	if _, ok := input["kind"]; ok {
-		t.Fatalf("handler input carries kind: %s", inv.Input)
+	if err := json.Unmarshal([]byte(d.OutputJSON), &out); err != nil {
+		t.Fatalf("handler output: %v %s", err, d.OutputJSON)
+	}
+	if out.RunID != st.Run.ID {
+		t.Fatalf("invoke run fence lost: %+v", out)
+	}
+	in := out.Input
+	if in["run_id"] != st.Run.ID || in["interrupt_id"] != slot.ID ||
+		in["handler"] != "on_ok" || in["resolution"] != "resolved" ||
+		in["resolved_by"] != store.ResolvedByToken {
+		t.Fatalf("handler input: %v", in)
+	}
+	if ev, ok := in["event"].(map[string]any); !ok || ev["go"] != true {
+		t.Fatalf("handler event: %v", in["event"])
+	}
+	if _, ok := in["kind"]; ok {
+		t.Fatalf("handler input carries kind: %v", in)
 	}
 }
 
@@ -288,7 +298,29 @@ func TestNoSlotsWithoutInterruptReference(t *testing.T) {
 func TestChainLimit(t *testing.T) {
 	e := newEnv(t, testCipher(t), 2)
 	ctx := context.Background()
-	st := startRun(t, e)
+	// The handler waits on a fresh slot, so the dispatched step hits
+	// the step budget instead of queuing another interrupt.
+	bundle := e.rel.Program
+	bundle.Sources = map[string][]byte{"main.star": []byte(`def main(i):
+    req = interrupt.new()
+    interrupt.wait(req["id"], handler = "on_ok", context = {})
+
+def on_ok(i):
+    req = interrupt.new()
+    interrupt.wait(req["id"], handler = "on_ok", context = {})
+`)}
+	rel, err := store.NewServingRelease(e.app.WorkspaceID, e.usr.ID, json.RawMessage(`{}`),
+		runtime.PolicyBundle{}, bundle, rNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.CreateServingRelease(ctx, rel); err != nil {
+		t.Fatal(err)
+	}
+	st, err := e.svc.Begin(ctx, e.app, rel, store.RunTriggerTest, actor(e.usr))
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Step 1 waits (steps=1 < 2 OK).
 	oc, err := e.svc.Complete(ctx, st, 0, 1, "main", "",
 		&runtime.InvokeResponse{Result: waitingRes(st.Interrupts[0].ID)}, nil)
@@ -300,7 +332,6 @@ func TestChainLimit(t *testing.T) {
 	if _, err := e.st.ResolveInterrupt(ctx, st.Interrupts[0].ID, []byte("s"), "usr_o", rNow); err != nil {
 		t.Fatal(err)
 	}
-	e.rt.res = waitingRes("") // fake echoes slot id
 	e.svc.RunOnce(ctx)
 	run, _ := e.st.GetRun(ctx, st.Run.ID)
 	if run.Status != store.RunFailed || run.ErrorCode != "chain_limit" {
@@ -344,7 +375,7 @@ func TestRetrySeq(t *testing.T) {
 		t.Fatal(err)
 	}
 	// First dispatch: handler step goes unknown (transport error).
-	e.rt.invokeE = errors.New("transport")
+	e.gate.fail.Store(true)
 	e.svc.RunOnce(ctx)
 	run, _ := e.st.GetRun(ctx, st.Run.ID)
 	if run.Status != store.RunUnknown {
@@ -355,8 +386,7 @@ func TestRetrySeq(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("retry: %v %v", ok, err)
 	}
-	e.rt.invokeE = nil
-	e.rt.res = runtime.ProgramResult{Output: json.RawMessage(`{"done":true}`)}
+	e.gate.fail.Store(false)
 	e.svc.RunOnce(ctx)
 	run, _ = e.st.GetRun(ctx, st.Run.ID)
 	steps, _ := e.st.ListRunSteps(ctx, st.Run.ID)

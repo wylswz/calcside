@@ -17,8 +17,8 @@ import (
 	capfs "calcside/internal/capability/fs"
 	capio "calcside/internal/capability/io"
 	"calcside/internal/engine"
-	"calcside/internal/instance"
 	"calcside/internal/runtime"
+	"calcside/internal/runtime/instance"
 	"calcside/internal/runtime/remote"
 )
 

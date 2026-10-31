@@ -12,32 +12,51 @@ import (
 	"time"
 
 	"calcside/internal/runtime"
+	"calcside/internal/runtime/instance"
 	"calcside/internal/runtime/remote"
 	"calcside/internal/types"
 )
 
-type servingContextRuntime struct {
-	runtime.Runtime
+// ctxSpy records the context a call arrives with and delegates to the
+// real manager — it observes, it never fakes a result.
+type ctxSpy struct {
+	*instance.Manager
 	seen context.Context
 }
 
-func (r *servingContextRuntime) Prepare(ctx context.Context, _ *runtime.PrepareRequest) (*runtime.PrepareResponse, error) {
+func (r *ctxSpy) Prepare(ctx context.Context, req *runtime.PrepareRequest) (*runtime.PrepareResponse, error) {
 	r.seen = ctx
-	return &runtime.PrepareResponse{}, nil
+	return r.Manager.Prepare(ctx, req)
 }
 
-func (r *servingContextRuntime) Invoke(ctx context.Context, _ *runtime.InvokeRequest) (*runtime.InvokeResponse, error) {
+func (r *ctxSpy) Invoke(ctx context.Context, req *runtime.InvokeRequest) (*runtime.InvokeResponse, error) {
 	r.seen = ctx
-	return &runtime.InvokeResponse{}, nil
+	return r.Manager.Invoke(ctx, req)
 }
 
 func TestServingRequestContext(t *testing.T) {
+	m := testManager(t)
+	t.Cleanup(m.StopReaper)
+	rt := &ctxSpy{Manager: m}
+	prep := prepareReq("spy-rep", nil)
+	if _, err := m.Prepare(context.Background(), prep); err != nil {
+		t.Fatal(err)
+	}
+	bodies := map[string][]byte{}
+	prep2 := prepareReq("spy-rep2", nil)
+	prepBody, _ := json.Marshal(prep2)
+	bodies["/runtime/v1/prepare"] = prepBody
+	invBody, _ := json.Marshal(&runtime.InvokeRequest{
+		InstanceID: "spy-rep", Owner: prep.Owner,
+		ReleaseID: prep.ReleaseID, Generation: prep.Generation,
+		InvokeID: "spy-i", Input: json.RawMessage(`{"name":"x","n":1}`)})
+	bodies["/runtime/v1/invoke"] = invBody
 	for _, path := range []string{"/runtime/v1/prepare", "/runtime/v1/invoke"} {
 		t.Run(path, func(t *testing.T) {
-			rt := &servingContextRuntime{}
+			rt.seen = nil
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			body := []byte(`{}`)
+			body := bodies[path]
 			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body)).WithContext(ctx)
 			req.Header.Set("Content-Type", "application/json")
 			remote.SignRequest(testKey, "test", req, body, time.Now())
@@ -66,7 +85,7 @@ func TestServingRequestRejectionStatus(t *testing.T) {
 		{"malformed input", "/runtime/v1/invoke", 0, `{"input":"PRIVATE_BODY_MARKER`, http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rt := &servingContextRuntime{}
+			rt := &ctxSpy{Manager: testManager(t)}
 			body := []byte(tc.body)
 			if tc.size > 0 {
 				body = bytes.Repeat([]byte(" "), tc.size)

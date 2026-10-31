@@ -1,7 +1,9 @@
 package worker_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,15 +12,15 @@ import (
 	"testing"
 	"time"
 
-	"calcside/cmd/calcside/internal/worker"
 	"calcside/internal/capability"
 	capfs "calcside/internal/capability/fs"
 	capio "calcside/internal/capability/io"
 	"calcside/internal/engine"
-	"calcside/internal/instance"
 	"calcside/internal/placement"
 	"calcside/internal/runtime"
+	"calcside/internal/runtime/instance"
 	"calcside/internal/runtime/remote"
+	"calcside/internal/runtime/worker"
 	"calcside/internal/types"
 )
 
@@ -209,24 +211,41 @@ func TestRemoteAuth(t *testing.T) {
 	}
 }
 
+// contextRuntime records the context a call arrives with and delegates
+// to the real manager — it observes, it never fakes a result.
 type contextRuntime struct {
-	runtime.Runtime
+	*instance.Manager
 	ctx context.Context
 }
 
-func (r *contextRuntime) Create(ctx context.Context, _ *runtime.CreateRequest) (*runtime.CreateResponse, error) {
+func (r *contextRuntime) Create(ctx context.Context, req *runtime.CreateRequest) (*runtime.CreateResponse, error) {
 	r.ctx = ctx
-	return &runtime.CreateResponse{}, nil
+	return r.Manager.Create(ctx, req)
 }
 
 func TestRuntimeReceivesRequestContext(t *testing.T) {
-	rt := &contextRuntime{}
+	reg := capability.NewRegistry()
+	reg.Register(capio.Factory())
+	reg.Register(capfs.Factory())
+	rt := &contextRuntime{Manager: instance.New(instance.Options{
+		Engine:   engine.New(8),
+		Registry: reg,
+		Limits: capability.ServerLimits{
+			DefaultTTL: 15 * time.Minute, MaxTTL: 24 * time.Hour,
+			MaxExecTimeout: 5 * time.Minute,
+		},
+	})}
+	t.Cleanup(rt.StopReaper)
 	h := remote.NewHandler(rt, testKey)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req := httptest.NewRequest("POST", "/runtime/v1/create", strings.NewReader(`{}`)).WithContext(ctx)
+	body, err := json.Marshal(createReq("ins_ctx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("POST", "/runtime/v1/create", bytes.NewReader(body)).WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
-	remote.SignRequest(testKey, "api-test", req, []byte(`{}`), time.Now())
+	remote.SignRequest(testKey, "api-test", req, body, time.Now())
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	if w.Code != 200 {

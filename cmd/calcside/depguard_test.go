@@ -10,9 +10,9 @@ import (
 // worker fixtures).
 func TestAPINoExecutionImports(t *testing.T) {
 	forbidden := map[string]bool{
-		"calcside/internal/node":         true,
-		"calcside/internal/node/subproc": true,
-		"calcside/internal/instance":     true,
+		"calcside/internal/node":             true,
+		"calcside/internal/runtime/subproc":  true,
+		"calcside/internal/runtime/instance": true,
 	}
 	pkg, err := build.Default.ImportDir(".", 0)
 	if err != nil {

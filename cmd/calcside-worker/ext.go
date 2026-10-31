@@ -2,7 +2,7 @@ package main
 
 import (
 	"calcside/cmd/calcside-worker/internal/extcache"
-	"calcside/internal/node/subproc"
+	"calcside/internal/runtime/subproc"
 )
 
 func configureChild(cfg *subproc.ChildConfig) error {

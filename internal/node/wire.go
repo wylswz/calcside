@@ -5,7 +5,7 @@ package node
 import (
 	"github.com/google/wire"
 
-	"calcside/internal/instance"
+	"calcside/internal/runtime/instance"
 )
 
 func Build(c Config) *Node {

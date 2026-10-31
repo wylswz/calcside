@@ -7,7 +7,7 @@
 package node
 
 import (
-	"calcside/internal/instance"
+	"calcside/internal/runtime/instance"
 )
 
 // Injectors from wire.go:

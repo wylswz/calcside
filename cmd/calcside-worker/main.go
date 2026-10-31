@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"calcside/cmd/calcside-worker/internal/config"
-	"calcside/internal/node/subproc"
+	"calcside/internal/runtime/subproc"
 )
 
 func main() {

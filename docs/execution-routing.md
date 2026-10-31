@@ -43,7 +43,7 @@ the `Manager`, which trusts no caller.
 
 ### Hop 2: worker → instance process
 
-- **Code:** `subproc.Supervisor` (`internal/node/subproc/supervisor.go`),
+- **Code:** `subproc.Supervisor` (`internal/runtime/subproc/supervisor.go`),
   served by `remote.NewHandler` in `cmd/calcside-worker`.
 - **Create:** spawns a child, which is the worker binary re-executed as
   `calcside-worker __instance`. Its config (`subproc.ChildConfig`: node
@@ -63,7 +63,7 @@ the `Manager`, which trusts no caller.
 
 ### Hop 3: instance process → in-memory Manager
 
-- **Code:** `subproc.RunChild` (`internal/node/subproc/child.go`).
+- **Code:** `subproc.RunChild` (`internal/runtime/subproc/child.go`).
 - **Setup:** builds a normal execution node (`node.Build`: capability
   registry, engine, `instance.Manager`) and serves it with
   `remote.NewHandler`. Its Manager is capped at one instance and runs no
