@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { allowedSummary, callOutcome, denialReason, groupCalls, instanceName, isBuiltinGlobal, isConsoleCall, runBy, runOutcome } from './activity.ts'
+import { allowedSummary, callOutcome, denialReason, groupCalls, instanceName, instanceTitle, isBuiltinGlobal, isConsoleCall, runBy, runOutcome } from './activity.ts'
 import { relTime } from './format.ts'
 import type { AuditEvent, Execution, Instance } from './api.ts'
 
@@ -68,6 +68,8 @@ test('instanceName', () => {
   assert.equal(instanceName(inst), 'env=dev · task=recon')
   assert.equal(instanceName({ id: 'ins_2', labels: {} } as unknown as Instance), 'ins_2')
   assert.equal(instanceName({ id: 'ins_3' } as unknown as Instance), 'ins_3')
+  assert.equal(instanceTitle({ id: 'ins_1', labels: { name: 'recon', env: 'dev' } } as unknown as Instance), 'recon')
+  assert.equal(instanceTitle({ id: 'ins_2', labels: { env: 'dev' } } as unknown as Instance), 'env=dev')
 })
 
 test('allowedSummary', () => {

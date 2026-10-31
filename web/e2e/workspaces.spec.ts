@@ -347,7 +347,7 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   expect(tableType.casing).toBe('none')
   expect(['normal', '0px']).toContain(tableType.tracking)
   expect(tableType.source).toContain('IBM Plex Mono')
-  expect(tableType.when).toContain('Inter')
+  expect(tableType.when).toContain('IBM Plex Sans')
   // title wraps at word boundaries, not mid-word
   const h1 = page.getByRole('heading', { name: 'Research session' })
   expect(await h1.evaluate((el) => getComputedStyle(el).wordBreak)).toBe('normal')
@@ -359,14 +359,14 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   // env name rendered whole; its value never leaks into the boundary
   await expect(page.getByText('DOMAIN_NAME_REALLY_LONG_VALUE')).toBeVisible()
   await expect(page.getByText('NEVER_RENDER_THIS')).toHaveCount(0)
-  // white base — no beige regression
+  // cool paper desk — no beige regression
   const base = await page.evaluate(() => ({
     body: getComputedStyle(document.body).backgroundColor,
     header: getComputedStyle(document.querySelector('.console-header')!).backgroundColor,
   }))
-  expect(base.body).toBe('rgb(255, 255, 255)')
-  // frosted white header over a white page
-  expect(base.header).toMatch(/^rgba\(255, 255, 255, 0\.\d+\)$/)
+  expect(base.body).toBe('rgb(245, 247, 251)')
+  // frosted desk-toned header over the paper desk
+  expect(base.header).toMatch(/^rgba\(245, 247, 251, 0\.\d+\)$/)
   // no page overflow on desktop
   const dw = await page.evaluate(() => ({ s: document.documentElement.scrollWidth, i: window.innerWidth }))
   expect(dw.s).toBeLessThanOrEqual(dw.i)
@@ -396,7 +396,7 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
     }))
   expect(tblWrap.length).toBeGreaterThan(0)
   for (const w of tblWrap) {
-    expect(w.r).toBe('10px')
+    expect(w.r).toBe('8px')
     expect(w.ox).toBe('auto')
     expect(w.oy).toBe('hidden')
   }
@@ -501,7 +501,7 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
     body: getComputedStyle(document.body).backgroundColor,
     title: getComputedStyle(document.querySelector('.next-title')!).color,
   }))
-  expect(dark.body).toBe('rgb(11, 18, 32)')
+  expect(dark.body).toBe('rgb(10, 16, 28)')
   expect(dark.title).toBe('rgb(241, 245, 249)')
   await page.screenshot({ path: testInfo.outputPath('detail-dark.png'), fullPage: true })
 })
@@ -1023,7 +1023,7 @@ test('new instances wait behind "Show latest" without moving the primary action 
   expect(await newInstance.boundingBox()).toEqual(newAt)
   await more.click()
   await expect(rows).toHaveCount(before + 1)
-  await expect(page.getByRole('link', { name: 'name=held-list' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'held-list' })).toBeVisible()
   await expect(more).toBeHidden()
   expect(await newInstance.boundingBox()).toEqual(newAt)
 })
@@ -1067,14 +1067,14 @@ test('console material: raised controls, inset wells, pressed state', async ({ p
   const create = await style('[data-ui="button"][data-variant="primary"]')
   expect(create.image).toContain('radial-gradient')
   expect(create.shadow).toContain('inset')
-  expect(create.radius).toBe('10px')
+  expect(create.radius).toBe('8px')
   const input = await style('.input')
   expect(input.image).toBe('none')
   expect(input.shadow).toMatch(/inset/)
-  expect(input.radius).toBe('10px')
+  expect(input.radius).toBe('8px')
   const panel = await style('.builder-work-panel')
-  expect(panel.image).toContain('radial-gradient')
-  expect(panel.radius).toBe('16px')
+  expect(panel.image).toBe('none')
+  expect(panel.radius).toBe('12px')
   const tray = await style('.spec-selection')
   expect(tray.shadow).toMatch(/inset/)
   // pressed: gradient and shadow change while held

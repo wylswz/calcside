@@ -4,19 +4,21 @@
 .app-page .app-label { display: block; font-size: 12px; color: rgb(var(--sec)); margin: 12px 0 4px }
 .app-page .app-input {
   width: 100%; max-width: 480px; padding: 6px 8px; font: inherit;
-  border: 1px solid rgb(var(--line)); border-radius: 6px; background: rgb(var(--paper));
+  border: 1px solid transparent; border-radius: var(--radius-control);
+  background: var(--fill-muted); box-shadow: var(--shadow-inset);
 }
 .app-page .app-area {
   width: 100%; padding: 8px; font-family: inherit; font-size: 13px;
-  border: 1px solid rgb(var(--line)); border-radius: 6px; background: rgb(var(--paper));
+  border: 1px solid transparent; border-radius: var(--radius-control);
+  background: var(--fill-muted); box-shadow: var(--shadow-inset);
   box-sizing: border-box;
 }
-.app-page .app-cm { border: 1px solid rgb(var(--line)); border-radius: 6px; overflow: hidden }
+.app-page .app-cm { border: 1px solid rgb(var(--line)); border-radius: var(--radius-control); overflow: hidden }
 .app-page .app-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 24px }
 .app-page .app-grid > div { min-width: 0 }
 .app-page .app-card {
   border: 1px solid rgb(var(--line)); border-radius: var(--radius-surface);
-  background: rgb(var(--surface)); padding: 20px; margin-top: 20px; min-width: 0;
+  background: rgb(var(--paper)); padding: 24px; margin-top: 24px; min-width: 0;
 }
 .app-page .app-card-head {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -27,7 +29,7 @@
    lives on the body wrapper, which exists only while open (S1) */
 .app-page details.app-card > summary { cursor: pointer; padding-bottom: 12px }
 .app-page details.app-card > .app-card-body { border-top: 1px solid rgb(var(--line)); padding-top: 16px }
-.app-page .app-status { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid rgb(var(--line)) }
+.app-page .app-status { font-size: 12px; padding: 2px 8px; border-radius: 4px; border: 1px solid rgb(var(--line)); background: rgb(var(--surface)) }
 .app-page .app-status-ready { color: rgb(var(--accent)); border-color: rgb(var(--accent)) }
 .app-page .app-status-degraded { color: rgb(var(--warn-text)); border-color: rgb(var(--warn-text)) }
 .app-page .app-status-disabled { color: rgb(var(--sec)) }
@@ -38,18 +40,20 @@
 /* Shared create-kind tabs — used on both /instances/new and
    /applications/new, so the class must live outside .app-page. */
 .kind-tabs { display: flex; width: max-content; gap: 4px; margin-bottom: 10px; font-size: 13px }
-.kind-tabs a { padding: 4px 10px; border: 1px solid rgb(var(--line)); border-radius: 999px; color: rgb(var(--sec)); text-decoration: none }
+.kind-tabs a { padding: 4px 10px; border: 1px solid rgb(var(--line)); border-radius: var(--radius-control); color: rgb(var(--sec)); text-decoration: none }
 .kind-tabs a.kind-on { color: rgb(var(--accent)); border-color: rgb(var(--accent)) }
 .app-page .app-result { min-height: 44px; margin-top: 8px }
 .app-page .app-out { margin-top: 8px }
 .app-page .app-out-pre {
   margin: 0; padding: 10px; min-height: 44px;
   background: rgb(var(--paper)); border: 1px solid rgb(var(--line));
-  border-radius: 6px; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere;
+  border-radius: var(--radius-control); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .app-page .app-check { display: flex; gap: 6px; align-items: center; font-size: 13px; margin: 8px 0 4px }
+.app-page :is(.app-input, .app-area):focus { outline: none; background: rgb(var(--paper)); border-color: rgb(var(--accent)); box-shadow: 0 0 0 4px rgb(var(--accent) / 0.18) }
 @media (max-width: 768px) {
   .app-page .app-grid { grid-template-columns: minmax(0, 1fr); gap: 0 }
+  .app-page .app-card { padding: 16px }
   .app-page .app-input { max-width: 100% }
 }
 /* Request-examples tabs + pre — bounded height, horizontal scroll on
@@ -58,14 +62,14 @@
 .app-page .app-ex-tabs { display: flex; align-items: center; gap: 4px }
 .app-page .app-ex-tab {
   padding: 3px 10px; font-size: 12px; border: 1px solid rgb(var(--line));
-  border-radius: 999px; color: rgb(var(--sec)); background: none; cursor: pointer;
+  border-radius: var(--radius-control); color: rgb(var(--sec)); background: none; cursor: pointer;
 }
 .app-page .app-ex-tab[data-state="active"] { color: rgb(var(--accent)); border-color: rgb(var(--accent)) }
 .app-page .app-ex-panel { margin-top: 6px; min-width: 0 }
 .app-page .app-ex-pre {
   margin: 0; padding: 10px; height: 220px; overflow: auto;
   background: rgb(var(--paper)); border: 1px solid rgb(var(--line));
-  border-radius: 6px; font-size: 12px; white-space: pre; overflow-wrap: normal;
+  border-radius: var(--radius-control); font-size: 12px; white-space: pre; overflow-wrap: normal;
 }
 
 /* Inbox nav count: reserved width, tabular figures — nav never shifts (S3/S4) */

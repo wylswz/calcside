@@ -1,85 +1,89 @@
-/* material.css — the console's one surface language.
+/* material.css — the console's one material language.
 
-   Modelled on how Apple's icons balance flat and physical:
-   - one light source from above; a surface is lit by a single same-hue
-     gradient whose lightness changes by only a few percent, placed as a
-     wide radial falloff so the face reads as a gentle curve, never a ramp;
-   - edges carry at most a barely visible specular line, no bevels and no
-     inner shading bands;
-   - shadows are neutral (black at low alpha): a tight contact shadow plus
-     a soft ambient one;
-   - frosted translucency only on what floats above the page.
+   Restrained skeuomorphism: a matte paper desk under opaque work cards,
+   machined controls with one top light and one contact shadow, and glass
+   only for things that actually float (header, menus, dialogs). Each
+   control reads through one material cue — an inset well, a hairline face,
+   or a soft primary dome — never all of them at once. The desk carries a
+   faint paper grain so translucency has something to blur.
+
    Interaction feedback is paint-only (docs/interaction-stability.md, S1/S2):
    hover, press, focus, open and selected states change light, shadow and
    colour, never a control's box (no transform, size, spacing, border width
    or font metrics). Nothing moves under the pointer, and floating layers
    anchored to a control (menus) stay exactly where they opened. Only
    entrances move, once (P4). src/interactionStability.test.ts enforces
-   this. Colour stays
-   functional (blue = act, green = live, rose = denied, orange = attention). */
+   this. Colour stays functional (blue = act, green = live, rose = denied,
+   orange = attention). */
 
 :root {
-  --desk: 255 255 255;
-  --radius-surface: 16px;
-  --radius-control: 10px;
-  --radius-inset: 10px;
-  --edge: rgba(15, 23, 42, 0.075);
-  --edge-strong: rgba(15, 23, 42, 0.1);
-  --fill-muted: rgb(244 246 249);
-  --fill-muted-hover: rgb(239 242 246);
-  --glass: rgba(255, 255, 255, 0.72);
-  --glass-strong: rgba(255, 255, 255, 0.86);
-  --frost: saturate(180%) blur(20px);
+  --desk: 245 247 251;
+  --radius-surface: 12px;
+  --radius-control: 8px;
+  --radius-inset: 8px;
+  --edge: rgba(15, 23, 42, 0.08);
+  --edge-strong: rgba(15, 23, 42, 0.11);
+  --fill-muted: rgb(240 244 248);
+  --fill-muted-hover: rgb(234 239 245);
+  --glass: rgba(245, 247, 251, 0.78);
+  --glass-strong: rgba(255, 255, 255, 0.9);
+  --frost: saturate(140%) blur(16px);
   --ease-damped: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-press: cubic-bezier(0.4, 0, 0.6, 1);
+  --desk-light: rgb(255 255 255 / 0.5);
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");
 
-  /* light: brightest just above the top edge, ~2-5% darker at the bottom */
-  --dome: radial-gradient(140% 120% at 50% -20%, #ffffff 0%, #ffffff 45%, #f7f8fa 100%);
-  --dome-surface: radial-gradient(160% 140% at 50% -30%, #ffffff 0%, #ffffff 60%, #fbfbfd 100%);
+  /* controls: one flat face, one top light, one contact shadow */
+  --dome: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
   --dome-primary: radial-gradient(140% 120% at 50% -20%, #4783f3 0%, #3170ee 45%, #2563eb 100%);
-  --dome-pressed: radial-gradient(140% 120% at 50% -20%, #f6f7f9 0%, #f3f5f8 100%);
+  --dome-pressed: linear-gradient(180deg, #f1f4f8 0%, #edf1f6 100%);
   --dome-primary-pressed: radial-gradient(140% 120% at 50% -20%, #2a65e6 0%, #2259d8 100%);
   --well: none;
 
-  --spec: inset 0 0.5px 0 rgba(255, 255, 255, 0.9);
-  --shadow-surface: 0 0.5px 1px rgba(0, 0, 0, 0.04), 0 8px 24px -12px rgba(0, 0, 0, 0.1);
-  --shadow-control: 0 0.5px 1px rgba(0, 0, 0, 0.06), 0 2px 6px -2px rgba(0, 0, 0, 0.06);
-  --shadow-control-hover: 0 0.5px 1px rgba(0, 0, 0, 0.06), 0 8px 18px -8px rgba(0, 0, 0, 0.14);
-  --shadow-pressed: 0 0.5px 1px rgba(0, 0, 0, 0.05);
-  --shadow-inset: inset 0 0.5px 1px rgba(0, 0, 0, 0.04);
-  --shadow-primary: inset 0 0.5px 0 rgba(255, 255, 255, 0.22), 0 0.5px 1px rgba(0, 0, 0, 0.12), 0 4px 10px -4px rgba(0, 0, 0, 0.18);
-  --shadow-primary-hover: inset 0 0.5px 0 rgba(255, 255, 255, 0.24), 0 0.5px 1px rgba(0, 0, 0, 0.12), 0 10px 20px -10px rgba(0, 0, 0, 0.28);
-  --shadow-primary-pressed: 0 0.5px 1px rgba(0, 0, 0, 0.12);
-  --shadow-float: inset 0 0.5px 0 rgba(255, 255, 255, 0.7), 0 4px 12px rgba(0, 0, 0, 0.05), 0 24px 56px -20px rgba(0, 0, 0, 0.22);
+  --shadow-surface: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 28px -22px rgba(15, 23, 42, 0.22);
+  --shadow-control: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 2px rgba(15, 23, 42, 0.08);
+  --shadow-control-hover: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 3px 7px -2px rgba(15, 23, 42, 0.12);
+  --shadow-pressed: inset 0 1px 2px rgba(15, 23, 42, 0.1);
+  --shadow-inset: inset 0 1px 2px rgba(15, 23, 42, 0.07), inset 0 -1px 0 rgba(255, 255, 255, 0.7);
+  --shadow-primary: inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 1px 2px rgba(15, 23, 42, 0.2), 0 6px 14px -8px rgba(37, 99, 235, 0.5);
+  --shadow-primary-hover: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 1px 2px rgba(15, 23, 42, 0.2), 0 8px 18px -8px rgba(37, 99, 235, 0.6);
+  --shadow-primary-pressed: inset 0 1px 2px rgba(15, 23, 42, 0.2);
+  --shadow-float: 0 1px 2px rgba(15, 23, 42, 0.06), 0 24px 60px -28px rgba(15, 23, 42, 0.35);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --desk: 11 18 32;
-    --edge: rgba(255, 255, 255, 0.08);
-    --edge-strong: rgba(255, 255, 255, 0.11);
-    --fill-muted: rgb(24 35 54);
-    --fill-muted-hover: rgb(30 43 64);
-    --glass: rgba(17, 27, 45, 0.7);
-    --glass-strong: rgba(20, 31, 51, 0.86);
-    --dome: radial-gradient(140% 120% at 50% -20%, #25344c 0%, #223047 45%, #1e2b41 100%);
-    --dome-surface: radial-gradient(160% 140% at 50% -30%, #152136 0%, #142033 60%, #121d30 100%);
-    --dome-primary: radial-gradient(140% 120% at 50% -20%, #7db4fb 0%, #6aa9fa 45%, #60a5fa 100%);
-    --dome-pressed: radial-gradient(140% 120% at 50% -20%, #1b273b 0%, #192438 100%);
+    --desk: 10 16 28;
+    --edge: rgba(255, 255, 255, 0.09);
+    --edge-strong: rgba(255, 255, 255, 0.13);
+    --fill-muted: rgb(26 37 55);
+    --fill-muted-hover: rgb(32 45 64);
+    --desk-light: rgb(96 165 250 / 0.05);
+    --glass: rgba(12 19 31, 0.8);
+    --glass-strong: rgba(20 31 49, 0.92);
+    --dome: linear-gradient(180deg, #1b273b 0%, #172235 100%);
+      --dome-primary: radial-gradient(140% 120% at 50% -20%, #7db4fb 0%, #6aa9fa 45%, #60a5fa 100%);
+    --dome-pressed: linear-gradient(180deg, #141e30 0%, #111a2a 100%);
     --dome-primary-pressed: radial-gradient(140% 120% at 50% -20%, #5596f2 0%, #4c8ced 100%);
-    --shadow-surface: inset 0 0.5px 0 rgba(255, 255, 255, 0.05), 0 0.5px 1px rgba(0, 0, 0, 0.3), 0 10px 28px -12px rgba(0, 0, 0, 0.5);
-    --shadow-control: inset 0 0.5px 0 rgba(255, 255, 255, 0.07), 0 0.5px 1px rgba(0, 0, 0, 0.35), 0 2px 6px -2px rgba(0, 0, 0, 0.35);
-    --shadow-control-hover: inset 0 0.5px 0 rgba(255, 255, 255, 0.08), 0 0.5px 1px rgba(0, 0, 0, 0.35), 0 8px 18px -8px rgba(0, 0, 0, 0.55);
-    --shadow-pressed: 0 0.5px 1px rgba(0, 0, 0, 0.35);
-    --shadow-inset: inset 0 0.5px 1px rgba(0, 0, 0, 0.3);
-    --shadow-primary: inset 0 0.5px 0 rgba(255, 255, 255, 0.3), 0 0.5px 1px rgba(0, 0, 0, 0.35), 0 4px 10px -4px rgba(0, 0, 0, 0.45);
-    --shadow-primary-hover: inset 0 0.5px 0 rgba(255, 255, 255, 0.32), 0 0.5px 1px rgba(0, 0, 0, 0.35), 0 10px 20px -10px rgba(0, 0, 0, 0.6);
-    --shadow-primary-pressed: 0 0.5px 1px rgba(0, 0, 0, 0.35);
-    --shadow-float: inset 0 0.5px 0 rgba(255, 255, 255, 0.06), 0 4px 12px rgba(0, 0, 0, 0.35), 0 24px 56px -20px rgba(0, 0, 0, 0.7);
+    --shadow-surface: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 1px 2px rgba(0, 0, 0, 0.35), 0 16px 36px -26px rgba(0, 0, 0, 0.75);
+    --shadow-control: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-control-hover: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 3px 8px -2px rgba(0, 0, 0, 0.5);
+    --shadow-pressed: inset 0 1px 2px rgba(0, 0, 0, 0.45);
+    --shadow-inset: inset 0 1px 2px rgba(0, 0, 0, 0.4), inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+    --shadow-primary: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 14px -8px rgba(0, 0, 0, 0.6);
+    --shadow-primary-hover: inset 0 1px 0 rgba(255, 255, 255, 0.34), 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 18px -8px rgba(0, 0, 0, 0.7);
+    --shadow-primary-pressed: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-float: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 1px 2px rgba(0, 0, 0, 0.4), 0 26px 64px -30px rgba(0, 0, 0, 0.8);
   }
 }
 
-body { background-color: rgb(var(--desk)); }
+body {
+  background-color: rgb(var(--desk));
+  background-image:
+    radial-gradient(120% 80% at 50% -10%, var(--desk-light), transparent 62%),
+    var(--grain);
+  background-attachment: fixed;
+}
 
 /* ---- frosted: things that float over content ---- */
 .console-header {
@@ -96,13 +100,12 @@ body { background-color: rgb(var(--desk)); }
   box-shadow: var(--shadow-float);
 }
 
-/* ---- surfaces: flat white, hairline edge, diffuse shadow ---- */
+/* ---- surfaces: opaque paper, hairline edge, one contact shadow ---- */
 .builder-work-panel,
 .instance-detail .next-action,
 .instance-detail .work-surface,
 .settings-card {
   background-color: rgb(var(--paper));
-  background-image: var(--dome-surface);
   border: 1px solid var(--edge);
   box-shadow: var(--shadow-surface);
 }
@@ -142,10 +145,10 @@ body { background-color: rgb(var(--desk)); }
 .instance-detail .seg-filters button,
 .input {
   transition:
-    box-shadow 320ms var(--ease-damped),
-    background-color 240ms var(--ease-damped),
-    border-color 240ms var(--ease-damped),
-    color 240ms var(--ease-damped);
+    box-shadow 180ms var(--ease-damped),
+    background-color 160ms var(--ease-damped),
+    border-color 160ms var(--ease-damped),
+    color 160ms var(--ease-damped);
 }
 [data-ui='button'] { border-radius: var(--radius-control); color: rgb(var(--ink)); min-height: 32px; height: auto; }
 /* hover lifts the light, not the control; an open toggle stays held */
@@ -161,7 +164,7 @@ body { background-color: rgb(var(--desk)); }
   transition-timing-function: var(--ease-press);
 }
 [data-ui='button']:focus-visible, .ability-choice:focus-visible, .segmented [role='tab']:focus-visible {
-  outline: 2px solid rgb(var(--accent) / 0.55);
+  outline: 2px solid rgb(var(--accent));
   outline-offset: 2px;
 }
 [data-ui='button']:disabled { opacity: 0.5; box-shadow: none; }
@@ -202,8 +205,8 @@ body { background-color: rgb(var(--desk)); }
   outline: none;
   background-color: rgb(var(--paper));
   background-image: none;
-  border-color: rgb(var(--accent) / 0.55);
-  box-shadow: 0 0 0 4px rgb(var(--accent) / 0.12);
+  border-color: rgb(var(--accent));
+  box-shadow: 0 0 0 4px rgb(var(--accent) / 0.18);
 }
 /* states layered on the material */
 .ext-card.ext-card-added, .ability-choice[data-selected='true'] {
@@ -255,7 +258,7 @@ body { background-color: rgb(var(--desk)); }
   width: 32px; height: 32px; margin-right: -8px;
   border-radius: var(--radius-control);
   font-size: 20px; line-height: 1; color: rgb(var(--mute));
-  transition: background-color 240ms var(--ease-damped), color 240ms var(--ease-damped);
+  transition: background-color 160ms var(--ease-damped), color 160ms var(--ease-damped);
 }
 [data-ui='dialog-close']:hover { background: var(--fill-muted); color: rgb(var(--ink)); }
 
@@ -265,7 +268,7 @@ body { background-color: rgb(var(--desk)); }
   display: flex; align-items: center; gap: 8px; width: 100%;
   padding: 8px 10px; border-radius: 8px;
   font-size: 13px; color: rgb(var(--ink)); cursor: pointer; outline: none; user-select: none;
-  transition: background-color 200ms var(--ease-damped), color 200ms var(--ease-damped);
+  transition: background-color 150ms var(--ease-damped), color 150ms var(--ease-damped);
 }
 [data-ui='menu-item'][data-highlighted] { background: rgb(var(--accent) / 0.08); color: rgb(var(--accent)); }
 [data-ui='menu-item'][data-disabled] { opacity: 0.5; cursor: default; }
@@ -275,10 +278,10 @@ body { background-color: rgb(var(--desk)); }
 
 /* ---- motion: damped entrances, none when reduced motion is asked ---- */
 @media (prefers-reduced-motion: no-preference) {
-  [data-ui='dialog-overlay'][data-state='open'] { animation: material-fade 280ms var(--ease-damped); }
-  [data-ui='dialog-surface'][data-state='open'] { animation: material-rise 420ms var(--ease-damped); }
-  [data-ui='menu'][data-state='open'] { animation: material-drop 320ms var(--ease-damped); transform-origin: var(--radix-dropdown-menu-content-transform-origin); }
-  .selected-row:not(.is-empty):not(.is-removed) { animation: material-settle 420ms var(--ease-damped); }
+  [data-ui='dialog-overlay'][data-state='open'] { animation: material-fade 180ms var(--ease-damped); }
+  [data-ui='dialog-surface'][data-state='open'] { animation: material-rise 280ms var(--ease-damped); }
+  [data-ui='menu'][data-state='open'] { animation: material-drop 220ms var(--ease-damped); transform-origin: var(--radix-dropdown-menu-content-transform-origin); }
+  .selected-row:not(.is-empty):not(.is-removed) { animation: material-settle 280ms var(--ease-damped); }
 }
 @media (prefers-reduced-motion: reduce) {
   [data-ui='button'], .ability-choice, .ext-card, .selected-row, .segmented [role='tab'], .workspace-tabs a, .input { transition: none; }

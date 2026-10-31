@@ -62,6 +62,13 @@ export function instanceName(inst: Pick<Instance, 'id' | 'labels'>): string {
   return pairs.length ? pairs.join(' · ') : inst.id
 }
 
+// instanceTitle prefers the human label for names and surfaces, falling
+// back to the full label summary (or id) when no name is set.
+export function instanceTitle(inst: Pick<Instance, 'id' | 'labels'>): string {
+  const name = inst.labels?.name?.trim()
+  return name || instanceName(inst)
+}
+
 // allowedSummary compresses the granted capability set to one line:
 // `fs 64 MiB · net 2 hosts · ext tavily`.
 export function allowedSummary(spec: InstanceSpec | undefined): string {

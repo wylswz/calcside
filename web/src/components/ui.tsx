@@ -13,7 +13,7 @@ import { expiringSoon } from '../nextStep'
 // Normal outcomes (ok, running, allow) are never coloured.
 export type Signal = 'denied' | 'failed' | 'you' | 'live'
 
-const signalFill: Record<Signal, string> = { denied: 'fill-danger', failed: 'fill-warn', you: 'fill-accent', live: 'fill-live' }
+const signalFill: Record<Signal, string> = { denied: 'fill-danger', failed: 'fill-warn-text', you: 'fill-accent', live: 'fill-live' }
 const signalText: Record<Signal, string> = { denied: 'text-danger', failed: 'text-warn-text', you: 'text-accent', live: 'text-live' }
 
 export function SignalMark({ signal, className = '' }: { signal: Signal; className?: string }) {
@@ -103,7 +103,7 @@ export function Icon({ name, className = '' }: { name: 'preview' | 'download' | 
 }
 
 export function Tag({ children }: { children: React.ReactNode }) {
-  return <span className="inline-block border border-line px-1.5 py-px font-mono text-[11px] text-sec">{children}</span>
+  return <span className="inline-block rounded-[4px] border border-line bg-surface px-1.5 py-px font-mono text-[11px] leading-4 text-sec">{children}</span>
 }
 
 // SwapLabel keeps a control the same width while its label changes
@@ -160,8 +160,8 @@ export function PageHeader({ title, children, actions }: {
   return (
     <div className="mb-8 flex flex-wrap items-end gap-x-8 gap-y-4">
       <div className="min-w-0 flex-1">
-        <h1 className="text-[32px] font-semibold leading-[1.1] tracking-tight text-ink">{title}</h1>
-        {children && <p className="mt-3 max-w-3xl text-[15px] leading-relaxed text-sec">{children}</p>}
+        <h1 className="text-[30px] font-semibold leading-[36px] tracking-tight text-ink">{title}</h1>
+        {children && <p className="mt-3 max-w-3xl text-sm leading-[22px] text-sec">{children}</p>}
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
     </div>

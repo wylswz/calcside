@@ -25,7 +25,7 @@ export default {
         DEFAULT: token('line'),
       },
       fontFamily: {
-        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        sans: ['"IBM Plex Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         mono: ['var(--font-mono)'],
       },
       letterSpacing: {

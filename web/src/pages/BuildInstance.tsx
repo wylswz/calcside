@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Instance, User } from '../api'
-import { instanceName } from '../activity'
+import { instanceTitle } from '../activity'
 import { Button, Notice, PageHeader, SectionTitle, SwapLabel, Icon, Confirm, inputCls } from '../components/ui'
 import ContractEditor from '../components/ContractEditor'
 import {
@@ -183,7 +183,7 @@ function BuildDraftEditor({ scopeKey, inst }: {
     URL.revokeObjectURL(a.href)
   }
 
-  const name = instanceName(inst)
+  const name = instanceTitle(inst)
   const entryInSources = draft.sources.some((f) => f.path === draft.entrypoint)
 
   if (corrupt) {

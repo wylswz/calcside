@@ -8,14 +8,14 @@
 :root {
   color-scheme: light;
   --paper: 255 255 255;
-  --surface: 248 250 255;
-  --code: 247 250 255;
-  --ink: 24 39 55;
+  --surface: 249 250 252;
+  --code: 242 245 249;
+  --ink: 24 35 50;
   --body: 55 65 81;
-  --sec: 95 109 126;
-  --mute: 90 106 124;
-  --line: 231 237 245;
-  --line-strong: 207 219 232;
+  --sec: 78 94 113;
+  --mute: 98 114 132;
+  --line: 226 232 240;
+  --line-strong: 203 213 225;
   --accent: 37 99 235;
   --danger: 225 29 72;
   --warn: 249 115 22;
@@ -27,15 +27,15 @@
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --paper: 17 28 46;
-    --surface: 27 39 55;
-    --code: 11 18 32;
+    --paper: 18 28 44;
+    --surface: 24 35 51;
+    --code: 12 20 33;
     --ink: 241 245 249;
     --body: 203 213 225;
-    --sec: 148 163 184;
-    --mute: 148 163 184;
-    --line: 43 58 82;
-    --line-strong: 66 85 110;
+    --sec: 154 168 186;
+    --mute: 128 145 166;
+    --line: 45 59 80;
+    --line-strong: 67 84 107;
     --accent: 96 165 250;
     --danger: 251 113 133;
     --warn: 251 146 60;
@@ -50,7 +50,6 @@
   }
   body {
     @apply bg-paper font-sans text-body antialiased;
-    font-feature-settings: 'cv11', 'ss03';
   }
   ::selection {
     background: rgb(var(--accent) / 0.2);
@@ -101,7 +100,8 @@
     overflow-y: hidden;
   }
   .tbl {
-    @apply w-full text-sm;
+    @apply w-full;
+    font-size: 13px; line-height: 20px;
     font-variant-numeric: tabular-nums;
   }
   .tbl th {
@@ -111,7 +111,7 @@
     @apply border-b border-line px-3 py-2.5 align-middle;
   }
   .tbl-compact {
-    @apply text-xs;
+    font-size: 12px; line-height: 18px;
   }
   .tbl-compact th,
   .tbl-compact td {
@@ -167,7 +167,7 @@
 .segmented [role='tab']:hover { color: rgb(var(--ink)); }
 .segmented [role='tab'] { font-weight: 500; }
 .segmented [role='tab'][aria-selected='true'] { color: rgb(var(--accent)); }
-.tab-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: rgb(var(--warn) / 0.14); color: rgb(var(--warn-text)); font-size: 11px; font-weight: 600; }
+.tab-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 4px; background: rgb(var(--warn) / 0.14); color: rgb(var(--warn-text)); font-size: 11px; font-weight: 600; }
 
 .spec-palette { container-type: inline-size; display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-content: start; min-width: 0; }
 .ability-choices { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); }
