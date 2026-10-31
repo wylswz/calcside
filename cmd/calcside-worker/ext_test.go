@@ -15,10 +15,13 @@ import (
 
 	"calcside/cmd/calcside-worker/internal/config"
 	"calcside/cmd/calcside-worker/internal/extcache"
+	"calcside/internal/capability"
+	"calcside/internal/engine"
 	"calcside/internal/extartifact"
-	"calcside/internal/node/subproc"
 	"calcside/internal/runtime"
+	"calcside/internal/runtime/instance"
 	"calcside/internal/runtime/remote"
+	"calcside/internal/runtime/subproc"
 )
 
 var extTestKey = []byte("test-shared-key-0123456789abcdef")
@@ -122,7 +125,7 @@ func TestCanceledEnsureNeverCreates(t *testing.T) {
 		return nil, "", ctx.Err()
 	}
 	c, _ := extcache.New(t.TempDir(), fetch, 0)
-	inner := &countRuntime{}
+	inner := newCountRuntime()
 	rt := extcache.WithRuntime(inner, c)
 	sum, _ := extartifact.TreeHash(map[string][]byte{"a": []byte("b")})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -159,7 +162,7 @@ func TestFetchFailuresFailClosed(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, _ := extcache.New(t.TempDir(), tc.fetch, 0)
-			inner := &countRuntime{}
+			inner := newCountRuntime()
 			rt := extcache.WithRuntime(inner, c)
 			if _, err := rt.Prepare(context.Background(), &runtime.PrepareRequest{CreateRequest: runtime.CreateRequest{Spec: tc.spec}}); err == nil {
 				t.Fatal("expected failure")
@@ -229,18 +232,27 @@ func TestAuthenticatedFetchAndOversize(t *testing.T) {
 	}
 }
 
+// countRuntime counts calls through a real Manager — the tests assert
+// the inner runtime was never reached, so it wraps the real thing
+// rather than scripting one.
 type countRuntime struct {
-	runtime.Runtime
+	*instance.Manager
 	creates, preps atomic.Int32
+}
+
+func newCountRuntime() *countRuntime {
+	return &countRuntime{Manager: instance.New(instance.Options{
+		Engine: engine.New(8), Registry: capability.NewRegistry(),
+	})}
 }
 
 func (c *countRuntime) Create(ctx context.Context, req *runtime.CreateRequest) (*runtime.CreateResponse, error) {
 	c.creates.Add(1)
-	return &runtime.CreateResponse{}, nil
+	return c.Manager.Create(ctx, req)
 }
 func (c *countRuntime) Prepare(ctx context.Context, req *runtime.PrepareRequest) (*runtime.PrepareResponse, error) {
 	c.preps.Add(1)
-	return &runtime.PrepareResponse{}, nil
+	return c.Manager.Prepare(ctx, req)
 }
 
 // The configured timeout bounds the fetch even when the caller's
@@ -268,7 +280,7 @@ func TestEnsureDeadlineAlwaysBounded(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			inner := &countRuntime{}
+			inner := newCountRuntime()
 			rt := extcache.WithRuntime(inner, c)
 			pctx := context.Background()
 			if tc.parentTimeout > 0 {

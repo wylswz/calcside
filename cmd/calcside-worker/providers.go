@@ -14,10 +14,10 @@ import (
 	"calcside/cmd/calcside-worker/internal/controlclient"
 	"calcside/cmd/calcside-worker/internal/extcache"
 	"calcside/internal/node"
-	"calcside/internal/node/subproc"
 	"calcside/internal/nodeagent"
 	"calcside/internal/runtime"
 	"calcside/internal/runtime/remote"
+	"calcside/internal/runtime/subproc"
 )
 
 type workerApp struct {

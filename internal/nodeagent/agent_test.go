@@ -2,14 +2,126 @@ package nodeagent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"calcside/internal/capability"
+	"calcside/internal/engine"
 	"calcside/internal/runtime"
+	"calcside/internal/runtime/instance"
+	"calcside/internal/runtime/remote"
 )
+
+var agentKey = []byte("agent-test-shared-key-0123456789a")
+
+// gateRT injects transport faults on a path suffix — a real network
+// failure or stall, the only runtime errors a test cannot distinguish
+// from a dead node.
+type gateRT struct {
+	base   http.RoundTripper
+	suffix string
+	fail   atomic.Bool
+	hold   chan struct{}
+}
+
+func (g *gateRT) RoundTrip(r *http.Request) (*http.Response, error) {
+	if strings.HasSuffix(r.URL.Path, g.suffix) {
+		if g.hold != nil {
+			select {
+			case <-g.hold:
+			case <-r.Context().Done():
+				return nil, r.Context().Err()
+			}
+		}
+		if g.fail.Load() {
+			return nil, errors.New("gate: transport failure")
+		}
+	}
+	return g.base.RoundTrip(r)
+}
+
+// nodeRT is a Manager behind the signed worker protocol: the agent's
+// runtime calls take the production path, gate injects faults on the
+// named path suffix ("/prepare", "/keepalive", "/delete").
+type nodeRT struct {
+	mgr  *instance.Manager
+	rt   *remote.Direct
+	gate *gateRT
+}
+
+func realNode(t *testing.T, suffix string) *nodeRT {
+	t.Helper()
+	reg := capability.NewRegistry()
+	mgr := instance.New(instance.Options{
+		Engine: engine.New(8), Registry: reg,
+		Limits: capability.ServerLimits{MaxExecTimeout: time.Minute},
+	})
+	t.Cleanup(mgr.StopReaper)
+	srv := httptest.NewServer(remote.NewHandler(mgr, agentKey))
+	t.Cleanup(srv.Close)
+	gate := &gateRT{base: http.DefaultTransport, suffix: suffix}
+	rt, err := remote.NewDirect(srv.URL, &http.Client{Transport: gate}, agentKey, "agent-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &nodeRT{mgr: mgr, rt: rt, gate: gate}
+}
+
+// waitCount polls until the manager holds n live instances.
+func waitCount(t *testing.T, m *instance.Manager, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if m.Count() == n {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("instance count %d, want %d", m.Count(), n)
+}
+
+// okProgram is the smallest valid replica program.
+func okProgram() runtime.ProgramBundle {
+	return runtime.ProgramBundle{
+		Sources:      map[string][]byte{"main.star": []byte("def main(i):\n    return i\n")},
+		InputSchema:  json.RawMessage(`{"type":"object","additionalProperties":true}`),
+		OutputSchema: json.RawMessage(`{"type":"object","additionalProperties":true}`),
+	}
+}
+
+// badProgram fails prepare with a real invalid_program result and the
+// engine's audit.
+func badProgram() runtime.ProgramBundle {
+	return runtime.ProgramBundle{
+		Sources:      map[string][]byte{"main.star": []byte("print(\"top\")\ndef main(i):\n    return {}\n")},
+		InputSchema:  json.RawMessage(`{}`),
+		OutputSchema: json.RawMessage(`{}`),
+	}
+}
+
+// prepFor builds the control-plane prepare payload for an assignment —
+// a complete request the real Manager accepts.
+func prepFor(as runtime.ReplicaAssignment, prog runtime.ProgramBundle) *runtime.NodePrepareResponse {
+	return &runtime.NodePrepareResponse{
+		ServerNow: time.Now(),
+		Request: runtime.PrepareRequest{
+			CreateRequest: runtime.CreateRequest{
+				InstanceID: as.ReplicaID, Owner: as.Owner,
+				ExpiresAt: as.ExpiresAt, Epoch: as.Epoch,
+				Spec: json.RawMessage(`{"capabilities":{}}`),
+			},
+			ReleaseID: as.ReleaseID, Generation: as.Generation, PrepareID: "prp_1",
+			Program: prog,
+		},
+	}
+}
 
 type fakeCtl struct {
 	mu       sync.Mutex
@@ -65,46 +177,6 @@ func (f *fakeCtl) PrepareReplica(ctx context.Context, r *runtime.NodePrepareRequ
 	return f.prepResp, nil
 }
 
-type fakeRT struct {
-	runtime.Runtime
-	prepares  atomic.Int32
-	deletes   atomic.Int32
-	keeps     atomic.Int32
-	prepErr   error
-	prepRes   *runtime.PrepareResponse
-	delErr    error
-	keepErr   error
-	prepBlock chan struct{}
-}
-
-func (f *fakeRT) Prepare(ctx context.Context, r *runtime.PrepareRequest) (*runtime.PrepareResponse, error) {
-	f.prepares.Add(1)
-	if f.prepBlock != nil {
-		select {
-		case <-f.prepBlock:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
-	if f.prepErr != nil {
-		return nil, f.prepErr
-	}
-	if f.prepRes != nil {
-		return f.prepRes, nil
-	}
-	return &runtime.PrepareResponse{}, nil
-}
-
-func (f *fakeRT) Delete(ctx context.Context, r *runtime.DeleteRequest) (*runtime.DeleteResponse, error) {
-	f.deletes.Add(1)
-	return &runtime.DeleteResponse{}, f.delErr
-}
-
-func (f *fakeRT) Keepalive(ctx context.Context, r *runtime.KeepaliveRequest) (*runtime.KeepaliveResponse, error) {
-	f.keeps.Add(1)
-	return &runtime.KeepaliveResponse{}, f.keepErr
-}
-
 func assign(id, inst string, epoch int64, exp time.Time) runtime.ReplicaAssignment {
 	return runtime.ReplicaAssignment{
 		ReplicaID: id, InstanceID: inst, ReleaseID: "rel_1",
@@ -151,45 +223,24 @@ func TestLeaseDeadline(t *testing.T) {
 
 func TestStartupPrepareAndExpiry(t *testing.T) {
 	ctl := &fakeCtl{}
-	rt := &fakeRT{}
+	n := realNode(t, "")
 	exp := time.Now().Add(300 * time.Millisecond)
 	as := assign("rep_1", "pin_1", 1, exp)
 	ctl.syncResp = &runtime.NodeSyncResponse{
 		Assignments: []runtime.ReplicaAssignment{as}, ServerNow: time.Now()}
-	ctl.prepResp = &runtime.NodePrepareResponse{
-		ServerNow: time.Now(),
-		Request: runtime.PrepareRequest{
-			CreateRequest: runtime.CreateRequest{
-				InstanceID: "rep_1", Owner: runtime.Owner{UserID: "u1"},
-				ExpiresAt: exp, Epoch: 1,
-			},
-			ReleaseID: "rel_1", Generation: 1, PrepareID: "prp_1",
-		},
-	}
-	a := fastAgent(ctl, rt)
+	ctl.prepResp = prepFor(as, okProgram())
+	a := fastAgent(ctl, n.rt)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- a.Run(ctx) }()
-	// Wait for prepare then ready.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && rt.prepares.Load() == 0 {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if rt.prepares.Load() != 1 {
-		t.Fatalf("prepares %d", rt.prepares.Load())
-	}
+	waitCount(t, n.mgr, 1)
 	// The API stops assigning it: the snapshot no longer renews the
 	// lease -> delete + stopped report.
 	ctl.mu.Lock()
 	ctl.syncResp = &runtime.NodeSyncResponse{ServerNow: time.Now()}
 	ctl.mu.Unlock()
-	for time.Now().Before(deadline) && rt.deletes.Load() == 0 {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if rt.deletes.Load() != 1 {
-		t.Fatalf("deletes %d", rt.deletes.Load())
-	}
+	waitCount(t, n.mgr, 0)
 	cancel()
 	<-done
 }
@@ -198,23 +249,14 @@ func TestStartupPrepareAndExpiry(t *testing.T) {
 // next PollInterval tick.
 func TestReadyReportWakesSync(t *testing.T) {
 	ctl := &fakeCtl{}
-	rt := &fakeRT{}
+	n := realNode(t, "")
 	exp := time.Now().Add(30 * time.Second)
 	as := assign("rep_1", "pin_1", 1, exp)
 	ctl.syncResp = &runtime.NodeSyncResponse{
 		Assignments: []runtime.ReplicaAssignment{as}, ServerNow: time.Now()}
-	ctl.prepResp = &runtime.NodePrepareResponse{
-		ServerNow: time.Now(),
-		Request: runtime.PrepareRequest{
-			CreateRequest: runtime.CreateRequest{
-				InstanceID: "rep_1", Owner: runtime.Owner{UserID: "u1"},
-				ExpiresAt: exp, Epoch: 1,
-			},
-			ReleaseID: "rel_1", Generation: 1, PrepareID: "prp_1",
-		},
-	}
+	ctl.prepResp = prepFor(as, okProgram())
 	a, err := New(Options{
-		Control: ctl, Runtime: rt, NodeID: "n1", BootID: "b1",
+		Control: ctl, Runtime: n.rt, NodeID: "n1", BootID: "b1",
 		Capacity: 4, PollInterval: time.Hour, CallTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
@@ -247,83 +289,55 @@ func TestReadyReportWakesSync(t *testing.T) {
 
 func TestStaleBootTerminal(t *testing.T) {
 	ctl := &fakeCtl{regErr: runtime.ErrStaleEpoch}
-	rt := &fakeRT{}
-	a := fastAgent(ctl, rt)
+	n := realNode(t, "")
+	a := fastAgent(ctl, n.rt)
 	err := a.Run(context.Background())
 	if err == nil || !errors.Is(err, runtime.ErrStaleEpoch) {
 		t.Fatalf("run: %v", err)
 	}
-	if ctl.regs != 1 || rt.prepares.Load() != 0 {
-		t.Fatalf("regs=%d prepares=%d", ctl.regs, rt.prepares.Load())
+	if ctl.regs != 1 || n.mgr.Count() != 0 {
+		t.Fatalf("regs=%d instances=%d", ctl.regs, n.mgr.Count())
 	}
 }
 
 func TestTransientSyncNotEmpty(t *testing.T) {
 	ctl := &fakeCtl{}
-	rt := &fakeRT{}
+	n := realNode(t, "")
 	// Assignment far-future so it survives transient sync failures.
 	exp := time.Now().Add(30 * time.Second)
 	as := assign("rep_1", "pin_1", 1, exp)
 	ctl.syncResp = &runtime.NodeSyncResponse{
 		Assignments: []runtime.ReplicaAssignment{as}, ServerNow: time.Now()}
-	ctl.prepResp = &runtime.NodePrepareResponse{
-		ServerNow: time.Now(),
-		Request: runtime.PrepareRequest{
-			CreateRequest: runtime.CreateRequest{
-				InstanceID: "rep_1", Owner: runtime.Owner{UserID: "u1"},
-				ExpiresAt: exp, Epoch: 1,
-			},
-			ReleaseID: "rel_1", Generation: 1, PrepareID: "prp_1",
-		},
-	}
-	a := fastAgent(ctl, rt)
+	ctl.prepResp = prepFor(as, okProgram())
+	a := fastAgent(ctl, n.rt)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- a.Run(ctx) }()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && rt.prepares.Load() == 0 {
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitCount(t, n.mgr, 1)
 	// Flip to transient failure: the managed context must NOT be torn
 	// down as if the desired set were empty.
 	ctl.mu.Lock()
 	ctl.syncErr = errors.New("network down")
 	ctl.mu.Unlock()
 	time.Sleep(120 * time.Millisecond)
-	if rt.deletes.Load() != 0 {
+	if n.mgr.Count() != 1 {
 		t.Fatal("transient sync deleted ready context")
 	}
 	cancel()
 	<-done
-	if rt.deletes.Load() != 1 {
-		t.Fatalf("shutdown deletes %d", rt.deletes.Load())
-	}
+	waitCount(t, n.mgr, 0)
 }
 
 func TestFailedPrepareAudit(t *testing.T) {
 	ctl := &fakeCtl{}
-	rt := &fakeRT{
-		prepRes: &runtime.PrepareResponse{
-			Result: runtime.ProgramResult{Error: &runtime.ProgramError{Code: "policy_denied"}},
-			Audit:  runtime.AuditBatch{Events: []runtime.AuditEvent{{Ts: time.Now()}}},
-		},
-	}
+	n := realNode(t, "")
 	exp := time.Now().Add(30 * time.Second)
 	as := assign("rep_1", "pin_1", 1, exp)
 	ctl.syncResp = &runtime.NodeSyncResponse{
 		Assignments: []runtime.ReplicaAssignment{as}, ServerNow: time.Now()}
-	ctl.prepResp = &runtime.NodePrepareResponse{
-		ServerNow: time.Now(),
-		Request: runtime.PrepareRequest{
-			CreateRequest: runtime.CreateRequest{
-				InstanceID: "rep_1", Owner: runtime.Owner{UserID: "u1"},
-				ExpiresAt: exp, Epoch: 1,
-			},
-			ReleaseID: "rel_1", Generation: 1, PrepareID: "prp_1",
-		},
-	}
-	a := fastAgent(ctl, rt)
+	ctl.prepResp = prepFor(as, badProgram())
+	a := fastAgent(ctl, n.rt)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
@@ -341,8 +355,8 @@ func TestFailedPrepareAudit(t *testing.T) {
 	a.mu.Lock()
 	rep := a.reports[0]
 	a.mu.Unlock()
-	if rep.State != runtime.NodeReplicaFailed || rep.ErrorCode != "policy_denied" ||
-		len(rep.Audit.Events) != 1 {
+	if rep.State != runtime.NodeReplicaFailed || rep.ErrorCode != "invalid_program" ||
+		len(rep.Audit.Events) == 0 {
 		t.Fatalf("report: %+v", rep)
 	}
 	cancel()

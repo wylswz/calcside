@@ -13,7 +13,7 @@ import (
 // consume them and cannot fail silently at the cap.
 func TestReportReservationSlots(t *testing.T) {
 	a, err := New(Options{
-		Control: &fakeCtl{}, Runtime: &fakeRT{}, NodeID: "n1", BootID: "b1", Capacity: 2})
+		Control: &fakeCtl{}, Runtime: realNode(t, "").rt, NodeID: "n1", BootID: "b1", Capacity: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestReportReservationSlots(t *testing.T) {
 // nothing.
 func TestReportAckAccounting(t *testing.T) {
 	a, err := New(Options{
-		Control: &fakeCtl{}, Runtime: &fakeRT{}, NodeID: "n1", BootID: "b1", Capacity: 2})
+		Control: &fakeCtl{}, Runtime: realNode(t, "").rt, NodeID: "n1", BootID: "b1", Capacity: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestReportAckAccounting(t *testing.T) {
 // wire limit while report ids stay stable across retries.
 func TestReportBatchingBounds(t *testing.T) {
 	a, err := New(Options{
-		Control: &fakeCtl{}, Runtime: &fakeRT{}, NodeID: "n1", BootID: "b1", Capacity: 2})
+		Control: &fakeCtl{}, Runtime: realNode(t, "").rt, NodeID: "n1", BootID: "b1", Capacity: 2})
 	if err != nil {
 		t.Fatal(err)
 	}

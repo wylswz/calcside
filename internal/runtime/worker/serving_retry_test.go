@@ -34,7 +34,7 @@ func TestClientServingDoesNotRetry(t *testing.T) {
 						resolutions++
 						return nil, errors.New("must not re-resolve within one attempt")
 					})
-				cl.routes["rep"] = routeEnt{nodeID: "w1", addr: "unused.invalid"}
+				cl.router.routes["rep"] = routeEnt{nodeID: "w1", addr: "unused.invalid"}
 				cl.HTTP = &http.Client{Transport: servingRoundTripper(func(req *http.Request) (*http.Response, error) {
 					requests++
 					if req.URL.Path != "/runtime/v1/"+operation {

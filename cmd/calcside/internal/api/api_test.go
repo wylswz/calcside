@@ -33,8 +33,8 @@ import (
 	capio "calcside/internal/capability/io"
 	capnet "calcside/internal/capability/net"
 	"calcside/internal/engine"
-	"calcside/internal/instance"
 	"calcside/internal/runtime"
+	"calcside/internal/runtime/instance"
 	"calcside/internal/store"
 	"calcside/internal/store/storetest"
 )

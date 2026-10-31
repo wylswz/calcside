@@ -2,7 +2,6 @@ package nodeagent
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -16,38 +15,23 @@ func regSync(as runtime.ReplicaAssignment) *runtime.NodeSyncResponse {
 }
 
 func regPrep(as runtime.ReplicaAssignment) *runtime.NodePrepareResponse {
-	return &runtime.NodePrepareResponse{
-		ServerNow: time.Now(),
-		Request: runtime.PrepareRequest{
-			CreateRequest: runtime.CreateRequest{
-				InstanceID: as.ReplicaID, Owner: as.Owner,
-				ExpiresAt: as.ExpiresAt, Epoch: as.Epoch,
-			},
-			ReleaseID: as.ReleaseID, Generation: as.Generation, PrepareID: "prp_1",
-		},
-	}
+	return prepFor(as, okProgram())
 }
 
 // Shutdown's final flush must send pending reports only — a response
 // carrying new assignments must not spawn prepare work after Run.
 func TestShutdownFlushNoReconcile(t *testing.T) {
 	ctl := &fakeCtl{}
-	rt := &fakeRT{}
+	n := realNode(t, "")
 	exp := time.Now().Add(30 * time.Second)
 	as := assign("rep_1", "pin_1", 1, exp)
 	ctl.syncResp = regSync(as)
 	ctl.prepResp = regPrep(as)
-	a := fastAgent(ctl, rt)
+	a := fastAgent(ctl, n.rt)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- a.Run(ctx) }()
-	wait := time.Now().Add(2 * time.Second)
-	for time.Now().Before(wait) && rt.prepares.Load() == 0 {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if rt.prepares.Load() != 1 {
-		t.Fatalf("prepares %d", rt.prepares.Load())
-	}
+	waitCount(t, n.mgr, 1)
 	// Wait until the replica is reported ready in inventory, then
 	// cancel. The final flush (reports-only, empty inventory) gets a
 	// response carrying a NEW assignment — it must never be applied.
@@ -70,8 +54,22 @@ func TestShutdownFlushNoReconcile(t *testing.T) {
 	ctl.mu.Unlock()
 	cancel()
 	<-done
-	if rt.prepares.Load() != 1 {
-		t.Fatalf("post-shutdown prepare: %d", rt.prepares.Load())
+	// rep_2 must never bootstrap: no report ever carries it and the
+	// manager holds nothing.
+	a.mu.Lock()
+	var rep2 int
+	for _, r := range a.reports {
+		if r.Assignment.ReplicaID == "rep_2" {
+			rep2++
+		}
+	}
+	left := len(a.managed)
+	a.mu.Unlock()
+	if rep2 != 0 {
+		t.Fatal("post-shutdown assignment was bootstrapped")
+	}
+	if n.mgr.Count() != 0 {
+		t.Fatalf("replica leaked: %d", n.mgr.Count())
 	}
 	ctl.mu.Lock()
 	last := ctl.lastReq
@@ -79,9 +77,6 @@ func TestShutdownFlushNoReconcile(t *testing.T) {
 	if last == nil || len(last.Inventory) != 0 {
 		t.Fatalf("flush inventory: %+v", last)
 	}
-	a.mu.Lock()
-	left := len(a.managed)
-	a.mu.Unlock()
 	if left != 0 {
 		t.Fatalf("managed leak: %d", left)
 	}
@@ -92,18 +87,13 @@ func TestShutdownFlushNoReconcile(t *testing.T) {
 // re-bootstrapping the same id on later polls.
 func TestFailedPrepareAuditOnlyTombstone(t *testing.T) {
 	ctl := &fakeCtl{}
-	rt := &fakeRT{
-		prepRes: &runtime.PrepareResponse{
-			Result: runtime.ProgramResult{Error: &runtime.ProgramError{Code: "policy_denied"}},
-			Audit:  runtime.AuditBatch{Events: []runtime.AuditEvent{{Ts: time.Now()}}},
-		},
-		delErr: errors.New("transport lost"),
-	}
+	n := realNode(t, "/delete")
+	n.gate.fail.Store(true) // delete never verifies: unverifiable cleanup
 	exp := time.Now().Add(30 * time.Second)
 	as := assign("rep_1", "pin_1", 1, exp)
 	ctl.syncResp = regSync(as)
-	ctl.prepResp = regPrep(as)
-	a := fastAgent(ctl, rt)
+	ctl.prepResp = prepFor(as, badProgram())
+	a := fastAgent(ctl, n.rt)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
@@ -121,9 +111,14 @@ func TestFailedPrepareAuditOnlyTombstone(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	ctl.mu.Lock()
+	repReports := 0
 	if ctl.lastReq != nil {
 		for _, r := range ctl.lastReq.Reports {
-			if r.State == runtime.NodeReplicaAuditOnly && len(r.Audit.Events) == 1 {
+			if r.Assignment.ReplicaID != "rep_1" {
+				continue
+			}
+			repReports++
+			if r.State == runtime.NodeReplicaAuditOnly && len(r.Audit.Events) > 0 {
 				sawAuditOnly = true
 			}
 			if r.State == runtime.NodeReplicaFailed || r.State == runtime.NodeReplicaStopped {
@@ -135,8 +130,13 @@ func TestFailedPrepareAuditOnlyTombstone(t *testing.T) {
 	if !sawAuditOnly {
 		t.Fatal("audit_only report missing")
 	}
-	if rt.prepares.Load() != 1 {
-		t.Fatalf("tombstone re-prepared: %d", rt.prepares.Load())
+	// The tombstone blocks re-bootstrap: rep_1 reports exactly once —
+	// a re-prepare would have queued another audit_only by now.
+	if repReports != 1 {
+		t.Fatalf("tombstone re-prepared: %d reports", repReports)
+	}
+	if n.mgr.Count() != 0 {
+		t.Fatalf("failed prepare left %d instances", n.mgr.Count())
 	}
 	cancel()
 	<-done
@@ -147,10 +147,11 @@ func TestFailedPrepareAuditOnlyTombstone(t *testing.T) {
 // local timer deletes it.
 func TestKeepaliveFailurePureExpiry(t *testing.T) {
 	ctl := &fakeCtl{}
-	rt := &fakeRT{keepErr: errors.New("transient")}
-	exp := time.Now().Add(150 * time.Millisecond)
+	n := realNode(t, "/keepalive")
+	n.gate.fail.Store(true) // transient transport error on every renewal
+	exp := time.Now().Add(500 * time.Millisecond)
 	as := assign("rep_1", "pin_1", 1, exp)
-	ctl.prepResp = regPrep(as) // the 150ms fetch lease, not the later 1s
+	ctl.prepResp = regPrep(as) // the 500ms fetch lease, not the later 1s
 	started := time.Now()
 	// Desired keeps claiming a longer lease on each poll.
 	ctl.onSync = func() {
@@ -158,40 +159,36 @@ func TestKeepaliveFailurePureExpiry(t *testing.T) {
 		ctl.syncResp = regSync(as)
 	}
 	ctl.onSync()
-	a := fastAgent(ctl, rt)
+	a := fastAgent(ctl, n.rt)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- a.Run(ctx) }()
-	// The confirmed lease is ~150ms — the timer must delete even
+	waitCount(t, n.mgr, 1)
+	// The confirmed lease is ~500ms — the timer must delete even
 	// though the API keeps "extending" the desired deadline.
-	wait := time.Now().Add(2 * time.Second)
-	for time.Now().Before(wait) && rt.deletes.Load() == 0 {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if rt.deletes.Load() != 1 {
-		t.Fatalf("no timer delete: %d", rt.deletes.Load())
-	}
+	waitCount(t, n.mgr, 0)
 	if time.Since(started) > time.Second {
 		t.Fatalf("delete late: %v", time.Since(started))
 	}
-	if rt.prepares.Load() != 1 {
-		t.Fatalf("re-prepared: %d", rt.prepares.Load())
-	}
 	cancel()
 	<-done
+	if n.mgr.Count() != 0 {
+		t.Fatalf("re-prepared: %d instances", n.mgr.Count())
+	}
 }
 
 // A slow prepare must not block heartbeat polls; inventory stays
 // empty until the prepare lands.
 func TestSlowPrepareUnblocksHeartbeats(t *testing.T) {
 	ctl := &fakeCtl{}
-	rt := &fakeRT{prepBlock: make(chan struct{})}
+	n := realNode(t, "/prepare")
+	n.gate.hold = make(chan struct{}) // the worker's prepare stalls
 	exp := time.Now().Add(30 * time.Second)
 	as := assign("rep_1", "pin_1", 1, exp)
 	ctl.syncResp = regSync(as)
 	ctl.prepResp = regPrep(as)
-	a := fastAgent(ctl, rt)
+	a := fastAgent(ctl, n.rt)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
@@ -217,7 +214,7 @@ func TestSlowPrepareUnblocksHeartbeats(t *testing.T) {
 	if len(inv) != 0 {
 		t.Fatalf("inventory before ready: %+v", inv)
 	}
-	close(rt.prepBlock)
+	close(n.gate.hold)
 	for time.Now().Before(wait) {
 		ctl.mu.Lock()
 		inv = ctl.lastInv
@@ -232,7 +229,5 @@ func TestSlowPrepareUnblocksHeartbeats(t *testing.T) {
 	}
 	cancel()
 	<-done
-	if rt.deletes.Load() != 1 {
-		t.Fatalf("shutdown deletes %d", rt.deletes.Load())
-	}
+	waitCount(t, n.mgr, 0)
 }

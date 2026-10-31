@@ -23,7 +23,6 @@ import (
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/serving"
 	"calcside/cmd/calcside/internal/vaultcipher"
-	"calcside/cmd/calcside/internal/worker"
 	"calcside/internal/capability"
 	capext "calcside/internal/capability/ext"
 	capfs "calcside/internal/capability/fs"
@@ -31,6 +30,7 @@ import (
 	capnet "calcside/internal/capability/net"
 	"calcside/internal/placement"
 	"calcside/internal/runtime"
+	"calcside/internal/runtime/worker"
 	"calcside/internal/store"
 	webpkg "calcside/web"
 )

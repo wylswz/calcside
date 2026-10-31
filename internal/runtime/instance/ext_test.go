@@ -24,7 +24,7 @@ import (
 // contribDir resolves the repo's contrib dir.
 func contribDir(t *testing.T) string {
 	t.Helper()
-	d, err := filepath.Abs(filepath.Join("..", "..", "contrib"))
+	d, err := filepath.Abs(filepath.Join("..", "..", "..", "contrib"))
 	if err != nil {
 		t.Fatal(err)
 	}

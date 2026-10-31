@@ -10,55 +10,31 @@ import (
 	"calcside/cmd/calcside/internal/service"
 	"calcside/cmd/calcside/internal/service/access"
 	"calcside/cmd/calcside/internal/service/sandbox"
+	"calcside/internal/capability"
+	capfs "calcside/internal/capability/fs"
+	"calcside/internal/engine"
 	"calcside/internal/runtime"
+	"calcside/internal/runtime/instance"
 	"calcside/internal/store"
 	"calcside/internal/store/storetest"
 	"calcside/internal/types"
 )
 
-type fakeRT struct {
-	runtime.Runtime
-	prepared map[string]*runtime.PrepareRequest
-	invoked  map[string]*runtime.InvokeRequest
-	prepErr  *runtime.ProgramError
-	out      json.RawMessage
-}
-
-func (f *fakeRT) Prepare(ctx context.Context, r *runtime.PrepareRequest) (*runtime.PrepareResponse, error) {
-	if f.prepared == nil {
-		f.prepared = map[string]*runtime.PrepareRequest{}
-	}
-	f.prepared[r.InstanceID] = r
-	res := runtime.ProgramResult{ID: r.PrepareID, Output: json.RawMessage(`{"ok":true}`)}
-	if f.prepErr != nil {
-		res.Error = f.prepErr
-	}
-	return &runtime.PrepareResponse{Result: res, Epoch: r.Epoch}, nil
-}
-
-func (f *fakeRT) Invoke(ctx context.Context, r *runtime.InvokeRequest) (*runtime.InvokeResponse, error) {
-	if f.invoked == nil {
-		f.invoked = map[string]*runtime.InvokeRequest{}
-	}
-	f.invoked[r.InstanceID] = r
-	out := f.out
-	if out == nil {
-		out = json.RawMessage(`{"message":"Hello, world"}`)
-	}
-	return &runtime.InvokeResponse{Result: runtime.ProgramResult{ID: r.InvokeID, Output: out}}, nil
-}
-
-func (f *fakeRT) Delete(ctx context.Context, r *runtime.DeleteRequest) (*runtime.DeleteResponse, error) {
-	return &runtime.DeleteResponse{}, nil
-}
-
-func newSvc(t *testing.T) (*Service, store.Store, *fakeRT) {
+// newSvc wires the service to a real Manager so publish/test flows
+// exercise real prepares and invokes.
+func newSvc(t *testing.T) (*Service, store.Store) {
 	t.Helper()
 	st, err := store.Open(context.Background(), types.DriverSQLite, storetest.SQLite(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt := &fakeRT{}
+	reg := capability.NewRegistry()
+	reg.Register(capfs.Factory())
+	rt := instance.New(instance.Options{
+		Engine: engine.New(8), Registry: reg,
+		Limits: capability.ServerLimits{DefaultTTL: time.Minute, MaxTTL: time.Hour, MaxFSQuotaBytes: 256 << 20},
+	})
+	t.Cleanup(rt.StopReaper)
 	sb := sandbox.New(sandbox.Options{Store: st, Runtime: rt, Secrets: nopSecrets{}})
 	svc, err := New(Options{
 		Store: st, Runtime: rt, Sandbox: sb,
@@ -67,7 +43,7 @@ func newSvc(t *testing.T) (*Service, store.Store, *fakeRT) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return svc, st, rt
+	return svc, st
 }
 
 func ownerActor(st store.Store) service.Actor {
@@ -76,7 +52,7 @@ func ownerActor(st store.Store) service.Actor {
 }
 
 func TestCreateDefaults(t *testing.T) {
-	svc, st, _ := newSvc(t)
+	svc, st := newSvc(t)
 	a := ownerActor(st)
 	v, err := svc.Create(context.Background(), a, CreateRequest{})
 	if err != nil {
@@ -92,7 +68,7 @@ func TestCreateDefaults(t *testing.T) {
 }
 
 func TestUpdateCASAndValidation(t *testing.T) {
-	svc, st, _ := newSvc(t)
+	svc, st := newSvc(t)
 	a := ownerActor(st)
 	v, _ := svc.Create(context.Background(), a, CreateRequest{Name: "x"})
 	id := v.Application.ID
@@ -118,7 +94,7 @@ func TestUpdateCASAndValidation(t *testing.T) {
 }
 
 func TestPublishAndInvoke(t *testing.T) {
-	svc, st, rt := newSvc(t)
+	svc, st := newSvc(t)
 	a := ownerActor(st)
 	code := "def main(input): return input"
 	v, _ := svc.Create(context.Background(), a, CreateRequest{Name: "svc", Code: &code})
@@ -138,7 +114,7 @@ func TestPublishAndInvoke(t *testing.T) {
 	if got.InputSchema != nil {
 		t.Fatal("schema persisted before publish")
 	}
-	// invoke routes to the prepared replica — fake prepare made one
+	// invoke routes to the replica publish prepared
 	rv, err := svc.Test(context.Background(), a, id, 1, json.RawMessage(`{"name":"x"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -146,11 +122,10 @@ func TestPublishAndInvoke(t *testing.T) {
 	if rv.OutputJSON == "" {
 		t.Fatal("empty output")
 	}
-	_ = rt
 }
 
 func TestQuota(t *testing.T) {
-	svc, st, _ := newSvc(t)
+	svc, st := newSvc(t)
 	a := ownerActor(st)
 	for i := 0; i < 4; i++ {
 		if _, err := svc.Create(context.Background(), a, CreateRequest{}); err != nil {
@@ -163,7 +138,7 @@ func TestQuota(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
-	svc, st, _ := newSvc(t)
+	svc, st := newSvc(t)
 	a := ownerActor(st)
 	v, _ := svc.Create(context.Background(), a, CreateRequest{})
 	id := v.Application.ID

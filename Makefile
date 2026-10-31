@@ -45,7 +45,7 @@ benchmark-smoke:
 # parent group, so memory is enabled at the root here.
 test-cgroup:
 	CGO_ENABLED=0 GOOS=linux GOARCH=$$(docker version -f '{{.Server.Arch}}') \
-	  go test -c -o bin/subproc.linux.test ./internal/node/subproc
+	  go test -c -o bin/subproc.linux.test ./internal/runtime/subproc
 	docker run --rm --privileged --cgroupns=private -v $(CURDIR)/bin:/t:ro \
 	  --entrypoint sh alpine:3.22 -c '\
 	    mkdir /sys/fs/cgroup/init && \
@@ -58,7 +58,7 @@ test-cgroup:
 # under the real root cgroup, which is exempt from that constraint
 # (systemd normally enables memory there already).
 test-cgroup-host:
-	go test -race -c -o bin/subproc.test ./internal/node/subproc
+	go test -race -c -o bin/subproc.test ./internal/runtime/subproc
 	sudo sh -c 'echo +memory > /sys/fs/cgroup/cgroup.subtree_control'
 	sudo env CALCSIDE_TEST_CGROUP=1 CALCSIDE_TEST_CGROUP_PARENT=/calcside-test \
 	  bin/subproc.test -test.v -test.run Cgroup

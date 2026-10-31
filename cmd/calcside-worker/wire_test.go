@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"calcside/cmd/calcside-worker/internal/config"
-	"calcside/internal/node/subproc"
 	"calcside/internal/runtime"
 	"calcside/internal/runtime/remote"
+	"calcside/internal/runtime/subproc"
 )
 
 func TestMain(m *testing.M) {

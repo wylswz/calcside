@@ -21,10 +21,10 @@ import (
 	"calcside/cmd/calcside/internal/extensions"
 	"calcside/cmd/calcside/internal/service/serving"
 	"calcside/internal/node"
-	"calcside/internal/node/subproc"
 	"calcside/internal/nodeagent"
 	"calcside/internal/runtime"
 	"calcside/internal/runtime/remote"
+	"calcside/internal/runtime/subproc"
 	"calcside/internal/store"
 	"calcside/internal/types"
 )

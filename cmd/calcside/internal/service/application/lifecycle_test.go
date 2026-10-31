@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,27 +18,44 @@ import (
 	"calcside/internal/capability"
 	capfs "calcside/internal/capability/fs"
 	"calcside/internal/engine"
-	"calcside/internal/instance"
 	"calcside/internal/runtime"
+	"calcside/internal/runtime/instance"
+	"calcside/internal/runtime/remote"
 	"calcside/internal/store"
 	"calcside/internal/store/storetest"
 )
 
+var lcTestKey = []byte("lc-test-shared-key-0123456789abcdef")
+
+// gateRT fails requests to a path suffix — a real transport error, the
+// only prepare failure the contract cannot classify.
+type gateRT struct {
+	base   http.RoundTripper
+	suffix string
+	fail   atomic.Bool
+}
+
+func (g *gateRT) RoundTrip(r *http.Request) (*http.Response, error) {
+	if g.fail.Load() && strings.HasSuffix(r.URL.Path, g.suffix) {
+		return nil, errors.New("gate: transport failure")
+	}
+	return g.base.RoundTrip(r)
+}
+
+// lifecycleRuntime is a spy, never a fake: every call delegates to the
+// real wire client; it only records what the service asked for.
 type lifecycleRuntime struct {
 	runtime.Runtime
-	events      []string
-	audits      int
-	auditWS     []string
-	prepareFail error
-	owner       runtime.Owner
+	gate    *gateRT
+	events  []string
+	audits  int
+	auditWS []string
+	owner   runtime.Owner
 }
 
 func (r *lifecycleRuntime) Prepare(ctx context.Context, req *runtime.PrepareRequest) (*runtime.PrepareResponse, error) {
 	r.events = append(r.events, "prepare")
 	r.owner = req.Owner
-	if r.prepareFail != nil {
-		return &runtime.PrepareResponse{Epoch: req.Epoch}, r.prepareFail
-	}
 	return r.Runtime.Prepare(ctx, req)
 }
 
@@ -70,7 +90,14 @@ func lifecycleService(t *testing.T) (*Service, store.Store, *lifecycleRuntime, s
 		EvalTimeout: time.Second, ReapInterval: time.Hour,
 	})
 	t.Cleanup(mgr.StopReaper)
-	rt := &lifecycleRuntime{Runtime: mgr}
+	srv := httptest.NewServer(remote.NewHandler(mgr, lcTestKey))
+	t.Cleanup(srv.Close)
+	gate := &gateRT{base: http.DefaultTransport, suffix: "/prepare"}
+	direct, err := remote.NewDirect(srv.URL, &http.Client{Transport: gate}, lcTestKey, "lifecycle-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := &lifecycleRuntime{Runtime: direct, gate: gate}
 	ac := access.New(st)
 	sb := sandbox.New(sandbox.Options{
 		Store: st, Runtime: rt, Registry: reg, Limits: limits, Secrets: nopSecrets{}, Access: ac,
@@ -192,12 +219,14 @@ func TestUncertainPrepareIsAuditedAndCleaned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt.prepareFail = errors.New("sensitive transport details")
+	rt.gate.fail.Store(true)
 	if _, err := s.Test(ctx, actor, v.Application.ID, 1, json.RawMessage(`{}`)); err == nil ||
-		strings.Contains(err.Error(), "sensitive") {
+		strings.Contains(err.Error(), "gate") {
 		t.Fatalf("transport error was lost or leaked: %v", err)
 	}
-	if !reflect.DeepEqual(rt.events, []string{"prepare", "delete"}) || rt.audits != 1 {
-		t.Fatalf("uncertain preparation escaped cleanup/audit: %v, %d", rt.events, rt.audits)
+	// A transport-dead prepare has no response: cleanup still runs,
+	// and no audit batch ever arrived to record.
+	if !reflect.DeepEqual(rt.events, []string{"prepare", "delete"}) || rt.audits != 0 {
+		t.Fatalf("uncertain preparation escaped cleanup: %v, %d", rt.events, rt.audits)
 	}
 }
