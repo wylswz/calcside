@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { AuditEvent, Instance } from '../api'
-import { callOutcome, denialReason, instanceName, isConsoleCall } from '../activity'
+import { callOutcome, denialReason, instanceTitle, isConsoleCall } from '../activity'
 import { fmtMs, relTime } from '../format'
 import { EmptyRow, OutcomeBadge } from './ui'
 import { fmtTime } from '../format'
@@ -84,7 +84,7 @@ export function CallRows({ events, instances, showInstance }: {
                   {showInstance && (
                     <td className="max-w-[160px] truncate">
                       {inst
-                        ? <Link to={`/instances/${inst.id}`} className="link text-xs" onClick={(ev) => ev.stopPropagation()}>{instanceName(inst)}</Link>
+                        ? <Link to={`/instances/${inst.id}`} className="link text-xs" onClick={(ev) => ev.stopPropagation()}>{instanceTitle(inst)}</Link>
                         : <span className="text-xs text-mute">{e.instance_id}</span>}
                     </td>
                   )}

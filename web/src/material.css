@@ -145,10 +145,10 @@ body {
 .instance-detail .seg-filters button,
 .input {
   transition:
-    box-shadow 320ms var(--ease-damped),
-    background-color 240ms var(--ease-damped),
-    border-color 240ms var(--ease-damped),
-    color 240ms var(--ease-damped);
+    box-shadow 180ms var(--ease-damped),
+    background-color 160ms var(--ease-damped),
+    border-color 160ms var(--ease-damped),
+    color 160ms var(--ease-damped);
 }
 [data-ui='button'] { border-radius: var(--radius-control); color: rgb(var(--ink)); min-height: 32px; height: auto; }
 /* hover lifts the light, not the control; an open toggle stays held */
@@ -164,7 +164,7 @@ body {
   transition-timing-function: var(--ease-press);
 }
 [data-ui='button']:focus-visible, .ability-choice:focus-visible, .segmented [role='tab']:focus-visible {
-  outline: 2px solid rgb(var(--accent) / 0.55);
+  outline: 2px solid rgb(var(--accent));
   outline-offset: 2px;
 }
 [data-ui='button']:disabled { opacity: 0.5; box-shadow: none; }
@@ -205,8 +205,8 @@ body {
   outline: none;
   background-color: rgb(var(--paper));
   background-image: none;
-  border-color: rgb(var(--accent) / 0.55);
-  box-shadow: 0 0 0 4px rgb(var(--accent) / 0.12);
+  border-color: rgb(var(--accent));
+  box-shadow: 0 0 0 4px rgb(var(--accent) / 0.18);
 }
 /* states layered on the material */
 .ext-card.ext-card-added, .ability-choice[data-selected='true'] {
@@ -258,7 +258,7 @@ body {
   width: 32px; height: 32px; margin-right: -8px;
   border-radius: var(--radius-control);
   font-size: 20px; line-height: 1; color: rgb(var(--mute));
-  transition: background-color 240ms var(--ease-damped), color 240ms var(--ease-damped);
+  transition: background-color 160ms var(--ease-damped), color 160ms var(--ease-damped);
 }
 [data-ui='dialog-close']:hover { background: var(--fill-muted); color: rgb(var(--ink)); }
 
@@ -268,7 +268,7 @@ body {
   display: flex; align-items: center; gap: 8px; width: 100%;
   padding: 8px 10px; border-radius: 8px;
   font-size: 13px; color: rgb(var(--ink)); cursor: pointer; outline: none; user-select: none;
-  transition: background-color 200ms var(--ease-damped), color 200ms var(--ease-damped);
+  transition: background-color 150ms var(--ease-damped), color 150ms var(--ease-damped);
 }
 [data-ui='menu-item'][data-highlighted] { background: rgb(var(--accent) / 0.08); color: rgb(var(--accent)); }
 [data-ui='menu-item'][data-disabled] { opacity: 0.5; cursor: default; }
@@ -278,10 +278,10 @@ body {
 
 /* ---- motion: damped entrances, none when reduced motion is asked ---- */
 @media (prefers-reduced-motion: no-preference) {
-  [data-ui='dialog-overlay'][data-state='open'] { animation: material-fade 280ms var(--ease-damped); }
-  [data-ui='dialog-surface'][data-state='open'] { animation: material-rise 420ms var(--ease-damped); }
-  [data-ui='menu'][data-state='open'] { animation: material-drop 320ms var(--ease-damped); transform-origin: var(--radix-dropdown-menu-content-transform-origin); }
-  .selected-row:not(.is-empty):not(.is-removed) { animation: material-settle 420ms var(--ease-damped); }
+  [data-ui='dialog-overlay'][data-state='open'] { animation: material-fade 180ms var(--ease-damped); }
+  [data-ui='dialog-surface'][data-state='open'] { animation: material-rise 280ms var(--ease-damped); }
+  [data-ui='menu'][data-state='open'] { animation: material-drop 220ms var(--ease-damped); transform-origin: var(--radix-dropdown-menu-content-transform-origin); }
+  .selected-row:not(.is-empty):not(.is-removed) { animation: material-settle 280ms var(--ease-damped); }
 }
 @media (prefers-reduced-motion: reduce) {
   [data-ui='button'], .ability-choice, .ext-card, .selected-row, .segmented [role='tab'], .workspace-tabs a, .input { transition: none; }

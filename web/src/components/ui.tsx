@@ -13,7 +13,7 @@ import { expiringSoon } from '../nextStep'
 // Normal outcomes (ok, running, allow) are never coloured.
 export type Signal = 'denied' | 'failed' | 'you' | 'live'
 
-const signalFill: Record<Signal, string> = { denied: 'fill-danger', failed: 'fill-warn', you: 'fill-accent', live: 'fill-live' }
+const signalFill: Record<Signal, string> = { denied: 'fill-danger', failed: 'fill-warn-text', you: 'fill-accent', live: 'fill-live' }
 const signalText: Record<Signal, string> = { denied: 'text-danger', failed: 'text-warn-text', you: 'text-accent', live: 'text-live' }
 
 export function SignalMark({ signal, className = '' }: { signal: Signal; className?: string }) {

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Instance, Execution, APIKey, SharedInstance, workspaces } from '../api'
-import { instanceName } from '../activity'
+import { instanceTitle } from '../activity'
 import { nextStep } from '../nextStep'
 import { useRole } from '../workspace'
 import { Button, Confirm, Loading, Menu, MenuItem, SectionTitle, InstanceStatus, Modal, Notice, SwapLabel } from '../components/ui'
@@ -96,7 +96,7 @@ export default function InstanceDetail() {
 
   if (instErr) return <Notice tone="warning">Could not load this instance — it may be gone or you may not have access.</Notice>
   if (!inst) return <Loading />
-  const name = inst.labels?.name?.trim() || instanceName(inst)
+  const name = instanceTitle(inst)
   const live = inst.status === 'running'
   const latest = (execs?.executions ?? []).slice().sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))[0] ?? null
   const stateRevision = latest ? `${latest.id}:${latest.steps}` : undefined

@@ -1023,7 +1023,7 @@ test('new instances wait behind "Show latest" without moving the primary action 
   expect(await newInstance.boundingBox()).toEqual(newAt)
   await more.click()
   await expect(rows).toHaveCount(before + 1)
-  await expect(page.getByRole('link', { name: 'name=held-list' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'held-list' })).toBeVisible()
   await expect(more).toBeHidden()
   expect(await newInstance.boundingBox()).toEqual(newAt)
 })

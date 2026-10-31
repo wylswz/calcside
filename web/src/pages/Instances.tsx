@@ -5,7 +5,7 @@ import { api, SharedInstance, Instance, wsPath } from '../api'
 import { useRole } from '../workspace'
 import { Button, Confirm, Loading, PageHeader, InstanceStatus, RevealNew } from '../components/ui'
 import { attentionText, expiringSoon } from '../nextStep'
-import { allowedSummary, instanceName } from '../activity'
+import { allowedSummary, instanceTitle } from '../activity'
 import { fmtTime, relTime } from '../format'
 import { useHeldOrder } from '../stableList'
 import { useState } from 'react'
@@ -74,7 +74,7 @@ export default function Instances() {
               </thead>
               <tbody>
                 {g.map((i) => {
-                const name = instanceName(i)
+                const name = instanceTitle(i)
                 return (
                   <tr key={i.id} className="row-hover" title={`created ${fmtTime(i.created_at)}`}>
                     <td>
@@ -107,7 +107,7 @@ export default function Instances() {
               <tbody>
                 {shared!.instances.map((si) => (
                   <tr key={si.instance.id} className="row-hover">
-                    <td><Link to={`/instances/${si.instance.id}`} className="link font-medium">{instanceName(si.instance)}</Link></td>
+                    <td><Link to={`/instances/${si.instance.id}`} className="link font-medium">{instanceTitle(si.instance)}</Link></td>
                     <td className="text-xs text-sec">{si.workspace_name}</td>
                     <td className="text-xs text-sec">{si.role}</td>
                     <td><InstanceStatus inst={si.instance} /></td>
@@ -119,7 +119,7 @@ export default function Instances() {
         </div>
       )}
       {ending && (
-        <Confirm tone="danger" title={`End ${instanceName(ending)}?`} confirm="End" pending="Ending…"
+        <Confirm tone="danger" title={`End ${instanceTitle(ending)}?`} confirm="End" pending="Ending…"
           action={async () => {
             await api.del(`/api/v1/instances/${ending.id}`)
             await qc.invalidateQueries({ queryKey: ['instances'] })

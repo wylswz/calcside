@@ -50,7 +50,7 @@
   border-radius: var(--radius-control); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .app-page .app-check { display: flex; gap: 6px; align-items: center; font-size: 13px; margin: 8px 0 4px }
-.app-page :is(.app-input, .app-area):focus { outline: none; background: rgb(var(--paper)); border-color: rgb(var(--accent) / 0.55); box-shadow: 0 0 0 4px rgb(var(--accent) / 0.12) }
+.app-page :is(.app-input, .app-area):focus { outline: none; background: rgb(var(--paper)); border-color: rgb(var(--accent)); box-shadow: 0 0 0 4px rgb(var(--accent) / 0.18) }
 @media (max-width: 768px) {
   .app-page .app-grid { grid-template-columns: minmax(0, 1fr); gap: 0 }
   .app-page .app-card { padding: 16px }

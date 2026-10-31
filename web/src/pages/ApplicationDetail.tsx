@@ -420,7 +420,7 @@ function Editor({ app, role, userID, qc }: Props) {
           <div>
             <label className="app-label" id="app-code-label">Code — main.star</label>
             <div className="app-cm" aria-labelledby="app-code-label">
-              <CodeMirror value={draft.code} height="360px" extensions={editor.extensions} theme={cmTheme}
+              <CodeMirror value={draft.code} height="320px" extensions={editor.extensions} theme={cmTheme}
                 basicSetup={{ autocompletion: false }}
                 readOnly={view === 'view'} onChange={(v) => edit({ code: v })} />
               <div className="editor-footer flex flex-wrap gap-x-4 border-t border-line px-3 py-2 text-xs text-sec">
