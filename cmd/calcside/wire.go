@@ -27,7 +27,7 @@ import (
 func initializeApp(ctx context.Context, cfg config.Config) (*application, func(), error) {
 	wire.Build(
 		provideStore, provideRecorder, provideCipher, provideLimits,
-		provideExtRepo, provideRegistry, provideRuntime, provideGlobalPolicies,
+		provideExtRepo, provideRegistry, provideScheduler, provideRuntime, provideGlobalPolicies,
 		wire.Bind(new(sandbox.SecretResolver), new(*vault.Service)),
 		wire.Bind(new(sandbox.AuditSink), new(*audit.Recorder)),
 		wire.Bind(new(appsvc.AuditSink), new(*audit.Recorder)),

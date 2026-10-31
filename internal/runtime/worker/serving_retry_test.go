@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"calcside/internal/placement"
@@ -24,16 +25,17 @@ func TestClientServingDoesNotRetry(t *testing.T) {
 	for _, operation := range []string{"prepare", "invoke"} {
 		for _, failure := range []string{"stale_epoch", "not_running", "internal", "network"} {
 			t.Run(operation+"/"+failure, func(t *testing.T) {
-				requests, resolutions, nodes := 0, 0, 0
-				cl := NewClient([]byte("test-key"), "api",
-					func(context.Context) ([]placement.NodeRef, error) {
-						nodes++
-						return []placement.NodeRef{{NodeID: "w1", Addr: "unused.invalid"}}, nil
-					},
-					func(context.Context, string) (*placement.Binding, error) {
+				requests, resolutions := 0, 0
+				nodes := &atomic.Int64{}
+				p := &testPlacement{
+					nodes:      []placement.NodeRef{{NodeID: "w1", Addr: "unused.invalid"}},
+					nodesCalls: nodes,
+					resolve: func(context.Context, string) (*placement.Binding, error) {
 						resolutions++
 						return nil, errors.New("must not re-resolve within one attempt")
-					})
+					},
+				}
+				cl := NewClient([]byte("test-key"), "api", p, p.Nodes, p.Resolve)
 				cl.router.routes["rep"] = routeEnt{nodeID: "w1", addr: "unused.invalid"}
 				cl.HTTP = &http.Client{Transport: servingRoundTripper(func(req *http.Request) (*http.Response, error) {
 					requests++
@@ -73,8 +75,8 @@ func TestClientServingDoesNotRetry(t *testing.T) {
 				if err == nil || requests != 1 || resolutions != 0 {
 					t.Fatalf("err=%v HTTP attempts=%d resolutions=%d", err, requests, resolutions)
 				}
-				if operation == "prepare" && nodes != 1 {
-					t.Fatalf("prepare selected a node %d times", nodes)
+				if operation == "prepare" && nodes.Load() != 1 {
+					t.Fatalf("prepare selected a node %d times", nodes.Load())
 				}
 				if failure == "network" && !errors.Is(err, networkErr) {
 					t.Fatalf("transport error changed: %v", err)

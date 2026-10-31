@@ -16,6 +16,7 @@ import (
 	"calcside/cmd/calcside/internal/config"
 	"calcside/cmd/calcside/internal/extensions"
 	_ "calcside/cmd/calcside/internal/gormstore"
+	"calcside/cmd/calcside/internal/scheduler"
 	"calcside/cmd/calcside/internal/service/access"
 	appsvc "calcside/cmd/calcside/internal/service/application"
 	policysvc "calcside/cmd/calcside/internal/service/policy"
@@ -98,21 +99,39 @@ func provideRegistry(repo *extensions.Repository) *capability.Registry {
 	return reg
 }
 
-func provideRuntime(cfg config.Config, st store.Store) (runtime.Runtime, func(), error) {
+// provideScheduler builds the deploy-time placement authority used by
+// fresh instance placement and persistent reconcile passes.
+func provideScheduler(cfg config.Config, st store.Store) (*scheduler.Scheduler, error) {
+	refs, err := config.ParseWorkers(cfg.Workers)
+	if err != nil {
+		return nil, err
+	}
+	nodes := map[string]string{}
+	for _, r := range refs {
+		nodes[r.NodeID] = r.Addr
+	}
+	slog.Info("remote execution tier", "workers", len(nodes))
+	return scheduler.New(scheduler.Options{
+		Store: st, Nodes: nodes,
+		LeaseDuration: 30 * time.Second, NodeTTL: 45 * time.Second,
+	})
+}
+
+func provideRuntime(cfg config.Config, st store.Store, sch *scheduler.Scheduler) (runtime.Runtime, func(), error) {
 	// The API tier never executes code — every call forwards to a
 	// remote worker node; --workers/--worker-key are required.
 	if cfg.WorkerKey == "" {
 		return nil, nil, fmt.Errorf("--worker-key is required")
 	}
-	nodes, err := config.ParseWorkers(cfg.Workers)
+	refs, err := config.ParseWorkers(cfg.Workers)
 	if err != nil {
 		return nil, nil, err
 	}
-	slog.Info("remote execution tier", "workers", len(nodes))
 	client := worker.NewClient(
 		[]byte(cfg.WorkerKey),
 		"api",
-		func(context.Context) ([]placement.NodeRef, error) { return nodes, nil },
+		sch,
+		func(context.Context) ([]placement.NodeRef, error) { return refs, nil },
 		func(ctx context.Context, id string) (*placement.Binding, error) {
 			if strings.HasPrefix(id, string(store.PrefixServingReplica)) {
 				// Persistent replica: route only to the node that
@@ -234,22 +253,13 @@ func provideWeb() fs.FS {
 	return nil
 }
 
-// provideServingService is the API-side persistent scheduler. It owns
-// SQL; workers never touch the database.
-func provideServingService(cfg config.Config, st store.Store, secrets sandbox.SecretResolver,
-	globalPolicies map[string]string) (*serving.Service, error) {
-	refs, err := config.ParseWorkers(cfg.Workers)
-	if err != nil {
-		return nil, err
-	}
-	nodes := map[string]string{}
-	for _, r := range refs {
-		nodes[r.NodeID] = r.Addr
-	}
+// provideServingService is the API-side persistent control plane. It
+// owns SQL; workers never touch the database.
+func provideServingService(st store.Store, secrets sandbox.SecretResolver,
+	globalPolicies map[string]string, sch *scheduler.Scheduler) (*serving.Service, error) {
 	return serving.New(serving.Options{
-		Store: st, Secrets: secrets, Nodes: nodes,
+		Store: st, Secrets: secrets, Scheduler: sch,
 		GlobalPolicies: globalPolicies,
-		LeaseDuration:  30 * time.Second, NodeTTL: 45 * time.Second,
 	})
 }
 
