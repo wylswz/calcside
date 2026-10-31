@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Instance, Execution, APIKey, SharedInstance, workspaces } from '../api'
@@ -33,35 +33,18 @@ function NextSignal({ kind }: { kind: 'neutral' | 'expiring' | 'denied' | 'conne
   )
 }
 
-// The instance page shows one next step at a time: connect → waiting →
-// runs → denials → expiry → ended. Tools live behind More.
+// The instance page shows one next step at a time: waiting → runs →
+// denials → expiry → ended. Instance actions live in the header.
 export default function InstanceDetail() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
   const qc = useQueryClient()
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setCode(false) }
-    window.addEventListener('keydown', key)
-    return () => window.removeEventListener('keydown', key)
-  }, [])
   const role = useRole() // current workspace — destination for create-similar
   const canCreate = role === 'owner' || role === 'editor'
   const [running, setRunning] = useState(false)
   const [share, setShare] = useState(false)
   const [agent, setAgent] = useState(false)
   const [prompt, setPrompt] = useState(false)
-
-  const [code, setCode] = useState(false)
-  const [revealEditor, setRevealEditor] = useState(false)
-  // "Run code yourself" from the next-step card opens the editor and
-  // brings it into view; the Activity toggle opens it in place.
-  useEffect(() => {
-    if (!revealEditor || !code) return
-    setRevealEditor(false)
-    const el = document.getElementById('run-code')
-    el?.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
-    el?.querySelector<HTMLElement>('.cm-content')?.focus({ preventScroll: true })
-  }, [revealEditor, code])
   const [focusId, setFocusId] = useState<string | undefined>()
 
   const { data: inst, isError: instErr } = useQuery({
@@ -77,7 +60,7 @@ export default function InstanceDetail() {
   const { data: execs } = useQuery({
     queryKey: ['execs', id],
     queryFn: () => api.get<{ executions: Execution[] }>(`/api/v1/instances/${id}/executions`),
-    refetchInterval: 10000,
+    refetchInterval: 5000,
   })
   const { data: shared } = useQuery({
     queryKey: ['shared'],
@@ -116,6 +99,7 @@ export default function InstanceDetail() {
   const name = inst.labels?.name?.trim() || instanceName(inst)
   const live = inst.status === 'running'
   const latest = (execs?.executions ?? []).slice().sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))[0] ?? null
+  const stateRevision = latest ? `${latest.id}:${latest.steps}` : undefined
   const hasBoundKey = (keys?.keys ?? []).some((k) => k.instance_id === id && !k.revoked_at && (!k.expires_at || new Date(k.expires_at).getTime() > Date.now()))
   const step = nextStep(inst, latest, hasBoundKey, Date.now())
 
@@ -130,7 +114,7 @@ export default function InstanceDetail() {
           <div className="mb-3 text-xs text-sec">
             <Link to="/" className="transition-colors hover:text-accent">← Instances</Link>
           </div>
-          <h1 className="break-words text-[32px] font-semibold leading-[1.1] tracking-tight text-ink">{name}</h1>
+          <h1 className="break-words font-semibold text-ink">{name}</h1>
           {name !== inst.id && <div className="mt-1 font-mono text-xs text-mute">{inst.id}</div>}
           <div className="mt-3 flex items-center gap-3">
             <InstanceStatus inst={inst} />
@@ -138,12 +122,18 @@ export default function InstanceDetail() {
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          {canCreate && <Button variant="primary" onClick={() => navigate('/instances/new')}>New instance</Button>}
-          <Menu trigger={<Button>More ▾</Button>}>
-            {isOwner && <MenuItem onSelect={() => setShare(true)}>Share…</MenuItem>}
-            <MenuItem onSelect={() => setPrompt(true)}>Copy agent prompt</MenuItem>
-            {effRun && inst.status !== 'deleted' && <MenuItem tone="danger" onSelect={() => setEnding(true)}>End instance</MenuItem>}
-          </Menu>
+          {isOwner && <Button onClick={() => setShare(true)}>Share</Button>}
+          <Button onClick={() => setPrompt(true)}>Copy prompt</Button>
+          {canManage && live && (
+            <Button className="!w-8 !px-0" aria-label="Connect agent" title="Connect agent" onClick={() => setAgent(true)}>
+              <NextSignal kind="connect" />
+            </Button>
+          )}
+          {effRun && inst.status !== 'deleted' && (
+            <Menu trigger={<Button>More ▾</Button>}>
+              <MenuItem tone="danger" onSelect={() => setEnding(true)}>End instance</MenuItem>
+            </Menu>
+          )}
         </div>
       </div>
 
@@ -175,20 +165,6 @@ export default function InstanceDetail() {
             <p className="next-text">Review the blocked call before changing the boundary.</p>
           </div>
           <div className="next-actions"><Button variant="primary" onClick={() => setFocusId(latest?.id)}>Review run</Button></div>
-        </div>
-      )}
-      {step.kind === 'connect' && (
-        <div className="next-action mb-8">
-          <div className="next-signal connect" aria-hidden="true"><NextSignal kind="connect" /></div>
-          <div className="next-body">
-            <h2 className="next-title">Connect an agent</h2>
-            <p className="next-text">Give an agent access to exactly this instance — nothing else.</p>
-            <div className="next-links">
-              <button className="hover:text-ink" onClick={() => setPrompt(true)}>Copy agent prompt</button>
-              {canManage && <button className="hover:text-ink" onClick={() => { setCode(true); setRevealEditor(true) }}>Run code yourself</button>}
-            </div>
-          </div>
-          {canManage && <div className="next-actions"><Button variant="primary" onClick={() => setAgent(true)}>Connect agent</Button></div>}
         </div>
       )}
       {step.kind === 'waiting' && (
@@ -224,13 +200,16 @@ export default function InstanceDetail() {
         <div className="work-surface min-w-0">
           <section aria-label="Work">
             <h2 className="sr-only">Work</h2>
-            <Activity id={id} focusId={focusId}
-              aside={effRun && live ? <Button size="sm" aria-expanded={code} aria-controls="run-code" onClick={() => setCode(!code)}>Run code</Button> : undefined}
-              editor={code && effRun && live ? <div id="run-code" className="mb-6"><RunCode inst={inst} running={running} setRunning={setRunning} /></div> : undefined} />
+            {effRun && live && (
+              <div id="run-code" className="work-run">
+                <RunCode inst={inst} running={running} setRunning={setRunning} />
+              </div>
+            )}
+            <Activity id={id} focusId={focusId} />
           </section>
           {inst.spec?.capabilities?.fs != null && (
             <section aria-label="Results" className="results-block">
-              <h2 className="mb-4 text-lg font-semibold text-ink">Results</h2>
+              <h2 className="mb-4 font-semibold text-ink">Results</h2>
               <div className="results-content">
                 <div>
                   <SectionTitle>Files</SectionTitle>
@@ -241,7 +220,7 @@ export default function InstanceDetail() {
           )}
         </div>
         <aside className="side-col">
-          <StatePanel key={`state-${id}`} id={id} running={live} busy={running} capNames={Object.keys(inst.spec?.capabilities ?? {})} />
+          <StatePanel key={`state-${id}`} id={id} running={live} revision={stateRevision} capNames={Object.keys(inst.spec?.capabilities ?? {})} />
           <section aria-label="Boundary">
             <h2>Boundary</h2>
             <p className="side-text mb-3">Fixed at creation.</p>
@@ -265,13 +244,9 @@ export default function InstanceDetail() {
                 <>
                   <p className="side-text">Key ready.</p>
                   <p className="side-name break-all mt-1">{mUrl}</p>
-                  {live && <p className="mt-2"><button className="text-xs text-accent hover:underline" onClick={() => setAgent(true)}>New key</button></p>}
                 </>
               ) : (
-                <>
-                  <p className="side-text">No instance key yet.</p>
-                  {live && <p className="mt-2"><Button size="sm" onClick={() => setAgent(true)}>Connect agent</Button></p>}
-                </>
+                <p className="side-text">{live ? 'No instance key yet — use the connect icon in the header.' : 'No instance key yet.'}</p>
               )
             ) : (
               <p className="side-text">key availability unknown — this workspace's keys are not visible to you</p>

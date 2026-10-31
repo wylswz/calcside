@@ -361,7 +361,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
 
           {/* forceMount keeps both views mounted so editor state survives switching */}
           <Tabs.Content value="capabilities" forceMount className="spec-palette">
-            <p className="spec-pane-note">Optional. Add capabilities and policies here; adjust capability details under Settings. {application ? 'Applied when published.' : 'Settings are fixed after creation.'}</p>
+            <p className="spec-pane-note">Optional. {application ? 'Applied when published.' : 'Settings are fixed after creation.'}</p>
             <div className="ability-choices">
               <button type="button" className="ability-choice" data-selected={!!draft.fs} aria-label={draft.fs ? 'Files added' : 'Add Files'} onClick={addFiles}>
                 <FilesIcon />
@@ -381,7 +381,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
             </div>
             <div className="policies-block">
               <h4 className="mb-3 text-sm font-semibold text-ink">Policies</h4>
-              <p className="spec-pane-note">Pluggable rules that constrain what capabilities may do. Add any number; they never grant access.</p>
+              <p className="spec-pane-note">Policies constrain what capabilities may do; they never grant access.</p>
               <PolicyPicker entries={policies.data?.policies ?? []} selected={selectedPolicies}
                 loading={policies.isPending} error={policies.isError} onRetry={() => policies.refetch()}
                 onToggle={togglePolicy} onRemove={removePolicy}

@@ -9,7 +9,7 @@ const c = (name: string, alpha?: number) => (alpha === undefined ? `rgb(var(--${
 export const cmTheme = [
   EditorView.theme({
     '&': { backgroundColor: c('paper'), color: c('ink'), fontSize: '13px' },
-    '.cm-scroller': { fontFamily: '"IBM Plex Mono", ui-monospace, monospace', lineHeight: '1.6' },
+    '.cm-scroller': { fontFamily: 'var(--font-mono)', lineHeight: '20px' },
     '.cm-content': { caretColor: c('accent'), padding: '10px 0' },
     '.cm-cursor, .cm-dropCursor': { borderLeftColor: c('accent'), borderLeftWidth: '2px' },
     '&.cm-focused': { outline: 'none' },

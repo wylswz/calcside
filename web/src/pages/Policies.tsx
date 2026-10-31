@@ -128,7 +128,7 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
               </select>
             </Field>
           </div>
-          <p className="mb-4 text-xs text-mute">Select an operation for args / result field suggestions. This only changes completion hints; Validate compiles the policy, it does not execute it.</p>
+          <p className="mb-4 text-xs text-mute">Validate compiles the policy; it does not execute it.</p>
           <div className="mb-2 text-xs font-medium text-sec">Input schema</div>
           <pre className="pre mb-4 max-h-64 text-sec">{editor.fields.length ? editor.fields.map((s) => `${s.name}  ${s.detail ?? ''}`).join('\n') : editor.error ? 'Schema unavailable' : 'Loading schema…'}</pre>
           <pre className="pre max-h-64 text-sec">{POLICY_DOC}</pre>
@@ -157,7 +157,7 @@ export default function Policies({ bare }: { bare?: boolean }) {
       {bare && <div className="mb-4 flex items-center justify-between"><p className="text-xs text-sec" /><Button variant="primary" onClick={() => setShowNew(true)}>New policy</Button></div>}
 {!bare && <PageHeader title="Policies"
         actions={<Button variant="primary" onClick={() => setShowNew(true)}>New policy</Button>}>
-        Built-in and Rego policies share one selection list at instance creation (spec.policies). Built-in policies run native runtime checks and are read-only; default policies are preselected, not mandatory. Rego policies are snapshotted at creation. Server policies (--policy-dir) always apply.
+        Built-in policies run native checks and are read-only. Defaults are preselected, not mandatory. Rego policies are snapshotted at creation; server policies always apply.
       </PageHeader>}
       <div className="tbl-wrap">
         <table className="tbl">

@@ -13,7 +13,7 @@
   --ink: 24 39 55;
   --body: 55 65 81;
   --sec: 95 109 126;
-  --mute: 103 119 138;
+  --mute: 90 106 124;
   --line: 231 237 245;
   --line-strong: 207 219 232;
   --accent: 37 99 235;
@@ -21,6 +21,7 @@
   --warn: 249 115 22;
   --live: 22 163 74;
   --warn-text: 194 65 12;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -64,9 +65,6 @@
 }
 
 @layer components {
-  .eyebrow {
-    @apply text-[11px] font-medium uppercase tracking-label text-mute;
-  }
   .input {
     @apply w-full border border-line bg-paper px-2.5 py-1.5 text-sm text-ink transition-colors placeholder:text-mute hover:border-line-strong focus:border-accent focus:outline-none disabled:opacity-50;
     height: 36px;

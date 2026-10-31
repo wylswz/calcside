@@ -134,20 +134,23 @@ test('workspace switcher scopes the instance list', async ({ page }) => {
   await expect(page.getByText('members', { exact: false }).first()).toBeVisible()
 })
 
-// Flow: creating an instance lands on its page with the Connect-agent
-// guidance card; after the first run the card disappears.
-test('instance flow guides connect then clears', async ({ page }) => {
+// Flow: creating an instance lands on its page with a compact connect
+// action — no oversized guidance card — that opens the key dialog.
+test('instance flow exposes a compact connect-agent action', async ({ page }) => {
   await page.goto(`${consoleURL}/`)
   await page.getByRole('button', { name: 'New instance' }).first().click()
   await page.getByRole('button', { name: 'Create instance' }).click()
   await expect(page).toHaveURL(/\/instances\/ins_/, { timeout: 10000 })
-  await expect(page.getByText('Connect an agent')).toBeVisible()
-  const id = page.url().split('/instances/')[1].split('?')[0].split('/')[0]
-  const ex = await client.post(`/api/v1/instances/${id}/exec`, { data: { code: 'print(1)' } })
-  expect(ex.status()).toBe(200)
-  await page.reload()
-  await page.waitForTimeout(1500)
   await expect(page.getByText('Connect an agent')).toHaveCount(0)
+  const connect = page.getByRole('button', { name: 'Connect agent', exact: true })
+  await expect(connect).toBeVisible()
+  const box = (await connect.boundingBox())!
+  expect(box.width).toBeLessThanOrEqual(44)
+  expect(box.height).toBeLessThanOrEqual(44)
+  await connect.click()
+  await expect(page.getByRole('dialog', { name: 'Connect agent' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog', { name: 'Connect agent' })).toHaveCount(0)
 })
 
 // The builder is a page: /instances/new with a capability palette and
@@ -413,47 +416,55 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   await more.click()
   await page.locator('body').click({ position: { x: 10, y: 10 } })
   await expect(menu).toHaveCount(0)
-  // an item that opens a dialog keeps it open; closing it returns to More
+  // the menu's remaining item opens a dialog; closing it returns to More
   await more.click()
-  await page.getByRole('menuitem', { name: 'Copy agent prompt' }).click()
-  const promptDialog = page.getByRole('dialog', { name: 'Agent prompt' })
-  await expect(promptDialog).toBeVisible()
+  await page.getByRole('menuitem', { name: 'End instance' }).click()
+  const endDialog = page.getByRole('dialog', { name: /End instance Research session/ })
+  await expect(endDialog).toBeVisible()
   await page.waitForTimeout(300)
+  await expect(endDialog).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(endDialog).toHaveCount(0)
+  await expect(more).toBeFocused()
+  // Share and Copy prompt are direct header actions, not menu items
+  const promptButton = page.getByRole('button', { name: 'Copy prompt', exact: true })
+  await promptButton.click()
+  const promptDialog = page.getByRole('dialog', { name: 'Agent prompt' })
   await expect(promptDialog).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(promptDialog).toHaveCount(0)
-  await expect(more).toBeFocused()
+  await expect(promptButton).toBeFocused()
+  await expect(page.getByRole('button', { name: 'Share', exact: true })).toBeVisible()
 
-  // Run code opens the editor under the Activity heading: the toggle and
-  // the filter do not move, and the toggle reads as held while open
-  const runToggle = page.getByRole('button', { name: 'Run code', exact: true })
-  const filterAll = page.locator('.seg-filters button').first()
-  const at = async () => ({
-    toggle: await runToggle.evaluate((el) => { const b = el.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y + scrollY), Math.round(b.width)] }),
-    filter: await filterAll.evaluate((el) => { const b = el.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y + scrollY), Math.round(b.width)] }),
-  })
-  // Run code sits after the filters, against the right edge of the header
-  const runBox = (await runToggle.boundingBox())!
+  // The run editor is its own region on arrival, above Activity — no
+  // toggle to reveal it. The all / needs attention filter belongs to
+  // Activity's heading and moving it never moves the editor.
+  await expect(page.locator('#run-code .cm-editor')).toBeVisible({ timeout: 8000 })
+  await expect(page.getByRole('button', { name: 'Run code', exact: true })).toHaveCount(0)
+  const editorBox = (await page.locator('#run-code').boundingBox())!
+  const activityBox = (await page.locator('[aria-label="Activity"]').boundingBox())!
+  expect(editorBox.y + editorBox.height).toBeLessThanOrEqual(activityBox.y)
   const filtersBox = (await page.locator('.seg-filters').boundingBox())!
-  expect(runBox.x).toBeGreaterThan(filtersBox.x + filtersBox.width)
-  await page.mouse.move(1, 1)
-  await page.waitForTimeout(400)
-  const closedAt = await at()
-  await runToggle.click()
-  await expect(page.locator('.cm-editor')).toBeVisible({ timeout: 8000 })
-  await expect(runToggle).toHaveAttribute('aria-expanded', 'true')
-  // the editor's action is an icon; closing is the header toggle's job
+  const headingBox = (await page.locator('.activity-heading').boundingBox())!
+  expect(filtersBox.y).toBeGreaterThanOrEqual(headingBox.y)
+  expect(filtersBox.y + filtersBox.height).toBeLessThanOrEqual(headingBox.y + headingBox.height)
+  // the editor's action is an icon; there is no header toggle or close
   const runAction = page.getByRole('button', { name: 'Run', exact: true })
   await expect(runAction).toBeVisible()
   await expect(runAction.locator('svg')).toHaveCount(1)
   await expect(page.locator('#run-code').getByRole('button', { name: 'Close' })).toHaveCount(0)
+  // switching the filter keeps the editor and the filter in place
+  const at = async () => ({
+    editor: await page.locator('#run-code').evaluate((el) => { const b = el.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y + scrollY), Math.round(b.width)] }),
+    filter: await page.locator('.seg-filters').evaluate((el) => { const b = el.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y + scrollY), Math.round(b.width)] }),
+  })
+  await page.mouse.move(1, 1)
   await page.waitForTimeout(400)
-  expect(await at()).toEqual(closedAt)
-  // switching the filter keeps both segments in place
+  const closedAt = await at()
   await page.locator('.seg-filters button').nth(1).click()
   await page.waitForTimeout(400)
   expect(await at()).toEqual(closedAt)
-  await filterAll.click()
+  await page.locator('.seg-filters button').first().click()
 
   // mobile: Work precedes Boundary; ≥44px primary; no overflow
   await page.setViewportSize({ width: 390, height: 900 })
@@ -495,54 +506,46 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   await page.screenshot({ path: testInfo.outputPath('detail-dark.png'), fullPage: true })
 })
 
-// Regression: the detail page exposes a plain New-instance entry for owners/editors.
-test('instance detail: new instance starts a fresh draft', async ({ page }) => {
+// Detail page has no generic create entry; instance actions stay in the
+// header, including the compact square connect-agent control.
+test('instance detail: header actions replace the create entry', async ({ page }) => {
   const created = await client.post('/api/v1/instances', { data: { ttl_seconds: 600 } })
   const inst = (await created.json()).instance
   await page.goto(`${consoleURL}/instances/${inst.id}`)
-  const entry = page.getByRole('button', { name: 'New instance' })
-  await expect(entry).toBeVisible()
-  await entry.click()
-  await expect(page).toHaveURL(/\/instances\/new$/) // no ?from → fresh draft
-  await expect(page.getByRole('heading', { name: 'Compute only' })).toBeVisible()
-  await expect(page.getByPlaceholder('e.g. research run')).toHaveValue('')
-  await expect(page.getByRole('button', { name: 'Create instance' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'New instance' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Share', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Copy prompt', exact: true })).toBeVisible()
+  const connect = page.getByRole('button', { name: 'Connect agent', exact: true })
+  await expect(connect).toBeVisible()
+  const box = (await connect.boundingBox())!
+  expect(box.width).toBeLessThanOrEqual(44)
+  expect(box.height).toBeLessThanOrEqual(44)
 
-  // mobile: entry stays ≥44px with no overflow
+  // mobile: the square grows to a 44px target and nothing overflows
   await page.setViewportSize({ width: 390, height: 900 })
-  await page.goto(`${consoleURL}/instances/${inst.id}`)
   await page.waitForTimeout(600)
-  const bb = await page.getByRole('button', { name: 'New instance' }).boundingBox()
-  expect(bb!.height).toBeGreaterThanOrEqual(44)
+  const mobile = (await connect.boundingBox())!
+  expect(mobile.height).toBeGreaterThanOrEqual(44)
   const dw = await page.evaluate(() => ({ s: document.documentElement.scrollWidth, i: window.innerWidth }))
   expect(dw.s).toBeLessThanOrEqual(dw.i)
-  await page.screenshot({ path: 'test-results/new-entry-mobile.png', fullPage: true })
+  await page.screenshot({ path: 'test-results/detail-header-mobile.png', fullPage: true })
 })
 
-// Role-driven: the entry appears for editors, hides for viewers.
-for (const role of ['editor', 'viewer'] as const) {
-  test(`instance detail: create entry follows ${role} role`, async ({ page }) => {
-    const created = await client.post('/api/v1/instances', { data: { ttl_seconds: 600 } })
-    const inst = (await created.json()).instance
-    const real = await client.get('/api/v1/workspaces')
-    const body = await real.json()
-    for (const ws of body.workspaces ?? []) ws.role = role
-    await page.route('**/api/v1/workspaces', (r) =>
-      r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) }))
-    await page.goto(`${consoleURL}/instances/${inst.id}`)
-    const entry = page.getByRole('button', { name: 'New instance' })
-    if (role === 'editor') {
-      await expect(entry).toBeVisible()
-      await entry.click()
-      await expect(page).toHaveURL(/\/instances\/new$/)
-    } else {
-      await expect(entry).toHaveCount(0)
-      await expect(page.getByRole('button', { name: 'Create similar' })).toHaveCount(0)
-      await page.goto(`${consoleURL}/instances/new`)
-      await expect(page.getByText(/You need editor access/i)).toBeVisible()
-    }
-  })
-}
+// State has no refresh controls: a new execution is the only trigger.
+test('instance detail: state follows executions without auto-refresh', async ({ page }) => {
+  const created = await client.post('/api/v1/instances', { data: { ttl_seconds: 600 } })
+  const inst = (await created.json()).instance
+  await page.goto(`${consoleURL}/instances/${inst.id}`)
+  const state = page.locator('[aria-label="State"]')
+  await expect(state).toBeVisible()
+  await expect(state.getByText('auto-refresh')).toHaveCount(0)
+  await expect(state.getByRole('button', { name: /refresh/i })).toHaveCount(0)
+  await expect(state.getByText('no variables yet — run some code first')).toBeVisible()
+
+  const ex = await client.post(`/api/v1/instances/${inst.id}/exec`, { data: { code: 'answer = 42' } })
+  expect(ex.status()).toBe(200)
+  await expect(state.getByText('answer', { exact: true })).toBeVisible({ timeout: 15000 })
+})
 
 // 1000-entry catalog: library stays a 12-card bounded surface, search +
 // paging work, selected extensions survive page turns, icons are same-origin.
@@ -953,8 +956,7 @@ test('policy editor reports validation and save outcomes beside its buttons (P5)
 test('share dialog: the role menu matches the email field (P2)', async ({ page }) => {
   const inst = (await (await client.post('/api/v1/instances', { data: { ttl_seconds: 600 } })).json()).instance
   await page.goto(`${consoleURL}/instances/${inst.id}`)
-  await page.getByRole('button', { name: 'More ▾' }).click()
-  await page.getByRole('menuitem', { name: 'Share…' }).click()
+  await page.getByRole('button', { name: 'Share', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Share instance' })
   await expect(dialog).toBeVisible()
   await dialog.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)))

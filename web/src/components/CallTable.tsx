@@ -70,25 +70,25 @@ export function CallRows({ events, instances, showInstance }: {
             <th className="!text-right">Time</th>
           </tr>
         </thead>
-        <tbody className="font-mono">
+        <tbody>
           {events.map((e) => {
             const outcome = callOutcome(e)
             const inst = instances?.get(e.instance_id)
             const consoleCall = isConsoleCall(e)
             return (
               <Fragment key={e.id}>
-                <tr className={`row-click ${open === e.id ? 'row-open' : ''} ${consoleCall ? 'opacity-60' : ''}`} onClick={() => setOpen(open === e.id ? null : e.id)}>
-                  <td className="whitespace-nowrap font-sans text-sec" title={fmtTime(e.ts)}>
+                <tr className={`row-click ${open === e.id ? 'row-open' : ''}`} onClick={() => setOpen(open === e.id ? null : e.id)}>
+                  <td className="whitespace-nowrap text-sec" title={fmtTime(e.ts)}>
                     <span className="mr-1.5 inline-block w-2 text-mute">{open === e.id ? '▾' : '▸'}</span>{relTime(e.ts)}
                   </td>
                   {showInstance && (
-                    <td className="max-w-[160px] truncate font-sans">
+                    <td className="max-w-[160px] truncate">
                       {inst
                         ? <Link to={`/instances/${inst.id}`} className="link text-xs" onClick={(ev) => ev.stopPropagation()}>{instanceName(inst)}</Link>
                         : <span className="text-xs text-mute">{e.instance_id}</span>}
                     </td>
                   )}
-                  <td className="max-w-[280px] truncate text-ink" title={`${e.capability}.${e.op} ${e.args}`}>
+                  <td className="max-w-[280px] truncate font-mono text-ink" title={`${e.capability}.${e.op} ${e.args}`}>
                     {consoleCall && <span className="text-mute">your file browsing · </span>}
                     <span className="font-medium">{e.capability}.{e.op}</span>
                     <span className="text-sec"> {keyArgs(e)}</span>
@@ -101,7 +101,7 @@ export function CallRows({ events, instances, showInstance }: {
                 </tr>
                 {open === e.id && (
                   <tr className="bg-surface">
-                    <td colSpan={cols} className="!px-4 !py-4 font-sans"><CallDetail e={e} /></td>
+                    <td colSpan={cols} className="!px-4 !py-4"><CallDetail e={e} /></td>
                   </tr>
                 )}
               </Fragment>

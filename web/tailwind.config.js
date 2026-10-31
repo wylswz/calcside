@@ -26,7 +26,7 @@ export default {
       },
       fontFamily: {
         sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        mono: ['"IBM Plex Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        mono: ['var(--font-mono)'],
       },
       letterSpacing: {
         label: '0.08em',

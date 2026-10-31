@@ -82,9 +82,8 @@ function RunDetail({ execId }: { execId: string }) {
 
 // Activity lists runs newest first with their outcomes and the calls
 // each made; console (file-browsing) calls sit in their own muted group.
-// editor renders directly under the heading, so the control that opens it
-// stays where it was clicked.
-export function Activity({ id, aside, editor, focusId }: { id: string; aside?: React.ReactNode; editor?: React.ReactNode; focusId?: string }) {
+// Its run filter belongs to this heading and never follows other controls.
+export function Activity({ id, focusId }: { id: string; focusId?: string }) {
   const [open, setOpen] = useState<string | null>(focusId ?? null)
   const [attentionOnly, setAttentionOnly] = useState(false)
   useEffect(() => {
@@ -139,9 +138,8 @@ export function Activity({ id, aside, editor, focusId }: { id: string; aside?: R
             )
           })}
         </div>
-        {aside}</>
+        </>
       }>Activity</SectionTitle>
-      {editor}
 
       <div className="tbl-wrap">
         <table className="tbl tbl-compact">
@@ -155,20 +153,20 @@ export function Activity({ id, aside, editor, focusId }: { id: string; aside?: R
               <th className="!text-right">Time</th>
             </tr>
           </thead>
-          <tbody className="font-mono">
+          <tbody>
             {shown.map(({ x, denied, failed, outcome }) => (
               <Fragment key={x.id}>
                 <tr id={`run-${x.id}`} className={`row-click ${open === x.id ? 'row-open' : ''}`} onClick={() => setOpen(open === x.id ? null : x.id)}>
-                  <td className="whitespace-nowrap font-sans">
+                  <td className="whitespace-nowrap">
                     <span className="mr-1.5 inline-block w-2 text-mute">{open === x.id ? '▾' : '▸'}</span>
                     <RunByBadge runBy={runBy(x)} />
                   </td>
-                  <td className="whitespace-nowrap font-sans text-sec" title={fmtTime(x.created_at)}>{relTime(x.created_at)}</td>
+                  <td className="whitespace-nowrap text-sec" title={fmtTime(x.created_at)}>{relTime(x.created_at)}</td>
                   <td>
                     <OutcomeBadge outcome={outcome} label={outcome === 'ok' ? 'ok' : outcome === 'denied' ? 'denied' : x.error_type || 'failed'} />
                   </td>
                   <td className="max-w-[260px] truncate text-sec" title={x.code_snippet}><code className="detail-code">{firstCodeLine(x.code_snippet)}</code></td>
-                  <td className="num whitespace-nowrap text-right font-sans">
+                  <td className="num whitespace-nowrap text-right">
                     {denied > 0 && <OutcomeBadge outcome="denied" label={`${denied} denied`} />}
                     {failed > 0 && <span className={denied > 0 ? 'ml-2' : ''}><OutcomeBadge outcome="failed" label={`${failed} failed`} /></span>}
                     {denied === 0 && failed === 0 && <span className="text-xs text-mute">—</span>}
@@ -177,7 +175,7 @@ export function Activity({ id, aside, editor, focusId }: { id: string; aside?: R
                 </tr>
                 {open === x.id && (
                   <tr className="bg-surface">
-                    <td colSpan={6} className="!px-4 !py-4 font-sans"><RunDetail execId={x.id} /></td>
+                    <td colSpan={6} className="!px-4 !py-4"><RunDetail execId={x.id} /></td>
                   </tr>
                 )}
               </Fragment>
@@ -195,7 +193,7 @@ export function Activity({ id, aside, editor, focusId }: { id: string; aside?: R
             Your file browsing · {consoleCalls.length} call{consoleCalls.length === 1 ? '' : 's'}
           </button>
           {showConsole && (
-            <div className="mt-2 opacity-70"><CallRows events={consoleCalls} /></div>
+            <div className="mt-2"><CallRows events={consoleCalls} /></div>
           )}
         </div>
       )}

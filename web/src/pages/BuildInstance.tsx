@@ -221,10 +221,7 @@ function BuildDraftEditor({ scopeKey, inst }: {
         <span className="build-eyebrow">BUILD / CONTRACT DRAFT — <span className="build-src-id">{inst.id}</span></span>
         <span className="build-breadcrumb"><Link to={`/instances/${inst.id}`} className="link-btn">← {name}</Link></span>
       </PageHeader></div>
-      <Notice tone="neutral">
-        Not published. Publishing is not connected yet. This page prepares a build
-        draft; it does not create a release.
-      </Notice>
+      <Notice tone="neutral">Draft only — publishing is not connected yet.</Notice>
 
 
       <div className="build-grid">
@@ -317,7 +314,7 @@ function BuildDraftEditor({ scopeKey, inst }: {
             {warn && <Notice tone="warning">{warn}</Notice>}
             {validated && <Notice tone="neutral">Contracts validated.</Notice>}
           </div>
-          <p className="build-dim">{storageFailed ? 'Not saved to this tab. Not published.' : 'Saved in this tab only. Not published.'}</p>
+          <p className="build-dim">{storageFailed ? 'Not saved to this tab.' : 'Saved in this tab only.'}</p>
         </section>
       </div>
     </div>
