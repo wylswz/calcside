@@ -17,8 +17,24 @@ import (
 // process supervisor uses it to reach a per-instance child over a unix
 // socket, speaking the same signed protocol the API tier speaks to it.
 type Direct struct {
-	cl *gen.ClientWithResponses
+	cl   *gen.ClientWithResponses
+	hook LifecycleHook
 }
+
+// LifecycleHook observes the side-effecting lifecycle calls a Direct
+// sends. Each method runs before the request leaves the process, so a
+// call that fails in transport is still observed. Hooks must not mutate
+// the request and must be safe for concurrent use.
+type LifecycleHook interface {
+	Create(ctx context.Context, req *runtime.CreateRequest)
+	Prepare(ctx context.Context, req *runtime.PrepareRequest)
+	Invoke(ctx context.Context, req *runtime.InvokeRequest)
+	Delete(ctx context.Context, req *runtime.DeleteRequest)
+}
+
+// SetLifecycleHook installs h to observe outbound Create, Prepare,
+// Invoke and Delete calls. Set it before the client is shared.
+func (d *Direct) SetLifecycleHook(h LifecycleHook) { d.hook = h }
 
 var _ runtime.Runtime = (*Direct)(nil)
 var _ runtime.ServingRuntime = (*Direct)(nil)
@@ -36,6 +52,9 @@ func NewDirect(baseURL string, hc *http.Client, key []byte, callerNode string) (
 }
 
 func (d *Direct) Create(ctx context.Context, req *runtime.CreateRequest) (*runtime.CreateResponse, error) {
+	if d.hook != nil {
+		d.hook.Create(ctx, req)
+	}
 	resp, err := d.cl.RuntimeCreateWithResponse(ctx, *req)
 	if err != nil {
 		return nil, err
@@ -52,6 +71,9 @@ func (d *Direct) Exec(ctx context.Context, req *runtime.ExecRequest) (*runtime.E
 }
 
 func (d *Direct) Prepare(ctx context.Context, req *runtime.PrepareRequest) (*runtime.PrepareResponse, error) {
+	if d.hook != nil {
+		d.hook.Prepare(ctx, req)
+	}
 	resp, err := d.cl.RuntimePrepareWithResponse(ctx, *req)
 	if err != nil {
 		return nil, err
@@ -60,6 +82,9 @@ func (d *Direct) Prepare(ctx context.Context, req *runtime.PrepareRequest) (*run
 }
 
 func (d *Direct) Invoke(ctx context.Context, req *runtime.InvokeRequest) (*runtime.InvokeResponse, error) {
+	if d.hook != nil {
+		d.hook.Invoke(ctx, req)
+	}
 	resp, err := d.cl.RuntimeInvokeWithResponse(ctx, *req)
 	if err != nil {
 		return nil, err
@@ -76,6 +101,9 @@ func (d *Direct) Keepalive(ctx context.Context, req *runtime.KeepaliveRequest) (
 }
 
 func (d *Direct) Delete(ctx context.Context, req *runtime.DeleteRequest) (*runtime.DeleteResponse, error) {
+	if d.hook != nil {
+		d.hook.Delete(ctx, req)
+	}
 	resp, err := d.cl.RuntimeDeleteWithResponse(ctx, *req)
 	if err != nil {
 		return nil, err

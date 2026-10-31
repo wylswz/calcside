@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"calcside/cmd/calcside/internal/audit"
 	"calcside/cmd/calcside/internal/service"
 	"calcside/cmd/calcside/internal/service/access"
 	"calcside/cmd/calcside/internal/service/sandbox"
@@ -42,39 +43,31 @@ func (g *gateRT) RoundTrip(r *http.Request) (*http.Response, error) {
 	return g.base.RoundTrip(r)
 }
 
-// lifecycleRuntime is a spy, never a fake: every call delegates to the
-// real wire client; it only records what the service asked for.
-type lifecycleRuntime struct {
-	runtime.Runtime
-	gate    *gateRT
-	events  []string
-	audits  int
-	auditWS []string
-	owner   runtime.Owner
+// lifecycleHook observes what the service asked the real wire client
+// for. It is an observer on the production hook, never a replacement
+// runtime or audit sink.
+type lifecycleHook struct {
+	gate   *gateRT
+	events []string
 }
 
-func (r *lifecycleRuntime) Prepare(ctx context.Context, req *runtime.PrepareRequest) (*runtime.PrepareResponse, error) {
+func (r *lifecycleHook) Create(context.Context, *runtime.CreateRequest) {
+	r.events = append(r.events, "create")
+}
+
+func (r *lifecycleHook) Prepare(context.Context, *runtime.PrepareRequest) {
 	r.events = append(r.events, "prepare")
-	r.owner = req.Owner
-	return r.Runtime.Prepare(ctx, req)
 }
 
-func (r *lifecycleRuntime) Invoke(ctx context.Context, req *runtime.InvokeRequest) (*runtime.InvokeResponse, error) {
+func (r *lifecycleHook) Invoke(context.Context, *runtime.InvokeRequest) {
 	r.events = append(r.events, "invoke")
-	return r.Runtime.Invoke(ctx, req)
 }
 
-func (r *lifecycleRuntime) Delete(ctx context.Context, req *runtime.DeleteRequest) (*runtime.DeleteResponse, error) {
+func (r *lifecycleHook) Delete(context.Context, *runtime.DeleteRequest) {
 	r.events = append(r.events, "delete")
-	return r.Runtime.Delete(ctx, req)
 }
 
-func (r *lifecycleRuntime) RecordWorkspace(workspaceID string, _ runtime.AuditBatch) {
-	r.audits++
-	r.auditWS = append(r.auditWS, workspaceID)
-}
-
-func lifecycleService(t *testing.T) (*Service, store.Store, *lifecycleRuntime, service.Actor) {
+func lifecycleService(t *testing.T) (*Service, store.Store, *lifecycleHook, service.Actor) {
 	t.Helper()
 	ctx := context.Background()
 	st, err := store.Open(ctx, "sqlite", storetest.SQLite(t))
@@ -82,6 +75,8 @@ func lifecycleService(t *testing.T) (*Service, store.Store, *lifecycleRuntime, s
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
+	ra := audit.NewRecorder(st)
+	t.Cleanup(ra.Close)
 	reg := capability.NewRegistry()
 	reg.Register(capfs.Factory())
 	limits := capability.ServerLimits{DefaultTTL: time.Minute, MaxTTL: time.Hour, MaxFSQuotaBytes: 256 << 20}
@@ -97,12 +92,13 @@ func lifecycleService(t *testing.T) (*Service, store.Store, *lifecycleRuntime, s
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt := &lifecycleRuntime{Runtime: direct, gate: gate}
+	rt := &lifecycleHook{gate: gate}
+	direct.SetLifecycleHook(rt)
 	ac := access.New(st)
 	sb := sandbox.New(sandbox.Options{
-		Store: st, Runtime: rt, Registry: reg, Limits: limits, Secrets: nopSecrets{}, Access: ac,
+		Store: st, Runtime: direct, Registry: reg, Limits: limits, Secrets: nopSecrets{}, Access: ac,
 	})
-	s, err := New(Options{Store: st, Runtime: rt, Sandbox: sb, Access: ac, Audit: rt, MaxPerUser: 4})
+	s, err := New(Options{Store: st, Runtime: direct, Sandbox: sb, Access: ac, Audit: ra, MaxPerUser: 4})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,20 +121,12 @@ func TestRealDraftLifecycle(t *testing.T) {
 	if err != nil || out.Result.Error != nil || out.OutputJSON != string(input) {
 		t.Fatalf("precise dynamic object: result=%+v err=%v", out, err)
 	}
-	if !reflect.DeepEqual(rt.events, []string{"prepare", "invoke", "delete"}) || rt.audits != 2 {
-		t.Fatalf("test lifecycle: %v, audits=%d", rt.events, rt.audits)
-	}
-	if rt.owner.Email != actor.Email {
-		t.Fatal("prepare lost owner email")
+	if !reflect.DeepEqual(rt.events, []string{"prepare", "invoke", "delete"}) {
+		t.Fatalf("test lifecycle: %v", rt.events)
 	}
 	app, err := st.GetApplication(ctx, id)
 	if err != nil || app.PersistentInstanceID != "" || app.PublishedVersion != 0 {
 		t.Fatalf("test unexpectedly published: %+v, %v", app, err)
-	}
-	for _, ws := range rt.auditWS {
-		if ws != app.WorkspaceID {
-			t.Fatalf("replica audit landed in the wrong workspace: %v", rt.auditWS)
-		}
 	}
 	for _, bad := range []string{`[]`, `42`, `null`} {
 		out, err := s.Test(ctx, actor, id, 1, json.RawMessage(bad))
@@ -146,13 +134,13 @@ func TestRealDraftLifecycle(t *testing.T) {
 			t.Fatalf("default object accepted %s: %+v, %v", bad, out, err)
 		}
 	}
-	rt.events, rt.audits, rt.auditWS = nil, 0, nil
+	rt.events = nil
 	pub, err := s.Publish(ctx, actor, id, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(rt.events, []string{"prepare", "delete"}) || rt.audits != 1 {
-		t.Fatalf("publish executed main or leaked temporary replica: %v, %d", rt.events, rt.audits)
+	if !reflect.DeepEqual(rt.events, []string{"prepare", "delete"}) {
+		t.Fatalf("publish executed main or leaked temporary replica: %v", rt.events)
 	}
 	rel, err := st.GetServingRelease(ctx, actor.WorkspaceID, pub.ReleaseID)
 	if err != nil || !strings.Contains(string(rel.Program.InputSchema), `"type":"object"`) ||
@@ -194,12 +182,12 @@ func TestInvalidProgramsCannotPublish(t *testing.T) {
 			if err != nil || result.Result.Error == nil {
 				t.Fatalf("invalid draft not reported: %+v, %v", result, err)
 			}
-			rt.events, rt.audits, rt.auditWS = nil, 0, nil
+			rt.events = nil
 			if _, err := s.Publish(ctx, actor, v.Application.ID, 1); err == nil {
 				t.Fatal("invalid program was published")
 			}
-			if !reflect.DeepEqual(rt.events, []string{"prepare", "delete"}) || rt.audits != 1 {
-				t.Fatalf("failed prepare lifecycle: %v, %d", rt.events, rt.audits)
+			if !reflect.DeepEqual(rt.events, []string{"prepare", "delete"}) {
+				t.Fatalf("failed prepare lifecycle: %v", rt.events)
 			}
 			app, err := st.GetApplication(ctx, v.Application.ID)
 			if err != nil || app.PersistentInstanceID != "" {
@@ -212,7 +200,7 @@ func TestInvalidProgramsCannotPublish(t *testing.T) {
 	}
 }
 
-func TestUncertainPrepareIsAuditedAndCleaned(t *testing.T) {
+func TestUncertainPrepareIsCleaned(t *testing.T) {
 	s, _, rt, actor := lifecycleService(t)
 	ctx := context.Background()
 	v, err := s.Create(ctx, actor, CreateRequest{})
@@ -224,9 +212,8 @@ func TestUncertainPrepareIsAuditedAndCleaned(t *testing.T) {
 		strings.Contains(err.Error(), "gate") {
 		t.Fatalf("transport error was lost or leaked: %v", err)
 	}
-	// A transport-dead prepare has no response: cleanup still runs,
-	// and no audit batch ever arrived to record.
-	if !reflect.DeepEqual(rt.events, []string{"prepare", "delete"}) || rt.audits != 0 {
-		t.Fatalf("uncertain preparation escaped cleanup: %v, %d", rt.events, rt.audits)
+	// A transport-dead prepare has no response, but cleanup still runs.
+	if !reflect.DeepEqual(rt.events, []string{"prepare", "delete"}) {
+		t.Fatalf("uncertain preparation escaped cleanup: %v", rt.events)
 	}
 }

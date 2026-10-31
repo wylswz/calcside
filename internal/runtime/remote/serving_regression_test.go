@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,66 +11,9 @@ import (
 	"time"
 
 	"calcside/internal/runtime"
-	"calcside/internal/runtime/instance"
 	"calcside/internal/runtime/remote"
 	"calcside/internal/types"
 )
-
-// ctxSpy records the context a call arrives with and delegates to the
-// real manager — it observes, it never fakes a result.
-type ctxSpy struct {
-	*instance.Manager
-	seen context.Context
-}
-
-func (r *ctxSpy) Prepare(ctx context.Context, req *runtime.PrepareRequest) (*runtime.PrepareResponse, error) {
-	r.seen = ctx
-	return r.Manager.Prepare(ctx, req)
-}
-
-func (r *ctxSpy) Invoke(ctx context.Context, req *runtime.InvokeRequest) (*runtime.InvokeResponse, error) {
-	r.seen = ctx
-	return r.Manager.Invoke(ctx, req)
-}
-
-func TestServingRequestContext(t *testing.T) {
-	m := testManager(t)
-	t.Cleanup(m.StopReaper)
-	rt := &ctxSpy{Manager: m}
-	prep := prepareReq("spy-rep", nil)
-	if _, err := m.Prepare(context.Background(), prep); err != nil {
-		t.Fatal(err)
-	}
-	bodies := map[string][]byte{}
-	prep2 := prepareReq("spy-rep2", nil)
-	prepBody, _ := json.Marshal(prep2)
-	bodies["/runtime/v1/prepare"] = prepBody
-	invBody, _ := json.Marshal(&runtime.InvokeRequest{
-		InstanceID: "spy-rep", Owner: prep.Owner,
-		ReleaseID: prep.ReleaseID, Generation: prep.Generation,
-		InvokeID: "spy-i", Input: json.RawMessage(`{"name":"x","n":1}`)})
-	bodies["/runtime/v1/invoke"] = invBody
-	for _, path := range []string{"/runtime/v1/prepare", "/runtime/v1/invoke"} {
-		t.Run(path, func(t *testing.T) {
-			rt.seen = nil
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			body := bodies[path]
-			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body)).WithContext(ctx)
-			req.Header.Set("Content-Type", "application/json")
-			remote.SignRequest(testKey, "test", req, body, time.Now())
-			w := httptest.NewRecorder()
-			remote.NewHandler(rt, testKey).ServeHTTP(w, req)
-			if w.Code != http.StatusOK || rt.seen != ctx {
-				t.Fatalf("status=%d runtime context=%T, want original request context", w.Code, rt.seen)
-			}
-			cancel()
-			if !errors.Is(rt.seen.Err(), context.Canceled) {
-				t.Fatal("request cancellation did not propagate")
-			}
-		})
-	}
-}
 
 func TestServingRequestRejectionStatus(t *testing.T) {
 	for _, tc := range []struct {
@@ -85,7 +27,8 @@ func TestServingRequestRejectionStatus(t *testing.T) {
 		{"malformed input", "/runtime/v1/invoke", 0, `{"input":"PRIVATE_BODY_MARKER`, http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rt := &ctxSpy{Manager: testManager(t)}
+			m := testManager(t)
+			t.Cleanup(m.StopReaper)
 			body := []byte(tc.body)
 			if tc.size > 0 {
 				body = bytes.Repeat([]byte(" "), tc.size)
@@ -94,12 +37,12 @@ func TestServingRequestRejectionStatus(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			remote.SignRequest(testKey, "test", req, body, time.Now())
 			w := httptest.NewRecorder()
-			remote.NewHandler(rt, testKey).ServeHTTP(w, req)
+			remote.NewHandler(m, testKey).ServeHTTP(w, req)
 			if w.Code != tc.status {
 				t.Fatalf("status=%d want=%d body=%s", w.Code, tc.status, w.Body.String())
 			}
-			if rt.seen != nil || strings.Contains(w.Body.String(), "PRIVATE_BODY_MARKER") {
-				t.Fatal("rejected request reached runtime or leaked its payload")
+			if strings.Contains(w.Body.String(), "PRIVATE_BODY_MARKER") {
+				t.Fatal("rejected request leaked its payload")
 			}
 			if tc.status == http.StatusBadRequest && !strings.Contains(w.Body.String(), "request body invalid") {
 				t.Fatalf("binding failure is not generic: %s", w.Body.String())

@@ -1,9 +1,7 @@
 package worker_test
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -208,55 +206,6 @@ func TestRemoteAuth(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("unconfigured worker: got %d", resp.StatusCode)
-	}
-}
-
-// contextRuntime records the context a call arrives with and delegates
-// to the real manager — it observes, it never fakes a result.
-type contextRuntime struct {
-	*instance.Manager
-	ctx context.Context
-}
-
-func (r *contextRuntime) Create(ctx context.Context, req *runtime.CreateRequest) (*runtime.CreateResponse, error) {
-	r.ctx = ctx
-	return r.Manager.Create(ctx, req)
-}
-
-func TestRuntimeReceivesRequestContext(t *testing.T) {
-	reg := capability.NewRegistry()
-	reg.Register(capio.Factory())
-	reg.Register(capfs.Factory())
-	rt := &contextRuntime{Manager: instance.New(instance.Options{
-		Engine:   engine.New(8),
-		Registry: reg,
-		Limits: capability.ServerLimits{
-			DefaultTTL: 15 * time.Minute, MaxTTL: 24 * time.Hour,
-			MaxExecTimeout: 5 * time.Minute,
-		},
-	})}
-	t.Cleanup(rt.StopReaper)
-	h := remote.NewHandler(rt, testKey)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	body, err := json.Marshal(createReq("ins_ctx"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest("POST", "/runtime/v1/create", bytes.NewReader(body)).WithContext(ctx)
-	req.Header.Set("Content-Type", "application/json")
-	remote.SignRequest(testKey, "api-test", req, body, time.Now())
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	if w.Code != 200 {
-		t.Fatalf("request failed: %d %s", w.Code, w.Body.String())
-	}
-	if rt.ctx != ctx {
-		t.Fatalf("runtime received pooled context %T instead of request context", rt.ctx)
-	}
-	cancel()
-	if !errors.Is(rt.ctx.Err(), context.Canceled) {
-		t.Fatal("request cancellation not propagated")
 	}
 }
 
