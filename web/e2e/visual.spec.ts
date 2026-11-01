@@ -29,8 +29,10 @@ test.describe('visual audit', () => {
     const pages: [string, string][] = [
       ['instances', '/'],
       ['applications', '/applications'],
-      ['new-instance', '/instances/new'],
-      ['new-application', '/applications/new'],
+      ['new-instance-basics', '/instances/new'],
+      ['new-instance-config', '/instances/new?step=config'],
+      ['new-application-basics', '/applications/new'],
+      ['new-application-config', '/applications/new?step=config'],
       ['workspace-members', '/workspace/members'],
       ['workspace-policies', '/workspace/policies'],
       ['workspace-secrets', '/workspace/secrets'],
@@ -45,7 +47,12 @@ test.describe('visual audit', () => {
       await page.waitForTimeout(900)
       await page.screenshot({ path: testInfo.outputPath(`${name}-light.png`), fullPage: true })
     }
-    for (const [name, path] of [['instances', '/'], ['workspace-policies', '/workspace/policies']] as [string, string][]) {
+    for (const [name, path] of [
+      ['instances', '/'],
+      ['new-instance-basics', '/instances/new'],
+      ['new-application-basics', '/applications/new'],
+      ['workspace-policies', '/workspace/policies'],
+    ] as [string, string][]) {
       await page.emulateMedia({ colorScheme: 'dark' })
       await page.goto(rt.viteURL + path)
       await page.waitForTimeout(900)

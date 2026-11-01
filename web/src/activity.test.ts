@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { allowedSummary, callOutcome, denialReason, groupCalls, instanceName, instanceTitle, isBuiltinGlobal, isConsoleCall, runBy, runOutcome } from './activity.ts'
+import { allowedSummary, applicationDescription, callOutcome, denialReason, groupCalls, instanceDescription, instanceName, instanceTitle, isBuiltinGlobal, isConsoleCall, runBy, runOutcome } from './activity.ts'
 import { relTime } from './format.ts'
 import type { AuditEvent, Execution, Instance } from './api.ts'
 
@@ -21,6 +21,14 @@ test('callOutcome', () => {
   assert.equal(callOutcome(ev({ error: 'boom' })), 'failed')
   assert.equal(callOutcome(ev({ decision: 'deny', error: 'x' })), 'denied')
   assert.equal(callOutcome(ev({})), 'ok')
+})
+
+test('descriptions come from the reserved label', () => {
+  assert.equal(instanceDescription({ labels: { description: '  nightly run  ' } }), 'nightly run')
+  assert.equal(instanceDescription({ labels: {} }), '')
+  assert.equal(applicationDescription({ spec: { labels: { description: 'greeter api' } } }), 'greeter api')
+  assert.equal(applicationDescription({ spec: {} }), '')
+  assert.equal(applicationDescription({ spec: null }), '')
 })
 
 test('runOutcome', () => {
@@ -68,6 +76,7 @@ test('instanceName', () => {
   assert.equal(instanceName(inst), 'env=dev · task=recon')
   assert.equal(instanceName({ id: 'ins_2', labels: {} } as unknown as Instance), 'ins_2')
   assert.equal(instanceName({ id: 'ins_3' } as unknown as Instance), 'ins_3')
+  assert.equal(instanceName({ id: 'ins_4', labels: { description: 'reserved' } } as unknown as Instance), 'ins_4')
   assert.equal(instanceTitle({ id: 'ins_1', labels: { name: 'recon', env: 'dev' } } as unknown as Instance), 'recon')
   assert.equal(instanceTitle({ id: 'ins_2', labels: { env: 'dev' } } as unknown as Instance), 'env=dev')
 })

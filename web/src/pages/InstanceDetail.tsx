@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Instance, Execution, APIKey, SharedInstance, workspaces } from '../api'
-import { instanceTitle } from '../activity'
+import { instanceDescription, instanceTitle } from '../activity'
 import { nextStep } from '../nextStep'
 import { useRole } from '../workspace'
 import { Button, Confirm, Loading, Menu, MenuItem, SectionTitle, InstanceStatus, Modal, Notice, SwapLabel } from '../components/ui'
@@ -97,6 +97,7 @@ export default function InstanceDetail() {
   if (instErr) return <Notice tone="warning">Could not load this instance — it may be gone or you may not have access.</Notice>
   if (!inst) return <Loading />
   const name = instanceTitle(inst)
+  const description = instanceDescription(inst)
   const live = inst.status === 'running'
   const latest = (execs?.executions ?? []).slice().sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))[0] ?? null
   const stateRevision = latest ? `${latest.id}:${latest.steps}` : undefined
@@ -116,6 +117,7 @@ export default function InstanceDetail() {
           </div>
           <h1 className="break-words font-semibold text-ink">{name}</h1>
           {name !== inst.id && <div className="mt-1 font-mono text-xs text-mute">{inst.id}</div>}
+          {description && <p className="mt-2 max-w-2xl text-sm leading-[22px] text-sec">{description}</p>}
           <div className="mt-3 flex items-center gap-3">
             <InstanceStatus inst={inst} />
             {live && effRun && <button className="text-xs text-accent hover:underline disabled:opacity-50" onClick={keepalive} disabled={pending === 'extend'}><SwapLabel show={pending === 'extend' ? 'extending…' : 'extend'} options={['extend', 'extending…']} /></button>}

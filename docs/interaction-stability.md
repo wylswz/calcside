@@ -132,9 +132,9 @@ Every invariant has an owner mechanism, in order of preference:
 | S5 | `useHeldOrder` + "Show N new"/"Show latest"; `stableList` unit tests; e2e activity and instance list | enforced for polled lists |
 | S6 | scroll-locked `Modal`; e2e "opening a dialog does not shift the page" | enforced for dialogs |
 | C1 | `Modal`/`Menu` return focus, removal falls back to a neighbour; e2e primitives and removal tests | enforced for overlays and removals |
-| C2 | `Modal` asks before Escape, the close control or an outside click discards input; e2e "a dialog with unsaved input asks…"; extension editor keeps invalid JSON | enforced for dialogs |
+| C2 | `Modal` asks before Escape, the close control or an outside click discards input; create flow keeps configuration mounted behind Back; e2e "a dialog with unsaved input asks…", "guide -> configuration carries basics, Back keeps them"; extension editor keeps invalid JSON | enforced for dialogs and the create flow |
 | C3 | `useHeldOrder` keeps shown order across refetches; review for expansion, selection and scroll | partial — polled lists keep order |
-| C4 | — | review |
+| C4 | create steps are addressable as `?step=config`; other view state | partial — create step is addressable |
 | P1 | pending guards; static `mutate` check; e2e removal test | partial — async forms by review |
 | P2 | `ui.tsx` primitives; static browser-dialog check; e2e primitives test | enforced for buttons, menus, dialogs and labels |
 | P3, F3 | application autosave indicator | review |
@@ -200,11 +200,9 @@ console uses a plain `BrowserRouter` (no `useBlocker`), so `beforeunload`
 protects only real page unloads while a draft is unsaved.
 
 Application creation keeps the optional capability/extension form mounted
-when collapsed (C2). The kind-switch discard prompt covers structured
-configuration and invalid Advanced JSON, not only the name (C2/F2).
-Application-mode forms omit instance lifetime fields and allow only vault
-references. Raw Advanced JSON is submitted without a browser-number
-round trip.
+when collapsed (C2). Application-mode forms omit instance lifetime fields
+and allow only vault references. Raw Advanced JSON is submitted without a
+browser-number round trip.
 
 Invocation examples use Radix keyboard tabs and the shared `CopyBlock`
 with `SwapLabel` feedback (P2/S4). Their code panel has a fixed height
@@ -212,6 +210,44 @@ and local horizontal scrolling (S1/S3). Copy failures are visible without
 discarding text (P5). Snippet unit tests capture the actual curl arguments,
 Python request bytes and JavaScript fetch body without network access;
 all preserve the exact JSON input, including large integers.
+
+### Create flow: basics → configuration
+
+Creating an instance or application starts with a two-column page:
+basics (name, description and spec labels) on the left and, on the
+right, an equal-height guide that explains the kind being created (a
+persistent agent playground or a published API service). The flow is
+fixed to that kind from entry to create — there is no
+Instance/Application switch inside it. The second step is the existing
+capability builder and shows the basics as a read-only summary, not as
+a second form; its Inputs section skips the labels rows the basics
+step owns.
+
+The diagrams describe the real execution split: an instance keeps one
+live process, so successive runs share globals and `/work`; an
+application serves a published release where every invoke starts from a
+fresh session and returns JSON under the pinned schemas.
+
+- **S1**: the guide, step rail and diagram are paint-only; the step's
+  current dot changes colour only. The dashed flows are the only motion.
+- **P4**: the flow animation lives behind
+  `prefers-reduced-motion: no-preference` and completes a cycle in
+  420 ms (the static check in `interactionStability.test.ts` enforces
+  both; e2e "guide diagram moves and stops under reduced motion"
+  checks the rendered animation and packet visibility).
+- **C2**: after the first entry the configuration stays mounted while
+  Basics is shown, so Back never discards capability, policy or advanced
+  JSON work. Basics edits are pushed into that mounted draft explicitly
+  (`SpecForm.applyBasics`) instead of remounting it. e2e
+  `application.spec.ts` "guide -> configuration carries basics, Back
+  keeps them".
+- **C4**: the step is in the URL (`/applications/new?step=config`,
+  `/instances/new?step=config`), so direct links and Back land on the
+  intended step. `from=` cloning keeps its source parameter.
+
+Description has no dedicated server column; both kinds persist it as the
+reserved `labels.description` entry, which `draftFromSpec` treats as a
+dedicated field rather than a user label row.
 
 ### Interrupts (EP-0016)
 

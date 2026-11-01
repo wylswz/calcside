@@ -53,6 +53,22 @@ test('round-trip: populated spec preserves net fields, ext config, limits, label
   assert.deepEqual(out.policies, [])
 })
 
+test('description is a reserved label and round-trips without becoming a label row', () => {
+  const d = draftFromSpec({ labels: { name: 'research', description: 'nightly run', team: 'x' } })
+  assert.equal(d.name, 'research')
+  assert.equal(d.description, 'nightly run')
+  assert.deepEqual(d.labels, [{ k: 'team', v: 'x' }])
+  const r = buildInstanceSpec(d)
+  assert.ok(r.ok)
+  assert.equal(r.spec.labels?.name, 'research')
+  assert.equal(r.spec.labels?.description, 'nightly run')
+  // An empty description writes no reserved label.
+  d.description = ''
+  const empty = buildInstanceSpec(d)
+  assert.ok(empty.ok)
+  assert.equal(empty.spec.labels?.description, undefined)
+})
+
 test('duplicates rejected: aliases, env, secrets', () => {
   const d = draftFromSpec()
   d.exts = [

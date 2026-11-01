@@ -5,7 +5,7 @@ import { api, SharedInstance, Instance, wsPath } from '../api'
 import { useRole } from '../workspace'
 import { Button, Confirm, Loading, PageHeader, InstanceStatus, RevealNew } from '../components/ui'
 import { attentionText, expiringSoon } from '../nextStep'
-import { allowedSummary, instanceTitle } from '../activity'
+import { allowedSummary, instanceDescription, instanceTitle } from '../activity'
 import { fmtTime, relTime } from '../format'
 import { useHeldOrder } from '../stableList'
 import { useState } from 'react'
@@ -75,11 +75,13 @@ export default function Instances() {
               <tbody>
                 {g.map((i) => {
                 const name = instanceTitle(i)
+                const description = instanceDescription(i)
                 return (
                   <tr key={i.id} className="row-hover" title={`created ${fmtTime(i.created_at)}`}>
                     <td>
                       <Link to={`/instances/${i.id}`} className="link font-medium">{name}</Link>
                       {name !== i.id && <div className="mt-0.5 font-mono text-[11px] text-mute">{i.id}</div>}
+                      {description && <div className="mt-0.5 max-w-[420px] truncate text-xs text-sec" title={description}>{description}</div>}
                     </td>
                     <td><InstanceStatus inst={i} /></td>
                     <td>{attention(i)}</td>

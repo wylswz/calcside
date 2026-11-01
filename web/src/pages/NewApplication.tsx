@@ -1,38 +1,83 @@
-import { useCallback, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Application, workspaces, currentWorkspace } from '../api'
+import { CreateGuide } from '../components/CreateGuide'
 import { SpecForm, type SpecFormHandle } from '../components/SpecForm'
-import type { InstanceDraft, DraftError } from '../instanceDraft'
-import { Button, Confirm, Field, inputCls, Loading, Notice, PageHeader, SwapLabel } from '../components/ui'
+import { KeyValueRows } from '../components/SpecSections'
+import { sameRows, type InstanceDraft, type DraftError, type InstanceSpec } from '../instanceDraft'
+import { Button, Field, inputCls, Loading, Notice, PageHeader, SwapLabel } from '../components/ui'
+import './create-flow.css'
 
-// NewApplication mirrors NewInstance: the spec builder is the page,
-// the name lives in the sidebar identity slot, and the footer create
-// bar carries issues and the primary action. The server seeds the
-// main(input) scaffold; code is edited on the application's page.
+type Step = 'basics' | 'config'
+
+// NewApplication mirrors NewInstance: a guide + basics first, then the
+// detailed configuration. The configuration stays mounted once opened,
+// so Back preserves capability choices (C2); the step is addressable as
+// ?step=config (C4). The server seeds the main(input) scaffold; code is
+// edited on the application's page.
 export default function NewApplication() {
   const nav = useNavigate()
   const qc = useQueryClient()
+  const [params, setParams] = useSearchParams()
+  const step: Step = params.get('step') === 'config' ? 'config' : 'basics'
+  const [configMounted, setConfigMounted] = useState(step === 'config')
   const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [labels, setLabels] = useState<{ k: string; v: string }[]>([])
+  // A basics edit made while the hidden configuration is mounted must
+  // reach it even when the browser (not Continue) advances the step.
+  const basicsPending = useRef(false)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-  const [discard, setDiscard] = useState(false)
-  const [specDirty, setSpecDirty] = useState(false)
-  const [rawDirty, setRawDirty] = useState(false)
   const [specErrs, setSpecErrs] = useState<{ section: string; message: string }[]>([])
   const form = useRef<SpecFormHandle>(null)
-  // stable callback: an inline fn in a child's effect deps would
-  // re-fire on every render and falsely mark the form dirty
-  const baseline = useRef<string | null>(null)
-  const onSpec = useCallback((d: InstanceDraft, errs?: DraftError[]) => {
+
+  const goStep = (next: Step) => {
+    const p = new URLSearchParams(params)
+    if (next === 'config') p.set('step', 'config')
+    else p.delete('step')
+    setParams(p)
+  }
+  const goConfig = () => {
+    if (configMounted) form.current?.applyBasics({ description, labels })
+    basicsPending.current = false
+    setConfigMounted(true)
+    goStep('config')
+  }
+  const goBasics = () => goStep('basics')
+
+  useEffect(() => {
+    if (step !== 'config' || !configMounted || !basicsPending.current) return
+    form.current?.applyBasics({ description, labels })
+    basicsPending.current = false
+  }, [step, configMounted, description, labels])
+
+  const onSpec = useCallback((d: InstanceDraft, errs?: DraftError[], built?: { spec?: InstanceSpec; specJSON?: string }) => {
     setSpecErrs((cur) => (JSON.stringify(cur) === JSON.stringify(errs ?? []) ? cur : (errs ?? [])))
-    const fp = JSON.stringify(d)
-    if (baseline.current === null) baseline.current = fp // first call = pristine baseline
-    else setSpecDirty(fp !== baseline.current)
+    // Advanced JSON is another editor for the same basics; keep the
+    // basics step honest when it adds or removes labels. A pending
+    // basics edit wins until applyBasics pushes it.
+    if (basicsPending.current) return
+    if (built?.spec) {
+      const specLabels = built.spec.labels ?? {}
+      const nextDescription = typeof specLabels.description === 'string' ? specLabels.description : ''
+      setDescription((cur) => (cur === nextDescription ? cur : nextDescription))
+    }
+    setLabels((cur) => (sameRows(cur, d.labels) ? cur : d.labels))
   }, [])
   const wsq = useQuery({ queryKey: ['workspaces'], queryFn: workspaces })
   const dest = wsq.data?.find((w) => w.id === currentWorkspace()) ?? wsq.data?.find((w) => w.personal)
   const canCreate = dest != null && (dest.role === 'owner' || dest.role === 'editor')
+
+  // Read once when the configuration first mounts; later basics edits
+  // go through applyBasics, so capability choices are never remounted.
+  const initial = useMemo<InstanceSpec | undefined>(() => {
+    const merged: Record<string, string> = Object.fromEntries(labels.map((r) => [r.k.trim(), r.v]).filter(([k]) => k))
+    if (description.trim()) merged.description = description.trim()
+    return Object.keys(merged).length ? { labels: merged } : undefined
+  }, [description, labels])
+
   if (wsq.isLoading) return <Loading />
   if (!dest || !canCreate) return <Notice tone="warning">You need editor access to create applications in the current workspace.</Notice>
 
@@ -54,51 +99,85 @@ export default function NewApplication() {
   return (
     <div className="instance-builder">
       <PageHeader title="New application">
-        <KindSelect current="application" onDirty={() => ((name !== '' || specDirty || rawDirty) ? setDiscard(true) : nav('/instances/new'))} />
-        <span>Callers POST a JSON object to main(input).</span>
+        {step === 'config' && (name.trim() || description.trim()) && (
+          <span>{name.trim() || 'Untitled application'}{description.trim() ? ` — ${description.trim()}` : ''}</span>
+        )}
       </PageHeader>
-      <div className="builder-work-panel">
-        <SpecForm ref={form} application workspaceId={dest.id} onSpecChange={onSpec} onRawDirtyChange={setRawDirty}
-          identity={
-            <Field label="Name"><input id="app-name" className={inputCls} value={name} placeholder="Untitled application" onChange={(e) => setName(e.target.value)} /></Field>
-          }
-          footer={
-            <div className="create-bar">
-              {specErrs.length > 0 && <ul className="create-bar-issues" aria-live="polite">{specErrs.map((e, i) => <li key={i}>{e.section}: {e.message}</li>)}</ul>}
-              {err && <p className="create-bar-issues" role="alert">{err}</p>}
-              <Button variant="primary" className="w-full" disabled={busy || specErrs.length > 0} onClick={create}>
-                <SwapLabel show={busy ? 'Creating…' : 'Create application'} options={['Create application', 'Creating…']} />
-              </Button>
-              <p className="create-bar-note">Next: write main(input), run it, then publish.</p>
+
+      <nav className="create-steps" aria-label="Create steps">
+        <button type="button" className="create-step" data-state={step === 'basics' ? 'current' : 'done'}
+          aria-current={step === 'basics' ? 'step' : undefined} onClick={() => { if (step === 'config') goBasics() }}>
+          <span className="create-step-num">1</span> Basics
+        </button>
+        <span className="create-step-line" aria-hidden="true" />
+        <button type="button" className="create-step" data-state={step === 'config' ? 'current' : 'todo'}
+          aria-current={step === 'config' ? 'step' : undefined} onClick={() => { if (step === 'basics') goConfig() }}>
+          <span className="create-step-num">2</span> Configuration
+        </button>
+      </nav>
+
+      {step === 'basics' && (
+        <div className="create-basics-layout">
+          <section className="create-basics" aria-labelledby="create-basics-title">
+            <div className="create-basics-head">
+              <h2 id="create-basics-title">Basics</h2>
+              <p>Give it a name and a one-line purpose. Callers will send JSON to main(input).</p>
             </div>
-          } />
-      </div>
-      {discard && (
-        <Confirm title="Discard draft" confirm="Discard" pending="Discarding…"
-          onClose={() => setDiscard(false)}
-          action={async () => { nav('/instances/new') }}>
-          Leave without creating this application? Your name and configuration edits will be discarded.
-        </Confirm>
+            <div className="create-basics-body">
+              <div className="create-basics-grid">
+                <Field label="Name">
+                  <>
+                    <input id="basics-name" className={inputCls} value={name} maxLength={128}
+                      placeholder="e.g. Greeter" onChange={(e) => setName(e.target.value)} />
+                    <span className="create-field-hint">Optional — defaults to "Untitled application".</span>
+                  </>
+                </Field>
+                <Field label="Description">
+                  <>
+                    <input id="basics-description" className={inputCls} value={description} maxLength={280}
+                      placeholder="What does it do?" onChange={(e) => { basicsPending.current = true; setDescription(e.target.value) }} />
+                    <span className="create-field-hint">Shown under the name in the list.</span>
+                  </>
+                </Field>
+              </div>
+              <div>
+                <KeyValueRows title="Labels" addText="Add label" idPrefix="basics-label" rows={labels}
+                  onChange={(rows) => { basicsPending.current = true; setLabels(rows) }} />
+                <p className="create-field-hint">Optional key=value metadata — name and description have their own fields above.</p>
+              </div>
+              <div className="create-next">
+                <span className="create-next-label">After creation</span>
+                <ul className="create-next-list">
+                  <li>Edit <code className="create-code">main(input)</code> and its schemas on the application page.</li>
+                  <li>Publish a version to start serving calls.</li>
+                </ul>
+              </div>
+            </div>
+            <div className="create-basics-actions">
+              <p className="create-basics-note">Next you'll choose capabilities, policies and limits. Publishing serves the version.</p>
+              <Button variant="primary" onClick={goConfig}>Continue to configuration</Button>
+            </div>
+          </section>
+          <CreateGuide kind="application" />
+        </div>
+      )}
+
+      {configMounted && (
+        <div className="builder-work-panel" hidden={step !== 'config'}>
+          <SpecForm ref={form} application hideBasics workspaceId={dest.id} initial={initial} onSpecChange={onSpec}
+            footer={
+              <div className="create-bar">
+                {specErrs.length > 0 && <ul className="create-bar-issues" aria-live="polite">{specErrs.map((e, i) => <li key={i}>{e.section}: {e.message}</li>)}</ul>}
+                {err && <p className="create-bar-issues" role="alert">{err}</p>}
+                <Button variant="primary" className="w-full" disabled={busy || specErrs.length > 0} onClick={create}>
+                  <SwapLabel show={busy ? 'Creating…' : 'Create application'} options={['Create application', 'Creating…']} />
+                </Button>
+                <p className="create-bar-note">Next: write main(input), run it, then publish.</p>
+              </div>
+            } />
+        </div>
       )}
     </div>
   )
 }
 
-// KindSelect distinguishes the two things you can create. When the
-// page carries an onDirty handler the non-active tab routes through it
-// instead of navigating raw — a typed draft gets a Confirm (F2).
-export function KindSelect({ current, onDirty }: {
-  current: 'instance' | 'application'
-  onDirty?: () => void
-}) {
-  return (
-    <span className="kind-tabs" role="navigation" aria-label="create kind">
-      {current === 'instance'
-        ? <Link to="/instances/new" className="kind-on">Instance</Link>
-        : <Link to="/instances/new" onClick={(e) => { e.preventDefault(); onDirty?.() }}>Instance</Link>}
-      {current === 'application'
-        ? <Link to="/applications/new" className="kind-on">Application</Link>
-        : <Link to="/applications/new" onClick={(e) => { e.preventDefault(); onDirty?.() }}>Application</Link>}
-    </span>
-  )
-}
