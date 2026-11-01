@@ -32,6 +32,7 @@ export interface SecretDraft {
 
 export interface InstanceDraft {
   name: string
+  description: string
   ttlSeconds: number | ''
   fs: { quotaBytes: number | '' ; extra: Record<string, JsonValue> } | null
   net: { allowHosts: string[]; methods: string[]; extra: Record<string, JsonValue> } | null
@@ -53,7 +54,7 @@ const RESERVED = new Set(['fs', 'net', 'ext', 'print', 'load', 'exec'])
 
 export function draftFromSpec(spec?: InstanceSpec): InstanceDraft {
   const d: InstanceDraft = {
-    name: '', ttlSeconds: 900, fs: null, net: null, exts: [],
+    name: '', description: '', ttlSeconds: 900, fs: null, net: null, exts: [],
     policies: null, env: [], secrets: [], labels: [], limits: {},
     otherCaps: Object.create(null), extra: Object.create(null),
   }
@@ -63,7 +64,8 @@ export function draftFromSpec(spec?: InstanceSpec): InstanceDraft {
   if (ttl_seconds != null) d.ttlSeconds = ttl_seconds
   if (labels) {
     if (labels.name) d.name = String(labels.name)
-    d.labels = Object.entries(labels).filter(([k]) => k !== 'name').map(([k, v]) => ({ k, v: String(v) }))
+    if (labels.description) d.description = String(labels.description)
+    d.labels = Object.entries(labels).filter(([k]) => k !== 'name' && k !== 'description').map(([k, v]) => ({ k, v: String(v) }))
   }
   if (env) d.env = Object.entries(env).map(([k, v]) => ({ k, v: String(v) }))
   if (secrets) d.secrets = Object.entries(secrets).map(([name, v]: [string, any]) => {
@@ -105,6 +107,12 @@ export function draftFromSpec(spec?: InstanceSpec): InstanceDraft {
   return d
 }
 
+// sameRows compares key/value row lists so a draft sync can skip a
+// no-op state update.
+export function sameRows(a: { k: string; v: string }[], b: { k: string; v: string }[]): boolean {
+  return a.length === b.length && a.every((r, i) => r.k === b[i].k && r.v === b[i].v)
+}
+
 export interface DraftError { section: string; message: string }
 export type BuildResult = { ok: true; spec: InstanceSpec } | { ok: false; errors: DraftError[]; spec?: InstanceSpec }
 
@@ -131,6 +139,7 @@ export function buildInstanceSpec(draft: InstanceDraft, opts: { keyMode?: boolea
     labels[r.k] = r.v ?? ''
   }
   if (draft.name) labels.name = draft.name
+  if (draft.description) labels.description = draft.description
   spec.labels = labels
 
   const env: Record<string, string> = Object.create(null)

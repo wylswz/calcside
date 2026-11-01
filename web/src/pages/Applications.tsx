@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, wsPath, Application } from '../api'
+import { applicationDescription } from '../activity'
 import { useRole } from '../workspace'
 import { Button, Confirm, Loading, Notice, PageHeader, RevealNew } from '../components/ui'
 import { useHeldOrder } from '../stableList'
@@ -39,19 +40,25 @@ export default function Applications() {
               <tr><th>Name</th><th>Status</th><th>Version</th><th /></tr>
             </thead>
             <tbody>
-              {held.rows.map(({ item: { a } }) => (
-                <tr key={a.id} className="row-hover">
-                  <td><Link to={`/applications/${a.id}`} className="link font-medium">{a.name}</Link></td>
-                  <td><span className={`app-status app-status-${a.status}`}>{a.status}</span></td>
-                  <td className="text-xs text-sec">
-                    v{a.version}
-                    {a.has_unpublished_changes && <span className="text-mute"> · unpublished</span>}
-                  </td>
-                  <td className="text-right">
-                    {canEdit && <Button size="sm" variant="danger" onClick={() => setDeleting(a)}>Delete</Button>}
-                  </td>
-                </tr>
-              ))}
+              {held.rows.map(({ item: { a } }) => {
+                const description = applicationDescription(a)
+                return (
+                  <tr key={a.id} className="row-hover">
+                    <td>
+                      <Link to={`/applications/${a.id}`} className="link font-medium">{a.name}</Link>
+                      {description && <div className="mt-0.5 max-w-[420px] truncate text-xs text-sec" title={description}>{description}</div>}
+                    </td>
+                    <td><span className={`app-status app-status-${a.status}`}>{a.status}</span></td>
+                    <td className="text-xs text-sec">
+                      v{a.version}
+                      {a.has_unpublished_changes && <span className="text-mute"> · unpublished</span>}
+                    </td>
+                    <td className="text-right">
+                      {canEdit && <Button size="sm" variant="danger" onClick={() => setDeleting(a)}>Delete</Button>}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>

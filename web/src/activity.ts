@@ -1,7 +1,7 @@
 // Shared, pure helpers for the supervision views: run/call outcomes,
 // who ran what, naming and the "allowed" summary. The words mirror the
 // API: a run is an execution, a call is an audited capability call.
-import type { AuditEvent, Execution, Instance, InstanceSpec } from './api'
+import type { Application, AuditEvent, Execution, Instance, InstanceSpec } from './api'
 import { fmtBytes } from './format.ts'
 
 export type Outcome = 'ok' | 'failed' | 'denied'
@@ -56,7 +56,9 @@ export function isBuiltinGlobal(name: string, repr: string, capNames: string[]):
 // instanceName renders labels as `k=v` pairs (sorted) joined by ' · ';
 // an instance without labels is just its id.
 export function instanceName(inst: Pick<Instance, 'id' | 'labels'>): string {
+  // description is reserved create-flow metadata, not part of the name.
   const pairs = Object.entries(inst.labels ?? {})
+    .filter(([k]) => k !== 'description')
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([k, v]) => `${k}=${v}`)
   return pairs.length ? pairs.join(' · ') : inst.id
@@ -67,6 +69,18 @@ export function instanceName(inst: Pick<Instance, 'id' | 'labels'>): string {
 export function instanceTitle(inst: Pick<Instance, 'id' | 'labels'>): string {
   const name = inst.labels?.name?.trim()
   return name || instanceName(inst)
+}
+
+// Descriptions are stored as the reserved `description` label (there is
+// no dedicated column); both creates write them there.
+export function instanceDescription(inst: Pick<Instance, 'labels'>): string {
+  return inst.labels?.description?.trim() ?? ''
+}
+
+export function applicationDescription(app: Pick<Application, 'spec'>): string {
+  const labels = (app.spec as { labels?: Record<string, unknown> } | undefined)?.labels
+  const description = labels?.description
+  return typeof description === 'string' ? description.trim() : ''
 }
 
 // allowedSummary compresses the granted capability set to one line:

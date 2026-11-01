@@ -23,7 +23,8 @@ test.describe.configure({ mode: 'serial' })
 test('create application with ext -> blocked publish fails -> republish -> ready -> invoke v1', async ({ page }) => {
   test.setTimeout(180_000)
   await page.goto(`${viteURL}/applications/new`)
-  await page.locator('#app-name').fill('Echo app')
+  await page.locator('#basics-name').fill('Echo app')
+  await page.getByRole('button', { name: 'Continue to configuration' }).click()
   // the Add capabilities tab holds the ext selection
   await page.getByRole('button', { name: 'Add probe', exact: true }).click()
   // switching tabs and back keeps the selection
@@ -214,18 +215,15 @@ test('call examples tabs show real request shapes', async ({ page }) => {
   await examples.screenshot({ path: '/tmp/calcside-ep14-logs/ext-mode-mobile-examples.png' })
 })
 
-// Invalid raw spec edits persist through collapse/reopen; a kind
-// switch asks before discarding them (C2).
-test('raw spec invalid edit keeps draft and kind switch asks before discard', async ({ page }) => {
+// Invalid raw spec edits persist through collapse/reopen (C2).
+test('raw spec invalid edit keeps the draft', async ({ page }) => {
   await page.goto(`${viteURL}/applications/new`)
-  await page.locator('#app-name').fill('Raw edit')
+  await page.locator('#basics-name').fill('Raw edit')
+  await page.getByRole('button', { name: 'Continue to configuration' }).click()
   await page.getByRole('button', { name: /Advanced/ }).click()
   const raw = page.getByLabel('Application spec JSON')
   await raw.fill('{ not json')
   // invalid JSON refuses to leave raw mode — the draft is kept
   await page.getByRole('button', { name: 'Back to editor' }).click()
   await expect(page.getByLabel('Application spec JSON')).toHaveValue('{ not json')
-  // kind switch with dirty state asks first
-  await page.locator('.kind-tabs a', { hasText: 'Instance' }).click()
-  await expect(page.getByText('Discard draft')).toBeVisible()
 })

@@ -22,13 +22,37 @@ export function LimitsSection({ draft, set }: {
   )
 }
 
+// KeyValueRows edits a list of name/value pairs; idPrefix namespaces
+// the aria-labels so the same editor can appear in two surfaces (the
+// create flow's basics step uses 'basics label').
+export function KeyValueRows({ title, addText, idPrefix, rows, onChange }: {
+  title: string
+  addText: string
+  idPrefix: string
+  rows: { k: string; v: string }[]
+  onChange: (rows: { k: string; v: string }[]) => void
+}) {
+  return (
+    <div>
+      <div className="mb-3 flex justify-between"><h4 className="font-semibold text-ink">{title}</h4><button type="button" className="text-btn" onClick={() => onChange([...rows, { k: '', v: '' }])}>{addText}</button></div>
+      {rows.map((row, i) => <div key={i} className="mb-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+        <input aria-label={`${idPrefix} name ${i + 1}`} className={inputCls} value={row.k} onChange={(e) => onChange(rows.map((r, j) => j === i ? { ...r, k: e.target.value } : r))} />
+        <input aria-label={`${idPrefix} value ${i + 1}`} className={inputCls} value={row.v} onChange={(e) => onChange(rows.map((r, j) => j === i ? { ...r, v: e.target.value } : r))} />
+        <button type="button" className="text-btn" aria-label={`Remove ${idPrefix} ${i + 1}`} onClick={() => onChange(rows.filter((_, j) => j !== i))}>Remove</button>
+      </div>)}
+    </div>
+  )
+}
+
 // InputsSection edits variables, labels and secret bindings. Secret
-// values are write-only; vault entries are referenced by name.
-export function InputsSection({ draft, set, keyMode, application = false, vault, vaultError, onRetryVault, listId }: {
+// values are write-only; vault entries are referenced by name. When the
+// create flow owns labels in its basics step, they are hidden here.
+export function InputsSection({ draft, set, keyMode, application = false, hideLabels = false, vault, vaultError, onRetryVault, listId }: {
   draft: InstanceDraft
   set: Patch
   keyMode: boolean
   application?: boolean
+  hideLabels?: boolean
   vault: Secret[]
   vaultError: boolean
   onRetryVault: () => void
@@ -36,14 +60,8 @@ export function InputsSection({ draft, set, keyMode, application = false, vault,
 }) {
   return (
     <div className="space-y-5">
-      {(['env', 'labels'] as const).map((kind) => <div key={kind}>
-        <div className="mb-3 flex justify-between"><h4 className="font-semibold text-ink">{kind === 'env' ? 'Variables' : 'Labels'}</h4><button type="button" className="text-btn" onClick={() => set({ [kind]: [...draft[kind], { k: '', v: '' }] })}>Add {kind === 'env' ? 'variable' : 'label'}</button></div>
-        {draft[kind].map((row, i) => <div key={i} className="mb-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-          <input aria-label={`${kind} name ${i + 1}`} className={inputCls} value={row.k} onChange={(e) => set({ [kind]: draft[kind].map((r, j) => j === i ? { ...r, k: e.target.value } : r) })} />
-          <input aria-label={`${kind} value ${i + 1}`} className={inputCls} value={row.v} onChange={(e) => set({ [kind]: draft[kind].map((r, j) => j === i ? { ...r, v: e.target.value } : r) })} />
-          <button type="button" className="text-btn" aria-label={`Remove ${kind} ${i + 1}`} onClick={() => set({ [kind]: draft[kind].filter((_, j) => j !== i) })}>Remove</button>
-        </div>)}
-      </div>)}
+      <KeyValueRows title="Variables" addText="Add variable" idPrefix="env" rows={draft.env} onChange={(env) => set({ env })} />
+      {!hideLabels && <KeyValueRows title="Labels" addText="Add label" idPrefix="labels" rows={draft.labels} onChange={(labels) => set({ labels })} />}
       <div className="flex justify-between"><h4 className="font-semibold text-ink">Secrets</h4><button type="button" className="text-btn" onClick={() => set({ secrets: [...draft.secrets, { name: '', kind: 'vault', ref: '', value: '', domains: [], extra: {} }] })}>Add secret</button></div>
       {keyMode && <p className="text-xs text-sec">{application ? 'Applications' : 'Restricted keys'} store vault references only. Inline values are not allowed.</p>}
       {vaultError && <p className="text-xs text-sec">Vault unavailable. Existing references are preserved; enter a reference by name or retry. <button className="underline" onClick={onRetryVault}>Retry vault</button></p>}

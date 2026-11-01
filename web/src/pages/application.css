@@ -37,11 +37,6 @@
    for the read-only view, never draws its own box (S1). */
 .app-page .app-fieldset { border: 0; margin: 0 0 16px; padding: 0 0 16px; min-width: 0; border-bottom: 1px solid rgb(var(--line)) }
 .app-page .app-fieldset:disabled { color: inherit }
-/* Shared create-kind tabs — used on both /instances/new and
-   /applications/new, so the class must live outside .app-page. */
-.kind-tabs { display: flex; width: max-content; gap: 4px; margin-bottom: 10px; font-size: 13px }
-.kind-tabs a { padding: 4px 10px; border: 1px solid rgb(var(--line)); border-radius: var(--radius-control); color: rgb(var(--sec)); text-decoration: none }
-.kind-tabs a.kind-on { color: rgb(var(--accent)); border-color: rgb(var(--accent)) }
 .app-page .app-result { min-height: 44px; margin-top: 8px }
 .app-page .app-out { margin-top: 8px }
 .app-page .app-out-pre {

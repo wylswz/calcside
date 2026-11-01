@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { api, ApiError, Application, Run, workspaces } from '../api'
+import { applicationDescription } from '../activity'
 import { Button, Confirm, Loading, Notice, PageHeader, RevealNew, SwapLabel } from '../components/ui'
 import { cmTheme } from '../components/codemirror'
 import { useApplicationEditor } from '../components/editor'
@@ -405,6 +406,7 @@ function Editor({ app, role, userID, qc }: Props) {
         {saveFailed && view === 'edit' && <Button size="sm" onClick={saveNow} disabled={busy !== ''}>Retry</Button>}
       </PageHeader>
       <p className="app-dim"><Link to="/applications" className="link">← Applications</Link> · <span className="app-mono">{app.id}</span></p>
+      {applicationDescription(app) && <p className="app-dim max-w-3xl">{applicationDescription(app)}</p>}
 
       <section className="app-card">
         <div className="app-card-head">

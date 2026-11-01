@@ -139,6 +139,7 @@ test('workspace switcher scopes the instance list', async ({ page }) => {
 test('instance flow exposes a compact connect-agent action', async ({ page }) => {
   await page.goto(`${consoleURL}/`)
   await page.getByRole('button', { name: 'New instance' }).first().click()
+  await page.getByRole('button', { name: 'Continue to configuration' }).click()
   await page.getByRole('button', { name: 'Create instance' }).click()
   await expect(page).toHaveURL(/\/instances\/ins_/, { timeout: 10000 })
   await expect(page.getByText('Connect an agent')).toHaveCount(0)
@@ -153,13 +154,14 @@ test('instance flow exposes a compact connect-agent action', async ({ page }) =>
   await expect(page.getByRole('dialog', { name: 'Connect agent' })).toHaveCount(0)
 })
 
-// The builder is a page: /instances/new with a capability palette and
+// The builder is step 2 of /instances/new, with a capability palette and
 // the instance being built.
 test('new instance: compute-only default, name persists', async ({ page }) => {
   await page.goto(`${consoleURL}/instances/new`)
+  await page.locator('#basics-name').fill('my-run')
+  await page.getByRole('button', { name: 'Continue to configuration' }).click()
   await expect(page.getByRole('heading', { name: 'This instance' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Compute only' })).toBeVisible()
-  await page.getByPlaceholder('e.g. research run').fill('my-run')
   const [created] = await Promise.all([
     page.waitForResponse((r) => r.url().endsWith('/api/v1/instances') && r.request().method() === 'POST'),
     page.getByRole('button', { name: 'Create instance' }).click(),
@@ -172,7 +174,7 @@ test('new instance: compute-only default, name persists', async ({ page }) => {
 })
 
 test('new instance: add/configure/remove Files and Network, review reflects', async ({ page }) => {
-  await page.goto(`${consoleURL}/instances/new`)
+  await page.goto(`${consoleURL}/instances/new?step=config`)
   // one click each; adding never opens a form or leaves the palette
   await expect(page.getByRole('button', { name: 'Add ability' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Add Files' }).click()
@@ -202,7 +204,7 @@ test('new instance: add/configure/remove Files and Network, review reflects', as
 })
 
 test('new instance: advanced JSON survives, invalid blocks the editor', async ({ page }) => {
-  await page.goto(`${consoleURL}/instances/new`)
+  await page.goto(`${consoleURL}/instances/new?step=config`)
   await page.getByText('Advanced JSON').click()
   const ta = page.getByLabel('Instance spec JSON')
   await ta.fill('{ "ttl_seconds": 45 }')
@@ -218,7 +220,7 @@ test('new instance: advanced JSON survives, invalid blocks the editor', async ({
 
 test('new instance: 390px does not overflow', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 })
-  await page.goto(`${consoleURL}/instances/new`)
+  await page.goto(`${consoleURL}/instances/new?step=config`)
   const w = await page.evaluate(() => ({ s: document.documentElement.scrollWidth, i: window.innerWidth }))
   expect(w.s).toBeLessThanOrEqual(w.i)
 })
@@ -249,7 +251,7 @@ test('clone prefill: exact TTL, vault ref ≠ name, typed ext config, limits pre
   })
   await page.route('**/api/v1/extensions**', (r) => r.fulfill({ json: EXT_CAT }))
   await page.route('**/api/v1/instances/ins_src**', (r) => r.fulfill({ json: { instance: { id: 'ins_src', status: 'running', workspace_id: '', spec: SRC_SPEC } } }))
-  await page.goto(`${consoleURL}/instances/new?from=ins_src`)
+  await page.goto(`${consoleURL}/instances/new?step=config&from=ins_src`)
   await expect(page.getByLabel('Lifetime (seconds)')).toHaveValue('90')
   // sanitized inline clone must be replaced or removed — replace it
   await page.getByRole('button', { name: /^Inputs/ }).click()
@@ -275,7 +277,7 @@ test('extension with unmet dependency blocks submit (no auto-grant)', async ({ p
     local_enabled: true, remote_enabled: false,
   } }))
   await page.route('**/api/v1/instances/ins_src2**', (r) => r.fulfill({ json: { instance: { id: 'ins_src2', status: 'running', workspace_id: '', spec: { ttl_seconds: 60, capabilities: { ext: { tav: { source: 'contrib/tav' } } } } } } }))
-  await page.goto(`${consoleURL}/instances/new?from=ins_src2`)
+  await page.goto(`${consoleURL}/instances/new?step=config&from=ins_src2`)
   await expect(page.getByRole('button', { name: 'Create similar' })).toBeDisabled()
   // the dep error is attached (may be inside a collapsed panel)
   await expect(page.locator('text=requires').first()).toBeAttached()
@@ -575,7 +577,7 @@ test('new instance: extension library stays bounded at 1000 entries', async ({ p
   const external: string[] = []
   page.on('request', (r) => { if (r.url().startsWith('http') && !r.url().startsWith(consoleURL)) external.push(r.url()) })
 
-  await page.goto(`${consoleURL}/instances/new`)
+  await page.goto(`${consoleURL}/instances/new?step=config`)
   await expect(page.locator('.extensions-block .ext-card')).toHaveCount(12)
   await expect(page.getByText('1–12 of 1,000')).toBeVisible()
   const realIcon = page.locator('.extensions-block .ext-card img').first()
@@ -618,7 +620,7 @@ test('new instance: extension library stays bounded at 1000 entries', async ({ p
 // per-editor JSON state survives view switches and removals — invalid
 // text doesn't silently clear and only that entry's error blocks
 test('new instance: extension editor keeps invalid JSON through view switches and removes', async ({ page }) => {
-  await page.goto(`${consoleURL}/instances/new`)
+  await page.goto(`${consoleURL}/instances/new?step=config`)
   const palette = page.getByRole('tab', { name: 'Add capabilities' })
   const card = (alias: string) => page.locator('.settings-card').filter({ has: page.getByRole('heading', { name: alias }) })
   // custom extensions open their settings, since they need a source
@@ -650,7 +652,7 @@ test('new instance: extension editor keeps invalid JSON through view switches an
 test('new instance: catalog failure does not hide Files or Network', async ({ page }) => {
   let calls = 0
   await page.route('**/api/v1/extensions**', (r) => r.fulfill(++calls === 1 ? { status: 500 } : { status: 200, contentType: 'application/json', body: JSON.stringify({ extensions: [], local_enabled: true, remote_enabled: false }) }))
-  await page.goto(`${consoleURL}/instances/new`)
+  await page.goto(`${consoleURL}/instances/new?step=config`)
   await expect(page.getByText(/Could not load extensions/i)).toBeVisible()
   await page.getByRole('button', { name: 'Add Files' }).click()
   await page.getByRole('button', { name: 'Add Network' }).click()
@@ -671,7 +673,7 @@ test('new instance: palette controls stay put while adding and removing', async 
   await page.route('**/api/v1/extensions**', (r) => r.fulfill({ json: { extensions: entries, local_enabled: true, remote_enabled: false } }))
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport)
-    await page.goto(`${consoleURL}/instances/new`)
+    await page.goto(`${consoleURL}/instances/new?step=config`)
     await expect(page.locator('.extensions-block .ext-card')).toHaveCount(12)
     const targets = {
       files: page.locator('.ability-choice').nth(0),
@@ -731,7 +733,7 @@ test('new instance: palette controls stay put while adding and removing', async 
 test('new instance: no nested scrolling and nothing overflows', async ({ page }) => {
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport)
-    await page.goto(`${consoleURL}/instances/new`)
+    await page.goto(`${consoleURL}/instances/new?step=config`)
     await page.getByRole('button', { name: 'Add Files' }).click()
     await page.getByRole('button', { name: 'Add Network' }).click()
     await page.getByRole('button', { name: 'Configure Network' }).click()
@@ -753,7 +755,7 @@ test('new instance: no nested scrolling and nothing overflows', async ({ page })
 // Behaviour from the headless primitives: tabs follow arrow keys, dialogs
 // trap focus, close on Escape and hand focus back.
 test('console primitives: keyboard tabs and dialog focus', async ({ page }) => {
-  await page.goto(`${consoleURL}/instances/new`)
+  await page.goto(`${consoleURL}/instances/new?step=config`)
   const caps = page.getByRole('tab', { name: 'Add capabilities' })
   await caps.focus()
   await page.keyboard.press('ArrowRight')
@@ -816,7 +818,7 @@ test('console controls keep their box under hover and press', async ({ page }) =
     extensions: [{ source: 'contrib/steady', name: 'steady', description: 'fixture', dependencies: [], ops: [], config: [] }],
     local_enabled: true, remote_enabled: false,
   } }))
-  await page.goto(`${consoleURL}/instances/new`)
+  await page.goto(`${consoleURL}/instances/new?step=config`)
   await expect(page.locator('.extensions-block .ext-card')).toHaveCount(1)
   // tabs last: a pressed tab activates and swaps the panel
   const controls = ['[data-ui="button"][data-variant="primary"]', '[data-ui="button"][data-variant="default"]', '.ability-choice', '.extensions-block .ext-card', '.input', '.segmented [role="tab"]:not([aria-selected="true"])']
@@ -1059,7 +1061,7 @@ test('opening a dialog does not shift the page under it (S6)', async () => {
 // lit by a soft radial gradient (no bevels), fields are flat wells, and
 // pressing changes the face while it is held.
 test('console material: raised controls, inset wells, pressed state', async ({ page }) => {
-  await page.goto(`${consoleURL}/instances/new`)
+  await page.goto(`${consoleURL}/instances/new?step=config`)
   const style = (sel: string) => page.locator(sel).first().evaluate((el) => {
     const s = getComputedStyle(el)
     return { image: s.backgroundImage, shadow: s.boxShadow, radius: s.borderTopLeftRadius }

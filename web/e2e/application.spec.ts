@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
 import { startApplicationRuntime, type ApplicationRuntime } from './applicationRuntime'
 
 // Application lifecycle under real Vite (StrictMode) + scratch
@@ -31,9 +31,15 @@ async function waitReady(id: string, timeoutMs = 90_000) {
   }, { timeout: timeoutMs }).toBe('ready')
 }
 
-test('a) create -> scaffold -> test -> publish -> ready -> live invoke', async ({ page }) => {
+// Basics is a separate step now; tests that need a named draft start here.
+async function startApplication(page: Page, name?: string) {
   await page.goto(`${viteURL}/applications/new`)
-  await page.locator('#app-name').fill('Greeter')
+  if (name) await page.locator('#basics-name').fill(name)
+  await page.getByRole('button', { name: 'Continue to configuration' }).click()
+}
+
+test('a) create -> scaffold -> test -> publish -> ready -> live invoke', async ({ page }) => {
+  await startApplication(page, 'Greeter')
   await page.getByRole('button', { name: 'Create application' }).click()
   await page.waitForURL(/\/applications\/app_/)
   const id = page.url().split('/').pop()!
@@ -52,8 +58,7 @@ test('a) create -> scaffold -> test -> publish -> ready -> live invoke', async (
 })
 
 test('b) draft change stays unpublished until republish', async ({ page }) => {
-  await page.goto(`${viteURL}/applications/new`)
-  await page.locator('#app-name').fill('Counter')
+  await startApplication(page, 'Counter')
   await page.getByRole('button', { name: 'Create application' }).click()
   await page.waitForURL(/\/applications\/app_/)
   const id = page.url().split('/').pop()!
@@ -98,8 +103,7 @@ test('b) draft change stays unpublished until republish', async ({ page }) => {
 })
 
 test('c) mid-save edits abort the chained publish', async ({ page }) => {
-  await page.goto(`${viteURL}/applications/new`)
-  await page.locator('#app-name').fill('Delay')
+  await startApplication(page, 'Delay')
   await page.getByRole('button', { name: 'Create application' }).click()
   await page.waitForURL(/\/applications\/app_/)
   const id = page.url().split('/').pop()!
@@ -233,7 +237,7 @@ test('e) external write + my save -> 409, edits retained, reload offered', async
 })
 
 test('f) instance creation still works via the UI', async ({ page }) => {
-  await page.goto(`${viteURL}/instances/new`)
+  await page.goto(`${viteURL}/instances/new?step=config`)
   await page.getByRole('button', { name: 'Create instance' }).click()
   await page.waitForURL(/\/instances\/ins_/, { timeout: 20_000 })
 })
@@ -255,19 +259,42 @@ test('g) mobile populated layout, no horizontal overflow', async ({ page }) => {
   await page.screenshot({ path: '/tmp/calcside-ep14-logs/application-ui-desktop.png', fullPage: true })
 })
 
-test('h) kind switch: pristine navigates, edited name asks', async ({ page }) => {
+test('h) guide -> configuration carries basics, Back keeps them', async ({ page }) => {
   await page.goto(`${viteURL}/applications/new`)
-  await expect(page.locator('#app-name')).toBeVisible({ timeout: 10_000 })
-  // pristine -> switch to Instance needs no confirm
-  await page.locator('.kind-tabs a', { hasText: 'Instance' }).first().click()
-  await page.waitForURL(/\/instances\/new/)
-  // edited name -> switching back asks
+  await expect(page.getByRole('heading', { name: 'Application', exact: true })).toBeVisible({ timeout: 10_000 })
+  // one kind per create flow: the instance guide is not offered here
+  await expect(page.getByRole('heading', { name: 'Instance', exact: true })).toHaveCount(0)
+  await page.locator('#basics-name').fill('GuideGreeter')
+  await page.locator('#basics-description').fill('Says hello')
+  await page.getByRole('button', { name: 'Continue to configuration' }).click()
+  // Basics are read-only in configuration: no duplicate name/description form.
+  await expect(page.getByText('GuideGreeter — Says hello')).toBeVisible()
+  await expect(page.locator('#app-name')).toHaveCount(0)
+  await expect(page.locator('#app-description')).toHaveCount(0)
+  // Back is a paint-only step switch; details stay mounted (C2).
+  await page.getByRole('button', { name: /^1 Basics$/ }).click()
+  await expect(page.locator('#basics-name')).toHaveValue('GuideGreeter')
+  await expect(page.locator('#basics-description')).toHaveValue('Says hello')
+  await page.getByRole('button', { name: 'Continue to configuration' }).click()
+  await expect(page.getByText('GuideGreeter — Says hello')).toBeVisible()
+  await page.getByRole('button', { name: 'Create application' }).click()
+  await page.waitForURL(/\/applications\/app_/)
+  const id = page.url().split('/').pop()!
+  const created = (await (await client.get(`/api/v1/applications/${id}`)).json()).application
+  expect(created.spec.labels.description).toBe('Says hello')
+  await page.goto(`${viteURL}/applications`)
+  await expect(page.locator('tr').filter({ hasText: 'GuideGreeter' })).toContainText('Says hello')
+})
+
+test('h2) guide diagram moves and stops under reduced motion (P4)', async ({ page }) => {
   await page.goto(`${viteURL}/applications/new`)
-  await page.locator('#app-name').fill('half-done')
-  await page.locator('.kind-tabs a', { hasText: 'Instance' }).first().click()
-  await expect(page.getByText('Discard draft')).toBeVisible()
-  await page.getByRole('button', { name: 'Cancel' }).click()
-  await expect(page.locator('#app-name')).toHaveValue('half-done')
+  const edge = page.locator('.create-diagram .cf-edge').first()
+  const packet = page.locator('.create-diagram .cf-packet').first()
+  await expect.poll(() => edge.evaluate((el) => getComputedStyle(el).animationName)).not.toBe('none')
+  await expect.poll(() => packet.evaluate((el) => getComputedStyle(el).opacity)).toBe('1')
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect.poll(() => edge.evaluate((el) => getComputedStyle(el).animationName)).toBe('none')
+  await expect.poll(() => packet.evaluate((el) => getComputedStyle(el).opacity)).toBe('0')
 })
 
 test('i) applications list Delete removes the row after confirm', async ({ page }) => {

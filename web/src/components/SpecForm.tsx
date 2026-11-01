@@ -14,7 +14,10 @@ import { PolicyPicker } from './PolicyPicker'
 import { ExtensionIcon } from './ExtensionIcon'
 import { InputsSection, LimitsSection } from './SpecSections'
 
-export interface SpecFormHandle { buildSpec(): { spec?: InstanceSpec; specJSON?: string; err?: string } }
+export interface SpecFormHandle {
+  buildSpec(): { spec?: InstanceSpec; specJSON?: string; err?: string }
+  applyBasics(basics: { name?: string; description?: string; labels?: { k: string; v: string }[] }): void
+}
 
 interface Props {
   keyMode?: boolean
@@ -23,8 +26,9 @@ interface Props {
   workspaceId?: string
   onSpecChange?: (draft: InstanceDraft, errors?: DraftError[], built?: { spec?: InstanceSpec; specJSON?: string }) => void
   onRawDirtyChange?: (dirty: boolean) => void
-  identity?: ReactNode
   footer?: ReactNode
+  /** Basics are already collected by the create flow; only keep lifetime. */
+  hideBasics?: boolean
 }
 
 // Item keys order the instance summary: 'fs', 'net' or 'ext:<id>'. The id
@@ -55,7 +59,7 @@ const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)'
 // page section for the forms. The instance summary beside them is short
 // (one fixed-height row per capability), so nothing needs its own scroll.
 export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
-  keyMode = false, application = false, initial, workspaceId, onSpecChange, onRawDirtyChange, identity, footer,
+  keyMode = false, application = false, initial, workspaceId, onSpecChange, onRawDirtyChange, footer, hideBasics = false,
 }, ref) {
   // Application mode: vault-ref secrets only (same ceiling as key
   // specs) — never inline values in a durable spec.
@@ -128,6 +132,39 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
       return result.ok
         ? { spec: result.spec, ...(advanced ? { specJSON: json } : {}) }
         : { err: result.errors.map((e) => `${e.section}: ${e.message}`).join('; ') }
+    },
+    // applyBasics pushes the create flow's basics step into the mounted
+    // draft without remounting it, so detailed choices survive Back (C2).
+    applyBasics({ name, description, labels }) {
+      setDraft((d) => ({
+        ...d,
+        ...(name !== undefined ? { name } : {}),
+        ...(description !== undefined ? { description } : {}),
+        ...(labels !== undefined ? { labels } : {}),
+      }))
+      if (!advanced) return
+      // Advanced JSON is the submitted text. An explicit basics edit is
+      // the one case where the text itself must follow (P3/F3).
+      setJSON((text) => {
+        let raw: any
+        try { raw = JSON.parse(text) } catch { return text }
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return text
+        const next: Record<string, unknown> = {}
+        if (labels === undefined) {
+          const prev = raw.labels && typeof raw.labels === 'object' && !Array.isArray(raw.labels) ? raw.labels : {}
+          for (const [k, v] of Object.entries(prev)) next[k] = v
+        } else {
+          for (const r of labels) { const k = r.k.trim(); if (k) next[k] = r.v ?? '' }
+        }
+        for (const [key, value] of [['name', name], ['description', description]] as const) {
+          if (value === undefined) continue
+          if (value.trim()) next[key] = value
+          else delete next[key]
+        }
+        if (Object.keys(next).length) raw.labels = next
+        else delete raw.labels
+        return JSON.stringify(raw, null, 2)
+      })
     },
   }), [result, advanced, json])
   // "Configure" is navigation: the page scrolls to the chosen section.
@@ -422,21 +459,23 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
             </section>
             <section className="settings-group" data-section="inputs">
               <h3 className="spec-pane-title">Inputs <span className="spec-pane-meta">{inputsSummary}</span></h3>
-              <InputsSection draft={draft} set={set} keyMode={refsOnly} application={application} vault={vault.data?.secrets ?? []} vaultError={vault.isError} onRetryVault={() => vault.refetch()} listId={`vault-names-${ws}`} />
+              <InputsSection draft={draft} set={set} keyMode={refsOnly} application={application} hideLabels={hideBasics} vault={vault.data?.secrets ?? []} vaultError={vault.isError} onRetryVault={() => vault.refetch()} listId={`vault-names-${ws}`} />
             </section>
           </Tabs.Content>
         </Tabs.Root>
 
         <aside className="spec-selection" aria-label={application ? 'Application settings' : 'This instance'}>
           <h3 className="spec-pane-title">{application ? 'This application' : 'This instance'}</h3>
-          <div className="spec-identity">
-            {application ? identity : (
-              <>
+          {!application && (
+            hideBasics ? (
+              <Field label="Lifetime (seconds)"><input className={inputCls} type="number" min="1" value={draft.ttlSeconds} onChange={(e) => set({ ttlSeconds: e.target.value === '' ? '' : Number(e.target.value) })} /></Field>
+            ) : (
+              <div className="spec-identity">
                 <Field label="Name"><input className={inputCls} value={draft.name} placeholder="e.g. research run" onChange={(e) => set({ name: e.target.value })} /></Field>
                 <Field label="Lifetime (seconds)"><input className={inputCls} type="number" min="1" value={draft.ttlSeconds} onChange={(e) => set({ ttlSeconds: e.target.value === '' ? '' : Number(e.target.value) })} /></Field>
-              </>
-            )}
-          </div>
+              </div>
+            )
+          )}
           <div>
             <p className="sidebar-label">Capabilities</p>
             <div className="selected-list">
