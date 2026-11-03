@@ -50,6 +50,7 @@ test.describe('visual audit', () => {
     for (const [name, path] of [
       ['instances', '/'],
       ['new-instance-basics', '/instances/new'],
+      ['new-instance-config', '/instances/new?step=config'],
       ['new-application-basics', '/applications/new'],
       ['workspace-policies', '/workspace/policies'],
     ] as [string, string][]) {

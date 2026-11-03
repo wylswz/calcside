@@ -191,7 +191,7 @@ test('new instance: add/configure/remove Files and Network, review reflects', as
   await page.getByLabel(/HTTP methods/).fill('GET')
   await expect(page.locator('[data-row="net"] .selected-status')).toHaveText('api.example.com, other.com · GET')
   await expect(page.locator('[data-row="fs"] .selected-status')).toHaveText('2.00 KiB')
-  await page.getByRole('button', { name: 'Remove Files' }).click()
+  await page.locator('.spec-selection').getByRole('button', { name: 'Remove Files' }).click()
   await expect(page.getByText('Files removed')).toBeVisible()
   const [created] = await Promise.all([
     page.waitForResponse((r) => r.url().endsWith('/api/v1/instances') && r.request().method() === 'POST'),
@@ -201,6 +201,41 @@ test('new instance: add/configure/remove Files and Network, review reflects', as
   expect(body.capabilities.net.allow_hosts).toEqual(['api.example.com', 'other.com'])
   expect(body.capabilities.fs).toBeUndefined()
   await expect(page).toHaveURL(/\/instances\/[a-zA-Z0-9_]+/, { timeout: 10000 })
+})
+
+// Added cards toggle off through the same click; removal always leaves
+// the undo row, and a double click adds exactly once (F1/F2).
+test('new instance: capability cards toggle add/remove with undo and dblclick guard', async ({ page }) => {
+  await page.goto(`${consoleURL}/instances/new?step=config`)
+  await page.getByRole('button', { name: 'Add Files' }).click()
+  await expect(page.locator('[data-row="fs"]')).toBeVisible()
+  // the card now offers Remove — visible label swaps on hover, aria stays a button name
+  const files = page.locator('.ability-choice').first()
+  await expect(files).toHaveAccessibleName('Remove Files')
+  await files.hover()
+  await expect(files.locator('.swap-alt')).toBeVisible()
+  await expect(files.locator('.swap-rest')).toBeHidden()
+  await files.click()
+  await expect(page.locator('[data-row="fs"]')).toHaveCount(0)
+  await expect(page.getByText('Files removed')).toBeVisible()
+  await page.getByRole('button', { name: 'Undo' }).click()
+  await expect(page.locator('[data-row="fs"]')).toBeVisible()
+  // an extension card toggles the same way
+  await page.route('**/api/v1/extensions**', (r) => r.fulfill({ json: {
+    extensions: [{ source: 'contrib/steady', name: 'steady', description: 'fixture', dependencies: [], ops: [], config: [] }],
+    local_enabled: true, remote_enabled: false,
+  } }))
+  await page.reload()
+  await page.locator('.extensions-block').getByRole('button', { name: 'Add steady' }).click()
+  await expect(page.locator('[data-row^="ext:"]')).toHaveCount(1)
+  await page.locator('.extensions-block').getByRole('button', { name: 'Remove steady' }).click()
+  await expect(page.locator('[data-row^="ext:"]')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Undo' }).click()
+  await expect(page.locator('[data-row^="ext:"]')).toHaveCount(1)
+  // dblclick adds once, never add-then-remove
+  await page.getByRole('button', { name: 'Add Network' }).dblclick()
+  await expect(page.locator('[data-row="net"]')).toBeVisible()
+  await expect(page.getByText('Network removed')).toHaveCount(0)
 })
 
 test('new instance: advanced JSON survives, invalid blocks the editor', async ({ page }) => {
@@ -366,9 +401,9 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
     body: getComputedStyle(document.body).backgroundColor,
     header: getComputedStyle(document.querySelector('.console-header')!).backgroundColor,
   }))
-  expect(base.body).toBe('rgb(245, 247, 251)')
+  expect(base.body).toBe('rgb(245, 245, 247)')
   // frosted desk-toned header over the paper desk
-  expect(base.header).toMatch(/^rgba\(245, 247, 251, 0\.\d+\)$/)
+  expect(base.header).toMatch(/^rgba\(245, 245, 247, 0\.\d+\)$/)
   // no page overflow on desktop
   const dw = await page.evaluate(() => ({ s: document.documentElement.scrollWidth, i: window.innerWidth }))
   expect(dw.s).toBeLessThanOrEqual(dw.i)
@@ -379,7 +414,7 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
     const c = getComputedStyle(el)
     return { bg: c.backgroundColor, fg: c.color }
   })
-  expect(pb.bg).toBe('rgb(37, 99, 235)')
+  expect(pb.bg).toBe('rgb(0, 113, 227)')
   expect(pb.fg).toBe('rgb(255, 255, 255)')
 
   // initial screenshot (scrollTop 0, full page)
@@ -398,7 +433,7 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
     }))
   expect(tblWrap.length).toBeGreaterThan(0)
   for (const w of tblWrap) {
-    expect(w.r).toBe('8px')
+    expect(w.r).toBe('10px')
     expect(w.ox).toBe('auto')
     expect(w.oy).toBe('hidden')
   }
@@ -406,9 +441,9 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
 
   // More menu: arrow keys move through items, Escape closes and returns
   // focus to the trigger, an outside click closes it
-  const more = page.getByRole('button', { name: 'More ▾' })
+  const more = page.getByRole('button', { name: 'More actions' })
   await more.click()
-  const menu = page.getByRole('menu', { name: 'More ▾' })
+  const menu = page.getByRole('menu', { name: 'More actions' })
   await expect(menu).toBeVisible()
   await page.keyboard.press('ArrowDown')
   await expect(page.getByRole('menuitem').first()).toBeFocused()
@@ -503,8 +538,8 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
     body: getComputedStyle(document.body).backgroundColor,
     title: getComputedStyle(document.querySelector('.next-title')!).color,
   }))
-  expect(dark.body).toBe('rgb(10, 16, 28)')
-  expect(dark.title).toBe('rgb(241, 245, 249)')
+  expect(dark.body).toBe('rgb(17, 17, 19)')
+  expect(dark.title).toBe('rgb(237, 237, 240)')
   await page.screenshot({ path: testInfo.outputPath('detail-dark.png'), fullPage: true })
 })
 
@@ -522,6 +557,22 @@ test('instance detail: header actions replace the create entry', async ({ page }
   const box = (await connect.boundingBox())!
   expect(box.width).toBeLessThanOrEqual(44)
   expect(box.height).toBeLessThanOrEqual(44)
+
+  // icon actions name themselves in the status slot: moving the pointer
+  // across them swaps the caption and never moves a control (S1/S3/F1)
+  const boxes = () => page.locator('.detail-actions [data-ui="button"], .detail-caption').evaluateAll((els) =>
+    els.map((el) => { const b = el.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)] }))
+  const shown = page.locator('.detail-caption-hint[data-on="true"]')
+  const rest = await boxes()
+  await expect(page.locator('.detail-caption-status')).toHaveCSS('opacity', '1')
+  for (const name of ['Copy prompt', 'Share', 'Connect agent']) {
+    await page.getByRole('button', { name, exact: true }).hover()
+    await expect(shown).toHaveText(name)
+    expect(await boxes()).toEqual(rest)
+  }
+  await page.mouse.move(1, 1)
+  await expect(shown).toHaveCount(0)
+  await expect(page.locator('.detail-caption-status')).toHaveCSS('opacity', '1')
 
   // mobile: the square grows to a 44px target and nothing overflows
   await page.setViewportSize({ width: 390, height: 900 })
@@ -706,20 +757,30 @@ test('new instance: palette controls stay put while adding and removing', async 
     await expect(page.locator('[data-row="net"]')).toBeVisible()
     expect(await snapshot()).toEqual(before)
     await targets.ext2.click()
-    await expect(targets.ext2).toHaveText('Added')
+    // pointer still rests on the button: it offers Remove (hover swap);
+    // moving away shows Added again
+    await expect(targets.ext2.locator('.swap-alt')).toBeVisible()
+    await expect(targets.ext2.locator('.swap-rest')).toBeHidden()
+    await page.mouse.move(1, 1)
+    await expect(targets.ext2.locator('.swap-rest')).toBeVisible()
+    await expect(targets.ext2.locator('.swap-alt')).toBeHidden()
     expect(await snapshot()).toEqual(before)
     await targets.ext3.click()
     expect(await snapshot()).toEqual(before)
-    // a second click on an added card neither removes it nor navigates
+    // a second click on an added card toggles it off through the undo
+    // row; the palette itself never moves or navigates
     await targets.files.click()
-    await expect(page.locator('[data-row="fs"]')).toHaveCount(1)
+    await expect(page.locator('[data-row="fs"]')).toHaveCount(0)
+    await expect(page.getByText('Files removed')).toBeVisible()
     await expect(page.getByRole('tab', { name: 'Add capabilities' })).toHaveAttribute('aria-selected', 'true')
     expect(await snapshot()).toEqual(before)
+    await page.getByRole('button', { name: 'Undo' }).click()
+    await expect(page.locator('[data-row="fs"]')).toHaveCount(1)
 
     // removal keeps the next row in place behind an undo row
     const network = page.locator('[data-row="net"]')
     const top = (await box(network)).y
-    await page.getByRole('button', { name: 'Remove Files' }).click()
+    await page.locator('.spec-selection').getByRole('button', { name: 'Remove Files' }).click()
     await expect(page.getByText('Files removed')).toBeVisible()
     expect((await box(network)).y).toBe(top)
     await page.getByRole('button', { name: 'Undo' }).click()
@@ -786,7 +847,7 @@ test('instance detail: the More menu stays where it opened', async ({ page }) =>
   const created = await client.post('/api/v1/instances', { data: { ttl_seconds: 600 } })
   const inst = (await created.json()).instance
   await page.goto(`${consoleURL}/instances/${inst.id}`)
-  const more = page.getByRole('button', { name: 'More ▾' })
+  const more = page.getByRole('button', { name: 'More actions' })
   await expect(more).toBeVisible()
   const t = (await more.boundingBox())!
   const stop = await watchGeometry(page, ['[data-ui="menu"]', '.instance-detail [aria-haspopup="menu"]'])
@@ -821,7 +882,7 @@ test('console controls keep their box under hover and press', async ({ page }) =
   await page.goto(`${consoleURL}/instances/new?step=config`)
   await expect(page.locator('.extensions-block .ext-card')).toHaveCount(1)
   // tabs last: a pressed tab activates and swaps the panel
-  const controls = ['[data-ui="button"][data-variant="primary"]', '[data-ui="button"][data-variant="default"]', '.ability-choice', '.extensions-block .ext-card', '.input', '.segmented [role="tab"]:not([aria-selected="true"])']
+  const controls = ['[data-ui="button"][data-variant="primary"]', '[data-ui="button"][data-variant="default"]', '.ability-choice', '.extensions-block .ext-card', '.spec-selection .input', '.segmented [role="tab"]:not([aria-selected="true"])']
   for (const sel of controls) {
     const control = page.locator(sel).first()
     await control.scrollIntoViewIfNeeded()
@@ -1042,6 +1103,7 @@ test('opening a dialog does not shift the page under it (S6)', async () => {
   })
   const page = await browser.newPage({ viewport: { width: 1280, height: 500 } })
   await page.goto(`${consoleURL}/workspace/policies`)
+  await page.waitForSelector('.workspace-tabs')
   await page.addStyleTag({ content: '::-webkit-scrollbar { width: 15px; height: 15px } ::-webkit-scrollbar-thumb { background: #999 } body { min-height: 200vh }' })
   expect(await page.evaluate(() => window.innerWidth - document.documentElement.clientWidth)).toBeGreaterThan(0)
   const where = () => page.evaluate(() => ['main', '.console-header-inner', 'h1, [role="tablist"], .workspace-tabs'].map((s) => {
@@ -1057,34 +1119,39 @@ test('opening a dialog does not shift the page under it (S6)', async () => {
   await browser.close()
 })
 
-// The material is real CSS, not a screenshot impression: raised faces are
-// lit by a soft radial gradient (no bevels), fields are flat wells, and
-// pressing changes the face while it is held.
+// The material is real CSS, not a screenshot impression: controls are
+// flat precise fills with a sub-pixel ring and a soft contact shadow —
+// no gradients or inset highlights anywhere — fields are thin inset
+// strokes, the side rail is a recessed tray, and pressing recolours the
+// face while it is held, all paint-only (S1).
 test('console material: raised controls, inset wells, pressed state', async ({ page }) => {
   await page.goto(`${consoleURL}/instances/new?step=config`)
   const style = (sel: string) => page.locator(sel).first().evaluate((el) => {
     const s = getComputedStyle(el)
-    return { image: s.backgroundImage, shadow: s.boxShadow, radius: s.borderTopLeftRadius }
+    return { image: s.backgroundImage, color: s.backgroundColor, shadow: s.boxShadow, radius: s.borderTopLeftRadius }
   })
   const create = await style('[data-ui="button"][data-variant="primary"]')
-  expect(create.image).toContain('radial-gradient')
-  expect(create.shadow).toContain('inset')
+  expect(create.image).toBe('none')
+  expect(create.shadow).not.toContain('inset')
   expect(create.radius).toBe('8px')
+  const plain = await style('[data-ui="button"][data-variant="default"]')
+  expect(plain.image).toBe('none')
   const input = await style('.input')
   expect(input.image).toBe('none')
   expect(input.shadow).toMatch(/inset/)
-  expect(input.radius).toBe('8px')
+  expect(input.radius).toBe('6px')
   const panel = await style('.builder-work-panel')
   expect(panel.image).toBe('none')
-  expect(panel.radius).toBe('12px')
-  const tray = await style('.spec-selection')
-  expect(tray.shadow).toMatch(/inset/)
-  // pressed: gradient and shadow change while held
+  expect(panel.radius).toBe('14px')
+  const rail = await style('.spec-selection')
+  expect(rail.color).not.toBe('rgba(0, 0, 0, 0)')
+  expect(rail.shadow).toBe('none')
+  // pressed: the face colour changes while held
   const files = page.locator('.ability-choice').first()
   const box = (await files.boundingBox())!
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-  const hover = await files.evaluate((el) => getComputedStyle(el).backgroundImage)
+  const hover = await files.evaluate((el) => getComputedStyle(el).backgroundColor)
   await page.mouse.down()
-  await expect.poll(() => files.evaluate((el) => getComputedStyle(el).backgroundImage)).not.toBe(hover)
+  await expect.poll(() => files.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe(hover)
   await page.mouse.up()
 })

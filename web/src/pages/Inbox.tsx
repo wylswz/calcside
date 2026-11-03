@@ -30,9 +30,14 @@ export default function Inbox() {
 		queryKey: ['interrupt', sel],
 		queryFn: () => getInterrupt(sel!),
 		enabled: sel != null,
+		// a held row is a stale snapshot — poll while the interrupt is
+		// still pending so a resume flips the card to its resolved state
+		refetchInterval: (q) => (q.state.data?.interrupt?.status === 'pending' ? 5000 : false),
 	})
+	// Fresh data wins over the held (stale) row; before the fetch lands
+	// the held row fills in so the card opens without a flash.
 	const selected: Interrupt | undefined =
-		held.rows.find((r) => r.item.i.id === sel)?.item.i ?? selQ.data?.interrupt
+		selQ.data?.interrupt ?? held.rows.find((r) => r.item.i.id === sel)?.item.i
 
 	return (
 		<div className="app-page">

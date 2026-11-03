@@ -20,6 +20,31 @@
   border: 1px solid rgb(var(--line)); border-radius: var(--radius-surface);
   background: rgb(var(--paper)); padding: 24px; margin-top: 24px; min-width: 0;
 }
+/* inside a grid cell the card IS the cell content — its own margin
+   would drop it below the sibling column's top edge */
+.app-page .app-grid > .app-card { margin-top: 0 }
+.app-page .app-tabs { margin-top: 16px }
+.app-page .app-pager { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 12px }
+/* the h1 IS the name field: identical type metrics, chrome only on
+   hover/focus and only painted (S1) */
+/* The field sizes to its text: a hidden mirror of the value shares the
+   grid cell with the input, so the status icon sits right after the
+   last glyph instead of after a fixed-width box. */
+.app-page .app-title-field { display: inline-grid; min-width: 0; max-width: 100%; margin-left: -4px; }
+.app-page .app-title-field > * { grid-area: 1 / 1; min-width: 0; padding: 0 4px; font: inherit; letter-spacing: inherit; }
+.app-page .app-title-mirror { visibility: hidden; white-space: pre; overflow: hidden; }
+.app-page .app-title-input {
+  /* contributes no intrinsic width of its own: the mirror sizes the cell */
+  width: 0; min-width: 100%; color: rgb(var(--ink));
+  background: transparent; border: 0;
+  border-radius: var(--radius-control);
+}
+.app-page .app-title-input::placeholder { color: rgb(var(--mute)) }
+.app-page .app-title-input:hover { background: var(--fill-muted-hover) }
+.app-page .app-title-input:focus {
+  outline: none; background: rgb(var(--paper));
+  box-shadow: 0 0 0 0.5px rgb(var(--accent)), 0 0 0 3px rgb(var(--accent) / 0.15);
+}
 .app-page .app-card-head {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding-bottom: 12px; margin-bottom: 16px; border-bottom: 1px solid rgb(var(--line));
@@ -67,6 +92,4 @@
   border-radius: var(--radius-control); font-size: 12px; white-space: pre; overflow-wrap: normal;
 }
 
-/* Inbox nav count: reserved width, tabular figures — nav never shifts (S3/S4) */
-.inbox-count { display: inline-block; min-width: 1.5em; text-align: center; font-variant-numeric: tabular-nums; color: rgb(var(--warn-text)); }
 .row-sel { outline: 1px solid rgb(var(--accent)); }

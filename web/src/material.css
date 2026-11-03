@@ -1,11 +1,12 @@
 /* material.css — the console's one material language.
 
-   Restrained skeuomorphism: a matte paper desk under opaque work cards,
-   machined controls with one top light and one contact shadow, and glass
-   only for things that actually float (header, menus, dialogs). Each
-   control reads through one material cue — an inset well, a hairline face,
-   or a soft primary dome — never all of them at once. The desk carries a
-   faint paper grain so translucency has something to blur.
+   Restrained skeuomorphism, refined: one neutral light source, no
+   coloured glows, gradients so subtle they read as flat. Material is
+   spent only where it means something — the primary action, the selected
+   segment of a tray, and layers that genuinely float (header, menus,
+   dialogs as glass). Everything else is flat paper with a hairline edge.
+   Radii are concentric: a 14px surface holds 10px cards and trays, whose
+   4px padding makes their 6px controls concentric (14 / 10 / 6).
 
    Interaction feedback is paint-only (docs/interaction-stability.md, S1/S2):
    hover, press, focus, open and selected states change light, shadow and
@@ -17,72 +18,69 @@
    orange = attention). */
 
 :root {
-  --desk: 245 247 251;
-  --radius-surface: 12px;
-  --radius-control: 8px;
-  --radius-inset: 8px;
-  --edge: rgba(15, 23, 42, 0.08);
-  --edge-strong: rgba(15, 23, 42, 0.11);
-  --fill-muted: rgb(240 244 248);
-  --fill-muted-hover: rgb(234 239 245);
-  --glass: rgba(245, 247, 251, 0.78);
-  --glass-strong: rgba(255, 255, 255, 0.9);
+  --desk: 245 245 247;
+  --radius-surface: 14px;
+  --radius-card: 10px;
+  --radius-control: 6px;
+  --radius-inset: 6px;
+  --edge: rgba(0, 0, 0, 0.08);
+  --edge-strong: rgba(0, 0, 0, 0.13);
+  --fill-muted: rgb(240 240 243);
+  --fill-muted-hover: rgb(233 233 237);
+  --glass: rgba(245, 245, 247, 0.8);
+  --glass-strong: rgba(255, 255, 255, 0.92);
   --frost: saturate(140%) blur(16px);
   --ease-damped: cubic-bezier(0.22, 1, 0.36, 1);
-  --ease-press: cubic-bezier(0.4, 0, 0.6, 1);
-  --desk-light: rgb(255 255 255 / 0.5);
-  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");
 
-  /* controls: one flat face, one top light, one contact shadow */
-  --dome: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
-  --dome-primary: radial-gradient(140% 120% at 50% -20%, #4783f3 0%, #3170ee 45%, #2563eb 100%);
-  --dome-pressed: linear-gradient(180deg, #f1f4f8 0%, #edf1f6 100%);
-  --dome-primary-pressed: radial-gradient(140% 120% at 50% -20%, #2a65e6 0%, #2259d8 100%);
-  --well: none;
+  /* shadows are always neutral black — never tinted by the accent */
+  --shadow-surface: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px -16px rgba(0, 0, 0, 0.1);
+  --shadow-float: 0 0 0 0.5px rgba(0, 0, 0, 0.06), 0 12px 32px -8px rgba(0, 0, 0, 0.18);
+  --shadow-inset: inset 0 1px 1px rgba(0, 0, 0, 0.03);
+  --radius-button: 8px;
 
-  --shadow-surface: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 28px -22px rgba(15, 23, 42, 0.22);
-  --shadow-control: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 2px rgba(15, 23, 42, 0.08);
-  --shadow-control-hover: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 3px 7px -2px rgba(15, 23, 42, 0.12);
-  --shadow-pressed: inset 0 1px 2px rgba(15, 23, 42, 0.1);
-  --shadow-inset: inset 0 1px 2px rgba(15, 23, 42, 0.07), inset 0 -1px 0 rgba(255, 255, 255, 0.7);
-  --shadow-primary: inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 1px 2px rgba(15, 23, 42, 0.2), 0 6px 14px -8px rgba(37, 99, 235, 0.5);
-  --shadow-primary-hover: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 1px 2px rgba(15, 23, 42, 0.2), 0 8px 18px -8px rgba(37, 99, 235, 0.6);
-  --shadow-primary-pressed: inset 0 1px 2px rgba(15, 23, 42, 0.2);
-  --shadow-float: 0 1px 2px rgba(15, 23, 42, 0.06), 0 24px 60px -28px rgba(15, 23, 42, 0.35);
+  /* push-button material: a flat precise fill, a sub-pixel ring and a
+     soft contact shadow — pressing drops the shadow so it sinks */
+  --btn-bg: #ffffff;
+  --btn-bg-hover: rgb(248 248 250);
+  --btn-bg-pressed: rgb(236 236 240);
+  --btn-ring: 0 0 0 0.5px rgba(0, 0, 0, 0.14);
+  --btn-ring-pressed: 0 0 0 0.5px rgba(0, 0, 0, 0.16);
+  --btn-shadow: var(--btn-ring), 0 1px 1.5px rgba(0, 0, 0, 0.08);
+
+  /* cards get material instead of a drawn edge: a ring plus soft depth */
+  --card-bg: rgb(var(--paper));
+  --card-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.07), 0 1px 2px rgba(0, 0, 0, 0.06), 0 2px 8px -4px rgba(0, 0, 0, 0.06);
+  --card-shadow-hover: 0 0 0 0.5px rgba(0, 0, 0, 0.09), 0 2px 4px rgba(0, 0, 0, 0.07), 0 4px 12px -4px rgba(0, 0, 0, 0.08);
+  --card-shadow-pressed: 0 0 0 0.5px rgba(0, 0, 0, 0.08);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --desk: 10 16 28;
-    --edge: rgba(255, 255, 255, 0.09);
+    --desk: 17 17 19;
+    --edge: rgba(255, 255, 255, 0.08);
     --edge-strong: rgba(255, 255, 255, 0.13);
-    --fill-muted: rgb(26 37 55);
-    --fill-muted-hover: rgb(32 45 64);
-    --desk-light: rgb(96 165 250 / 0.05);
-    --glass: rgba(12 19 31, 0.8);
-    --glass-strong: rgba(20 31 49, 0.92);
-    --dome: linear-gradient(180deg, #1b273b 0%, #172235 100%);
-      --dome-primary: radial-gradient(140% 120% at 50% -20%, #7db4fb 0%, #6aa9fa 45%, #60a5fa 100%);
-    --dome-pressed: linear-gradient(180deg, #141e30 0%, #111a2a 100%);
-    --dome-primary-pressed: radial-gradient(140% 120% at 50% -20%, #5596f2 0%, #4c8ced 100%);
-    --shadow-surface: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 1px 2px rgba(0, 0, 0, 0.35), 0 16px 36px -26px rgba(0, 0, 0, 0.75);
-    --shadow-control: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-control-hover: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 3px 8px -2px rgba(0, 0, 0, 0.5);
-    --shadow-pressed: inset 0 1px 2px rgba(0, 0, 0, 0.45);
-    --shadow-inset: inset 0 1px 2px rgba(0, 0, 0, 0.4), inset 0 -1px 0 rgba(255, 255, 255, 0.04);
-    --shadow-primary: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 14px -8px rgba(0, 0, 0, 0.6);
-    --shadow-primary-hover: inset 0 1px 0 rgba(255, 255, 255, 0.34), 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 18px -8px rgba(0, 0, 0, 0.7);
-    --shadow-primary-pressed: inset 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-float: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 1px 2px rgba(0, 0, 0, 0.4), 0 26px 64px -30px rgba(0, 0, 0, 0.8);
+    --fill-muted: rgb(36 36 40);
+    --fill-muted-hover: rgb(42 42 47);
+    --glass: rgba(17, 17, 19, 0.8);
+    --glass-strong: rgba(32, 32, 36, 0.92);
+    --shadow-surface: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 28px -18px rgba(0, 0, 0, 0.6);
+    --shadow-float: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 16px 40px -10px rgba(0, 0, 0, 0.7);
+    --shadow-inset: inset 0 1px 1px rgba(0, 0, 0, 0.4);
+    --btn-bg: rgba(255, 255, 255, 0.1);
+    --btn-bg-hover: rgba(255, 255, 255, 0.14);
+    --btn-bg-pressed: rgba(255, 255, 255, 0.19);
+    --btn-ring: 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+    --btn-ring-pressed: 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+    --btn-shadow: var(--btn-ring), 0 1px 1px rgba(0, 0, 0, 0.3);
+    --card-bg: rgb(var(--surface));
+    --card-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.5);
+    --card-shadow-hover: 0 0 0 0.5px rgba(255, 255, 255, 0.1), 0 1px 2px rgba(0, 0, 0, 0.5), 0 4px 12px -4px rgba(0, 0, 0, 0.4);
+    --card-shadow-pressed: 0 0 0 0.5px rgba(255, 255, 255, 0.08);
   }
 }
 
 body {
   background-color: rgb(var(--desk));
-  background-image:
-    radial-gradient(120% 80% at 50% -10%, var(--desk-light), transparent 62%),
-    var(--grain);
-  background-attachment: fixed;
 }
 
 /* ---- frosted: things that float over content ---- */
@@ -104,37 +102,51 @@ body {
 .builder-work-panel,
 .instance-detail .next-action,
 .instance-detail .work-surface,
-.settings-card {
+.settings-card,
+.create-basics,
+.create-guide-card {
   background-color: rgb(var(--paper));
   border: 1px solid var(--edge);
   box-shadow: var(--shadow-surface);
 }
 
-/* ---- muted wells and trays: a flat tint, no inner shadow ---- */
+/* ---- trays: one flat muted track; the selected tab is the raised thing ---- */
 .segmented,
 .workspace-tabs,
-.instance-detail .seg-filters,
-.spec-selection {
+.instance-detail .seg-filters {
   background-color: var(--fill-muted);
-  background-image: var(--well);
   border: 1px solid transparent;
-  box-shadow: var(--shadow-inset);
 }
 
 /* ---- controls ----
-   Every control owns a 1px border in all states; states only recolour it. */
+   Every control owns a 1px border in all states; states only recolour
+   it — the same flat chip serves the default button and the one raised
+   segment in a tray. */
 [data-ui='button'], .ability-choice, .ext-card { border: 1px solid transparent; }
 [data-ui='button'],
-.ability-choice,
-.ext-card,
-.selected-row:not(.is-empty):not(.is-removed),
 .segmented [role='tab'][aria-selected='true'],
 .workspace-tabs a[aria-current='page'],
 .instance-detail .seg-filters button[aria-pressed='true'] {
-  background-color: rgb(var(--paper));
-  background-image: var(--dome);
-  border-color: var(--edge);
-  box-shadow: var(--shadow-control);
+  background-color: var(--btn-bg);
+  box-shadow: var(--btn-shadow);
+}
+@media (prefers-color-scheme: dark) {
+  .segmented [role='tab'][aria-selected='true'],
+  .workspace-tabs a[aria-current='page'],
+  .instance-detail .seg-filters button[aria-pressed='true'] {
+    background-color: rgba(255, 255, 255, 0.12);
+  }
+}
+.ability-choice,
+.ext-card,
+.selected-row:not(.is-removed) {
+  background-color: var(--card-bg);
+  box-shadow: var(--card-shadow);
+}
+.segmented [role='tab'][aria-selected='true'],
+.workspace-tabs a[aria-current='page'],
+.instance-detail .seg-filters button[aria-pressed='true'] {
+  color: rgb(var(--ink));
 }
 [data-ui='button'],
 .ability-choice,
@@ -145,84 +157,102 @@ body {
 .instance-detail .seg-filters button,
 .input {
   transition:
-    box-shadow 180ms var(--ease-damped),
-    background-color 160ms var(--ease-damped),
-    border-color 160ms var(--ease-damped),
-    color 160ms var(--ease-damped);
+    box-shadow 120ms ease-out,
+    background-color 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out;
 }
-[data-ui='button'] { border-radius: var(--radius-control); color: rgb(var(--ink)); min-height: 32px; height: auto; }
-/* hover lifts the light, not the control; an open toggle stays held */
-[data-ui='button']:hover:not(:disabled):not([aria-expanded='true']),
+[data-ui='button'] { border-radius: var(--radius-button); color: rgb(var(--ink)); min-height: 32px; height: auto; }
+/* hover changes the fill, not the shape; an open toggle stays held */
+[data-ui='button']:hover:not(:disabled):not([aria-expanded='true']):not([data-variant='primary']):not([data-variant='danger']) {
+  background-color: var(--btn-bg-hover);
+}
 .ability-choice:hover,
 .ext-card:hover {
-  box-shadow: var(--shadow-control-hover);
+  box-shadow: var(--card-shadow-hover);
 }
+[data-ui='button']:active:not(:disabled):not([data-variant='primary']) {
+  background-color: var(--btn-bg-pressed);
+  box-shadow: var(--btn-ring-pressed);
+}
+.ability-choice:active {
+  background-color: var(--fill-muted);
+  box-shadow: var(--card-shadow-pressed);
+}
+/* press is instant, like a key click; release eases back */
 [data-ui='button']:active:not(:disabled), .ability-choice:active {
-  background-image: var(--dome-pressed);
-  box-shadow: var(--shadow-pressed);
-  transition-duration: 90ms;
-  transition-timing-function: var(--ease-press);
+  transition-duration: 0ms;
 }
 [data-ui='button']:focus-visible, .ability-choice:focus-visible, .segmented [role='tab']:focus-visible {
-  outline: 2px solid rgb(var(--accent));
-  outline-offset: 2px;
+  outline: 3px solid rgb(var(--accent) / 0.4);
+  outline-offset: 1px;
 }
-[data-ui='button']:disabled { opacity: 0.5; box-shadow: none; }
+/* disabled keeps its shape — only the ink fades */
+[data-ui='button']:disabled { opacity: 0.4; }
 
+/* primary is the one coloured material: a flat accent fill */
 [data-ui='button'][data-variant='primary'] {
-  background-color: rgb(var(--accent));
-  background-image: var(--dome-primary);
-  border-color: transparent;
+  background-color: rgb(var(--accent-fill));
   color: #ffffff;
-  box-shadow: var(--shadow-primary);
+  box-shadow: 0 1px 1.5px rgba(0, 0, 0, 0.12);
 }
-[data-ui='button'][data-variant='primary']:hover:not(:disabled) { box-shadow: var(--shadow-primary-hover); }
-[data-ui='button'][data-variant='primary']:active:not(:disabled) { background-image: var(--dome-primary-pressed); box-shadow: var(--shadow-primary-pressed); }
 @media (prefers-color-scheme: dark) {
-  [data-ui='button'][data-variant='primary'] { color: #08111f; }
+  [data-ui='button'][data-variant='primary'] { box-shadow: 0 1px 1px rgba(0, 0, 0, 0.4); }
 }
-/* danger: the same material, only the colour marks it destructive (S1) */
+[data-ui='button'][data-variant='primary']:hover:not(:disabled) {
+  background-color: rgb(var(--accent-fill-hover));
+}
+[data-ui='button'][data-variant='primary']:active:not(:disabled) {
+  background-color: rgb(var(--accent-fill-press));
+  box-shadow: none;
+}
+/* danger: the same flat control, only the colour marks it destructive (S1) */
 [data-ui='button'][data-variant='danger'] {
   color: rgb(var(--danger));
-  border-color: rgb(var(--danger) / 0.35);
 }
-[data-ui='button'][data-variant='danger']:hover:not(:disabled) { background-color: rgb(var(--danger) / 0.08); }
+[data-ui='button'][data-variant='danger']:hover:not(:disabled) {
+  background-color: rgb(var(--danger) / 0.06);
+}
+@media (prefers-color-scheme: dark) {
+  [data-ui='button'][data-variant='danger']:hover:not(:disabled) {
+    background-color: rgb(var(--danger) / 0.12);
+  }
+}
 @media (max-width: 900px) { [data-ui='button'] { min-height: 44px; } }
 
 .segmented [role='tab']:not([aria-selected='true']):hover,
 .workspace-tabs a:not([aria-current='page']):hover { color: rgb(var(--ink)); background-color: var(--fill-muted-hover); }
 
-/* inputs: a flat muted field that turns white and rings softly on focus */
+/* inputs: white fields on a hairline; focus rings softly */
 .input {
-  background-color: var(--fill-muted);
-  background-image: var(--well);
-  border-color: transparent;
+  background-color: rgb(var(--paper));
+  border-color: var(--edge-strong);
   border-radius: var(--radius-inset);
   box-shadow: var(--shadow-inset);
 }
-.input:hover { background-color: var(--fill-muted-hover); }
+.input:hover { border-color: rgba(0, 0, 0, 0.2); }
+@media (prefers-color-scheme: dark) {
+  .input:hover { border-color: rgba(255, 255, 255, 0.2); }
+}
 .input:focus, .input:focus-visible {
   outline: none;
-  background-color: rgb(var(--paper));
-  background-image: none;
   border-color: rgb(var(--accent));
-  box-shadow: 0 0 0 4px rgb(var(--accent) / 0.18);
+  box-shadow: 0 0 0 3px rgb(var(--accent) / 0.15);
 }
 /* states layered on the material */
 .ext-card.ext-card-added, .ability-choice[data-selected='true'] {
-  background-image: linear-gradient(rgb(var(--accent) / 0.045), rgb(var(--accent) / 0.045)), var(--dome);
-  border-color: rgb(var(--accent) / 0.28);
+  background-image: linear-gradient(rgb(var(--accent) / 0.04), rgb(var(--accent) / 0.04));
+  border-color: rgb(var(--accent) / 0.35);
 }
-.selected-row.is-flash:not(.is-empty):not(.is-removed) {
+.selected-row.is-flash:not(.is-removed) {
   border-color: rgb(var(--accent) / 0.45);
-  box-shadow: var(--shadow-control), 0 0 0 4px rgb(var(--accent) / 0.12);
+  box-shadow: 0 0 0 4px rgb(var(--accent) / 0.12);
 }
-.selected-row.is-empty, .selected-row.is-removed { background: rgb(var(--paper) / 0.6); }
 
 /* ---- dialog ---- */
 [data-ui='dialog-overlay'] {
   position: fixed; inset: 0; z-index: 50;
-  background: rgb(15 23 42 / 0.28);
+  background: rgb(0 0 0 / 0.28);
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
 }
@@ -263,10 +293,10 @@ body {
 [data-ui='dialog-close']:hover { background: var(--fill-muted); color: rgb(var(--ink)); }
 
 /* ---- menu ---- */
-[data-ui='menu'] { z-index: 60; min-width: 200px; padding: 6px; border-radius: 12px; }
+[data-ui='menu'] { z-index: 60; min-width: 200px; padding: 6px; border-radius: var(--radius-card); }
 [data-ui='menu-item'] {
   display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 8px 10px; border-radius: 8px;
+  padding: 8px 10px; border-radius: var(--radius-control);
   font-size: 13px; color: rgb(var(--ink)); cursor: pointer; outline: none; user-select: none;
   transition: background-color 150ms var(--ease-damped), color 150ms var(--ease-damped);
 }
@@ -281,7 +311,7 @@ body {
   [data-ui='dialog-overlay'][data-state='open'] { animation: material-fade 180ms var(--ease-damped); }
   [data-ui='dialog-surface'][data-state='open'] { animation: material-rise 280ms var(--ease-damped); }
   [data-ui='menu'][data-state='open'] { animation: material-drop 220ms var(--ease-damped); transform-origin: var(--radix-dropdown-menu-content-transform-origin); }
-  .selected-row:not(.is-empty):not(.is-removed) { animation: material-settle 280ms var(--ease-damped); }
+  .selected-row:not(.is-removed) { animation: material-settle 280ms var(--ease-damped); }
 }
 @media (prefers-reduced-motion: reduce) {
   [data-ui='button'], .ability-choice, .ext-card, .selected-row, .segmented [role='tab'], .workspace-tabs a, .input { transition: none; }
@@ -291,6 +321,28 @@ body {
 @keyframes material-drop { from { opacity: 0; transform: translateY(-6px) scale(0.98); } }
 @keyframes material-settle { from { opacity: 0; transform: translateY(6px); } }
 
+/* ---- detail caption: status at rest, the pointed-at action's name ----
+   Every text shares one grid cell sized to the longest, right-aligned
+   against the actions, so swapping never moves a control (S1/S4). The
+   name reveals from the actions' side (clip-path) while the status fades. */
+.detail-caption { display: inline-grid; justify-items: end; align-items: center; margin-right: 8px; white-space: nowrap; }
+.detail-caption > * { grid-area: 1 / 1; }
+.detail-caption-status { transition: opacity 160ms ease-out; }
+.detail-caption[data-hint='on'] .detail-caption-status { opacity: 0; }
+.detail-caption-hint {
+  font-size: 13px; font-weight: 500; color: rgb(var(--ink));
+  opacity: 0; clip-path: inset(0 0 0 100%);
+  transition: clip-path 220ms var(--ease-damped), opacity 140ms ease-out;
+}
+.detail-caption-hint[data-on='true'] { opacity: 1; clip-path: inset(0 0 0 0); }
+.btn-badge {
+  position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border-radius: 999px;
+  background: rgb(var(--warn)); box-shadow: 0 0 0 2px rgb(var(--desk));
+}
+@media (prefers-reduced-motion: reduce) {
+  .detail-caption-status, .detail-caption-hint { transition: none; }
+}
+
 /* ---- stable labels: options share one cell, only the current shows ---- */
 .swap-label { display: inline-grid; }
 .swap-label > span { grid-area: 1 / 1; text-align: center; }
@@ -298,7 +350,7 @@ body {
 
 /* a toggle button that is open reads as held down */
 [data-ui='button'][aria-expanded='true'] {
-  background-image: var(--dome-pressed);
-  box-shadow: var(--shadow-pressed);
+  background-color: var(--btn-bg-pressed);
+  box-shadow: var(--btn-ring-pressed);
   color: rgb(var(--accent));
 }

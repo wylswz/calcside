@@ -40,9 +40,8 @@ const navWork = [
   { to: '/workspace', label: 'Workspace' },
 ]
 
-// The inbox badge slot always renders — tabular figures at a reserved
-// width, empty at zero — so the nav never shifts when the count moves
-// (S3/S4).
+// The inbox badge floats over its link, out of flow, so appearing or
+// emptying never moves the nav (S3/S4).
 function InboxBadge() {
   const ws = currentWorkspace() ?? ''
   const q = useQuery({
@@ -54,8 +53,9 @@ function InboxBadge() {
   return <span className="inbox-count" aria-live="off">{n > 0 ? n : ''}</span>
 }
 
+// Nav links keep the same box in every state; only paint changes (S1).
 const navCls = ({ isActive }: { isActive: boolean }) =>
-  `relative flex items-center gap-1.5 whitespace-nowrap text-sm transition-colors ${isActive ? 'text-ink after:absolute after:inset-x-0 after:-bottom-px after:h-[3px] after:bg-accent' : 'text-sec hover:text-ink'}`
+  `relative flex items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2.5 py-1.5 text-sm transition-colors ${isActive ? 'bg-[var(--fill-muted)] text-ink' : 'text-sec hover:bg-[var(--fill-muted-hover)] hover:text-ink'}`
 
 export default function App() {
   const [backendRetrying, setBackendRetrying] = useState(false)
@@ -69,7 +69,7 @@ export default function App() {
   if (isLoading || (backendRetrying && !data)) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <Loading label={backendRetrying ? 'backend unreachable — retrying…' : 'loading…'} />
+        <Loading label={backendRetrying ? 'Backend unreachable — retrying…' : 'Loading…'} />
       </div>
     )
   }
@@ -108,9 +108,9 @@ export default function App() {
       <header className="console-header sticky top-0 z-40 border-b border-line bg-paper/95 backdrop-blur">
         <div className="console-header-inner mx-auto flex min-h-14 max-w-7xl flex-wrap items-center gap-x-6 gap-y-1 px-6 py-1">
           <Link to="/" className="flex items-center">
-            <span className="text-[15px] font-semibold tracking-tight text-ink">calcside</span>
+            <span className="text-[15px] font-semibold tracking-[-0.02em] text-ink">calcside</span>
           </Link>
-          <nav className="console-nav flex flex-1 items-stretch gap-5 overflow-x-auto sm:gap-7">
+          <nav className="console-nav flex flex-1 items-stretch gap-1 overflow-x-auto">
             {navWork.map((n) => (
               <NavLink key={n.to} to={n.to} end={n.end} className={navCls}>
                 {n.label}{n.to === '/inbox' && <InboxBadge />}
@@ -120,11 +120,11 @@ export default function App() {
           <div className="ml-auto flex items-center gap-3 sm:gap-4">
             {dev && (
               <span className="console-dev inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2 py-1 text-xs font-medium text-sec">
-                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-mute" />dev · anonymous
+                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-warn" />Dev mode
               </span>
             )}
             <WorkspaceSwitcher />
-            <Link to="/profile" className="console-profile text-xs text-sec hover:text-ink" title="Profile">{user?.username || user?.email}</Link>
+            <Link to="/profile" className="console-profile text-[13px] text-sec hover:text-ink" title="Profile">{user?.username || user?.email}</Link>
             {!dev && <Button size="sm" onClick={logout}>Logout</Button>}
           </div>
         </div>
@@ -137,7 +137,7 @@ export default function App() {
           <Route path="/instances/:id/build" element={<Navigate to="/applications/new" replace />} />
           <Route path="/applications" element={<Applications />} />
           <Route path="/applications/new" element={<NewApplication />} />
-          <Route path="/applications/:id" element={<ApplicationDetail />} />
+          <Route path="/applications/:id/*" element={<ApplicationDetail />} />
           <Route path="/applications/:id/runs/:runId" element={<RunDetail />} />
           <Route path="/inbox" element={<Inbox />} />
           <Route path="/workspace" element={<WorkspaceTabs />} />

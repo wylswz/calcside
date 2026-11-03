@@ -14,7 +14,7 @@ import { useState } from 'react'
 const toneCls = { danger: 'text-danger', warn: 'text-warn-text', mute: 'text-mute', sec: 'text-sec' } as const
 function attention(i: Instance) {
   const a = attentionText(i)
-  return <span className={`text-xs ${toneCls[a.tone]}`}>{a.text}{a.link ? <> · <Link className="link" to={`/instances/${i.id}`}>connect agent →</Link></> : null}</span>
+  return <span className={`text-xs ${toneCls[a.tone]}`}>{a.text}{a.link ? <> · <Link className="link" to={`/instances/${i.id}`}>Connect agent →</Link></> : null}</span>
 }
 
 function rank(i: Instance): number {
@@ -59,14 +59,15 @@ export default function Instances() {
         </>} />
       {isLoading && <Loading />}
       {data && all.length === 0 && (
-        <div className="rounded-xl border border-line bg-surface px-6 py-10 text-center">
-          <p className="mb-4 text-sm text-sec">1 Decide what an agent may do · 2 Connect the agent · 3 Review its runs</p>
-          {role != null && role !== 'viewer' && <Button variant="primary" onClick={() => nav('/instances/new')}>New instance</Button>}
+        <div className="tbl-wrap py-12 text-center">
+          <h2 className="text-[15px] font-semibold text-ink">No instances yet</h2>
+          <p className="mx-auto mt-2 max-w-md text-sm text-sec">An instance is a sandbox an agent can run code in. Decide what it may do, connect the agent, then review its runs.</p>
+          {role != null && role !== 'viewer' && <div className="mt-5"><Button variant="primary" onClick={() => nav('/instances/new')}>New instance</Button></div>}
         </div>
       )}
       {all.length > 0 && groups.filter(([, g]) => g.length).map(([label, g]) => (
         <div key={label} className="mb-8">
-          <h2 className="mb-3 text-base font-semibold text-ink">{label}</h2>
+          <h2 className="mb-2.5 text-[13px] font-semibold text-sec">{label}</h2>
           <div className="tbl-wrap">
             <table className="tbl">
               <thead>
@@ -86,7 +87,7 @@ export default function Instances() {
                     <td><InstanceStatus inst={i} /></td>
                     <td>{attention(i)}</td>
                     <td className="max-w-[280px]">
-                      <span className="block truncate font-mono text-xs text-sec" title={allowedSummary(i.spec)}>{allowedSummary(i.spec)}</span>
+                      <span className="block truncate text-xs text-sec" title={allowedSummary(i.spec)}>{allowedSummary(i.spec)}</span>
                     </td>
                     <td className="whitespace-nowrap text-xs text-sec" title={fmtTime(i.last_active_at)}>{relTime(i.last_active_at)}</td>
                     <td className="text-right">
@@ -102,7 +103,7 @@ export default function Instances() {
       ))}
             {(shared?.instances.length ?? 0) > 0 && (
         <div className="mt-8">
-          <h2 className="mb-3 text-base font-semibold text-ink">Shared with you</h2>
+          <h2 className="mb-2.5 text-[13px] font-semibold text-sec">Shared with you</h2>
           <div className="tbl-wrap">
             <table className="tbl">
               <thead><tr><th>Name</th><th>Workspace</th><th>Role</th><th>Status</th></tr></thead>

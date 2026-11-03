@@ -156,43 +156,22 @@ export default function NewInstance() {
 
       {step === 'basics' && (
         <div className="create-basics-layout">
-          <section className="create-basics" aria-labelledby="create-basics-title">
-            <div className="create-basics-head">
-              <h2 id="create-basics-title">Basics</h2>
-              <p>Give it a name and a one-line purpose so your team can find it later.</p>
-            </div>
+          <section className="create-basics" aria-label="Basics">
             <div className="create-basics-body">
               <div className="create-basics-grid">
                 <Field label="Name">
-                  <>
-                    <input id="basics-name" className={inputCls} value={name} maxLength={128}
-                      placeholder="e.g. nightly research" onChange={(e) => { basicsPending.current = true; setName(e.target.value) }} />
-                    <span className="create-field-hint">Optional — the id is used when empty.</span>
-                  </>
+                  <input id="basics-name" className={inputCls} value={name} maxLength={128}
+                    placeholder="e.g. nightly research" onChange={(e) => { basicsPending.current = true; setName(e.target.value) }} />
                 </Field>
                 <Field label="Description">
-                  <>
-                    <input id="basics-description" className={inputCls} value={description} maxLength={280}
-                      placeholder="What is this for?" onChange={(e) => { basicsPending.current = true; setDescription(e.target.value) }} />
-                    <span className="create-field-hint">Shown under the name in the list.</span>
-                  </>
+                  <input id="basics-description" className={inputCls} value={description} maxLength={280}
+                    placeholder="What is this for?" onChange={(e) => { basicsPending.current = true; setDescription(e.target.value) }} />
                 </Field>
               </div>
-              <div>
-                <KeyValueRows title="Labels" addText="Add label" idPrefix="basics-label" rows={labels}
-                  onChange={(rows) => { basicsPending.current = true; labelsTouched.current = true; setLabels(rows) }} />
-                <p className="create-field-hint">Optional key=value metadata — name and description have their own fields above.</p>
-              </div>
-              <div className="create-next">
-                <span className="create-next-label">After creation</span>
-                <ul className="create-next-list">
-                  <li>Connect your agent over MCP — or run code yourself.</li>
-                  <li>Memory and files stay until the instance ends.</li>
-                </ul>
-              </div>
+              <KeyValueRows title="Labels" addText="Add label" idPrefix="basics-label" rows={labels}
+                onChange={(rows) => { basicsPending.current = true; labelsTouched.current = true; setLabels(rows) }} />
             </div>
             <div className="create-basics-actions">
-              <p className="create-basics-note">Next you'll choose what the agent may do. Settings are fixed after creation.</p>
               <Button variant="primary" onClick={goConfig}>Continue to configuration</Button>
             </div>
           </section>
@@ -210,7 +189,6 @@ export default function NewInstance() {
                 <Button variant="primary" className="w-full" disabled={busy || errors.length > 0} onClick={create}>
                   {from ? 'Create similar' : 'Create instance'}
                 </Button>
-                <p className="create-bar-note">Next: connect an agent or run code yourself.</p>
               </div>
             } />
         </div>

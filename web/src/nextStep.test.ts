@@ -20,7 +20,7 @@ test('nextStep priorities', () => {
 })
 
 test('attentionText', () => {
-  assert.deepEqual(attentionText({ status: 'running' }), { text: 'no runs yet', tone: 'mute', link: true })
+  assert.deepEqual(attentionText({ status: 'running' }), { text: 'No runs yet', tone: 'mute', link: true })
   assert.deepEqual(attentionText({ status: 'ended' }), { text: '—', tone: 'mute', link: false })
   assert.deepEqual(attentionText({ status: 'ended', activity: { runs: 3 } }), { text: '3 runs', tone: 'sec', link: false })
   assert.equal(attentionText({ status: 'ended', activity: { denied_runs: 2 } }).text, '2 denied')

@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Instance, Execution, APIKey, SharedInstance, workspaces } from '../api'
 import { instanceDescription, instanceTitle } from '../activity'
 import { nextStep } from '../nextStep'
 import { useRole } from '../workspace'
-import { Button, Confirm, Loading, Menu, MenuItem, SectionTitle, InstanceStatus, Modal, Notice, SwapLabel } from '../components/ui'
+import { Button, Confirm, DetailHeader, Icon, Loading, Menu, MenuItem, SectionTitle, InstanceStatus, Modal, Notice, IconAction } from '../components/ui'
 import ShareDialog from '../components/ShareDialog'
 import ConnectAgent from '../components/ConnectAgent'
 import { Allowed } from '../components/Allowed'
@@ -110,34 +110,25 @@ export default function InstanceDetail() {
 
   return (
     <div className="instance-detail">
-      <div className="detail-head mb-8 flex flex-wrap items-end gap-x-8 gap-y-4">
-        <div className="min-w-0 basis-full flex-1 sm:basis-0">
-          <div className="mb-3 text-xs text-sec">
-            <Link to="/" className="transition-colors hover:text-accent">← Instances</Link>
-          </div>
-          <h1 className="break-words font-semibold text-ink">{name}</h1>
-          {name !== inst.id && <div className="mt-1 font-mono text-xs text-mute">{inst.id}</div>}
-          {description && <p className="mt-2 max-w-2xl text-sm leading-[22px] text-sec">{description}</p>}
-          <div className="mt-3 flex items-center gap-3">
-            <InstanceStatus inst={inst} />
-            {live && effRun && <button className="text-xs text-accent hover:underline disabled:opacity-50" onClick={keepalive} disabled={pending === 'extend'}><SwapLabel show={pending === 'extend' ? 'extending…' : 'extend'} options={['extend', 'extending…']} /></button>}
-          </div>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          {isOwner && <Button onClick={() => setShare(true)}>Share</Button>}
-          <Button onClick={() => setPrompt(true)}>Copy prompt</Button>
-          {canManage && live && (
-            <Button className="!w-8 !px-0" aria-label="Connect agent" title="Connect agent" onClick={() => setAgent(true)}>
-              <NextSignal kind="connect" />
-            </Button>
+      {/* Same header as ApplicationDetail: status + icon actions on the
+          title line (names appear in the status slot), lifecycle (End)
+          behind More; only the description sits under the title. */}
+      <DetailHeader back={{ to: '/', label: 'Instances' }} id={inst.id} title={name} description={description}
+        status={<InstanceStatus inst={inst} />}
+        actions={<>
+          {live && effRun && (
+            <IconAction label="Extend" aria-busy={pending === 'extend'}
+              disabled={pending === 'extend'} onClick={keepalive} icon={<Icon name="clock" />} />
           )}
+          {isOwner && <IconAction label="Share" icon={<Icon name="users" />} onClick={() => setShare(true)} />}
+          <IconAction label="Copy prompt" icon={<Icon name="clipboard" />} onClick={() => setPrompt(true)} />
+          {canManage && live && <IconAction label="Connect agent" icon={<Icon name="link" />} onClick={() => setAgent(true)} />}
           {effRun && inst.status !== 'deleted' && (
-            <Menu trigger={<Button>More ▾</Button>}>
-              <MenuItem tone="danger" onSelect={() => setEnding(true)}>End instance</MenuItem>
+            <Menu trigger={<IconAction label="More" aria-label="More actions" icon={<Icon name="more" />} />}>
+              <MenuItem tone="danger" onSelect={() => setEnding(true)}><Icon name="stop" className="!h-3.5 !w-3.5" />End instance</MenuItem>
             </Menu>
           )}
-        </div>
-      </div>
+        </>} />
 
       {actErr && <div className="mb-4 text-xs text-warn-text">{actErr}</div>}
       {step.kind === 'ended' && (

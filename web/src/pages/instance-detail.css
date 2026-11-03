@@ -5,12 +5,12 @@
   /* surface material comes from material.css */
   --detail-work: rgb(var(--paper)); --detail-edge: var(--edge);
   --detail-radius-surface: var(--radius-surface); --detail-radius-control: var(--radius-control); --detail-radius-inset: var(--radius-inset);
-  --detail-shadow-surface: var(--shadow-surface); --detail-shadow-control: var(--shadow-control); --detail-shadow-inset: var(--shadow-inset);
+  --detail-shadow-surface: var(--shadow-surface); --detail-shadow-inset: var(--shadow-inset);
   font-size: 14px; line-height: 22px;
 }
 
-/* type scale: body 14/22 · title 30/36 · section 18/26 · sub 14/22 · meta 12/18 */
-.instance-detail h1 { font-size: 30px; line-height: 36px; font-weight: 600; letter-spacing: -0.025em; }
+/* type scale: body 14/22 · title 28/34 (shared .detail-title) · section 18/26 · sub 14/22 · meta 12/18 */
+
 .instance-detail h2 { font-size: 18px; line-height: 26px; font-weight: 600; }
 .instance-detail .side-col h2 { font-size: 16px; line-height: 22px; }
 .instance-detail .side-label { font-size: 14px; font-weight: 500; }
@@ -22,12 +22,9 @@
   font-family: var(--font-mono); font-size: 13px; line-height: 20px; font-weight: 400;
 }
 
-/* header — quiet, no enclosing box, no heavy black rule */
-.instance-detail .detail-head { padding-top: 4px; }
 
 /* shell header hooks — only inside detail */
 body:has(.instance-detail) .console-header-inner { gap: 24px; }
-body:has(.instance-detail) .console-nav { gap: 24px; }
 body:has(.instance-detail) .console-dev {
   font-size: 12px; border: 0; text-transform: none; letter-spacing: normal;
   color: rgb(var(--sec)); padding: 0;
@@ -95,14 +92,14 @@ body:has(.instance-detail) .console-profile { font-size: 13px; color: rgb(var(--
 .instance-detail .tbl tbody tr:hover { background: rgb(var(--surface) / 0.4); }
 .instance-detail .tbl tbody tr.row-open { background: rgb(var(--surface)); }
 .instance-detail .tbl-wrap {
-  border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-control);
+  border: 1px solid var(--detail-edge); border-radius: var(--radius-card);
   overflow-x: auto; overflow-y: hidden; background: var(--detail-work);
 }
 .instance-detail .tbl .num, .instance-detail .tbl td[data-num] { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 
 /* segmented run filter — inset track, one raised segment */
 .instance-detail .seg-filters {
-  display: inline-flex; gap: 2px; border-radius: var(--detail-radius-control); padding: 2px;
+  display: inline-flex; gap: 2px; border-radius: var(--radius-card); padding: 4px;
 }
 .instance-detail .seg-filters button {
   border: 1px solid transparent; border-radius: var(--detail-radius-inset); background: transparent;

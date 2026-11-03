@@ -49,7 +49,7 @@ test('a) develop waiting -> resume -> handler output on run page', async ({ page
 	const appID = await makeApp('int-e2e')
 	const { run_id: runID, int_id: intID } = await testRun(appID)
 
-	await page.goto(`${viteURL}/applications/${appID}`)
+	await page.goto(`${viteURL}/applications/${appID}/runs`)
 	await expect(page.locator('section.app-card').filter({ hasText: 'Runs' })).toBeVisible()
 	await page.screenshot({ path: '/tmp/calcside-ep16-logs/app-detail.png' })
 
@@ -111,7 +111,7 @@ test('c) cancel run; retry absent while waiting; count slot stable (S4)', async 
 
 test('d) settings have no handler declarations', async ({ page }) => {
 	const appID = await makeApp('int-no-decl')
-	await page.goto(`${viteURL}/applications/${appID}`)
+	await page.goto(`${viteURL}/applications/${appID}/runs`)
 	await expect(page.locator('section.app-card').filter({ hasText: 'Runs' })).toBeVisible()
 	await expect(page.getByRole('button', { name: 'Add handler' })).toHaveCount(0)
 	await expect(page.getByText('Handlers', { exact: true })).toHaveCount(0)
@@ -148,4 +148,24 @@ test('e) resolved row keeps its box until reveal (S3/F1)', async ({ page }) => {
 	// The reveal affordance clears the placeholder.
 	await page.getByRole('button', { name: 'Show latest' }).click()
 	await expect(page.locator('tbody tr')).toHaveCount(1)
+})
+
+// A resume from the Inbox must move the card on: the held row is a
+// stale snapshot, so the card follows the live interrupt and lands on
+// "Resumed" + View run, then "Resolved by …", never a stuck busy label.
+test('f) inbox resume moves the card to its resolved state', async ({ page }) => {
+	const appID = await makeApp('int-inbox')
+	const { int_id: intID } = await testRun(appID)
+	await page.goto(`${viteURL}/inbox?interrupt=${intID}`)
+	const card = page.locator('section.app-card').first()
+	await page.locator(`#event-${intID}`).fill('{"approved":true}')
+	await card.getByRole('button', { name: 'Resume' }).click()
+	await expect(page.getByText('Calls on_ok with this event:')).toBeVisible()
+	await page.getByRole('button', { name: 'Resume', exact: true }).last().click()
+	// terminal state, no reload: Resumed + View run…
+	await expect(card.getByRole('link', { name: 'View run' })).toBeVisible({ timeout: 15_000 })
+	// …then the fetched interrupt flips the card to its resolved line.
+	await expect(card).toContainText('Resolved by', { timeout: 15_000 })
+	// it never sat on a busy/transient label
+	await expect(card).not.toContainText('Resuming…')
 })

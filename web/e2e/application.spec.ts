@@ -50,7 +50,8 @@ test('a) create -> scaffold -> test -> publish -> ready -> live invoke', async (
 
   await page.getByRole('button', { name: 'Publish' }).click()
   await waitReady(id)
-  // the Invoke button is always rendered; it enables once ready
+  // the Invoke tab is separate; the button enables once ready
+  await page.getByRole('link', { name: 'Invoke' }).click()
   const invokeCard = page.locator('section.app-card').filter({ hasText: 'Invoke' })
   await expect(invokeCard.getByRole('button', { name: 'Invoke' })).toBeEnabled({ timeout: 10_000 })
   await invokeCard.getByRole('button', { name: 'Invoke' }).click()
@@ -150,7 +151,7 @@ test('c2) input-only mid-save change aborts and keeps the input', async ({ page 
   const r = await client.post('/api/v1/applications', { data: { name: 'InOnly' } })
   const id = (await r.json()).application.id
   await page.goto(`${viteURL}/applications/${id}`)
-  await expect(page.locator('.app-status')).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('.detail-caption-status')).toBeVisible({ timeout: 10_000 })
   await page.route('**/api/v1/applications/*', async (route) => {
     if (route.request().method() === 'PUT') {
       await new Promise((rr) => setTimeout(rr, 400))
@@ -212,7 +213,7 @@ test('e) external write + my save -> 409, edits retained, reload offered', async
   const id = (await r.json()).application.id
   await page.goto(`${viteURL}/applications/${id}`)
   // wait until the page has actually loaded the app (version 1 base)
-  await expect(page.locator('.app-status')).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('.detail-caption-status')).toBeVisible({ timeout: 10_000 })
   // another session bumps the draft server-side
   const app0 = (await (await client.get(`/api/v1/applications/${id}`)).json()).application
   await client.put(`/api/v1/applications/${id}`, {
@@ -321,7 +322,7 @@ test('j) instances list End ends a running instance', async ({ page }) => {
   await row.getByRole('button', { name: 'End' }).click()
   const dialog = page.getByRole('dialog')
   await dialog.getByRole('button', { name: 'End' }).click()
-  await expect(row).toContainText('ended', { timeout: 15_000 })
+  await expect(row).toContainText('Ended', { timeout: 15_000 })
 })
 
 test('k) failed save shows "Couldn\'t save" + Retry and keeps the draft', async ({ page }) => {
@@ -351,4 +352,45 @@ test('k) failed save shows "Couldn\'t save" + Retry and keeps the draft', async 
     const rr = await client.get(`/api/v1/applications/${id}`)
     return (await rr.json()).application.code
   }, { timeout: 10_000 }).toContain('"kept":1')
+})
+
+// The Editor (and its CodeMirror draft) stays mounted across tabs —
+// switching to Invoke and back must not lose typed text (C2).
+test('l) editor draft survives switching to Invoke and back (C2)', async ({ page }) => {
+  // created through the API: the create flow is covered by a); this test
+  // is about the mounted editor, not the workspace's create preconditions
+  // earlier tests in this file may have used the per-user application
+  // quota; free one slot so this test does not depend on ordering
+  const list = (await (await client.get('/api/v1/applications')).json()).applications ?? []
+  if (list.length > 0) {
+    const old = list[list.length - 1]
+    await client.delete(`/api/v1/applications/${old.id}?version=${old.version}`)
+  }
+  const created = await client.post('/api/v1/applications', { data: { name: 'TabDraft' } })
+  const body = await created.json()
+  expect(body.application, JSON.stringify(body)).toBeDefined()
+  await page.goto(`${viteURL}/applications/${body.application.id}`)
+  const cm = page.locator('.app-cm .cm-content')
+  // a fresh app is a draft — status sits on the title line, like an instance's
+  await expect(page.locator('.detail-caption-status')).toHaveText('Draft')
+  await cm.click()
+  await page.keyboard.type('# typed note\n')
+  // ⌘/Ctrl+Enter runs from the editor, same as the toolbar button
+  await page.keyboard.press('Meta+Enter')
+  await expect(page.locator('.app-out-pre').first()).not.toContainText('Run to see output', { timeout: 30_000 })
+  await page.getByRole('link', { name: 'Invoke', exact: true }).click()
+  await expect(page.locator('section.app-card').filter({ hasText: 'Request examples' })).toBeVisible()
+  await page.getByRole('link', { name: 'Develop' }).click()
+  await expect(page.locator('.app-cm')).toContainText('typed note')
+
+  // the h1 is the name field: edit → autosave → persists across reload;
+  // Escape reverts an unsaved edit
+  const title = page.getByLabel('Application name')
+  await title.fill('Renamed app')
+  await expect(page.locator('.swap-label > span[data-on="true"]', { hasText: 'Saved' })).toBeVisible({ timeout: 15_000 })
+  await page.reload()
+  await expect(page.getByLabel('Application name')).toHaveValue('Renamed app')
+  await page.getByLabel('Application name').fill('Not this')
+  await page.keyboard.press('Escape')
+  await expect(page.getByLabel('Application name')).toHaveValue('Renamed app')
 })

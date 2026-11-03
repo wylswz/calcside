@@ -32,6 +32,10 @@ and tests.
   states are paint-only: colour, background, shadow, outline. Never
   transform, size, spacing, border width, font metrics or `content`. An
   element never moves under a stationary pointer because of its own state.
+  Icon-only header actions (`IconAction` in `DetailHeader`) keep a fixed
+  32px box; their name appears in the header's caption slot, which shows
+  the status at rest and reserves the width of its longest text, so moving
+  the pointer across the icons never moves or covers a control.
 - **S2 Floating layers stay on their anchors.** A menu or popover opens
   once at its anchor and does not follow it afterwards; together with S1
   the anchor never moves while the layer is open.

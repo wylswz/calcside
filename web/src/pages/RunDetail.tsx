@@ -49,7 +49,7 @@ export default function RunDetail() {
 				{retryable && <Button size="sm" onClick={() => setConfirm('retry')}>Retry step</Button>}
 			</>} />
 			<p className="app-dim">
-				<Link to={`/applications/${appId}`} className="link">← {appId}</Link> ·{' '}
+				<Link to={`/applications/${appId}/runs`} className="link">← {appId}</Link> ·{' '}
 				<span className="app-mono">{run.id}</span>
 				{deadline && <> · <TimeLeft expiresAt={deadline} /></>}
 			</p>

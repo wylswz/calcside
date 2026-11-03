@@ -1,4 +1,5 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import * as Tabs from '@radix-ui/react-tabs'
 import { api, currentWorkspace, type ExtensionCatalog, type ExtensionInfo, type Policy, type Secret } from '../api'
@@ -7,7 +8,7 @@ import {
   type BuildResult, type DraftError, type ExtDraft, type InstanceDraft, type InstanceSpec,
 } from '../instanceDraft'
 import { fmtBytes } from '../format'
-import { Field, inputCls } from './ui'
+import { Field, Icon, inputCls } from './ui'
 import { InstanceExtensionEditor } from './InstanceExtensionEditor'
 import { ExtensionPicker } from './ExtensionPicker'
 import { PolicyPicker } from './PolicyPicker'
@@ -46,6 +47,8 @@ interface Item { key: ItemKey; title: string; icon: ReactNode; summary: string; 
 const FilesIcon = () => <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/></svg>
 const NetworkIcon = () => <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>
 const CheckIcon = () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 5 5L20 7"/></svg>
+const PolicyIcon = () => <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l7 2.5V11c0 4.4-2.9 8-7 9.5C7.9 19 5 15.4 5 11V5.5L12 3z"/></svg>
+const SandboxIcon = () => <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>
 
 const capabilityLabel = (name: string) => name === 'net' ? 'Network' : name === 'fs' ? 'Files' : name
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -211,8 +214,10 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
     setRemoved(null)
     setFlash(key)
   }
-  // Adding twice never navigates or removes: a second click only points
-  // at the row that is already in the summary.
+  // Adding never navigates away: the row lands in the summary. Clicking
+  // an added card toggles it off through remove(), which keeps an undo
+  // row in the same slot (F2). A double click still adds exactly once —
+  // the second click is ignored rather than read as a remove (F1).
   const addFiles = () => {
     if (draft.fs) return setFlash('fs')
     set({ fs: { quotaBytes: 67108864, extra: {} } })
@@ -223,6 +228,8 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
     set({ net: { allowHosts: [], methods: ['GET', 'POST'], extra: {} } })
     append('net')
   }
+  const toggleFiles = (e: MouseEvent) => { if (e.detail > 1) return; if (draft.fs) remove('fs', 'Files'); else addFiles() }
+  const toggleNetwork = (e: MouseEvent) => { if (e.detail > 1) return; if (draft.net) remove('net', 'Network'); else addNetwork() }
   const addExtension = (entry: { name: string; source: string }) => {
     const id = extNext.current++
     extIds.current = [...extIds.current, id]
@@ -232,9 +239,9 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
     // A custom extension has nothing usable until it has a source.
     if (!entry.source) openSettings(`ext:${id}`)
   }
-  const pointAtExtension = (entry: ExtensionInfo) => {
+  const removeExtension = (entry: ExtensionInfo) => {
     const index = draft.exts.findIndex((e) => e.source === entry.source)
-    if (index >= 0) setFlash(`ext:${extIds.current[index]}`)
+    if (index >= 0) remove(`ext:${extIds.current[index]}`, draft.exts[index].alias)
   }
   const setExtError = (id: number, message: string) =>
     setExtErrors((m) => { const n = new Map(m); if (message) n.set(id, message); else n.delete(id); return n })
@@ -393,36 +400,46 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
                 Settings{errors.length > 0 && <span className="tab-badge" aria-label={`${errors.length} issues`}>{errors.length}</span>}
               </Tabs.Trigger>
             </Tabs.List>
-            <button type="button" className="text-btn underline" onClick={toggleAdvanced}>Advanced JSON</button>
+            <button type="button" className="text-btn" onClick={toggleAdvanced}>Advanced JSON</button>
           </div>
 
           {/* forceMount keeps both views mounted so editor state survives switching */}
           <Tabs.Content value="capabilities" forceMount className="spec-palette">
-            <p className="spec-pane-note">Optional. {application ? 'Applied when published.' : 'Settings are fixed after creation.'}</p>
             <div className="ability-choices">
-              <button type="button" className="ability-choice" data-selected={!!draft.fs} aria-label={draft.fs ? 'Files added' : 'Add Files'} onClick={addFiles}>
+              <button type="button" className="ability-choice" data-selected={!!draft.fs} title="Bounded virtual storage" aria-label={draft.fs ? 'Remove Files' : 'Add Files'} onClick={toggleFiles}>
                 <FilesIcon />
-                <span className="min-w-0 flex-1"><strong>Files</strong><small>bounded virtual storage</small></span>
-                <span className="ability-add">{draft.fs ? <><CheckIcon /> Added</> : 'Add'}</span>
+                <span className="min-w-0 flex-1"><strong>Files</strong></span>
+                <span className="ability-add">{draft.fs
+                  ? <span className="swap-hover"><span className="swap-rest"><CheckIcon /> Added</span><span className="swap-alt">Remove</span></span>
+                  : 'Add'}</span>
               </button>
-              <button type="button" className="ability-choice" data-selected={!!draft.net} aria-label={draft.net ? 'Network added' : 'Add Network'} onClick={addNetwork}>
+              <button type="button" className="ability-choice" data-selected={!!draft.net} title="Outbound HTTP" aria-label={draft.net ? 'Remove Network' : 'Add Network'} onClick={toggleNetwork}>
                 <NetworkIcon />
-                <span className="min-w-0 flex-1"><strong>Network</strong><small>outbound HTTP</small></span>
-                <span className="ability-add">{draft.net ? <><CheckIcon /> Added</> : 'Add'}</span>
+                <span className="min-w-0 flex-1"><strong>Network</strong></span>
+                <span className="ability-add">{draft.net
+                  ? <span className="swap-hover"><span className="swap-rest"><CheckIcon /> Added</span><span className="swap-alt">Remove</span></span>
+                  : 'Add'}</span>
               </button>
             </div>
             <div className="extensions-block">
-              <h4 className="mb-3 text-sm font-semibold text-ink">Extensions</h4>
+              <div className="mb-3 flex items-baseline justify-between gap-3">
+                <h4 className="text-sm font-semibold text-ink">Extensions</h4>
+                <button type="button" className="text-btn" aria-label="Configure a custom extension" onClick={() => addExtension({ name: '', source: '' })}>Custom…</button>
+              </div>
               <ExtensionPicker entries={extensions} selectedSources={selectedSources} loading={catalog.isPending} error={catalog.isError}
-                onRetry={() => catalog.refetch()} onAdd={addExtension} onShow={pointAtExtension} onCustom={() => addExtension({ name: '', source: '' })} />
+                onRetry={() => catalog.refetch()} onAdd={addExtension} onRemove={removeExtension} />
             </div>
             <div className="policies-block">
-              <h4 className="mb-3 text-sm font-semibold text-ink">Policies</h4>
-              <p className="spec-pane-note">Policies constrain what capabilities may do; they never grant access.</p>
+              <div className="mb-3 flex items-baseline justify-between gap-3">
+                <h4 className="text-sm font-semibold text-ink">Policies</h4>
+                <span className="flex items-baseline gap-3">
+                  {hasDefaults && draft.policies !== null && <button type="button" className="text-btn" onClick={() => set({ policies: null })}>Use default policies</button>}
+                  <Link to="/workspace/policies" className="text-btn">New policy</Link>
+                </span>
+              </div>
               <PolicyPicker entries={policies.data?.policies ?? []} selected={selectedPolicies}
                 loading={policies.isPending} error={policies.isError} onRetry={() => policies.refetch()}
-                onToggle={togglePolicy} onRemove={removePolicy}
-                showUseDefaults={hasDefaults && draft.policies !== null} onUseDefaults={() => set({ policies: null })} />
+                onToggle={togglePolicy} onRemove={removePolicy} />
             </div>
           </Tabs.Content>
 
@@ -465,59 +482,60 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
         </Tabs.Root>
 
         <aside className="spec-selection" aria-label={application ? 'Application settings' : 'This instance'}>
-          <h3 className="spec-pane-title">{application ? 'This application' : 'This instance'}</h3>
-          {!application && (
-            hideBasics ? (
+          <h3 className="spec-aside-title">{application ? 'This application' : 'This instance'}</h3>
+          {!application && !hideBasics && (
+            <div className="spec-identity">
+              <Field label="Name"><input className={inputCls} value={draft.name} placeholder="e.g. research run" onChange={(e) => set({ name: e.target.value })} /></Field>
               <Field label="Lifetime (seconds)"><input className={inputCls} type="number" min="1" value={draft.ttlSeconds} onChange={(e) => set({ ttlSeconds: e.target.value === '' ? '' : Number(e.target.value) })} /></Field>
-            ) : (
-              <div className="spec-identity">
-                <Field label="Name"><input className={inputCls} value={draft.name} placeholder="e.g. research run" onChange={(e) => set({ name: e.target.value })} /></Field>
-                <Field label="Lifetime (seconds)"><input className={inputCls} type="number" min="1" value={draft.ttlSeconds} onChange={(e) => set({ ttlSeconds: e.target.value === '' ? '' : Number(e.target.value) })} /></Field>
-              </div>
-            )
+            </div>
           )}
-          <div>
-            <p className="sidebar-label">Capabilities</p>
-            <div className="selected-list">
-              {rows.length === 0 && (
-                <div className="selected-row is-empty">
-                  <div className="min-w-0 flex-1">
-                    <h4 className="config-item-title">Compute only</h4>
-                    <span className="selected-status">Starlark and the standard library</span>
+          <div className="selected-list">
+            {rows.length === 0 && selectedPolicies.length === 0 ? (
+              <div className="selection-empty">
+                <span className="selection-empty-icon" aria-hidden="true"><SandboxIcon /></span>
+                <h4 className="selection-empty-title">Compute only</h4>
+                <p className="selection-empty-sub">Starlark and the standard library</p>
+              </div>
+            ) : (
+              <>
+                {rows}
+                {selectedPolicies.map((name) => (
+                  <div key={name} data-row={`policy:${name}`} className="selected-row">
+                    <span className="config-item-icon"><PolicyIcon /></span>
+                    <div className="min-w-0 flex-1">
+                      <p className="config-item-title">{name}</p>
+                      <span className="selected-status">{policyKind(name) === 'builtin' ? 'Built-in' : policyKind(name) === 'rego' ? 'Workspace policy' : 'Unknown'}</span>
+                    </div>
+                    <button type="button" className="text-btn" aria-label={`Remove policy ${name}`} onClick={() => removePolicy(name)}>Remove</button>
                   </div>
-                </div>
-              )}
-              {rows}
-            </div>
+                ))}
+              </>
+            )}
           </div>
-          <div>
-            <p className="sidebar-label">Policies</p>
-            <div className="selected-list">
-              {selectedPolicies.length === 0 && (
-                <div className="selected-row is-empty">
-                  <div className="min-w-0 flex-1">
-                    <h4 className="config-item-title">No policies</h4>
-                    <span className="selected-status">Add one to restrict capabilities</span>
-                  </div>
-                </div>
-              )}
-              {selectedPolicies.map((name) => (
-                <div key={name} data-row={`policy:${name}`} className="selected-row">
-                  <div className="min-w-0 flex-1">
-                    <p className="config-item-title">{name}</p>
-                    <span className="selected-status">{policyKind(name) === 'builtin' ? 'Built-in' : policyKind(name) === 'rego' ? 'Workspace policy' : 'Unknown'}</span>
-                  </div>
-                  <button type="button" className="text-btn" aria-label={`Remove policy ${name}`} onClick={() => removePolicy(name)}>Remove</button>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="sidebar-links">
-            <button type="button" onClick={() => openSettings('limits')}>
-              Limits <span className={sectionIssues(['Limits']) ? 'is-warn' : ''}>{limitsSummary}</span>
+          <div className="spec-props">
+            {!application && hideBasics && (
+              <div className="spec-prop">
+                <span className="spec-prop-label">Lifetime</span>
+                <span className="spec-prop-value">
+                  <input className={inputCls + ' spec-prop-input'} type="number" min="1" aria-label="Lifetime (seconds)"
+                    value={draft.ttlSeconds} onChange={(e) => set({ ttlSeconds: e.target.value === '' ? '' : Number(e.target.value) })} />
+                  <span className="spec-prop-suffix">s</span>
+                </span>
+              </div>
+            )}
+            <button type="button" className="spec-prop" onClick={() => openSettings('limits')}>
+              <span className="spec-prop-label">Limits</span>
+              <span className="spec-prop-value">
+                <span className={sectionIssues(['Limits']) ? 'is-warn' : ''}>{limitsSummary}</span>
+                <Icon name="chevron" className="spec-prop-chevron" />
+              </span>
             </button>
-            <button type="button" onClick={() => openSettings('inputs')}>
-              Inputs <span className={sectionIssues(['Variables', 'Secrets', 'Labels']) ? 'is-warn' : ''}>{inputsSummary}</span>
+            <button type="button" className="spec-prop" onClick={() => openSettings('inputs')}>
+              <span className="spec-prop-label">Inputs</span>
+              <span className="spec-prop-value">
+                <span className={sectionIssues(['Variables', 'Secrets', 'Labels']) ? 'is-warn' : ''}>{inputsSummary}</span>
+                <Icon name="chevron" className="spec-prop-chevron" />
+              </span>
             </button>
           </div>
           {alert}

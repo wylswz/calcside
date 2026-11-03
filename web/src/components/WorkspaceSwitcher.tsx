@@ -20,7 +20,9 @@ export default function WorkspaceSwitcher() {
     if (list.length && !list.find((w) => w.id === cur)) setWorkspace(null)
   }, [list, cur])
 
-  if (!list.length) return null
+  // With a single workspace the name is already on the profile link; the
+  // switcher stays out of the header entirely.
+  if (list.length <= 1) return null
   const pick = (id: string | null) => {
     setWorkspace(id)
     qc.clear()
@@ -40,7 +42,7 @@ export default function WorkspaceSwitcher() {
     <div className="flex items-center">
       {list.length > 1 ? (
         <Menu trigger={
-          <button className="border border-line px-2 py-1 text-xs text-ink transition-colors hover:border-ink aria-expanded:border-ink">
+          <button className="rounded-[6px] border border-[var(--edge-strong)] px-2.5 py-1.5 text-xs text-ink transition-colors hover:bg-surface">
             {active?.name ?? 'workspace'} {active?.personal ? '' : `· ${active?.role}`} ▾
           </button>
         }>
@@ -54,9 +56,7 @@ export default function WorkspaceSwitcher() {
           <MenuItem onSelect={() => setShowNew(true)}>New workspace…</MenuItem>
           {active && <MenuItem onSelect={() => nav(`/workspaces/${active.id}`)}>Workspace settings</MenuItem>}
         </Menu>
-      ) : (
-        <span className="text-xs text-mute">{active?.name}</span>
-      )}
+      ) : null}
       {showNew && (
         <Modal title="New workspace" onClose={() => setShowNew(false)} footer={
           <>

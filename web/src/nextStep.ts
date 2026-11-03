@@ -33,7 +33,7 @@ export function attentionText(inst: { status: string; activity?: { runs?: number
   const ended = inst.status !== 'running'
   if (a?.denied_runs) return { text: `${a.denied_runs} denied`, tone: 'danger', link: false }
   if (a?.failed_runs) return { text: `${a.failed_runs} failed`, tone: 'warn', link: false }
-  if (!a?.runs) return ended ? { text: '—', tone: 'mute', link: false } : { text: 'no runs yet', tone: 'mute', link: true }
+  if (!a?.runs) return ended ? { text: '—', tone: 'mute', link: false } : { text: 'No runs yet', tone: 'mute', link: true }
   return { text: `${a.runs} run${a.runs === 1 ? '' : 's'}`, tone: 'sec', link: false }
 }
 

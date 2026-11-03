@@ -1,6 +1,7 @@
 import React from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { Link } from 'react-router-dom'
 import type { InstanceStatus } from '../api'
 import type { Outcome, RunBy } from '../activity'
 import { fmtCountdown } from '../format'
@@ -84,7 +85,7 @@ export function TimeLeft({ expiresAt }: { expiresAt: string }) {
   return <span className="whitespace-nowrap text-xs text-sec">{text} left</span>
 }
 
-export function Icon({ name, className = '' }: { name: 'preview' | 'download' | 'upload' | 'refresh' | 'back' | 'folder' | 'file' | 'code' | 'play' | 'stop' | 'desktop' | 'mobile' | 'chevron'; className?: string }) {
+export function Icon({ name, className = '' }: { name: 'preview' | 'download' | 'upload' | 'refresh' | 'back' | 'folder' | 'file' | 'code' | 'play' | 'stop' | 'desktop' | 'mobile' | 'chevron' | 'publish' | 'more' | 'trash' | 'key' | 'check-circle' | 'alert-triangle' | 'clock' | 'circle-dashed' | 'circle-slash' | 'send' | 'history' | 'check' | 'users' | 'clipboard' | 'link'; className?: string }) {
   const paths = {
     preview: <><path d="M2 10s3-6 8-6 8 6 8 6-3 6-8 6-8-6-8-6Z" /><circle cx="10" cy="10" r="2.5" /></>,
     download: <><path d="M10 2v10m-4-4 4 4 4-4M3 13v4h14v-4" /></>,
@@ -99,6 +100,21 @@ export function Icon({ name, className = '' }: { name: 'preview' | 'download' | 
     desktop: <><path d="M2 3h16v11H2ZM10 14v4M6 18h8" /></>,
     mobile: <><rect x="5" y="2" width="10" height="16" /><path d="M9 15h2" /></>,
     chevron: <path d="m7 4 6 6-6 6" />,
+    publish: <path d="M10 12V4m-3.5 3.5L10 4l3.5 3.5M4 13v4h12v-4" />,
+    more: <><circle cx="4.5" cy="10" r="1.2" fill="currentColor" stroke="none" /><circle cx="10" cy="10" r="1.2" fill="currentColor" stroke="none" /><circle cx="15.5" cy="10" r="1.2" fill="currentColor" stroke="none" /></>,
+    trash: <path d="M3 5h14M8 5V3h4v2M5 5l1 12h8l1-12" />,
+    key: <><circle cx="7" cy="12" r="3" /><path d="M10 12h7v3M14 12v2.5" /></>,
+    'check-circle': <><circle cx="10" cy="10" r="7" /><path d="m7 10 2 2 4-4" /></>,
+    'alert-triangle': <path d="M10 3 18 17H2L10 3ZM10 8v4M10 14.5v.5" />,
+    clock: <><circle cx="10" cy="10" r="7" /><path d="M10 6v4l3 2" /></>,
+    'circle-dashed': <circle cx="10" cy="10" r="7" strokeDasharray="2.5 2" />,
+    'circle-slash': <><circle cx="10" cy="10" r="7" /><path d="m5.5 5.5 9 9" /></>,
+    send: <path d="M17 3 3 9.5l6 2 2 6L17 3ZM9 11.5 17 3" />,
+    history: <><path d="M3 10a7 7 0 1 1 2 5M3 10V6m0 4h4" /><path d="M10 7v3l2.5 1.5" /></>,
+    check: <path d="m4 10.5 4 4 8-9" />,
+    users: <><circle cx="7.5" cy="7" r="2.5" /><path d="M3 16c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4M13 4.5a2.5 2.5 0 0 1 0 5M14.5 12.3c1.5.5 2.5 1.8 2.5 3.7" /></>,
+    clipboard: <><path d="M7.5 2.5h5v3h-5Z" /><path d="M7.5 4H4v13.5h12V4h-3.5M7 10h6M7 13h4" /></>,
+    link: <path d="m8 12 4-4M9.5 5.5l1-1a3.2 3.2 0 0 1 4.5 4.5l-1 1M10.5 14.5l-1 1A3.2 3.2 0 0 1 5 11l1-1" />,
   }
   return <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" className={`h-4 w-4 shrink-0 ${className}`} aria-hidden="true">{paths[name]}</svg>
 }
@@ -134,11 +150,116 @@ export function RevealNew({ count, moved, onClick }: { count: number; moved: boo
 export const Button = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'danger'; size?: 'sm' }>(
   function Button({ variant, size, className, ...rest }, ref) {
     // Material (fill, edge, shadow, motion) comes from material.css.
-    const base = 'inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium disabled:pointer-events-none '
-    const sz = size === 'sm' ? 'h-7 px-2.5 text-xs' : 'h-8 px-3.5 text-sm'
+    const base = 'inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium tracking-[-0.005em] disabled:pointer-events-none '
+    const sz = size === 'sm' ? 'h-7 px-3 text-xs' : 'h-8 px-3.5 text-[13px]'
     return <button ref={ref} data-ui="button" data-variant={variant ?? 'default'} className={base + sz + (className ? ' ' + className : '')} {...rest} />
   },
 )
+
+// Icon actions in a DetailHeader announce their name in the header's
+// caption slot (where the status sits) instead of widening or overlaying,
+// so no button ever moves or is covered while the pointer travels across
+// the row (S1/S3/F1).
+type Hint = { show: (label: string, now?: boolean) => void; clear: () => void; register: (label: string) => () => void }
+const HintContext = React.createContext<Hint | null>(null)
+
+// IconAction is a fixed-size icon button. Inside a DetailHeader its name
+// appears in the caption slot on hover/focus; elsewhere it falls back to
+// the native tooltip. It forwards its ref so it can be a menu trigger.
+export const IconAction = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  icon: React.ReactNode
+  label: string
+  variant?: 'primary' | 'danger'
+}>(function IconAction({ icon, label, variant, className, onPointerEnter, onFocus, onBlur, ...rest }, ref) {
+  const hint = React.useContext(HintContext)
+  React.useEffect(() => hint?.register(label), [hint, label])
+  return (
+    <Button ref={ref} variant={variant} aria-label={rest['aria-label'] ?? label} title={hint ? undefined : label}
+      className={`!w-8 !px-0${className ? ' ' + className : ''}`}
+      onPointerEnter={(e) => { hint?.show(label); onPointerEnter?.(e) }}
+      onFocus={(e) => { if (e.currentTarget.matches(':focus-visible')) hint?.show(label, true); onFocus?.(e) }}
+      onBlur={(e) => { hint?.clear(); onBlur?.(e) }}
+      {...rest}>
+      {icon}
+    </Button>
+  )
+})
+
+// DetailHeader is the one header for an object's own page (instance,
+// application): breadcrumb with the id, the title on the left, and on the
+// same line a caption slot (status at rest, the hovered action's name
+// while pointing at an icon) followed by the actions. Only the
+// description sits under the title. The slot reserves the width of its
+// longest text, so swapping never moves anything (S4).
+export function DetailHeader({ back, id, title, status, actions, description }: {
+  back: { to: string; label: string }
+  id: string
+  title: React.ReactNode
+  status?: React.ReactNode
+  actions?: React.ReactNode
+  description?: React.ReactNode
+}) {
+  const [hint, setHint] = React.useState<string | null>(null)
+  const [labels, setLabels] = React.useState<string[]>([])
+  const current = React.useRef<string | null>(null)
+  const timer = React.useRef<number | undefined>(undefined)
+  const group = React.useRef<HTMLDivElement>(null)
+  const ctx = React.useMemo<Hint>(() => {
+    const set = (v: string | null) => { current.current = v; setHint(v) }
+    return {
+      // a short intent delay keeps a pointer sweeping past from flashing
+      // names; once a name shows, moving to the next icon swaps at once
+      show: (label, now) => {
+        window.clearTimeout(timer.current)
+        if (now || current.current !== null) set(label)
+        else timer.current = window.setTimeout(() => set(label), 150)
+      },
+      clear: () => {
+        window.clearTimeout(timer.current)
+        if (!group.current?.matches(':hover')) set(null)
+      },
+      register: (label) => {
+        setLabels((ls) => (ls.includes(label) ? ls : [...ls, label]))
+        return () => setLabels((ls) => ls.filter((l) => l !== label))
+      },
+    }
+  }, [])
+  React.useEffect(() => () => window.clearTimeout(timer.current), [])
+  return (
+    <header className="detail-header">
+      <p className="detail-crumb">
+        <Link to={back.to} className="link">← {back.label}</Link>
+        <span className="text-mute"> / <span className="font-mono">{id}</span></span>
+      </p>
+      <div className="detail-title-row">
+        <h1 className="detail-title">{title}</h1>
+        <div className="detail-actions" ref={group}
+          onPointerLeave={() => { window.clearTimeout(timer.current); current.current = null; setHint(null) }}>
+          <span className="detail-caption" data-hint={hint !== null ? 'on' : 'off'}>
+            <span className="detail-caption-status">{status}</span>
+            {labels.map((l) => <span key={l} className="detail-caption-hint" data-on={l === hint} aria-hidden="true">{l}</span>)}
+          </span>
+          <HintContext.Provider value={ctx}>{actions}</HintContext.Provider>
+        </div>
+      </div>
+      {description && <p className="detail-desc">{description}</p>}
+    </header>
+  )
+}
+
+// AppStatus mirrors InstanceStatus: dot + label, one display for the
+// deployment state of an application.
+const appStatus: Record<string, { label: string; dot: string }> = {
+  draft: { label: 'Draft', dot: 'border border-mute bg-transparent' },
+  preparing: { label: 'Deploying', dot: 'bg-warn' },
+  ready: { label: 'Ready', dot: 'bg-live' },
+  degraded: { label: 'Degraded', dot: 'bg-warn' },
+  disabled: { label: 'Disabled', dot: 'border border-mute bg-transparent' },
+}
+export function AppStatus({ status }: { status: string }) {
+  const s = appStatus[status] ?? { label: status, dot: 'border border-mute bg-transparent' }
+  return <span className="inline-flex items-center gap-1.5 text-xs text-sec"><span className={`inline-block h-2 w-2 rounded-full ${s.dot}`} />{s.label}</span>
+}
 
 export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -161,7 +282,7 @@ export function PageHeader({ title, children, actions }: {
   return (
     <div className="mb-8 flex flex-wrap items-end gap-x-8 gap-y-4">
       <div className="min-w-0 flex-1">
-        <h1 className="text-[30px] font-semibold leading-[36px] tracking-tight text-ink">{title}</h1>
+        <h1 className="text-[28px] font-semibold leading-[34px] tracking-[-0.022em] text-ink">{title}</h1>
         {children && <p className="mt-3 max-w-3xl text-sm leading-[22px] text-sec">{children}</p>}
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
@@ -197,7 +318,7 @@ export function EmptyRow({ cols, children }: { cols: number; children: React.Rea
   )
 }
 
-export function Loading({ label = 'loading' }: { label?: string }) {
+export function Loading({ label = 'Loading…' }: { label?: string }) {
   return (
     <div className="flex items-center gap-3 text-sm text-mute">
       <span className="inline-block h-3 w-3 motion-safe:animate-spin border-2 border-mute border-t-transparent rounded-full" aria-hidden />
@@ -392,20 +513,20 @@ export function InstanceStatus({ inst, now }: { inst: { status: string; created_
       const m = Math.max(0, Math.floor(left / 60000))
       const sec = Math.max(0, Math.floor((left % 60000) / 1000))
       dot = <span className="inline-block h-2 w-2 rounded-full bg-warn" />
-      label = `expiring · ${m}:${String(sec).padStart(2, '0')}`
+      label = `Expiring · ${m}:${String(sec).padStart(2, '0')}`
     } else {
       const mins = Math.floor(left / 60000)
       dot = <span className="inline-block h-2 w-2 rounded-full bg-live" />
-      label = mins >= 60 ? `live · ${Math.floor(mins / 60)}h ${mins % 60}m left`
-        : mins >= 1 ? `live · ${mins}m left`
-          : `live · ${Math.max(0, Math.floor(left / 1000))}s left`
+      label = mins >= 60 ? `Live · ${Math.floor(mins / 60)}h ${mins % 60}m left`
+        : mins >= 1 ? `Live · ${mins}m left`
+          : `Live · ${Math.max(0, Math.floor(left / 1000))}s left`
     }
   } else if (inst.status === 'pending') {
     dot = <span className="inline-block h-2 w-2 rounded-full bg-warn" />
-    label = 'pending · extensions'
+    label = 'Pending · extensions'
   } else {
     dot = <span className="inline-block h-2 w-2 rounded-full border border-mute bg-transparent" />
-    label = inst.status === 'lost' ? 'ended · lost' : 'ended'
+    label = inst.status === 'lost' ? 'Ended · lost' : 'Ended'
   }
   return <span className="inline-flex items-center gap-1.5 text-xs text-sec">{dot}{label}</span>
 }

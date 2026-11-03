@@ -24,22 +24,6 @@ export function CreateGuide({ kind }: { kind: CreateKind }) {
             ? 'A live workbench that stays open while you explore. An agent connects over MCP and calls it again and again — every run shares the same memory and files.'
             : 'A durable API you publish, version and call. Callers send JSON to main(input) and get JSON back — each call starts from a fresh session.'}
         </p>
-        <ul className="create-guide-points">
-          {instance ? (
-            <>
-              <li>Globals and files persist between runs; the process stays warm.</li>
-              <li>Best for exploring, debugging and long-running work.</li>
-              <li>Every call shows up in the run history.</li>
-            </>
-          ) : (
-            <>
-              <li>Publish a version when the code is ready to serve.</li>
-              <li>Input/output schemas pin the JSON contract.</li>
-              <li>Each call is an independent run with its own audit trail.</li>
-              <li>API keys decide who can call it.</li>
-            </>
-          )}
-        </ul>
       </article>
     </section>
   )

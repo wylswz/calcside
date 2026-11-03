@@ -182,7 +182,7 @@ test('call examples tabs show real request shapes', async ({ page }) => {
   const r = await client.post('/api/v1/applications', { data: { name: 'Examples app' } })
   expect(r.status()).toBe(200)
   const id = (await r.json()).application.id
-  await page.goto(`${viteURL}/applications/${id}`)
+  await page.goto(`${viteURL}/applications/${id}/invoke`)
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: viteURL })
   const examples = page.locator('.app-examples')
   await examples.scrollIntoViewIfNeeded()

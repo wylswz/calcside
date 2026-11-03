@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError, Interrupt, resumeInterrupt } from '../api'
 import { eventParse, resolverLabel, fmtDateTime, resumeDraftKey } from '../interrupts'
@@ -47,6 +48,8 @@ export function ResumeForm({ interrupt: i, scope, onResumed }: {
 				qc.setQueryData(['run', i.run_id], (old: { interrupts?: Interrupt[] } | undefined) =>
 					old?.interrupts ? { ...old, interrupts: old.interrupts.map((x) => (x.id === i.id ? { ...x, status: 'resolved', can_resume: false } : x)) } : old)
 				qc.invalidateQueries({ queryKey: ['run', i.run_id] })
+				// the Inbox card reads ['interrupt', i.id] directly
+				qc.invalidateQueries({ queryKey: ['interrupt', i.id] })
 				onResumed?.()
 			})
 			.catch((e) => {
@@ -58,7 +61,7 @@ export function ResumeForm({ interrupt: i, scope, onResumed }: {
 			})
 			.finally(() => setBusy(false))
 	}
-	const submitLabel = busy ? 'Resuming…' : resumed ? 'Resumed — running handler…' : 'Resume'
+	const submitLabel = busy ? 'Resuming…' : resumed ? 'Resumed' : 'Resume'
 
 	return (
 		<div>
@@ -78,8 +81,9 @@ export function ResumeForm({ interrupt: i, scope, onResumed }: {
 							if (!p.ok) { setErr(p.message); return }
 							setConfirmEv({ json: p.json })
 						}}>
-						<SwapLabel show={submitLabel} options={['Resume', 'Resuming…', 'Resumed — running handler…']} />
+						<SwapLabel show={submitLabel} options={['Resume', 'Resuming…', 'Resumed']} />
 					</Button>
+					{resumed && <Link className="link" to={`/applications/${i.application_id}/runs/${i.run_id}`}>View run</Link>}
 				</div>
 			</div>
 			{confirmEv && (

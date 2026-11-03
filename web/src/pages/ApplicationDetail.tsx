@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, Navigate, NavLink, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { api, ApiError, Application, Run, workspaces } from '../api'
 import { applicationDescription } from '../activity'
-import { Button, Confirm, Loading, Notice, PageHeader, RevealNew, SwapLabel } from '../components/ui'
+import { AppStatus, Button, Confirm, DetailHeader, Icon, Loading, Menu, MenuItem, Notice, IconAction, RevealNew, SwapLabel } from '../components/ui'
 import { cmTheme } from '../components/codemirror'
 import { useApplicationEditor } from '../components/editor'
 import { RunProgress, useRunProgress } from '../components/RunProgress'
@@ -35,6 +35,24 @@ const statusHint: Record<string, string> = {
   preparing: 'Deploying… Invoke will be enabled when ready.',
   degraded: 'Deployment unhealthy.',
   disabled: 'Deployment disabled.',
+}
+
+// The Develop head's quiet save indicator — icon + swapped label share
+// one fixed slot so the state text can change without moving anything.
+const Spinner = () => <span className="inline-block h-3.5 w-3.5 motion-safe:animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden />
+
+function SaveState({ state }: { state: string }) {
+  const icon = state === 'Saving…'
+    ? <span className="inline-block h-3 w-3 motion-safe:animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden />
+    : state === 'Saved' ? <Icon name="check" className="!h-3.5 !w-3.5" />
+    : state === 'Unsaved' ? <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
+    : <Icon name="alert-triangle" className="!h-3.5 !w-3.5" />
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-xs ${state === "Couldn't save" ? 'text-warn-text' : 'text-sec'}`}>
+      {icon}
+      <SwapLabel show={state} options={['Saved', 'Saving…', 'Unsaved', "Couldn't save"]} />
+    </span>
+  )
 }
 
 function draftOf(a: Application): Draft {
@@ -145,6 +163,11 @@ type Props = { app: Application; role: string; userID: string; qc: ReturnType<ty
 
 function Editor({ app, role, userID, qc }: Props) {
   const nav = useNavigate()
+  // Sub-page from /applications/:id/* — '' is Develop; anything unknown
+  // bounces back there. Only the body switches; the Editor (drafts,
+  // busy state, invoke input/result) stays mounted across tabs (C2).
+  const sub = useParams()['*'] ?? ''
+  const tab = sub === '' ? 'develop' : (sub === 'invoke' || sub === 'runs' ? sub : null)
   const scope = scopeKey(userID, app.workspace_id, app.id)
   const [init] = useState(() => loadSaved(scope, app))
   const [draft, setDraft] = useState<Draft>(init.s.draft)
@@ -163,7 +186,6 @@ function Editor({ app, role, userID, qc }: Props) {
   const [keyOpen, setKeyOpen] = useState(false)
   const [published, setPublished] = useState(false)
   const [reloadOpen, setReloadOpen] = useState<Application | null>(null)
-  const [adv, setAdv] = useState(true)
   // SpecForm remount key: bumped on reset so a corrupt stored spec is
   // re-parsed, never remounted while the user is editing.
   const [specKey, setSpecKey] = useState(0)
@@ -323,10 +345,15 @@ function Editor({ app, role, userID, qc }: Props) {
         e.preventDefault()
         if (view === 'edit' && !corrupt && busy === '' && fp(latest.current) !== latestBase.current.fp) saveRef.current()
       }
+      // ⌘/Ctrl+Enter runs — same guard as the toolbar button.
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault()
+        if (view === 'edit' && !corrupt && busy === '' && specErrs.length === 0) runRef.current()
+      }
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [view, corrupt, busy])
+  }, [view, corrupt, busy, specErrs])
 
   const onRun = () => guarded('run', async () => {
     const s = await attemptSave()
@@ -343,6 +370,8 @@ function Editor({ app, role, userID, qc }: Props) {
     setOutdated(false)
     setRun(r)
   })
+  const runRef = useRef(onRun)
+  runRef.current = onRun
 
   const onPublish = () => guarded('publish', async () => {
     const s = await attemptSave()
@@ -398,30 +427,74 @@ function Editor({ app, role, userID, qc }: Props) {
   const saveState = busy === 'save' ? 'Saving…' : saveFailed ? "Couldn't save" : fpDirty ? 'Unsaved' : 'Saved'
   return (
     <div className="app-page app-editor">
-      <PageHeader title={draft.name || 'Application'}
-        actions={view === 'edit' ? <Button variant="danger" onClick={() => setDelOpen(true)}>Delete</Button> : undefined}>
-        <span className={`app-status app-status-${app.status}`}>{app.status}</span>{' '}
-        {app.has_unpublished_changes && <span className="app-dim">unpublished changes</span>}{' '}
-        <span className="app-dim"><SwapLabel show={saveState} options={['Saved', 'Saving…', 'Unsaved', "Couldn't save"]} /></span>{' '}
-        {saveFailed && view === 'edit' && <Button size="sm" onClick={saveNow} disabled={busy !== ''}>Retry</Button>}
-      </PageHeader>
-      <p className="app-dim"><Link to="/applications" className="link">← Applications</Link> · <span className="app-mono">{app.id}</span></p>
-      {applicationDescription(app) && <p className="app-dim max-w-3xl">{applicationDescription(app)}</p>}
+      {/* Same header as InstanceDetail: lifecycle actions (Publish,
+          More → Delete) sit with the status on the title line; only the
+          description sits under the title. */}
+      <DetailHeader back={{ to: '/applications', label: 'Applications' }} id={app.id}
+        status={<AppStatus status={app.status} />}
+        description={applicationDescription(app)}
+        title={view === 'edit' ? (
+            // the title IS the name field — same h1 metrics, sized to its
+            // text by a hidden mirror; hover/focus are paint-only (S1)
+            <span className="app-title-field">
+              <span className="app-title-mirror" aria-hidden="true">{draft.name || 'Untitled application'}</span>
+              <input className="app-title-input" aria-label="Application name" placeholder="Untitled application"
+                maxLength={128} value={draft.name} onChange={(e) => edit({ name: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.currentTarget.blur()
+                  if (e.key === 'Escape') { edit({ name: base.draft.name }); e.currentTarget.blur() }
+                }} />
+            </span>
+          ) : (draft.name || 'Application')}
+        actions={view === 'edit' && <>
+          {/* the primary lifecycle action keeps its text; a dot marks
+              unpublished changes without changing the button's box */}
+          <Button variant="primary" className="relative" onClick={onPublish} disabled={busy !== '' || corrupt || specErrs.length > 0}
+            aria-busy={busy === 'publish'} aria-description={app.has_unpublished_changes ? 'Unpublished changes' : undefined}
+            title={app.has_unpublished_changes ? 'Unpublished changes' : undefined}>
+            {busy === 'publish' ? <Spinner /> : <Icon name="publish" className="!h-3.5 !w-3.5" />}
+            <SwapLabel show={busy === 'publish' ? 'Publishing…' : 'Publish'} options={['Publish', 'Publishing…']} />
+            {app.has_unpublished_changes && <span className="btn-badge" aria-hidden="true" />}
+          </Button>
+          <Menu trigger={<IconAction label="More" aria-label="More actions" icon={<Icon name="more" />} />}>
+            <MenuItem tone="danger" onSelect={() => setDelOpen(true)}>
+              <Icon name="trash" className="!h-3.5 !w-3.5" />Delete application
+            </MenuItem>
+          </Menu>
+        </>} />
 
+      {tab === null && <Navigate to={`/applications/${app.id}`} replace />}
+      <nav className="workspace-tabs app-tabs" aria-label="Application sections">
+        <NavLink to={`/applications/${app.id}`} end><Icon name="code" className="!h-3.5 !w-3.5" />Develop</NavLink>
+        <NavLink to={`/applications/${app.id}/invoke`}><Icon name="send" className="!h-3.5 !w-3.5" />Invoke</NavLink>
+        <NavLink to={`/applications/${app.id}/runs`}><Icon name="history" className="!h-3.5 !w-3.5" />Runs</NavLink>
+      </nav>
+
+      {/* develop body stays mounted (hidden) across tabs so the editor
+          draft, run output and SpecForm state are never lost (C2) */}
+      <div hidden={tab !== 'develop'}>
       <section className="app-card">
         <div className="app-card-head">
           <span className="app-card-title">Develop</span>
           <div className="flex items-center gap-2">
-            <Button onClick={onRun} disabled={busy !== '' || view === 'view' || corrupt || specErrs.length > 0}><SwapLabel show={busy === 'run' ? 'Running…' : 'Run'} options={['Run', 'Running…']} /></Button>
-            <Button variant="primary" onClick={onPublish} disabled={busy !== '' || view === 'view' || corrupt || specErrs.length > 0}><SwapLabel show={busy === 'publish' ? 'Publishing…' : 'Publish'} options={['Publish', 'Publishing…']} /></Button>
+            <SaveState state={saveState} />
+            {saveFailed && view === 'edit' && <Button size="sm" onClick={saveNow} disabled={busy !== ''}>Retry</Button>}
           </div>
         </div>
-        <label className="app-label" htmlFor="app-name">Name</label>
-        <input id="app-name" className="app-input" value={draft.name} disabled={view === 'view'} onChange={(e) => edit({ name: e.target.value })} />
         <div className="app-grid mt-3">
           <div>
-            <label className="app-label" id="app-code-label">Code — main.star</label>
-            <div className="app-cm" aria-labelledby="app-code-label">
+            <div className="app-cm" role="group" aria-label="Code — main.star">
+              <div className="editor-toolbar flex items-center gap-3 border-b border-line px-3 py-2">
+                <span className="text-xs font-medium text-ink">main.star</span>
+                <span className="text-xs text-sec">Starlark · ⌘/Ctrl + Enter</span>
+                {/* same control as the instance page's RunCode toolbar */}
+                <Button className="ml-auto" variant="primary" size="sm"
+                  disabled={busy !== '' || view === 'view' || corrupt || specErrs.length > 0} onClick={onRun}
+                  aria-label={busy === 'run' ? 'Running' : 'Run'} aria-busy={busy === 'run'}
+                  title={busy === 'run' ? 'Running…' : 'Run (⌘/Ctrl + Enter)'}>
+                  {busy === 'run' ? <Spinner /> : <Icon name="play" className="!h-3.5 !w-3.5" />}
+                </Button>
+              </div>
               <CodeMirror value={draft.code} height="320px" extensions={editor.extensions} theme={cmTheme}
                 basicSetup={{ autocompletion: false }}
                 readOnly={view === 'view'} onChange={(v) => edit({ code: v })} />
@@ -469,8 +542,8 @@ function Editor({ app, role, userID, qc }: Props) {
         </div>
       </section>
 
-      <details className="app-card" open={adv} onToggle={(e) => setAdv((e.target as HTMLDetailsElement).open)}>
-        <summary><span className="app-card-title">Settings</span></summary>
+      <section className="app-card">
+        <div className="app-card-head"><span className="app-card-title">Settings</span></div>
         <div className="app-card-body">
         <fieldset disabled={view === 'view'} className="app-fieldset">
           <SpecForm key={specKey} application workspaceId={app.workspace_id} initial={initialSpec} onSpecChange={onSpec} />
@@ -498,12 +571,14 @@ function Editor({ app, role, userID, qc }: Props) {
           </div>
         ))}
         </div>
-      </details>
+      </section>
+      </div>
 
+      <div hidden={tab !== 'invoke'}>
       <section className="app-card">
         <div className="app-card-head">
           <span className="app-card-title">Invoke</span>
-          {view === 'edit' && <Button onClick={() => setKeyOpen(true)}>Create API key</Button>}
+          {view === 'edit' && <Button onClick={() => setKeyOpen(true)}><Icon name="key" className="!h-3.5 !w-3.5" />Create API key</Button>}
         </div>
         {!ready && <p className="app-dim">{statusHint[app.status] ?? 'Not ready.'}</p>}
         <div className="app-grid">
@@ -512,7 +587,7 @@ function Editor({ app, role, userID, qc }: Props) {
             <textarea id="app-call-input" className="app-area" rows={5} spellCheck={false}
               value={callInput} onChange={(e) => setCallInput(e.target.value)} />
             <div className="mt-2">
-              <Button variant="primary" onClick={onInvoke} disabled={busy !== '' || !ready || view === 'view' || corrupt}><SwapLabel show={busy === 'invoke' ? 'Invoking…' : 'Invoke'} options={['Invoke', 'Invoking…']} /></Button>
+              <Button variant="primary" onClick={onInvoke} disabled={busy !== '' || !ready || view === 'view' || corrupt}><Icon name="send" className="!h-3.5 !w-3.5" /><SwapLabel show={busy === 'invoke' ? 'Invoking…' : 'Invoke'} options={['Invoke', 'Invoking…']} /></Button>
             </div>
             <div className="app-out">
               <span className="app-label">Output</span>
@@ -532,7 +607,14 @@ function Editor({ app, role, userID, qc }: Props) {
           </div>
         </div>
       </section>
+      </div>
 
+      {tab === 'runs' && (
+        <section className="app-card">
+          <div className="app-card-head"><span className="app-card-title">Runs</span></div>
+          <div className="app-card-body"><RunsTable appId={app.id} /></div>
+        </section>
+      )}
 
       {delOpen && (
         <Confirm tone="danger" title="Delete application" confirm="Delete" pending="Deleting…" onClose={() => setDelOpen(false)}
@@ -556,10 +638,6 @@ function Editor({ app, role, userID, qc }: Props) {
           This draft was changed by another session. Reload the newer version? Your current edits are kept in this tab until you confirm.
         </Confirm>
       )}
-      <section className="app-card">
-        <div className="app-card-head"><span className="app-card-title">Runs</span></div>
-        <div className="app-card-body"><RunsTable appId={app.id} /></div>
-      </section>
       {keyOpen && <AppKeyModal appId={app.id} appName={app.name} workspaceId={app.workspace_id} onClose={() => setKeyOpen(false)} />}
       {busy === 'delete' && <Loading />}
     </div>
@@ -567,36 +645,61 @@ function Editor({ app, role, userID, qc }: Props) {
 }
 
 
-// RunsTable lists the application's runs with held order (S5/C3); rows
-// update in place and reordering waits for the reveal affordance.
+// RunsTable lists the application's runs 20 at a time (the API's
+// newest-first `before` cursor is a run id). Only the first page polls
+// (S5/C3 — held order + reveal); older pages are stable snapshots. The
+// pager row is always present once a second page exists so it never
+// shifts when it appears.
+const RUNS_PAGE = 20
 function RunsTable({ appId }: { appId: string }) {
+  const [page, setPage] = useState(0)
+  // page N's `before` is the last run id shown on page N-1.
+  const cursors = useRef(new Map<number, string>())
+  const before = page > 0 ? cursors.current.get(page) : undefined
   const q = useQuery({
-    queryKey: ['runs', appId],
-    queryFn: () => api.get<{ runs?: Run[] }>(`/api/v1/applications/${encodeURIComponent(appId)}/runs`),
-    refetchInterval: 5000,
+    queryKey: ['runs', appId, page, before ?? ''],
+    queryFn: () => api.get<{ runs?: Run[] }>(`/api/v1/applications/${encodeURIComponent(appId)}/runs?limit=${RUNS_PAGE + 1}${before ? `&before=${encodeURIComponent(before)}` : ''}`),
+    refetchInterval: page === 0 ? 5000 : false,
+    placeholderData: (prev) => prev,
   })
-  const held = useHeldOrder(q.data?.runs?.map((r) => ({ r })) ?? undefined, ({ r }) => ({ key: r.id, slot: 'runs' }))
+  const fetched = q.data?.runs ?? []
+  const rows = fetched.slice(0, RUNS_PAGE)
+  const hasOlder = fetched.length > RUNS_PAGE
+  const held = useHeldOrder(page === 0 ? rows.map((r) => ({ r })) : undefined, ({ r }) => ({ key: r.id, slot: 'runs' }))
   if (q.isLoading) return <Loading />
   if (q.isError) return <Notice tone="warning">Could not load runs.</Notice>
+  const shown = page === 0 ? held.rows.map(({ item }) => item) : rows.map((r) => ({ r }))
+  const renderRow = ({ r }: { r: Run }) => (
+    <tr key={r.id} className="row-hover">
+      <td><Link className="link" to={`/applications/${appId}/runs/${r.id}`}><span className={`app-status app-status-${r.status}`}>{r.status}</span></Link></td>
+      <td className="text-xs text-sec">{r.trigger}</td>
+      <td className="text-xs text-sec">{r.steps}</td>
+      <td className="text-xs text-sec">{r.created_at ? fmtDateTime(r.created_at) : ''}</td>
+      <td className="text-xs text-sec">{r.interrupt_id ?? '—'}</td>
+    </tr>
+  )
   return (
     <>
-      <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />
-      {held.rows.length === 0 && held.arrived === 0 && <p className="app-dim">No runs yet.</p>}
-      {held.rows.length > 0 && (
-        <table className="tbl">
-          <thead><tr><th>Status</th><th>Trigger</th><th>Steps</th><th>Started</th><th>Waiting on</th></tr></thead>
-          <tbody>
-            {held.rows.map(({ item: { r } }) => (
-              <tr key={r.id} className="row-hover">
-                <td><Link className="link" to={`/applications/${appId}/runs/${r.id}`}><span className={`app-status app-status-${r.status}`}>{r.status}</span></Link></td>
-                <td className="text-xs text-sec">{r.trigger}</td>
-                <td className="text-xs text-sec">{r.steps}</td>
-                <td className="text-xs text-sec">{r.created_at ? fmtDateTime(r.created_at) : ''}</td>
-                <td className="text-xs text-sec">{r.interrupt_id ?? '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {page === 0 && <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />}
+      {shown.length === 0 && (page !== 0 || held.arrived === 0) && <p className="app-dim">No runs yet.</p>}
+      {shown.length > 0 && (
+        <div className="tbl-wrap">
+          <table className="tbl">
+            <thead><tr><th>Status</th><th>Trigger</th><th>Steps</th><th>Started</th><th>Waiting on</th></tr></thead>
+            <tbody>{shown.map(renderRow)}</tbody>
+          </table>
+        </div>
+      )}
+      {(page > 0 || hasOlder) && (
+        <div className="app-pager">
+          <Button size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Newer</Button>
+          <span className="app-dim">Page {page + 1}</span>
+          <Button size="sm" disabled={!hasOlder} onClick={() => {
+            const last = rows[rows.length - 1]
+            if (last) cursors.current.set(page + 1, last.id)
+            setPage((p) => p + 1)
+          }}>Older</Button>
+        </div>
       )}
     </>
   )
