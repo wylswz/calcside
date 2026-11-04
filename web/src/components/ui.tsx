@@ -234,13 +234,14 @@ function returnFocus(): () => void {
 // detection: true for content that cannot be had again (a one-time
 // secret, with a discardPrompt saying what would be lost), false where
 // nothing is lost.
-export function Modal({ title, onClose, children, footer, wide, dirty: dirtyProp, discardPrompt = 'Discard unsaved changes?', discardConfirm = 'Discard' }: {
+export function Modal({ title, onClose, children, footer, wide, dirty: dirtyProp, placement = 'center', discardPrompt = 'Discard unsaved changes?', discardConfirm = 'Discard' }: {
   title: string
   onClose: () => void
   children: React.ReactNode
   footer?: React.ReactNode
   wide?: boolean
   dirty?: boolean
+  placement?: 'center' | 'left'
   discardPrompt?: string
   discardConfirm?: string
 }) {
@@ -270,8 +271,8 @@ export function Modal({ title, onClose, children, footer, wide, dirty: dirtyProp
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open) onClose() }}>
       <Dialog.Portal>
-        <Dialog.Overlay data-ui="dialog-overlay" />
-        <Dialog.Content data-ui="dialog-surface" aria-describedby={undefined} className={wide ? 'max-w-5xl' : 'max-w-xl'}
+        <Dialog.Overlay data-ui="dialog-overlay" data-placement={placement} />
+        <Dialog.Content data-ui="dialog-surface" aria-describedby={undefined} data-placement={placement} className={wide ? 'max-w-5xl' : 'max-w-xl'}
           onEscapeKeyDown={(e) => { if (!dirty) return; e.preventDefault(); if (asking.current) keep(); else ask() }}
           onInteractOutside={(e) => { if (!dirty) return; e.preventDefault(); ask() }}
           onCloseAutoFocus={(e) => { e.preventDefault(); restore() }}>

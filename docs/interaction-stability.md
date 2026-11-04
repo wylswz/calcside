@@ -272,3 +272,21 @@ dedicated field rather than a user label row.
 - **F2**: Resume, Cancel run and Retry step all pass named Confirms that show the exact event JSON (and the handler it calls) or consequence text.
 - **P3**: resolving never navigates; lists and run pages refetch in place.
 - **P6**: interrupts carry no presentation fields — rows label as `→ handler`; the application Settings card has no handler declarations.
+
+## Console shell navigation (consoleShell.spec.ts)
+
+- C1: mobile drawer closes via shared Modal Escape and returns focus to the
+  "Open navigation" trigger; drawer also closes on route change and on
+  widening past 1024px.
+- C2: module source + caller-script buffers survive drawer open/Escape and
+  viewport resize (390→1440→390) without remount.
+- S1: nav link boxes are measured under hover — identical geometry;
+  the active marker is a `::before` whose base declaration carries all
+  geometry and only `opacity` changes on `aria-current`.
+- S4: the Inbox count retains its reserved-width slot as it updates.
+  A single `Primary` navigation landmark and `aria-current="page"` identify
+  the active destination including nested detail routes.
+- S6: left-placement drawer reuses the shared Modal; centered modals and
+  the page-scroll lock are unchanged.
+- F2: destructive flows (dep removal, draft reload) still go through
+  `Confirm`.
