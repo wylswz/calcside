@@ -103,6 +103,18 @@ MCP. Promotion is explicit:
 
 ## Environments
 
+> **Design note (refined 2026-11):** the shared workspace-level
+> environment design below has been refined into **per-consumer owned
+> environment scopes** carried on the consumer's own spec
+> (`spec.environment` — see EP-0017's "Consumer environment" section).
+> Instances, applications and module debug runs each own an environment
+> (per-extension named bindings of vault-secret references) rather than
+> referencing one globally shared mutable environment resource; the
+> *shape* and the resolution/validation rules stay shared. The rest of
+> this section describes the earlier shared-environment plan and remains
+> directionally useful for endpoint-facing environments, which are still
+> unimplemented.
+
 - Workspace-level, shared by its projects. `dev` always exists.
 - Hold environment variables (plain) and secrets (vault references or
   values, encrypted as today; AAD bound to environment ID + name).

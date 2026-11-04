@@ -28,6 +28,7 @@ import (
 	"calcside/cmd/calcside/internal/service/catalog"
 	"calcside/cmd/calcside/internal/service/iam"
 	llmprovidersvc "calcside/cmd/calcside/internal/service/llmprovider"
+	modsvc "calcside/cmd/calcside/internal/service/module"
 	policysvc "calcside/cmd/calcside/internal/service/policy"
 	runsvc "calcside/cmd/calcside/internal/service/run"
 	"calcside/cmd/calcside/internal/service/sandbox"
@@ -49,6 +50,7 @@ type Deps struct {
 	Catalog     *catalog.Service
 	Sandbox     *sandbox.Service
 	Application *application.Service
+	Module      *modsvc.Service
 	Run         *runsvc.Service
 	Workspace   *workspacesvc.Service
 	Access      *access.Checker
@@ -145,6 +147,17 @@ func bodyLimit() gin.HandlerFunc {
 			return
 		}
 		limit := int64(maxBodyBytes)
+		// Module create/patch/validate bodies carry UTF-8 source maps:
+		// the 1MiB decoded tree can escape to ~6MiB JSON; add framing
+		// slack for keys/braces. Other module routes keep the 1MiB cap.
+		if strings.HasPrefix(c.Request.URL.Path, "/api/v1/modules") {
+			isModuleBody := c.Request.Method == http.MethodPost && strings.HasSuffix(c.Request.URL.Path, "/modules") ||
+				c.Request.Method == http.MethodPost && strings.HasSuffix(c.Request.URL.Path, "/validate") ||
+				c.Request.Method == http.MethodPatch
+			if isModuleBody {
+				limit = 6<<20 + 256<<10
+			}
+		}
 		if strings.HasSuffix(c.Request.URL.Path, "/exec") {
 			limit = sandbox.MaxCodeBytes + 1024
 		}

@@ -5,6 +5,7 @@ import CodeMirror from '@uiw/react-codemirror'
 import { api, ApiError, Application, Run, workspaces } from '../api'
 import { applicationDescription } from '../activity'
 import { Button, Confirm, Loading, Notice, PageHeader, RevealNew, SwapLabel } from '../components/ui'
+import { PublishReviewDialog } from '../components/PublishReviewDialog'
 import { cmTheme } from '../components/codemirror'
 import { useApplicationEditor } from '../components/editor'
 import { RunProgress, useRunProgress } from '../components/RunProgress'
@@ -344,14 +345,13 @@ function Editor({ app, role, userID, qc }: Props) {
     setRun(r)
   })
 
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [reviewVer, setReviewVer] = useState(0)
   const onPublish = () => guarded('publish', async () => {
     const s = await attemptSave()
     if (!s) return
-    await api.post<{ application: Application }>(`/api/v1/applications/${s.app2.id}/publish`, { version: s.app2.version })
-    if (mounted.current) {
-      setPublished(true)
-      qc.invalidateQueries({ queryKey: ['application', app.id] })
-    }
+    setReviewVer(s.app2.version)
+    setReviewOpen(true)
   })
 
   const onInvoke = () => guarded('invoke', async () => {
@@ -413,7 +413,7 @@ function Editor({ app, role, userID, qc }: Props) {
           <span className="app-card-title">Develop</span>
           <div className="flex items-center gap-2">
             <Button onClick={onRun} disabled={busy !== '' || view === 'view' || corrupt || specErrs.length > 0}><SwapLabel show={busy === 'run' ? 'Running…' : 'Run'} options={['Run', 'Running…']} /></Button>
-            <Button variant="primary" onClick={onPublish} disabled={busy !== '' || view === 'view' || corrupt || specErrs.length > 0}><SwapLabel show={busy === 'publish' ? 'Publishing…' : 'Publish'} options={['Publish', 'Publishing…']} /></Button>
+            <Button variant="primary" onClick={onPublish} disabled={busy !== '' || view === 'view' || corrupt || specErrs.length > 0} data-testid="app-publish"><SwapLabel show={busy === 'publish' ? 'Publishing…' : 'Publish…'} options={['Publish…', 'Publishing…']} /></Button>
           </div>
         </div>
         <label className="app-label" htmlFor="app-name">Name</label>
@@ -455,7 +455,17 @@ function Editor({ app, role, userID, qc }: Props) {
           {specErrs.length > 0 && <Notice tone="warning">{specErrs[0].section}: {specErrs[0].message}</Notice>}
           {warn && <Notice tone="warning">{warn}</Notice>}
           {storeFailed && <Notice tone="warning">Not saved to this tab.</Notice>}
-          {published && (
+          {reviewOpen && (
+        <PublishReviewDialog resource="applications" id={app.id} version={reviewVer}
+          onClose={() => setReviewOpen(false)}
+          onPublished={() => {
+            setReviewOpen(false)
+            setPublished(true)
+            qc.invalidateQueries({ queryKey: ['application', app.id] })
+            qc.invalidateQueries({ queryKey: ['applications'] })
+          }} />
+      )}
+      {published && (
             <Notice><SwapLabel
               show={app.status === 'preparing' ? 'Published — deploying. Invoke becomes available when status is ready.' : 'Published.'}
               options={['Published — deploying. Invoke becomes available when status is ready.', 'Published.']} /></Notice>

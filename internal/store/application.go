@@ -146,6 +146,36 @@ type ApplicationStore interface {
 	// BEFORE this call — no prepare inside the transaction.
 	PublishApplication(ctx context.Context, workspaceID, id string, expectedVersion int64, release *ServingRelease, now time.Time) (*PersistentInstance, error)
 	// DeleteApplication soft-deletes the draft and disables the
-	// persistent instance under the same CAS.
+	// persistent instance under the same CAS. Release history is
+	// retained.
 	DeleteApplication(ctx context.Context, workspaceID, id string, expectedVersion int64, now time.Time) (bool, error)
+
+	// PublishReviewedApplication is the reviewed publish path:
+	// expectedDraftVersion CASes the draft, expectedBase is the
+	// release ID the reviewer compared against ("" = never published).
+	// An identical candidate (same release.ID as the current pointer)
+	// is a no-op returning the existing persistent instance without a
+	// generation bump or history row — PublishedVersion still advances
+	// to expectedDraftVersion so the draft is not left dirty. A
+	// changed candidate appends an immutable history row (seq = max+1).
+	PublishReviewedApplication(ctx context.Context, workspaceID, id string, expectedDraftVersion int64, expectedBase string, release *ServingRelease, publishedBy, note string, now time.Time) (*PersistentInstance, *ApplicationRelease, error)
+
+	ListApplicationReleases(ctx context.Context, workspaceID, appID string) ([]*ApplicationRelease, error)
+	GetApplicationRelease(ctx context.Context, workspaceID, appID string, seq int64) (*ApplicationRelease, error)
 }
+
+// ApplicationRelease is one immutable reviewed-publish history entry:
+// the serving-release pointer the publish produced, the draft counter
+// it came from, and reviewer metadata. History survives soft-delete.
+type ApplicationRelease struct {
+	ApplicationID string    `json:"application_id"`
+	WorkspaceID   string    `json:"workspace_id"`
+	Seq           int64     `json:"seq"`
+	ReleaseID     string    `json:"release_id"`
+	DraftVersion  int64     `json:"draft_version"`
+	PublishedBy   string    `json:"published_by"`
+	Note          string    `json:"note"`
+	PublishedAt   time.Time `json:"published_at"`
+}
+
+func (r *ApplicationRelease) Clone() *ApplicationRelease { out := *r; return &out }

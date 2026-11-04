@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"calcside/cmd/calcside/internal/service"
+	"calcside/internal/runtime"
 	"calcside/internal/store"
 	"calcside/internal/types"
 )
@@ -70,7 +71,7 @@ func (s *Service) readyReplica(ctx context.Context, app *store.Application) (*st
 // status computes the view's lifecycle word from the actual pin and
 // replica state — never optimistic.
 func (s *Service) status(ctx context.Context, app *store.Application) (status, releaseID, errCode string, changed bool) {
-	changed = app.Version > app.PublishedVersion
+	changed = s.dirty(ctx, app)
 	if app.PersistentInstanceID == "" {
 		return "draft", "", "", changed
 	}
@@ -97,4 +98,40 @@ func (s *Service) view(ctx context.Context, app *store.Application) *View {
 	status, rel, code, changed := s.status(ctx, app)
 	return &View{Application: app, Status: status, ReleaseID: rel,
 		ErrorCode: code, HasUnpublishedChanges: changed}
+}
+
+// dirty reports whether the draft's current descriptor candidate
+// digest differs from the published pointer — the real dirty signal,
+// not just the draft counter (edits that cancel out, and post-publish
+// dependency drift, are all captured). Errors conservatively report
+// dirty rather than silently clean. Never decrypts.
+func (s *Service) dirty(ctx context.Context, app *store.Application) bool {
+	if app.PersistentInstanceID == "" {
+		return true // never published
+	}
+	pin, err := s.o.Store.GetPersistentInstance(ctx, app.WorkspaceID, app.PersistentInstanceID)
+	if err != nil || pin == nil {
+		return true
+	}
+	b, err := s.o.Sandbox.BuildBoundary(ctx, service.Actor{UserID: app.UserID, WorkspaceID: app.WorkspaceID}, app.Spec, false)
+	if err != nil {
+		return true
+	}
+	in, out := app.InputSchema, app.OutputSchema
+	if in == nil {
+		in = store.DefaultApplicationSchema()
+	}
+	if out == nil {
+		out = store.DefaultApplicationSchema()
+	}
+	rel, err := store.NewServingReleaseWithModules(app.WorkspaceID, app.UserID, b.Spec, b.Policies,
+		runtime.ProgramBundle{
+			Sources:      map[string][]byte{"main.star": []byte(app.Code)},
+			InputSchema:  in,
+			OutputSchema: out,
+		}, b.Modules, s.o.Now())
+	if err != nil {
+		return true
+	}
+	return rel.ID != pin.ReleaseID
 }

@@ -20,6 +20,15 @@ test.afterAll(async () => { await rt?.close() })
 
 test.describe.configure({ mode: 'serial' })
 
+
+async function apiPublish(client: any, id: string, version: number) {
+  const prev = await client.post(`/api/v1/applications/${id}/publish/preview`, { data: { version } })
+  const rev = await prev.json()
+  return client.post(`/api/v1/applications/${id}/publish`, {
+    data: { version, expected_base: rev.base?.digest ?? '', candidate: rev.candidate.digest },
+  })
+}
+
 test('create application with ext -> blocked publish fails -> republish -> ready -> invoke v1', async ({ page }) => {
   test.setTimeout(180_000)
   await page.goto(`${viteURL}/applications/new`)
@@ -39,7 +48,9 @@ test('create application with ext -> blocked publish fails -> republish -> ready
   if (!app0.spec?.capabilities?.ext?.probe) {
     throw new Error('spec missing ext pin: ' + JSON.stringify(app0.spec).slice(0, 500))
   }
-  expect(app0.spec.capabilities.ext.probe.sum).toMatch(/^h1:/)
+  // The draft keeps the unpinned selector (re-pinned at publish) —
+  // assert the alias survives, not a frozen draft-time sum.
+  expect(app0.spec.capabilities.ext.probe.source).toBe('fixture/probe')
 
   // write code that calls the pinned extension
   const cm = page.locator('.app-cm .cm-content').first()
@@ -54,8 +65,9 @@ test('create application with ext -> blocked publish fails -> republish -> ready
   try {
     const app0v = app0.version
     const putResp = page.waitForResponse((r) => r.url().includes(`/api/v1/applications/${id}`) && r.request().method() === 'PUT', { timeout: 60_000 })
-    const pubResp = page.waitForResponse((r) => r.url().includes(`/api/v1/applications/${id}/publish`), { timeout: 60_000 })
-    await page.getByRole('button', { name: 'Publish' }).click()
+    const pubResp = page.waitForResponse((r) => r.url().includes(`/api/v1/applications/${id}/publish`) && !r.url().includes('preview'), { timeout: 60_000 })
+    await page.getByRole('button', { name: 'Publish…' }).click()
+    await page.getByTestId('review-publish').click()
     expect((await putResp).status()).toBe(200)
     const pub = await pubResp
     expect(pub.status(), `publish should fail while artifacts blocked: ${pub.status()}`).toBeGreaterThanOrEqual(400)
@@ -73,8 +85,15 @@ test('create application with ext -> blocked publish fails -> republish -> ready
     rt.blockArtifacts(false)
   }
 
+  // The failed publish leaves the modal open — close it explicitly
+  // before the second publish; a header click under an open modal is
+  // a no-op, and we must not silently rely on that.
+  if (await page.getByTestId('review-publish').isVisible().catch(() => false)) {
+    await page.getByRole('button', { name: 'Close' }).click()
+  }
   // explicit second publish — fetch succeeds synchronously, ready
-  await page.getByRole('button', { name: 'Publish' }).click()
+  await page.getByRole('button', { name: 'Publish…' }).click()
+  await page.getByTestId('review-publish').click()
   await expect.poll(async () => {
     const r = await client.get(`/api/v1/applications/${id}`)
     return (await r.json()).application.status
@@ -99,8 +118,10 @@ test('artifact persists across worker restart with empty cache', async () => {
   expect(r.status()).toBe(200)
   const id = (await r.json()).application.id
   const a0 = (await (await client.get(`/api/v1/applications/${id}`)).json()).application
-  const sum = a0.spec.capabilities?.ext?.probe?.sum
-  expect(sum, `pin: ${JSON.stringify(a0.spec)}`).toMatch(/^h1:/)
+  // The draft keeps the unpinned selector (re-pinned at publish) —
+  // assert the alias survives, not a frozen draft-time sum.
+  const extEntry = a0.spec.capabilities?.ext?.probe
+  expect(extEntry?.source ?? '', `ext: ${JSON.stringify(a0.spec)}`).toBe('fixture/probe')
   const put = await client.put(`/api/v1/applications/${id}`, {
     data: {
       version: a0.version, name: 'Persist',
@@ -109,7 +130,7 @@ test('artifact persists across worker restart with empty cache', async () => {
     },
   })
   expect(put.status(), await put.text()).toBe(200)
-  const pub = await client.post(`/api/v1/applications/${id}/publish`, { data: { version: a0.version + 1 } })
+  const pub = await apiPublish(client, id, a0.version + 1)
   expect(pub.status(), await pub.text()).toBe(202)
   await expect.poll(async () => {
     const rr = await client.get(`/api/v1/applications/${id}`)

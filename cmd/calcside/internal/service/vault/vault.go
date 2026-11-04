@@ -143,3 +143,9 @@ func (s *Service) Delete(ctx context.Context, a service.Actor, id string) error 
 	}
 	return nil
 }
+
+// WithStore returns a clone bound to a different store — same cipher,
+// a fresh access checker over st — for transaction-rebound boundaries.
+func (s *Service) WithStore(st store.Store) *Service {
+	return &Service{st: st, cipher: s.cipher, access: access.New(st)}
+}

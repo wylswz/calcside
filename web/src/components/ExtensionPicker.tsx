@@ -11,7 +11,7 @@ const PAGE_SIZE = 12
 // Geometry is fixed: cards keep their size when added, the pager is
 // always present for multi-page catalogs, and the result area reserves a
 // full page so filtering does not move what follows.
-export function ExtensionPicker({ entries, selectedSources, loading, error, onRetry, onAdd, onShow, onCustom }: {
+export function ExtensionPicker({ entries, selectedSources, loading, error, onRetry, onAdd, onShow }: {
   entries: ExtensionInfo[]
   selectedSources: ReadonlySet<string>
   loading: boolean
@@ -19,7 +19,6 @@ export function ExtensionPicker({ entries, selectedSources, loading, error, onRe
   onRetry: () => void
   onAdd: (entry: ExtensionInfo) => void
   onShow: (entry: ExtensionInfo) => void
-  onCustom: () => void
 }) {
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(0)
@@ -73,7 +72,6 @@ export function ExtensionPicker({ entries, selectedSources, loading, error, onRe
           </ul>
         )}
       </div>
-      <p className="mt-3 text-xs text-sec">Extension not listed? <button type="button" className="underline" onClick={onCustom}>Configure a custom extension</button></p>
     </div>
   )
 }

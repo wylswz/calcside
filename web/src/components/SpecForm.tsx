@@ -9,6 +9,7 @@ import {
 import { fmtBytes } from '../format'
 import { Field, inputCls } from './ui'
 import { InstanceExtensionEditor } from './InstanceExtensionEditor'
+import { setBindingField, removeBindingField } from '../environment'
 import { ExtensionPicker } from './ExtensionPicker'
 import { PolicyPicker } from './PolicyPicker'
 import { ExtensionIcon } from './ExtensionIcon'
@@ -24,6 +25,8 @@ interface Props {
   application?: boolean
   initial?: InstanceSpec
   workspaceId?: string
+  /** module-debug variant: refs-only like application, own labels */
+  debug?: boolean
   onSpecChange?: (draft: InstanceDraft, errors?: DraftError[], built?: { spec?: InstanceSpec; specJSON?: string }) => void
   onRawDirtyChange?: (dirty: boolean) => void
   footer?: ReactNode
@@ -59,11 +62,11 @@ const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)'
 // page section for the forms. The instance summary beside them is short
 // (one fixed-height row per capability), so nothing needs its own scroll.
 export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
-  keyMode = false, application = false, initial, workspaceId, onSpecChange, onRawDirtyChange, footer, hideBasics = false,
+  keyMode = false, application = false, debug = false, initial, workspaceId, onSpecChange, onRawDirtyChange, footer, hideBasics = false,
 }, ref) {
   // Application mode: vault-ref secrets only (same ceiling as key
   // specs) — never inline values in a durable spec.
-  const refsOnly = keyMode || application
+  const refsOnly = keyMode || application || debug
   const [draft, setDraft] = useState(() => draftFromSpec(initial))
   const [advanced, setAdvanced] = useState(false)
   const [json, setJSON] = useState('')
@@ -323,8 +326,25 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
       issues: [...errors.filter((e) => e.section === 'Extensions' && own(e.message) && !e.message.includes('— add it explicitly')).map((e) => e.message), ...(extErrors.has(id) ? [extErrors.get(id)!] : [])],
       body: <InstanceExtensionEditor value={ext} catalog={extensions}
         secretNames={draft.secrets.map((s) => s.name).filter(Boolean)}
+        legacySecretRefs={Object.fromEntries(draft.secrets.filter((x) => x.name && x.kind === 'vault').map((x) => [x.name, x.ref || x.name]))}
         vaultNames={(vault.data?.secrets ?? []).map((s) => s.name)}
         onUseVault={(name) => set({ secrets: draft.secrets.some((s) => s.name === name) ? draft.secrets : [...draft.secrets, { name, kind: 'vault', ref: name, value: '', domains: [], extra: {} }] })}
+        secretBindings={(((draft.extra?.environment as { extensions?: Record<string, { bindings?: Record<string, { secrets?: Record<string, { ref: string; allowed_domains?: string[] }> }> }> } | undefined)?.extensions?.[ext.alias]?.bindings?.default?.secrets) ?? {})}
+        onSecretBindingChange={(field, sf) => setDraft((d) => {
+          const env = (d.extra?.environment ?? {}) as never
+          const nextEnv = sf === undefined
+            ? removeBindingField(env, ext.alias, 'default', field)
+            : setBindingField(env, ext.alias, 'default', field, sf)
+          // A new env selection removes the legacy config placeholder
+          // for that field only — siblings and secondary bindings stay.
+          const exts = d.exts.map((e, i) => {
+            if (i !== index || sf === undefined) return e
+            const cfg = { ...e.config }
+            delete cfg[field]
+            return { ...e, config: cfg }
+          })
+          return { ...d, exts, extra: { ...d.extra, environment: nextEnv } }
+        })}
         onValidityChange={(m) => setExtError(id, m)} onChange={(value) => set({ exts: draft.exts.map((e, i) => i === index ? value : e) })} />,
     }
   }
@@ -374,7 +394,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
             <p className="text-sm text-sec">{refsOnly ? 'Secrets must use vault references.' : 'Advanced editing includes any inline secret values.'} Invalid edits cannot be submitted.</p>
             <button type="button" className="text-btn underline" onClick={toggleAdvanced}>Back to editor</button>
           </div>
-          <textarea aria-label={application ? 'Application spec JSON' : 'Instance spec JSON'} className={inputCls + ' min-h-[420px] font-mono text-xs'} value={json} spellCheck={false} onChange={(e) => setJSON(e.target.value)} />
+          <textarea aria-label={application ? 'Application spec JSON' : debug ? 'Debug spec JSON' : 'Instance spec JSON'} className={inputCls + ' min-h-[420px] font-mono text-xs'} value={json} spellCheck={false} onChange={(e) => setJSON(e.target.value)} />
           {alert}
           {footer && <div className="spec-json-footer">{footer}</div>}
         </div>
@@ -387,7 +407,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
       <div className="spec-builder">
         <Tabs.Root className="spec-main" value={view} onValueChange={(v) => switchView(v as View)}>
           <div className="spec-tabs" ref={tabsRef}>
-            <Tabs.List className="segmented" aria-label={application ? 'Application configuration' : 'Instance configuration'}>
+            <Tabs.List className="segmented" aria-label={application ? 'Application configuration' : debug ? 'Debug configuration' : 'Instance configuration'}>
               <Tabs.Trigger value="capabilities">Add capabilities</Tabs.Trigger>
               <Tabs.Trigger value="settings">
                 Settings{errors.length > 0 && <span className="tab-badge" aria-label={`${errors.length} issues`}>{errors.length}</span>}
@@ -398,7 +418,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
 
           {/* forceMount keeps both views mounted so editor state survives switching */}
           <Tabs.Content value="capabilities" forceMount className="spec-palette">
-            <p className="spec-pane-note">Optional. {application ? 'Applied when published.' : 'Settings are fixed after creation.'}</p>
+            <p className="spec-pane-note">Optional. {application ? 'Applied when published.' : debug ? 'Used only for this module debug run.' : 'Settings are fixed after creation.'}</p>
             <div className="ability-choices">
               <button type="button" className="ability-choice" data-selected={!!draft.fs} aria-label={draft.fs ? 'Files added' : 'Add Files'} onClick={addFiles}>
                 <FilesIcon />
@@ -414,7 +434,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
             <div className="extensions-block">
               <h4 className="mb-3 text-sm font-semibold text-ink">Extensions</h4>
               <ExtensionPicker entries={extensions} selectedSources={selectedSources} loading={catalog.isPending} error={catalog.isError}
-                onRetry={() => catalog.refetch()} onAdd={addExtension} onShow={pointAtExtension} onCustom={() => addExtension({ name: '', source: '' })} />
+                onRetry={() => catalog.refetch()} onAdd={addExtension} onShow={pointAtExtension} />
             </div>
             <div className="policies-block">
               <h4 className="mb-3 text-sm font-semibold text-ink">Policies</h4>
@@ -464,8 +484,8 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
           </Tabs.Content>
         </Tabs.Root>
 
-        <aside className="spec-selection" aria-label={application ? 'Application settings' : 'This instance'}>
-          <h3 className="spec-pane-title">{application ? 'This application' : 'This instance'}</h3>
+        <aside className="spec-selection" aria-label={application ? 'Application settings' : debug ? 'Debug environment' : 'This instance'}>
+          <h3 className="spec-pane-title">{application ? 'This application' : debug ? 'Debug environment' : 'This instance'}</h3>
           {!application && (
             hideBasics ? (
               <Field label="Lifetime (seconds)"><input className={inputCls} type="number" min="1" value={draft.ttlSeconds} onChange={(e) => set({ ttlSeconds: e.target.value === '' ? '' : Number(e.target.value) })} /></Field>

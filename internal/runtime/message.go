@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"calcside/internal/completion"
+	"calcside/internal/module"
 	"calcside/internal/types"
 )
 
@@ -68,7 +69,13 @@ type CreateRequest struct {
 	// stripped from it and travel in Secrets instead.
 	Spec     json.RawMessage `json:"spec"`
 	Policies PolicyBundle    `json:"policies"`
-	Secrets  []Secret        `json:"secrets,omitempty"`
+	// Modules carries the resolved, content-pinned module trees
+	// (mount alias → tree) the spec's spec.modules references point
+	// at. Sources cross the boundary inline like PolicyBundle — never
+	// store ids. The node verifies each tree's h1: sum and compiles
+	// every file at create; a missing mount or bad hash fails closed.
+	Modules map[string]module.Tree `json:"modules,omitempty"`
+	Secrets []Secret               `json:"secrets,omitempty"`
 	// ExpiresAt is computed by the API tier, which owns the clock. The
 	// node keeps it only to drive a local memory-reclaim safety net.
 	ExpiresAt time.Time `json:"expires_at"`

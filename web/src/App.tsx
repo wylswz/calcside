@@ -7,6 +7,8 @@ import WorkspaceTabs, { WorkspaceRedirect } from './pages/WorkspaceTabs'
 import Login from './pages/Login'
 import Instances from './pages/Instances'
 import Applications from './pages/Applications'
+import Modules from './pages/Modules'
+import ModuleDetail from './pages/ModuleDetail'
 import NewApplication from './pages/NewApplication'
 import ApplicationDetail from './pages/ApplicationDetail'
 import Inbox from './pages/Inbox'
@@ -35,6 +37,7 @@ function useMe(onBackendRetrying: (retrying: boolean) => void) {
 const navWork = [
   { to: '/', label: 'Instances', end: true },
   { to: '/applications', label: 'Applications' },
+  { to: '/modules', label: 'Modules' },
   { to: '/inbox', label: 'Inbox' },
   { to: '/audit', label: 'Audit' },
   { to: '/workspace', label: 'Workspace' },
@@ -138,6 +141,8 @@ export default function App() {
           <Route path="/applications" element={<Applications />} />
           <Route path="/applications/new" element={<NewApplication />} />
           <Route path="/applications/:id" element={<ApplicationDetail />} />
+          <Route path="/modules" element={<Modules />} />
+          <Route path="/modules/:id" element={<ModuleDetail />} />
           <Route path="/applications/:id/runs/:runId" element={<RunDetail />} />
           <Route path="/inbox" element={<Inbox />} />
           <Route path="/workspace" element={<WorkspaceTabs />} />

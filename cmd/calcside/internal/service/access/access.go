@@ -439,3 +439,46 @@ func (c *Checker) InterruptToken(ctx context.Context, a service.Actor, id string
 	}
 	return i, true, nil
 }
+
+// Module loads the module draft row and checks act in ITS workspace.
+// Modules carry no credentials, but they are authoring content: every
+// restricted or resource-bound key is invisible (not_found) on all
+// module operations, including list, create and validate.
+func (c *Checker) Module(ctx context.Context, a service.Actor, id string, act Action) (*store.Module, error) {
+	hidden := service.NotFound("module not found")
+	if a.Restricted() || a.KeyBoundID != "" {
+		return nil, hidden
+	}
+	row, err := c.st.GetModule(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, hidden
+		}
+		return nil, service.Internal(err)
+	}
+	if err := c.check(ctx, a, row.WorkspaceID, act, hidden); err != nil {
+		return nil, err
+	}
+	return row, nil
+}
+
+// Modules returns the workspace-scoped list filter for the modules
+// endpoint. Restricted and bound keys see nothing.
+func (c *Checker) Modules(ctx context.Context, a service.Actor) (store.ModuleFilter, error) {
+	if err := c.ModuleScope(ctx, a, View); err != nil {
+		return store.ModuleFilter{}, err
+	}
+	return store.ModuleFilter{WorkspaceID: a.WorkspaceID}, nil
+}
+
+// ModuleScope authorizes collection-level module operations —
+// create, validate, list — that have no per-module resource id.
+// Restricted and resource-bound keys are invisible (not_found) just
+// like per-module routes.
+func (c *Checker) ModuleScope(ctx context.Context, a service.Actor, act Action) error {
+	hidden := service.NotFound("module not found")
+	if a.Restricted() || a.KeyBoundID != "" {
+		return hidden
+	}
+	return c.check(ctx, a, a.WorkspaceID, act, hidden)
+}

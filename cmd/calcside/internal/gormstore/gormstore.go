@@ -919,7 +919,7 @@ func (d *sqlDB) ListAuditEvents(ctx context.Context, f store.AuditFilter) ([]*st
 
 // --- policies ---
 
-func (d *sqlDB) CreatePolicy(ctx context.Context, p *store.Policy) error {
+func (d *sqlDB) createPolicy(ctx context.Context, p *store.Policy) error {
 	if err := requireWorkspaceID(p.WorkspaceID); err != nil {
 		return err
 	}
@@ -959,7 +959,7 @@ func (d *sqlDB) ListPolicies(ctx context.Context, workspaceID string) ([]*store.
 	return out, nil
 }
 
-func (d *sqlDB) UpdatePolicy(ctx context.Context, p *store.Policy) error {
+func (d *sqlDB) updatePolicy(ctx context.Context, p *store.Policy) error {
 	p.UpdatedAt = time.Now().UTC()
 	n, err := gorm.G[policyRow](d.g).Where("id = ?", p.ID).Set(
 		col("name", p.Name),
@@ -975,14 +975,14 @@ func (d *sqlDB) UpdatePolicy(ctx context.Context, p *store.Policy) error {
 	return nil
 }
 
-func (d *sqlDB) DeletePolicy(ctx context.Context, id string) error {
+func (d *sqlDB) deletePolicy(ctx context.Context, id string) error {
 	_, err := gorm.G[policyRow](d.g).Where("id = ?", id).Delete(ctx)
 	return err
 }
 
 // --- llm providers ---
 
-func (d *sqlDB) CreateLLMProvider(ctx context.Context, p *store.LLMProvider) error {
+func (d *sqlDB) createLLMProvider(ctx context.Context, p *store.LLMProvider) error {
 	if err := requireWorkspaceID(p.WorkspaceID); err != nil {
 		return err
 	}
@@ -1023,7 +1023,7 @@ func (d *sqlDB) ListLLMProviders(ctx context.Context, workspaceID string) ([]*st
 	return out, nil
 }
 
-func (d *sqlDB) UpdateLLMProvider(ctx context.Context, p *store.LLMProvider) error {
+func (d *sqlDB) updateLLMProvider(ctx context.Context, p *store.LLMProvider) error {
 	p.UpdatedAt = time.Now().UTC()
 	mj, err := json.Marshal(p.Models)
 	if err != nil {
@@ -1046,14 +1046,14 @@ func (d *sqlDB) UpdateLLMProvider(ctx context.Context, p *store.LLMProvider) err
 	return nil
 }
 
-func (d *sqlDB) DeleteLLMProvider(ctx context.Context, id string) error {
+func (d *sqlDB) deleteLLMProvider(ctx context.Context, id string) error {
 	_, err := gorm.G[llmProviderRow](d.g).Where("id = ?", id).Delete(ctx)
 	return err
 }
 
 // --- secrets ---
 
-func (d *sqlDB) CreateSecret(ctx context.Context, s *store.Secret) error {
+func (d *sqlDB) createSecret(ctx context.Context, s *store.Secret) error {
 	if err := requireWorkspaceID(s.WorkspaceID); err != nil {
 		return err
 	}
@@ -1106,7 +1106,7 @@ func (d *sqlDB) ListSecrets(ctx context.Context, workspaceID string) ([]*store.S
 	return out, nil
 }
 
-func (d *sqlDB) UpdateSecret(ctx context.Context, s *store.Secret) error {
+func (d *sqlDB) updateSecret(ctx context.Context, s *store.Secret) error {
 	s.UpdatedAt = time.Now().UTC()
 	domains := s.AllowedDomains
 	if domains == nil {
@@ -1130,7 +1130,7 @@ func (d *sqlDB) UpdateSecret(ctx context.Context, s *store.Secret) error {
 	return nil
 }
 
-func (d *sqlDB) DeleteSecret(ctx context.Context, id string) error {
+func (d *sqlDB) deleteSecret(ctx context.Context, id string) error {
 	_, err := gorm.G[secretRow](d.g).Where("id = ?", id).Delete(ctx)
 	return err
 }
@@ -1442,4 +1442,118 @@ func (d *sqlDB) Tx(ctx context.Context, fn func(store.Store) error) error {
 	return d.g.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return fn(&sqlDB{g: tx})
 	})
+}
+
+// workspaceWrite runs fn inside a transaction that holds the workspace
+// lock — the serialization point for every workspace-scoped mutation
+// (policies, secrets, providers, module drafts, application drafts).
+// Reads inside fn see the locked snapshot.
+func (d *sqlDB) workspaceWrite(ctx context.Context, workspaceID string, fn func(tx *sqlDB) error) error {
+	return d.g.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		bound := &sqlDB{g: tx}
+		if err := bound.LockWorkspace(ctx, workspaceID); err != nil {
+			return err
+		}
+		return fn(bound)
+	})
+}
+
+// --- workspace-locked mutation entry points ---
+// All workspace-scoped mutations funnel through workspaceWrite so a
+// reviewed publish's dependency snapshot cannot interleave with
+// concurrent policy/secret/provider/module/application writes.
+
+func (d *sqlDB) CreatePolicy(ctx context.Context, p *store.Policy) error {
+	return d.workspaceWrite(ctx, p.WorkspaceID, func(tx *sqlDB) error { return tx.createPolicy(ctx, p) })
+}
+
+func (d *sqlDB) UpdatePolicy(ctx context.Context, p *store.Policy) error {
+	// Resolve the ACTUAL owning workspace — a caller-supplied
+	// workspace_id can't steer the lock onto the wrong workspace.
+	row, err := gorm.G[policyRow](d.g).Where("id = ?", p.ID).Take(ctx)
+	if err != nil {
+		return mapNotFound(err)
+	}
+	ws := row.WorkspaceID
+	if p.WorkspaceID != "" && p.WorkspaceID != ws {
+		return store.ErrNotFound
+	}
+	return d.workspaceWrite(ctx, ws, func(tx *sqlDB) error {
+		p2 := *p
+		p2.WorkspaceID = ws
+		return tx.updatePolicy(ctx, &p2)
+	})
+}
+
+func (d *sqlDB) DeletePolicy(ctx context.Context, id string) error {
+	row, err := gorm.G[policyRow](d.g).Where("id = ?", id).Take(ctx)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return d.workspaceWrite(ctx, row.WorkspaceID, func(tx *sqlDB) error { return tx.deletePolicy(ctx, id) })
+}
+
+func (d *sqlDB) CreateLLMProvider(ctx context.Context, p *store.LLMProvider) error {
+	return d.workspaceWrite(ctx, p.WorkspaceID, func(tx *sqlDB) error { return tx.createLLMProvider(ctx, p) })
+}
+
+func (d *sqlDB) UpdateLLMProvider(ctx context.Context, p *store.LLMProvider) error {
+	row, err := gorm.G[llmProviderRow](d.g).Where("id = ?", p.ID).Take(ctx)
+	if err != nil {
+		return mapNotFound(err)
+	}
+	ws := row.WorkspaceID
+	if p.WorkspaceID != "" && p.WorkspaceID != ws {
+		return store.ErrNotFound
+	}
+	return d.workspaceWrite(ctx, ws, func(tx *sqlDB) error {
+		p2 := *p
+		p2.WorkspaceID = ws
+		return tx.updateLLMProvider(ctx, &p2)
+	})
+}
+
+func (d *sqlDB) DeleteLLMProvider(ctx context.Context, id string) error {
+	row, err := gorm.G[llmProviderRow](d.g).Where("id = ?", id).Take(ctx)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return d.workspaceWrite(ctx, row.WorkspaceID, func(tx *sqlDB) error { return tx.deleteLLMProvider(ctx, id) })
+}
+
+func (d *sqlDB) CreateSecret(ctx context.Context, s *store.Secret) error {
+	return d.workspaceWrite(ctx, s.WorkspaceID, func(tx *sqlDB) error { return tx.createSecret(ctx, s) })
+}
+
+func (d *sqlDB) UpdateSecret(ctx context.Context, s *store.Secret) error {
+	row, err := gorm.G[secretRow](d.g).Where("id = ?", s.ID).Take(ctx)
+	if err != nil {
+		return mapNotFound(err)
+	}
+	ws := row.WorkspaceID
+	if s.WorkspaceID != "" && s.WorkspaceID != ws {
+		return store.ErrNotFound
+	}
+	return d.workspaceWrite(ctx, ws, func(tx *sqlDB) error {
+		s2 := *s
+		s2.WorkspaceID = ws
+		return tx.updateSecret(ctx, &s2)
+	})
+}
+
+func (d *sqlDB) DeleteSecret(ctx context.Context, id string) error {
+	row, err := gorm.G[secretRow](d.g).Where("id = ?", id).Take(ctx)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return d.workspaceWrite(ctx, row.WorkspaceID, func(tx *sqlDB) error { return tx.deleteSecret(ctx, id) })
 }

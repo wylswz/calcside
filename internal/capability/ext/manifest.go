@@ -13,6 +13,13 @@ import (
 
 var identRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// ParseManifest decodes capability.yaml strictly (unknown fields
+// rejected) and validates it — the read surface for manifest metadata
+// without loading or initializing the extension.
+func ParseManifest(data []byte) (*CapabilityManifest, error) {
+	return parseManifest(data)
+}
+
 // parseManifest decodes capability.yaml (unknown fields rejected).
 func parseManifest(data []byte) (*CapabilityManifest, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))

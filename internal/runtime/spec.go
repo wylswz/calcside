@@ -2,9 +2,11 @@ package runtime
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"time"
 
+	"calcside/internal/module"
 	"calcside/internal/secrets"
 	"calcside/internal/types"
 )
@@ -23,7 +25,100 @@ type Spec struct {
 	// instance. Nil selects defaults; an empty list selects none. Server
 	// policies (--policy-dir) always apply and are never listed here.
 	Policies []string `json:"policies"`
+	// Modules maps mount alias → module reference (EP-0017). The alias
+	// is the @-namespace consumer code loads through. Nil and an empty
+	// map both mean "no modules"; the distinction is preserved through
+	// serialization as policies are.
+	Modules map[string]module.Reference `json:"modules"`
+	// Environment is the consumer-owned configuration scope shared by
+	// instances, applications and module debug runs: per-extension
+	// named bindings of vault-secret references. It carries references
+	// only — never resolved values.
+	Environment *Environment `json:"environment,omitempty"`
 }
+
+// Environment is the spec.environment object: extension alias →
+// per-binding secret references the consumer supplies for that
+// extension's manifest secret fields. Field names are validated
+// against the pinned extension manifest at resolution time; only the
+// shape and reference syntax are checked at normalization.
+type Environment struct {
+	Extensions map[string]ExtensionEnvironment `json:"extensions,omitempty"`
+}
+
+// ExtensionEnvironment holds named bindings for one extension alias.
+// Execution always selects the binding named "default"; other names
+// exist in the data model for later selection surfaces.
+type ExtensionEnvironment struct {
+	Bindings map[string]SecretBinding `json:"bindings,omitempty"`
+}
+
+// SecretBinding maps manifest secret-field name → vault reference.
+type SecretBinding struct {
+	Secrets map[string]SecretRef `json:"secrets,omitempty"`
+}
+
+// strictFields decodes data into out after rejecting unknown keys —
+// the environment tree must never silently drop runtime attributes.
+func strictFields(data []byte, allowed []string, out any) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for k := range raw {
+		ok := false
+		for _, a := range allowed {
+			if k == a {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return fmt.Errorf("environment: unsupported field %q (references only)", k)
+		}
+	}
+	return json.Unmarshal(data, out)
+}
+
+// UnmarshalJSON rejects unknown top-level environment keys.
+func (e *Environment) UnmarshalJSON(data []byte) error {
+	type plain Environment
+	return strictFields(data, []string{"extensions"}, (*plain)(e))
+}
+
+// UnmarshalJSON rejects unknown per-extension keys.
+func (e *ExtensionEnvironment) UnmarshalJSON(data []byte) error {
+	type plain ExtensionEnvironment
+	return strictFields(data, []string{"bindings"}, (*plain)(e))
+}
+
+// UnmarshalJSON rejects unknown per-binding keys.
+func (b *SecretBinding) UnmarshalJSON(data []byte) error {
+	type plain SecretBinding
+	return strictFields(data, []string{"secrets"}, (*plain)(b))
+}
+
+// SecretRef references a workspace vault secret by name, with an
+// optional per-binding domain allowlist narrowing the vault entry's
+// own allowlist. Inline values are rejected at decode time.
+type SecretRef struct {
+	Ref            string   `json:"ref"`
+	AllowedDomains []string `json:"allowed_domains,omitempty"`
+}
+
+// UnmarshalJSON rejects inline credential material: only ref and
+// allowed_domains may appear in a binding field.
+func (s *SecretRef) UnmarshalJSON(data []byte) error {
+	type plain SecretRef
+	return strictFields(data, []string{"ref", "allowed_domains"}, (*plain)(s))
+}
+
+// Environment bounds checked at normalization.
+const (
+	maxEnvExtensions = 32
+	maxEnvBindings   = 16
+	maxEnvSecrets    = 32
+)
 
 // SecretSpec is one entry of spec.secrets: either a vault ref (name of a
 // vault secret owned by the instance owner) or an inline value.
@@ -155,6 +250,129 @@ func (s *Spec) Normalize(b Bounds, validate CapValidator) error {
 			return Errf(ErrBadSpec, "policies: duplicate %q", name)
 		}
 		seen[name] = true
+	}
+	if err := s.normalizeModules(); err != nil {
+		return err
+	}
+	return s.normalizeEnvironment()
+}
+
+// normalizeModules checks the mount map: mount grammar, module-name
+// grammar (name defaults to the alias), positive versions when set,
+// and h1: sum shape when pinned. Mount count is bounded with the
+// aggregate checked on the attached trees, not here — a spec carries
+// references only.
+func (s *Spec) normalizeModules() error {
+	if len(s.Modules) > module.MaxMounts {
+		return Errf(ErrBadSpec, "modules: more than %d mounts", module.MaxMounts)
+	}
+	for alias, ref := range s.Modules {
+		if !module.ValidMount(alias) {
+			return Errf(ErrBadSpec, "modules: invalid mount alias %q", alias)
+		}
+		if ref.Name == "" {
+			ref.Name = alias
+		}
+		if !module.ValidName(ref.Name) {
+			return Errf(ErrBadSpec, "modules: invalid name %q for mount %q", ref.Name, alias)
+		}
+		if ref.Version < 0 {
+			return Errf(ErrBadSpec, "modules: invalid version for mount %q", alias)
+		}
+		if ref.Sum != "" && !module.ValidSum(ref.Sum) {
+			return Errf(ErrBadSpec, "modules: mount %q sum must be an h1: hash", alias)
+		}
+		for _, e := range ref.Ext {
+			if !identRe.MatchString(e) {
+				return Errf(ErrBadSpec, "modules: mount %q has invalid ext alias %q", alias, e)
+			}
+		}
+		s.Modules[alias] = ref
+	}
+	return nil
+}
+
+// Validate checks the consumer-owned environment scope's shape:
+// bounded maps, alias/binding/field grammars, vault-name refs and
+// domain allowlists. Field↔manifest and alias↔spec resolution happens
+// later (sandbox); this is the shared shape contract both the spec
+// normalizer and the service-side pre-validation enforce.
+func (e *Environment) Validate() error {
+	if e == nil {
+		return nil
+	}
+	if len(e.Extensions) > maxEnvExtensions {
+		return fmt.Errorf("environment: more than %d extension entries", maxEnvExtensions)
+	}
+	for alias, ee := range e.Extensions {
+		if !identRe.MatchString(alias) {
+			return fmt.Errorf("environment: invalid extension alias %q", alias)
+		}
+		if len(ee.Bindings) == 0 || len(ee.Bindings) > maxEnvBindings {
+			return fmt.Errorf("environment: extension %q needs 1..%d bindings", alias, maxEnvBindings)
+		}
+		for bname, b := range ee.Bindings {
+			if !module.ValidMount(bname) {
+				return fmt.Errorf("environment: invalid binding name %q for extension %q", bname, alias)
+			}
+			if len(b.Secrets) == 0 || len(b.Secrets) > maxEnvSecrets {
+				return fmt.Errorf("environment: binding %q for extension %q needs 1..%d secret fields", bname, alias, maxEnvSecrets)
+			}
+			for field, ref := range b.Secrets {
+				if !identRe.MatchString(field) {
+					return fmt.Errorf("environment: invalid secret field %q for extension %q", field, alias)
+				}
+				if !secrets.ValidName(ref.Ref) {
+					return fmt.Errorf("environment: invalid vault reference %q for extension %q field %q", ref.Ref, alias, field)
+				}
+				if _, err := secrets.ValidateDomains(ref.AllowedDomains); err != nil {
+					return fmt.Errorf("environment: extension %q field %q: %s", alias, field, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// normalizeEnvironment checks the consumer-owned environment scope
+// via the shared Validate contract.
+func (s *Spec) normalizeEnvironment() error {
+	if s.Environment == nil {
+		return nil
+	}
+	if err := s.Environment.Validate(); err != nil {
+		return Errf(ErrBadSpec, "%s", err)
+	}
+	return nil
+}
+
+// identRe is the Starlark identifier grammar used for ext aliases and
+// manifest field names (≤64 chars).
+var identRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
+
+// VerifyModuleMounts checks a request's attached trees against the
+// spec's normalized module references — the node must never silently
+// create a module-less instance when the spec declares mounts, and an
+// attached tree must match its reference exactly (name, version, sum).
+// A version-0 reference is the debug-draft form and pairs only with a
+// version-0 tree. Extra mounts the spec never declared are rejected.
+func VerifyModuleMounts(refs map[string]module.Reference, trees map[string]module.Tree) error {
+	for alias, ref := range refs {
+		t, ok := trees[alias]
+		if !ok {
+			return Errf(ErrBadSpec, "modules: spec mount %q has no attached tree", alias)
+		}
+		if t.Name != ref.Name || t.Version != ref.Version {
+			return Errf(ErrBadSpec, "modules: mount %q tree %s v%d does not match reference %s v%d", alias, t.Name, t.Version, ref.Name, ref.Version)
+		}
+		if t.Sum != ref.Sum {
+			return Errf(ErrBadSpec, "modules: mount %q tree sum does not match the pinned reference", alias)
+		}
+	}
+	for alias := range trees {
+		if _, ok := refs[alias]; !ok {
+			return Errf(ErrBadSpec, "modules: attached mount %q is not declared by the spec", alias)
+		}
 	}
 	return nil
 }

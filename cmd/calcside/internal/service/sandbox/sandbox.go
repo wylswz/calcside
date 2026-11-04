@@ -26,6 +26,7 @@ import (
 	"calcside/internal/capability"
 	capext "calcside/internal/capability/ext"
 	"calcside/internal/llm"
+	"calcside/internal/module"
 	"calcside/internal/runtime"
 	"calcside/internal/store"
 	"calcside/internal/types"
@@ -48,6 +49,18 @@ const storedOutputBytes = 64 << 10
 // instance. Implemented by the vault service, which holds the cipher.
 type SecretResolver interface {
 	Resolve(ctx context.Context, userID string, in map[string]runtime.SecretSpec) ([]runtime.Secret, map[string]runtime.SecretSpec, error)
+	// Describe runs every check Resolve performs — entry shape, vault
+	// existence, allowlist narrowing — but never decrypts. It returns
+	// the sanitized descriptor map; drafts, previews and debug specs
+	// use it so ciphertext is never opened outside real creation.
+	Describe(ctx context.Context, userID string, in map[string]runtime.SecretSpec) (map[string]runtime.SecretSpec, error)
+}
+
+// ManifestReader returns extension manifest metadata for a pinned
+// (source,sum) without initializing anything — the API-owned
+// repository, which re-checks source allowlists per call.
+type ManifestReader interface {
+	Manifest(ctx context.Context, source, sum string) (*capext.CapabilityManifest, error)
 }
 
 // AuditSink persists the audit batches execution nodes report.
@@ -78,6 +91,9 @@ type Options struct {
 	// SpecPinner pins extension alias/provider refs to immutable sums
 	// before normalization; nil in unit fixtures without extensions.
 	SpecPinner SpecPinner
+	// Manifests reads pinned extension manifests for environment
+	// binding resolution; required when a spec carries spec.environment.
+	Manifests ManifestReader
 	// GlobalPolicies is the --policy-dir snapshot, loaded once at
 	// startup and shipped with every create request so that every node
 	// evaluates the same modules.
@@ -86,6 +102,9 @@ type Options struct {
 	// store because no single node can see the whole picture.
 	MaxInstancesPerUser int
 	Now                 func() time.Time
+	// Rebind builds transaction-scoped boundary dependencies for
+	// WithStore. Nil only in static fixtures; production sets it.
+	Rebind func(store.Store) (BoundaryBindings, error)
 }
 
 type Service struct {
@@ -101,6 +120,8 @@ type Service struct {
 	maxPerUser int
 	now        func() time.Time
 	pinner     SpecPinner
+	manifests  ManifestReader
+	rebind     func(store.Store) (BoundaryBindings, error)
 }
 
 // Activity aggregates run stats per instance for the list view; the
@@ -119,9 +140,10 @@ func New(o Options) *Service {
 	}
 	return &Service{
 		st: o.Store, rt: o.Runtime, secrets: o.Secrets, audit: o.Audit,
-		reg: o.Registry, ext: capext.NewInspector(o.Ext), limits: o.Limits,
+		reg: o.Registry, ext: capext.NewInspector(o.Ext), limits: o.Limits, rebind: o.Rebind,
 		access: o.Access, globalPols: o.GlobalPolicies,
 		maxPerUser: o.MaxInstancesPerUser, now: o.Now, pinner: o.SpecPinner,
+		manifests: o.Manifests,
 	}
 }
 
@@ -248,7 +270,7 @@ func (s *Service) selectedPolicies(ctx context.Context, wsID string, names []str
 // spec bytes. Key specs (keySpec=true) additionally reject inline secret
 // values — a stored key may only hold vault references.
 func (s *Service) ValidateSpec(ctx context.Context, a service.Actor, rawSpec []byte, keySpec bool) (json.RawMessage, error) {
-	spec, _, secs, err := s.validateSpec(ctx, a, rawSpec, keySpec)
+	spec, _, secs, _, err := s.validateSpec(ctx, a, rawSpec, keySpec, false)
 	if err != nil {
 		return nil, err
 	}
@@ -364,44 +386,72 @@ func (s *Service) resolveLLMProviders(ctx context.Context, wsID string, raw []by
 }
 
 // validateSpec runs normalization, secret resolution and policy
-// selection for a raw spec; no placement happens.
-func (s *Service) validateSpec(ctx context.Context, a service.Actor, rawSpec []byte, keySpec bool) (*runtime.Spec, []runtime.Secret, map[string]runtime.SecretSpec, error) {
+// selection for a raw spec; no placement happens. resolve=false is the
+// descriptor mode shared by draft saves and previews: every check runs,
+// but the vault is described, never decrypted, and no plaintext exists
+// anywhere in the result.
+func (s *Service) validateSpec(ctx context.Context, a service.Actor, rawSpec []byte, keySpec, resolve bool) (*runtime.Spec, []runtime.Secret, map[string]runtime.SecretSpec, map[string]module.Tree, error) {
+	return s.validateSpecWithModules(ctx, a, rawSpec, keySpec, resolve, nil)
+}
+
+// validateSpecWithModules is validateSpec with a trusted module-tree
+// override map — internal only (DebugBoundary/DebugCreate).
+func (s *Service) validateSpecWithModules(ctx context.Context, a service.Actor, rawSpec []byte, keySpec, resolve bool, overrides map[string]module.Tree) (*runtime.Spec, []runtime.Secret, map[string]runtime.SecretSpec, map[string]module.Tree, error) {
 	rawSpec, err := s.resolveLLMProviders(ctx, a.WorkspaceID, rawSpec)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
+	}
+	// Resolve spec.modules into pinned trees once — the snapshot
+	// travels with the request and is never re-read from the library.
+	var modules map[string]module.Tree
+	rawSpec, modules, err = s.selectedModulesWithOverrides(ctx, a.WorkspaceID, rawSpec, overrides)
+	if err != nil {
+		return nil, nil, nil, nil, err
 	}
 	if s.pinner != nil {
 		rawSpec, err = s.pinner.PinSpec(ctx, rawSpec)
 		if err != nil {
-			return nil, nil, nil, fail(err)
+			return nil, nil, nil, nil, fail(err)
 		}
+	}
+	// Environment bindings merge into ext.config/spec.secrets after
+	// pinning (sums exist) and before capability config validation.
+	rawSpec, err = s.applyEnvironment(ctx, a.WorkspaceID, rawSpec)
+	if err != nil {
+		return nil, nil, nil, nil, err
 	}
 	spec, _, err := capability.NormalizeSpec(rawSpec, s.reg, s.limits)
 	if err != nil {
-		return nil, nil, nil, fail(err)
+		return nil, nil, nil, nil, fail(err)
 	}
 	if keySpec {
 		for name, sec := range spec.Secrets {
 			if sec.Value != "" {
-				return nil, nil, nil, service.Errf(types.ErrCodeBadSpec, "secrets.%s: key specs hold vault references only, not inline values", name)
+				return nil, nil, nil, nil, service.Errf(types.ErrCodeBadSpec, "secrets.%s: key specs hold vault references only, not inline values", name)
 			}
 		}
 	}
-	resolved, sanitized, err := s.secrets.Resolve(ctx, a.WorkspaceID, spec.Secrets)
+	var resolved []runtime.Secret
+	var sanitized map[string]runtime.SecretSpec
+	if resolve {
+		resolved, sanitized, err = s.secrets.Resolve(ctx, a.WorkspaceID, spec.Secrets)
+	} else {
+		sanitized, err = s.secrets.Describe(ctx, a.WorkspaceID, spec.Secrets)
+	}
 	if err != nil {
-		return nil, nil, nil, service.Errf(types.ErrCodeBadSpec, "%s", err.Error())
+		return nil, nil, nil, nil, service.Errf(types.ErrCodeBadSpec, "%s", err.Error())
 	}
 	if _, err := s.selectedPolicies(ctx, a.WorkspaceID, spec.Policies); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	return spec, resolved, sanitized, nil
+	return spec, resolved, sanitized, modules, nil
 }
 
 // place builds the instance row, places it on the runtime and persists
 // the binding — rolling the placement back if the store write fails.
 // ttl is the effective TTL: it is written into the stored spec so
 // renewal slides by the same amount the instance was created with.
-func (s *Service) place(ctx context.Context, a service.Actor, spec *runtime.Spec, resolved []runtime.Secret, secs map[string]runtime.SecretSpec, labels map[string]string, ttl int64, keyID, workspaceID string) (*store.Instance, error) {
+func (s *Service) place(ctx context.Context, a service.Actor, spec *runtime.Spec, resolved []runtime.Secret, secs map[string]runtime.SecretSpec, mods map[string]module.Tree, labels map[string]string, ttl int64, keyID, workspaceID string) (*store.Instance, error) {
 	userPols, err := s.selectedPolicies(ctx, a.WorkspaceID, spec.Policies)
 	if err != nil {
 		return nil, err
@@ -434,6 +484,7 @@ func (s *Service) place(ctx context.Context, a service.Actor, spec *runtime.Spec
 		Labels:     meta.Labels,
 		Spec:       meta.Spec,
 		Policies:   runtime.PolicyBundle{Global: s.globalPols, User: userPols},
+		Modules:    mods,
 		Secrets:    resolved,
 		ExpiresAt:  meta.ExpiresAt,
 	})
@@ -463,14 +514,14 @@ func (s *Service) Create(ctx context.Context, a service.Actor, rawSpec []byte) (
 	if err := s.access.Workspace(ctx, a, a.WorkspaceID, access.Run); err != nil {
 		return nil, err
 	}
-	spec, resolved, secs, err := s.validateSpec(ctx, a, rawSpec, false)
+	spec, resolved, secs, mods, err := s.validateSpec(ctx, a, rawSpec, false, true)
 	if err != nil {
 		return nil, err
 	}
 	if err := s.checkUserLimit(ctx, a); err != nil {
 		return nil, err
 	}
-	return s.place(ctx, a, spec, resolved, secs, spec.Labels, spec.TTLSeconds, "", a.WorkspaceID)
+	return s.place(ctx, a, spec, resolved, secs, mods, spec.Labels, spec.TTLSeconds, "", a.WorkspaceID)
 }
 
 // checkUserLimit enforces the cluster-wide live-instance quota.
@@ -506,7 +557,7 @@ func (s *Service) createRestricted(ctx context.Context, a service.Actor, rawSpec
 	if err := s.access.Workspace(ctx, a, a.WorkspaceID, access.Run); err != nil {
 		return nil, err
 	}
-	spec, resolved, secs, err := s.validateSpec(ctx, a, a.KeySpec, false)
+	spec, resolved, secs, mods, err := s.validateSpec(ctx, a, a.KeySpec, false, true)
 	if err != nil {
 		return nil, err
 	}
@@ -534,7 +585,7 @@ func (s *Service) createRestricted(ctx context.Context, a service.Actor, rawSpec
 	for k, v := range spec.Labels {
 		labels[k] = v
 	}
-	return s.place(ctx, a, spec, resolved, secs, labels, ttl, a.KeyID, a.WorkspaceID)
+	return s.place(ctx, a, spec, resolved, secs, mods, labels, ttl, a.KeyID, a.WorkspaceID)
 }
 
 func (s *Service) Get(ctx context.Context, a service.Actor, id string) (*store.Instance, error) {
@@ -736,13 +787,170 @@ func (s *Service) ApplicationBoundary(ctx context.Context, a service.Actor, rawS
 	if err := json.Unmarshal(rawSpec, &draft); err != nil {
 		return nil, runtime.PolicyBundle{}, nil, service.BadRequest("invalid application runtime settings")
 	}
-	spec, resolved, secs, err := s.validateSpec(ctx, a, rawSpec, true)
+	b, err := s.BuildBoundary(ctx, a, rawSpec, true)
 	if err != nil {
 		return nil, runtime.PolicyBundle{}, nil, err
+	}
+	return b.Spec, b.Policies, b.Secrets, nil
+}
+
+// ReleaseBoundary reconstitutes the boundary for an immutable
+// serving release: the pinned rel.Spec, rel.Policies and rel.Modules
+// plus live vault resolution of the referenced secrets. No library
+// re-reads — module trees come from the release snapshot, user
+// policies are the snapshot, and server globals are the current
+// --policy-dir union (the same semantics ApplicationBoundary had for
+// globals). The release's own content is never mutated.
+func (s *Service) ReleaseBoundary(ctx context.Context, a service.Actor, rel *store.ServingRelease) (*Boundary, error) {
+	if err := module.ValidateMounts(rel.Modules); err != nil {
+		return nil, service.Errf(types.ErrCodeBadSpec, "release modules: %s", err)
+	}
+	var spec runtime.Spec
+	if err := json.Unmarshal(rel.Spec, &spec); err != nil {
+		return nil, service.Errf(types.ErrCodeBadSpec, "release spec invalid")
+	}
+	if err := runtime.VerifyModuleMounts(spec.Modules, rel.Modules); err != nil {
+		return nil, service.Errf(types.ErrCodeBadSpec, "release modules: %s", err)
+	}
+	var resolved []runtime.Secret
+	sanitized := map[string]runtime.SecretSpec{}
+	if len(spec.Secrets) > 0 {
+		var err error
+		resolved, sanitized, err = s.secrets.Resolve(ctx, a.WorkspaceID, spec.Secrets)
+		if err != nil {
+			return nil, service.Errf(types.ErrCodeBadSpec, "%s", err.Error())
+		}
+	}
+	// Global policy union matches the scheduler's namespacing exactly:
+	// the release's own global snapshot under release/ and the current
+	// server set under server/ — neither may shadow the other.
+	global := map[string]string{}
+	for k, v := range rel.Policies.Global {
+		global["release/"+k] = v
+	}
+	for k, v := range s.globalPols {
+		global["server/"+k] = v
+	}
+	return &Boundary{
+		Spec:     spec.Sanitized(sanitized),
+		Policies: runtime.PolicyBundle{Global: global, User: maps.Clone(rel.Policies.User)},
+		Modules:  rel.Modules,
+		Secrets:  resolved,
+	}, nil
+}
+
+// Boundary is the fully resolved creation context for a spec — the
+// normalized spec, the policy snapshot, the pinned module trees, and
+// (in resolve mode) the plaintext secrets. Callers retain one object
+// instead of threading the growing tuple.
+type Boundary struct {
+	Spec     json.RawMessage
+	Policies runtime.PolicyBundle
+	Modules  map[string]module.Tree
+	Secrets  []runtime.Secret
+}
+
+// BuildBoundary resolves a raw spec to a Boundary. resolve=false is
+// the descriptor mode: identical normalization and snapshots, but the
+// vault is described — never decrypted — and Secrets is nil.
+func (s *Service) BuildBoundary(ctx context.Context, a service.Actor, rawSpec []byte, resolve bool) (*Boundary, error) {
+	return s.buildBoundaryWith(ctx, a, rawSpec, resolve, nil)
+}
+
+// buildBoundaryWith is BuildBoundary plus trusted module-tree
+// overrides — internal only.
+func (s *Service) buildBoundaryWith(ctx context.Context, a service.Actor, rawSpec []byte, resolve bool, overrides map[string]module.Tree) (*Boundary, error) {
+	var draft runtime.Spec
+	if err := json.Unmarshal(rawSpec, &draft); err != nil {
+		return nil, service.BadRequest("invalid application runtime settings")
+	}
+	spec, resolved, secs, mods, err := s.validateSpecWithModules(ctx, a, rawSpec, true, resolve, overrides)
+	if err != nil {
+		return nil, err
 	}
 	userPols, err := s.selectedPolicies(ctx, a.WorkspaceID, spec.Policies)
 	if err != nil {
+		return nil, err
+	}
+	return &Boundary{
+		Spec:     spec.Sanitized(secs),
+		Policies: runtime.PolicyBundle{Global: maps.Clone(s.globalPols), User: maps.Clone(userPols)},
+		Modules:  mods,
+		Secrets:  resolved,
+	}, nil
+}
+
+// ApplicationReviewBoundary is ApplicationBoundary in descriptor mode:
+// identical normalization, pinning, environment merge and policy
+// snapshot, but the vault is described — never decrypted — and no
+// plaintext is returned. Draft saves and publish previews use it so a
+// stored draft can never cause ciphertext to open.
+func (s *Service) ApplicationReviewBoundary(ctx context.Context, a service.Actor, rawSpec []byte) (json.RawMessage, runtime.PolicyBundle, []runtime.Secret, error) {
+	var draft runtime.Spec
+	if err := json.Unmarshal(rawSpec, &draft); err != nil {
+		return nil, runtime.PolicyBundle{}, nil, service.BadRequest("invalid application runtime settings")
+	}
+	b, err := s.BuildBoundary(ctx, a, rawSpec, false)
+	if err != nil {
 		return nil, runtime.PolicyBundle{}, nil, err
 	}
-	return spec.Sanitized(secs), runtime.PolicyBundle{Global: maps.Clone(s.globalPols), User: maps.Clone(userPols)}, resolved, nil
+	return b.Spec, b.Policies, nil, nil
+}
+
+// BoundaryBindings are the store-backed dependencies a boundary needs:
+// secret resolution, spec pinning, manifest inspection and the ext
+// capability options. A transaction-rebound sandbox swaps all of them
+// at once so no lookup escapes to the root store.
+type BoundaryBindings struct {
+	Secrets    SecretResolver
+	SpecPinner SpecPinner
+	Manifests  ManifestReader
+	Ext        *capext.Options
+}
+
+// cloneRegistry copies the service's registry — every registered
+// factory except ext, which is re-registered with the rebound ext
+// options (its SourceResolver closes over the tx-bound repository).
+func (s *Service) cloneRegistry(ext *capext.Options) *capability.Registry {
+	if s.reg == nil {
+		return nil
+	}
+	out := capability.NewRegistry()
+	for _, name := range s.reg.Names() {
+		f, ok := s.reg.Get(name)
+		if !ok || name == types.CapExt {
+			continue
+		}
+		out.Register(f)
+	}
+	if ext != nil {
+		out.Register(capext.Factory(*ext))
+	}
+	return out
+}
+
+// WithStore returns a shallow clone whose store, access checker and
+// boundary dependencies run against st (a transaction handle). With no
+// Options.Rebind the clone keeps the existing resolvers — acceptable
+// only for static fixtures; production must supply Rebind.
+func (s *Service) WithStore(st store.Store) (*Service, error) {
+	nb := *s
+	nb.st = st
+	nb.access = access.New(st)
+	if s.rebind != nil {
+		b, err := s.rebind(st)
+		if err != nil {
+			return nil, err
+		}
+		if b.Secrets != nil {
+			nb.secrets = b.Secrets
+		}
+		nb.pinner = b.SpecPinner
+		nb.manifests = b.Manifests
+		if b.Ext != nil {
+			nb.ext = capext.NewInspector(b.Ext)
+		}
+		nb.reg = s.cloneRegistry(b.Ext)
+	}
+	return &nb, nil
 }

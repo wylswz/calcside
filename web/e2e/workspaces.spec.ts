@@ -607,9 +607,7 @@ test('new instance: extension library stays bounded at 1000 entries', async ({ p
 
   // settings for the catalog entry: source and alias sit under Advanced
   await page.getByRole('button', { name: 'Configure ext_0999' }).click()
-  await page.getByText('Advanced extension settings').click()
-  await expect(page.getByLabel('Extension source')).toHaveValue('contrib/ext999')
-  await expect(page.getByLabel('Alias')).toHaveValue('ext_0999')
+  await expect(page.getByRole('heading', { name: 'ext_0999' })).toBeVisible()
   await page.getByRole('button', { name: 'Create instance' }).click()
   await expect.poll(() => captured).not.toBeNull()
   expect(captured.capabilities.ext.ext_0999.source).toBe('contrib/ext999')
@@ -623,28 +621,28 @@ test('new instance: extension editor keeps invalid JSON through view switches an
   await page.goto(`${consoleURL}/instances/new?step=config`)
   const palette = page.getByRole('tab', { name: 'Add capabilities' })
   const card = (alias: string) => page.locator('.settings-card').filter({ has: page.getByRole('heading', { name: alias }) })
-  // custom extensions open their settings, since they need a source
-  await page.getByRole('button', { name: 'Configure a custom extension' }).click()
-  await page.getByLabel('Alias').fill('alpha')
-  await page.getByLabel('Extension source').fill('contrib/alpha')
+  // catalog entries carry a string_map field — the JSON editor is the
+  // same code path custom extensions used.
+  const mk = (n: string) => ({ source: `contrib/${n}`, name: n, description: n, config: [{ name: 'labels', type: 'string_map', doc: 'k=v map' }] })
+  await page.route('**/api/v1/extensions**', (r) => r.fulfill({ json: { extensions: [mk('alpha'), mk('beta')], local_enabled: true, remote_enabled: false } }))
+  await page.goto(`${consoleURL}/instances/new?step=config`)
+  await page.getByRole('button', { name: 'Add alpha' }).click()
   await palette.click()
-  await page.getByRole('button', { name: 'Configure a custom extension' }).click()
-  const beta = page.locator('.settings-card').last()
-  await beta.getByLabel('Alias').fill('beta')
-  await beta.getByLabel('Extension source').fill('contrib/beta')
-  await card('beta').getByLabel('Custom configuration JSON').fill('{ broken')
-  await expect(card('beta').getByRole('alert')).toContainText(/JSON object/i)
+  await page.getByRole('button', { name: 'Add beta' }).click()
   const create = page.getByRole('button', { name: 'Create instance' })
+  await page.getByRole('button', { name: 'Configure beta' }).click()
+  await card('beta').getByLabel('config JSON').fill('{ broken')
+  await expect(card('beta').getByRole('alert')).toContainText(/JSON/i)
   await expect(create).toBeDisabled()
   // leave and come back: the typed text and its error are still there
   await palette.click()
   await page.getByRole('button', { name: 'Configure beta' }).click()
-  await expect(card('beta').getByLabel('Custom configuration JSON')).toHaveValue('{ broken')
+  await expect(card('beta').getByLabel('config JSON')).toHaveValue('{ broken')
   // removing the other entry keeps beta's text and error
   await page.getByRole('button', { name: 'Remove alpha' }).click()
-  await expect(card('beta').getByLabel('Custom configuration JSON')).toHaveValue('{ broken')
+  await expect(card('beta').getByLabel('config JSON')).toHaveValue('{ broken')
   await expect(create).toBeDisabled()
-  await card('beta').getByLabel('Custom configuration JSON').fill('{}')
+  await card('beta').getByLabel('config JSON').fill('{}')
   await expect(create).toBeEnabled()
 })
 
@@ -682,7 +680,6 @@ test('new instance: palette controls stay put while adding and removing', async 
       next: page.getByRole('button', { name: 'Next extensions page' }),
       ext2: page.locator('.extensions-block .ext-card').nth(2).locator('.ext-card-action'),
       ext3: page.locator('.extensions-block .ext-card').nth(3).locator('.ext-card-action'),
-      custom: page.getByRole('button', { name: 'Configure a custom extension' }),
     }
     // Document coordinates: Playwright may scroll a target into view to
     // click it, which is the user's own scrolling, not layout movement.

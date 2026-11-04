@@ -222,6 +222,10 @@ export function buildInstanceSpec(draft: InstanceDraft, opts: { keyMode?: boolea
           : typeof value === 'string'
         if (!valid) errors.push({ section: 'Extensions', message: `${ex.alias}: ${f.name} must have type ${f.type}` })
         if (f.type === 'secret') {
+          const envProvided = (draft.extra?.environment as {
+            extensions?: Record<string, { bindings?: { default?: { secrets?: Record<string, { ref: string }> } } }>
+          } | undefined)?.extensions?.[ex.alias]?.bindings?.default?.secrets?.[f.name]?.ref
+          if (envProvided) continue
           const match = typeof value === 'string' ? value.match(/^\{\{\s*secrets\.([A-Z_][A-Z0-9_]{0,63})\s*\}\}$/) : null
           if (!match || !Object.hasOwn(secrets, match[1])) {
             errors.push({ section: 'Extensions', message: `${ex.alias}: ${f.name} requires an installed secret reference` })

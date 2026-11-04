@@ -15,7 +15,9 @@ import (
 	"maps"
 	"runtime"
 	"runtime/metrics"
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +29,7 @@ import (
 	"calcside/internal/capability"
 	capinterrupt "calcside/internal/capability/interrupt"
 	capio "calcside/internal/capability/io"
+	"calcside/internal/module"
 	"calcside/internal/secrets"
 	"calcside/internal/stdlib"
 	"calcside/internal/types"
@@ -54,6 +57,9 @@ type Session struct {
 	actorEmail string
 	Closers    map[types.CapabilityName]io.Closer
 	closers    []io.Closer // build order, for Close
+	// modules holds this session's compiled module attachments and the
+	// per-session init cache; nil when none are attached.
+	modules *moduleSet
 }
 
 // execContext builds the gate's ExecContext for one exec. The actor —
@@ -196,6 +202,10 @@ type SessionCreation struct {
 	Env            map[string]string
 	MaxSteps       uint64
 	MaxOutputBytes int64
+	// Modules maps mount alias to the resolved, h1:-pinned module
+	// trees attached to this session (EP-0017). Trees are verified
+	// and compiled at session create; module init is lazy per load.
+	Modules map[string]module.Tree
 }
 
 // SessionDeps are the live collaborators a session is wired to — the
@@ -328,12 +338,47 @@ func NewSession(d SessionDeps, c SessionCreation) (*Session, error) {
 	if d.Interrupt != nil {
 		docs = append(docs, capinterrupt.Factory().Help(nil)...)
 	}
+	// Module mounts appear in help() as "modules" (the mount list) and
+	// "@alias" (one mount's files).
+	if len(c.Modules) > 0 {
+		var mounts strings.Builder
+		mounts.WriteString("Attached module mounts:\n")
+		for _, alias := range slices.Sorted(maps.Keys(c.Modules)) {
+			t := c.Modules[alias]
+			ver := "draft"
+			if t.Version > 0 {
+				ver = fmt.Sprintf("v%d", t.Version)
+			}
+			fmt.Fprintf(&mounts, "@%s — %s %s\n", alias, t.Name, ver)
+		}
+		mounts.WriteString("load(\"@alias/path.star\", \"name\") imports a file; help(\"@alias\") lists a mount's files.\n")
+		docs = append(docs, capability.HelpEntry{Name: "modules", Summary: "attached module mounts", Text: mounts.String()})
+		for _, alias := range slices.Sorted(maps.Keys(c.Modules)) {
+			var files strings.Builder
+			t := c.Modules[alias]
+			fmt.Fprintf(&files, "Module mount @%s (%s) files:\n", alias, t.Name)
+			for _, name := range slices.Sorted(maps.Keys(t.Files)) {
+				if name == module.ManifestFile {
+					continue // the manifest is not loadable
+				}
+				fmt.Fprintf(&files, "load(\"@%s/%s\", ...)\n", alias, name)
+			}
+			docs = append(docs, capability.HelpEntry{Name: "@" + alias, Summary: "module mount", Text: files.String()})
+		}
+	}
 	stdlib.BindHelp(predeclared, docs)
 	predeclared["print"] = capio.PrintBuiltin(s.Out, gate)
 
 	if err := ValidatePredeclared(predeclared); err != nil {
 		return fail(err)
 	}
+	// Modules compile against the full session predeclared set and
+	// verify their pinned h1: sums; a bad tree fails create closed.
+	modules, err := compileModules(c.Modules, predeclared)
+	if err != nil {
+		return fail(err)
+	}
+	s.modules = modules
 	return s, nil
 }
 
@@ -507,6 +552,11 @@ func (e *Engine) Exec(
 		thread.SetMaxExecutionSteps(maxSteps)
 	}
 	thread.SetLocal(capability.ContextKey, ctx)
+	// Module attachments give exec chunks the @ mount namespace;
+	// ordinary loads stay an error (no consumer source namespace).
+	if s.modules != nil {
+		thread.Load = s.modules.loadFunc(s.Predeclared, nil)
+	}
 
 	e.runningMu.Lock()
 	e.running[execID] = cancel

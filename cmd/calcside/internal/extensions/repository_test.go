@@ -142,3 +142,40 @@ func TestPinProviderModules(t *testing.T) {
 		t.Fatal("provider configuration was modified")
 	}
 }
+
+func TestRepositoryManifest(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "fixtures")
+	module := filepath.Join(root, "echo")
+	if err := os.MkdirAll(module, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range map[string]string{
+		"capability.yaml": "name: echo\nops: [{name: echo, params: [value]}]\nconfig:\n  - {name: api_key, type: secret}\n",
+		"main.star":       "def echo(value): return value\n",
+	} {
+		if err := os.WriteFile(filepath.Join(module, name), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st := &artifactStore{}
+	repo, err := NewRepository(st, capext.Options{CacheDir: t.TempDir(), LocalRoots: []string{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := repo.Manifest(ctx, "fixtures/echo", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Name != "echo" || len(m.Config) != 1 || m.Config[0].Type != "secret" {
+		t.Fatalf("manifest: %+v", m)
+	}
+	// Revoked local namespace cannot be inspected either.
+	revoked, err := NewRepository(st, capext.Options{CacheDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := revoked.Manifest(ctx, "fixtures/echo", ""); err == nil {
+		t.Fatal("manifest read bypassed revoked source policy")
+	}
+}

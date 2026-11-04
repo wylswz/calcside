@@ -369,6 +369,78 @@ func (e PolicyKind) Valid() bool {
 	}
 }
 
+// Defines values for ReviewChangeCategory.
+const (
+	Contract     ReviewChangeCategory = "contract"
+	Grants       ReviewChangeCategory = "grants"
+	Inputs       ReviewChangeCategory = "inputs"
+	Requirements ReviewChangeCategory = "requirements"
+	Rules        ReviewChangeCategory = "rules"
+	Sources      ReviewChangeCategory = "sources"
+)
+
+// Valid indicates whether the value is a known member of the ReviewChangeCategory enum.
+func (e ReviewChangeCategory) Valid() bool {
+	switch e {
+	case Contract:
+		return true
+	case Grants:
+		return true
+	case Inputs:
+		return true
+	case Requirements:
+		return true
+	case Rules:
+		return true
+	case Sources:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReviewChangeDirection.
+const (
+	Changed   ReviewChangeDirection = "changed"
+	Narrowing ReviewChangeDirection = "narrowing"
+	Widening  ReviewChangeDirection = "widening"
+)
+
+// Valid indicates whether the value is a known member of the ReviewChangeDirection enum.
+func (e ReviewChangeDirection) Valid() bool {
+	switch e {
+	case Changed:
+		return true
+	case Narrowing:
+		return true
+	case Widening:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReviewChangeKind.
+const (
+	Added    ReviewChangeKind = "added"
+	Modified ReviewChangeKind = "modified"
+	Removed  ReviewChangeKind = "removed"
+)
+
+// Valid indicates whether the value is a known member of the ReviewChangeKind enum.
+func (e ReviewChangeKind) Valid() bool {
+	switch e {
+	case Added:
+		return true
+	case Modified:
+		return true
+	case Removed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SecretSource.
 const (
 	Inline SecretSource = "inline"
@@ -497,9 +569,20 @@ type ApplicationCreateRequest struct {
 	Spec *RawJSON `json:"spec,omitempty"`
 }
 
+// ApplicationPublishPreviewRequest defines model for ApplicationPublishPreviewRequest.
+type ApplicationPublishPreviewRequest struct {
+	Version int64 `json:"version"`
+}
+
 // ApplicationPublishRequest defines model for ApplicationPublishRequest.
 type ApplicationPublishRequest struct {
-	Version int64 `json:"version"`
+	// Candidate release id (rel_<hex>) returned by publish preview
+	Candidate string `json:"candidate"`
+
+	// ExpectedBase base release id from preview; explicit "" for never published, explicit null or omission 400
+	ExpectedBase *string `json:"expected_base"`
+	Note         *string `json:"note,omitempty"`
+	Version      int64   `json:"version"`
 }
 
 // ApplicationResponse defines model for ApplicationResponse.
@@ -907,8 +990,20 @@ type InstanceResponse struct {
 type InstanceSpec struct {
 	Capabilities *map[string]interface{} `json:"capabilities,omitempty"`
 	Env          *map[string]string      `json:"env,omitempty"`
-	Labels       *map[string]string      `json:"labels,omitempty"`
-	Limits       *Limits                 `json:"limits,omitempty"`
+
+	// Environment Consumer-owned extension configuration: per-extension named bindings of vault-secret references. References only — never resolved values. The "default" binding is used at execution.
+	Environment *SpecEnvironment   `json:"environment,omitempty"`
+	Labels      *map[string]string `json:"labels,omitempty"`
+	Limits      *Limits            `json:"limits,omitempty"`
+
+	// Modules Module mounts (EP-0017): alias → module reference. Code loads files via load("@alias/path.star", ...). References are pinned to name/version/sum by the service at creation; version 0 resolves to the latest published version.
+	Modules *map[string]struct {
+		// Ext extension aliases this mount introduced (provenance; server-recomputed)
+		Ext     *[]string `json:"ext,omitempty"`
+		Name    *string   `json:"name,omitempty"`
+		Sum     *string   `json:"sum,omitempty"`
+		Version *int64    `json:"version,omitempty"`
+	} `json:"modules,omitempty"`
 
 	// Policies Policy names to attach (at most 32), including built-in policies. Omitted or null selects the default policies; none of the current built-ins are defaults, so this attaches none. builtin.block_private_network is opt-in via an explicit list; [] selects none. Library Rego is snapshotted at creation; server policies (--policy-dir) always apply in addition.
 	Policies   *[]PolicyName          `json:"policies,omitempty"`
@@ -1061,6 +1156,160 @@ type MembersResponse struct {
 	Members *[]Member `json:"members,omitempty"`
 }
 
+// Module defines model for Module.
+type Module struct {
+	CreatedAt    time.Time `json:"created_at"`
+	Description  *string   `json:"description,omitempty"`
+	DraftVersion int64     `json:"draft_version"`
+
+	// Files UTF-8 source map; module.yaml optional manifest, other files .star only
+	Files                 map[string]string   `json:"files"`
+	HasUnpublishedChanges bool                `json:"has_unpublished_changes"`
+	Id                    string              `json:"id"`
+	LatestSum             *string             `json:"latest_sum,omitempty"`
+	LatestVersion         int64               `json:"latest_version"`
+	Name                  string              `json:"name"`
+	Requirements          *ModuleRequirements `json:"requirements,omitempty"`
+	UpdatedAt             time.Time           `json:"updated_at"`
+	UserId                string              `json:"user_id"`
+	WorkspaceId           string              `json:"workspace_id"`
+}
+
+// ModuleCreateRequest defines model for ModuleCreateRequest.
+type ModuleCreateRequest struct {
+	Description *string           `json:"description,omitempty"`
+	Files       map[string]string `json:"files"`
+	Name        string            `json:"name"`
+}
+
+// ModuleDebug defines model for ModuleDebug.
+type ModuleDebug struct {
+	Script string `json:"script"`
+
+	// Spec raw JSON preserved byte-for-byte; never re-parsed by the API tier
+	Spec RawJSON `json:"spec"`
+
+	// SpecJson canonical serialized spec
+	SpecJson  *string    `json:"spec_json,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	Version   int64      `json:"version"`
+}
+
+// ModuleDebugResponse defines model for ModuleDebugResponse.
+type ModuleDebugResponse struct {
+	Debug *ModuleDebug `json:"debug,omitempty"`
+}
+
+// ModuleDebugRun defines model for ModuleDebugRun.
+type ModuleDebugRun struct {
+	DebugVersion *int64      `json:"debug_version,omitempty"`
+	DraftVersion *int64      `json:"draft_version,omitempty"`
+	InstanceId   *string     `json:"instance_id,omitempty"`
+	ModuleSum    *string     `json:"module_sum,omitempty"`
+	Result       *ExecResult `json:"result,omitempty"`
+}
+
+// ModuleDebugRunRequest defines model for ModuleDebugRunRequest.
+type ModuleDebugRunRequest struct {
+	DebugVersion *int64 `json:"debug_version"`
+	DraftVersion *int64 `json:"draft_version"`
+}
+
+// ModuleDebugSaveRequest defines model for ModuleDebugSaveRequest.
+type ModuleDebugSaveRequest struct {
+	Script *string `json:"script"`
+
+	// Spec raw JSON preserved byte-for-byte; never re-parsed by the API tier
+	Spec    *json.RawMessage `json:"spec"`
+	Version *int64           `json:"version"`
+}
+
+// ModulePreviewRequest defines model for ModulePreviewRequest.
+type ModulePreviewRequest struct {
+	DraftVersion int64 `json:"draft_version"`
+}
+
+// ModulePublishRequest defines model for ModulePublishRequest.
+type ModulePublishRequest struct {
+	// Candidate pinned candidate digest (h1:) returned by preview
+	Candidate    string `json:"candidate"`
+	DraftVersion int64  `json:"draft_version"`
+
+	// ExpectedBase The base digest the preview compared against, or "" when no prior version exists. Explicit null or omission is a 400 — the field is required and may only be empty string.
+	ExpectedBase *string `json:"expected_base"`
+	Note         *string `json:"note,omitempty"`
+}
+
+// ModuleRequirements defines model for ModuleRequirements.
+type ModuleRequirements struct {
+	// Capabilities base capabilities the module requires granted (informational; io implicit)
+	Capabilities *[]string `json:"capabilities,omitempty"`
+
+	// Ext extension dependencies — source+sum only, never config or credentials
+	Ext *map[string]struct {
+		Source string `json:"source"`
+
+		// Sum pinned h1: extension sum
+		Sum string `json:"sum"`
+	} `json:"ext,omitempty"`
+}
+
+// ModuleResponse defines model for ModuleResponse.
+type ModuleResponse struct {
+	Module *Module `json:"module,omitempty"`
+}
+
+// ModuleRestoreRequest defines model for ModuleRestoreRequest.
+type ModuleRestoreRequest struct {
+	DraftVersion int64 `json:"draft_version"`
+}
+
+// ModuleUpdateRequest defines model for ModuleUpdateRequest.
+type ModuleUpdateRequest struct {
+	Description  *string            `json:"description,omitempty"`
+	DraftVersion int64              `json:"draft_version"`
+	Files        *map[string]string `json:"files,omitempty"`
+	Name         *string            `json:"name,omitempty"`
+}
+
+// ModuleValidateRequest defines model for ModuleValidateRequest.
+type ModuleValidateRequest struct {
+	Files map[string]string `json:"files"`
+}
+
+// ModuleValidateResponse defines model for ModuleValidateResponse.
+type ModuleValidateResponse struct {
+	Error *string `json:"error,omitempty"`
+	Valid bool    `json:"valid"`
+}
+
+// ModuleVersion defines model for ModuleVersion.
+type ModuleVersion struct {
+	BaseVersion  *int64              `json:"base_version,omitempty"`
+	CreatedAt    time.Time           `json:"created_at"`
+	Files        map[string]string   `json:"files"`
+	Note         *string             `json:"note,omitempty"`
+	PublishedBy  string              `json:"published_by"`
+	Requirements *ModuleRequirements `json:"requirements,omitempty"`
+	Sum          string              `json:"sum"`
+	Version      int64               `json:"version"`
+}
+
+// ModuleVersionResponse defines model for ModuleVersionResponse.
+type ModuleVersionResponse struct {
+	Version *ModuleVersion `json:"version,omitempty"`
+}
+
+// ModuleVersionsResponse defines model for ModuleVersionsResponse.
+type ModuleVersionsResponse struct {
+	Versions *[]ModuleVersion `json:"versions,omitempty"`
+}
+
+// ModulesResponse defines model for ModulesResponse.
+type ModulesResponse struct {
+	Modules *[]Module `json:"modules,omitempty"`
+}
+
 // OkResponse defines model for OkResponse.
 type OkResponse struct {
 	Ok *bool `json:"ok,omitempty"`
@@ -1126,6 +1375,14 @@ type PolicyUpdateRequest struct {
 	Rego *string     `json:"rego,omitempty"`
 }
 
+// PublishReview defines model for PublishReview.
+type PublishReview struct {
+	Base      *ReviewArtifact `json:"base,omitempty"`
+	Candidate ReviewArtifact  `json:"candidate"`
+	Changes   []ReviewChange  `json:"changes"`
+	Identical bool            `json:"identical"`
+}
+
 // RawJSON raw JSON preserved byte-for-byte; never re-parsed by the API tier
 type RawJSON = json.RawMessage
 
@@ -1140,6 +1397,58 @@ type ResourceUsages struct {
 	// MemoryUsage memory.current
 	MemoryUsage int64 `json:"memory_usage"`
 }
+
+// ReviewArtifact defines model for ReviewArtifact.
+type ReviewArtifact struct {
+	Digest       string             `json:"digest"`
+	DraftVersion *int64             `json:"draft_version,omitempty"`
+	Files        *map[string]string `json:"files,omitempty"`
+	InputSchema  *string            `json:"input_schema,omitempty"`
+	Modules      *map[string]struct {
+		Files   *map[string]string `json:"files,omitempty"`
+		Name    string             `json:"name"`
+		Sum     string             `json:"sum"`
+		Version int64              `json:"version"`
+	} `json:"modules,omitempty"`
+	Note         *string `json:"note,omitempty"`
+	OutputSchema *string `json:"output_schema,omitempty"`
+	Policies     *struct {
+		Global *map[string]string `json:"global,omitempty"`
+		User   *map[string]string `json:"user,omitempty"`
+	} `json:"policies,omitempty"`
+	PublishedAt *string `json:"published_at,omitempty"`
+	PublishedBy *string `json:"published_by,omitempty"`
+
+	// Requirements raw JSON preserved byte-for-byte; never re-parsed by the API tier
+	Requirements *RawJSON `json:"requirements,omitempty"`
+
+	// Spec raw JSON preserved byte-for-byte; never re-parsed by the API tier
+	Spec    *RawJSON `json:"spec,omitempty"`
+	Version *int64   `json:"version,omitempty"`
+}
+
+// ReviewChange defines model for ReviewChange.
+type ReviewChange struct {
+	// After raw JSON preserved byte-for-byte; never re-parsed by the API tier
+	After *RawJSON `json:"after,omitempty"`
+
+	// Before raw JSON preserved byte-for-byte; never re-parsed by the API tier
+	Before     *RawJSON               `json:"before,omitempty"`
+	Category   ReviewChangeCategory   `json:"category"`
+	Direction  *ReviewChangeDirection `json:"direction,omitempty"`
+	Kind       ReviewChangeKind       `json:"kind"`
+	Path       string                 `json:"path"`
+	ViaModules *[]string              `json:"via_modules,omitempty"`
+}
+
+// ReviewChangeCategory defines model for ReviewChange.Category.
+type ReviewChangeCategory string
+
+// ReviewChangeDirection defines model for ReviewChange.Direction.
+type ReviewChangeDirection string
+
+// ReviewChangeKind defines model for ReviewChange.Kind.
+type ReviewChangeKind string
 
 // Run defines model for Run.
 type Run struct {
@@ -1255,6 +1564,21 @@ type ShareResponse struct {
 // SharesResponse defines model for SharesResponse.
 type SharesResponse struct {
 	Shares *[]Share `json:"shares,omitempty"`
+}
+
+// SpecEnvironment Consumer-owned extension configuration: per-extension named bindings of vault-secret references. References only — never resolved values. The "default" binding is used at execution.
+type SpecEnvironment struct {
+	Extensions *map[string]struct {
+		Bindings *map[string]struct {
+			Secrets *map[string]struct {
+				// AllowedDomains narrowing; must be covered by the vault allowlist
+				AllowedDomains *[]string `json:"allowed_domains,omitempty"`
+
+				// Ref workspace vault secret name
+				Ref string `json:"ref"`
+			} `json:"secrets,omitempty"`
+		} `json:"bindings,omitempty"`
+	} `json:"extensions,omitempty"`
 }
 
 // UpdateSecretRequest defines model for UpdateSecretRequest.
@@ -1481,6 +1805,27 @@ type ChangePasswordJSONBody struct {
 	NewPassword *string `json:"new_password,omitempty"`
 }
 
+// ListModulesParams defines parameters for ListModules.
+type ListModulesParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
+// CreateModuleParams defines parameters for CreateModule.
+type CreateModuleParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
+// ValidateModuleParams defines parameters for ValidateModule.
+type ValidateModuleParams struct {
+	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
+}
+
+// CompareModuleVersionsParams defines parameters for CompareModuleVersions.
+type CompareModuleVersionsParams struct {
+	Base int64  `form:"base" json:"base"`
+	Head string `form:"head" json:"head"`
+}
+
 // ListPoliciesParams defines parameters for ListPolicies.
 type ListPoliciesParams struct {
 	Workspace *string `form:"workspace,omitempty" json:"workspace,omitempty"`
@@ -1534,6 +1879,9 @@ type InvokeApplicationJSONRequestBody = RawJSON
 // PublishApplicationJSONRequestBody defines body for PublishApplication for application/json ContentType.
 type PublishApplicationJSONRequestBody = ApplicationPublishRequest
 
+// PreviewApplicationPublishJSONRequestBody defines body for PreviewApplicationPublish for application/json ContentType.
+type PreviewApplicationPublishJSONRequestBody = ApplicationPublishPreviewRequest
+
 // TestApplicationJSONRequestBody defines body for TestApplication for application/json ContentType.
 type TestApplicationJSONRequestBody = ApplicationTestRequest
 
@@ -1572,6 +1920,30 @@ type UpdateLLMProviderJSONRequestBody = LLMProviderUpdateRequest
 
 // ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
 type ChangePasswordJSONRequestBody ChangePasswordJSONBody
+
+// CreateModuleJSONRequestBody defines body for CreateModule for application/json ContentType.
+type CreateModuleJSONRequestBody = ModuleCreateRequest
+
+// ValidateModuleJSONRequestBody defines body for ValidateModule for application/json ContentType.
+type ValidateModuleJSONRequestBody = ModuleValidateRequest
+
+// UpdateModuleJSONRequestBody defines body for UpdateModule for application/json ContentType.
+type UpdateModuleJSONRequestBody = ModuleUpdateRequest
+
+// SaveModuleDebugJSONRequestBody defines body for SaveModuleDebug for application/json ContentType.
+type SaveModuleDebugJSONRequestBody = ModuleDebugSaveRequest
+
+// RunModuleDebugJSONRequestBody defines body for RunModuleDebug for application/json ContentType.
+type RunModuleDebugJSONRequestBody = ModuleDebugRunRequest
+
+// PublishModuleJSONRequestBody defines body for PublishModule for application/json ContentType.
+type PublishModuleJSONRequestBody = ModulePublishRequest
+
+// PreviewModuleJSONRequestBody defines body for PreviewModule for application/json ContentType.
+type PreviewModuleJSONRequestBody = ModulePreviewRequest
+
+// RestoreModuleVersionJSONRequestBody defines body for RestoreModuleVersion for application/json ContentType.
+type RestoreModuleVersionJSONRequestBody = ModuleRestoreRequest
 
 // CreatePolicyJSONRequestBody defines body for CreatePolicy for application/json ContentType.
 type CreatePolicyJSONRequestBody = PolicyRequest
@@ -1623,6 +1995,9 @@ type ServerInterface interface {
 
 	// (POST /api/v1/applications/{id}/publish)
 	PublishApplication(c *gin.Context, id IdPath)
+
+	// (POST /api/v1/applications/{id}/publish/preview)
+	PreviewApplicationPublish(c *gin.Context, id IdPath)
 
 	// (GET /api/v1/applications/{id}/runs)
 	ListRuns(c *gin.Context, id IdPath, params ListRunsParams)
@@ -1749,6 +2124,51 @@ type ServerInterface interface {
 	// ChangePassword Change the current user's local password and revoke their sessions
 	// (POST /api/v1/me/password)
 	ChangePassword(c *gin.Context)
+
+	// (GET /api/v1/modules)
+	ListModules(c *gin.Context, params ListModulesParams)
+
+	// (POST /api/v1/modules)
+	CreateModule(c *gin.Context, params CreateModuleParams)
+
+	// (POST /api/v1/modules/validate)
+	ValidateModule(c *gin.Context, params ValidateModuleParams)
+
+	// (DELETE /api/v1/modules/{id})
+	DeleteModule(c *gin.Context, id IdPath)
+
+	// (GET /api/v1/modules/{id})
+	GetModule(c *gin.Context, id IdPath)
+
+	// (PATCH /api/v1/modules/{id})
+	UpdateModule(c *gin.Context, id IdPath)
+
+	// (GET /api/v1/modules/{id}/debug)
+	GetModuleDebug(c *gin.Context, id IdPath)
+
+	// (PUT /api/v1/modules/{id}/debug)
+	SaveModuleDebug(c *gin.Context, id IdPath)
+
+	// (POST /api/v1/modules/{id}/debug/run)
+	RunModuleDebug(c *gin.Context, id IdPath)
+
+	// (POST /api/v1/modules/{id}/publish)
+	PublishModule(c *gin.Context, id IdPath)
+
+	// (POST /api/v1/modules/{id}/publish/preview)
+	PreviewModule(c *gin.Context, id IdPath)
+
+	// (GET /api/v1/modules/{id}/versions)
+	ListModuleVersions(c *gin.Context, id IdPath)
+
+	// (GET /api/v1/modules/{id}/versions/compare)
+	CompareModuleVersions(c *gin.Context, id IdPath, params CompareModuleVersionsParams)
+
+	// (GET /api/v1/modules/{id}/versions/{version})
+	GetModuleVersion(c *gin.Context, id IdPath, version int64)
+
+	// (POST /api/v1/modules/{id}/versions/{version}/restore)
+	RestoreModuleVersion(c *gin.Context, id IdPath, version int64)
 
 	// (GET /api/v1/policies)
 	ListPolicies(c *gin.Context, params ListPoliciesParams)
@@ -2033,6 +2453,31 @@ func (siw *ServerInterfaceWrapper) PublishApplication(c *gin.Context) {
 	}
 
 	siw.Handler.PublishApplication(c, id)
+}
+
+// PreviewApplicationPublish operation middleware
+func (siw *ServerInterfaceWrapper) PreviewApplicationPublish(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PreviewApplicationPublish(c, id)
 }
 
 // ListRuns operation middleware
@@ -3164,6 +3609,424 @@ func (siw *ServerInterfaceWrapper) ChangePassword(c *gin.Context) {
 	siw.Handler.ChangePassword(c)
 }
 
+// ListModules operation middleware
+func (siw *ServerInterfaceWrapper) ListModules(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListModulesParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListModules(c, params)
+}
+
+// CreateModule operation middleware
+func (siw *ServerInterfaceWrapper) CreateModule(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateModuleParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CreateModule(c, params)
+}
+
+// ValidateModule operation middleware
+func (siw *ServerInterfaceWrapper) ValidateModule(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ValidateModuleParams
+
+	// ------------- Optional query parameter "workspace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "workspace", c.Request.URL.Query(), &params.Workspace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workspace: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ValidateModule(c, params)
+}
+
+// DeleteModule operation middleware
+func (siw *ServerInterfaceWrapper) DeleteModule(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteModule(c, id)
+}
+
+// GetModule operation middleware
+func (siw *ServerInterfaceWrapper) GetModule(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetModule(c, id)
+}
+
+// UpdateModule operation middleware
+func (siw *ServerInterfaceWrapper) UpdateModule(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.UpdateModule(c, id)
+}
+
+// GetModuleDebug operation middleware
+func (siw *ServerInterfaceWrapper) GetModuleDebug(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetModuleDebug(c, id)
+}
+
+// SaveModuleDebug operation middleware
+func (siw *ServerInterfaceWrapper) SaveModuleDebug(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.SaveModuleDebug(c, id)
+}
+
+// RunModuleDebug operation middleware
+func (siw *ServerInterfaceWrapper) RunModuleDebug(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RunModuleDebug(c, id)
+}
+
+// PublishModule operation middleware
+func (siw *ServerInterfaceWrapper) PublishModule(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PublishModule(c, id)
+}
+
+// PreviewModule operation middleware
+func (siw *ServerInterfaceWrapper) PreviewModule(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PreviewModule(c, id)
+}
+
+// ListModuleVersions operation middleware
+func (siw *ServerInterfaceWrapper) ListModuleVersions(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListModuleVersions(c, id)
+}
+
+// CompareModuleVersions operation middleware
+func (siw *ServerInterfaceWrapper) CompareModuleVersions(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CompareModuleVersionsParams
+
+	// ------------- Required query parameter "base" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "base", c.Request.URL.Query(), &params.Base, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter base: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required query parameter "head" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "head", c.Request.URL.Query(), &params.Head, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter head: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CompareModuleVersions(c, id, params)
+}
+
+// GetModuleVersion operation middleware
+func (siw *ServerInterfaceWrapper) GetModuleVersion(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "version" -------------
+	var version int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "version", c.Param("version"), &version, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetModuleVersion(c, id, version)
+}
+
+// RestoreModuleVersion operation middleware
+func (siw *ServerInterfaceWrapper) RestoreModuleVersion(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "version" -------------
+	var version int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "version", c.Param("version"), &version, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RestoreModuleVersion(c, id, version)
+}
+
 // ListPolicies operation middleware
 func (siw *ServerInterfaceWrapper) ListPolicies(c *gin.Context) {
 
@@ -3790,9 +4653,25 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.DELETE(options.BaseURL+"/api/v1/applications/:id", wrapper.DeleteApplication)
 	router.GET(options.BaseURL+"/api/v1/applications/:id", wrapper.GetApplication)
 	router.PUT(options.BaseURL+"/api/v1/applications/:id", wrapper.UpdateApplication)
+	router.POST(options.BaseURL+"/api/v1/applications/:id/publish/preview", wrapper.PreviewApplicationPublish)
 	router.POST(options.BaseURL+"/api/v1/applications/:id/publish", wrapper.PublishApplication)
 	router.POST(options.BaseURL+"/api/v1/applications/:id/test", wrapper.TestApplication)
 	router.POST(options.BaseURL+"/api/v1/applications/:id/invoke", wrapper.InvokeApplication)
+	router.GET(options.BaseURL+"/api/v1/modules", wrapper.ListModules)
+	router.POST(options.BaseURL+"/api/v1/modules", wrapper.CreateModule)
+	router.POST(options.BaseURL+"/api/v1/modules/validate", wrapper.ValidateModule)
+	router.DELETE(options.BaseURL+"/api/v1/modules/:id", wrapper.DeleteModule)
+	router.GET(options.BaseURL+"/api/v1/modules/:id", wrapper.GetModule)
+	router.PATCH(options.BaseURL+"/api/v1/modules/:id", wrapper.UpdateModule)
+	router.POST(options.BaseURL+"/api/v1/modules/:id/publish/preview", wrapper.PreviewModule)
+	router.POST(options.BaseURL+"/api/v1/modules/:id/publish", wrapper.PublishModule)
+	router.GET(options.BaseURL+"/api/v1/modules/:id/versions", wrapper.ListModuleVersions)
+	router.GET(options.BaseURL+"/api/v1/modules/:id/versions/compare", wrapper.CompareModuleVersions)
+	router.GET(options.BaseURL+"/api/v1/modules/:id/versions/:version", wrapper.GetModuleVersion)
+	router.POST(options.BaseURL+"/api/v1/modules/:id/versions/:version/restore", wrapper.RestoreModuleVersion)
+	router.GET(options.BaseURL+"/api/v1/modules/:id/debug", wrapper.GetModuleDebug)
+	router.PUT(options.BaseURL+"/api/v1/modules/:id/debug", wrapper.SaveModuleDebug)
+	router.POST(options.BaseURL+"/api/v1/modules/:id/debug/run", wrapper.RunModuleDebug)
 	router.GET(options.BaseURL+"/api/v1/audit", wrapper.ListAudit)
 	router.GET(options.BaseURL+"/api/v1/policies", wrapper.ListPolicies)
 	router.POST(options.BaseURL+"/api/v1/policies", wrapper.CreatePolicy)
@@ -4312,6 +5191,85 @@ func (response PublishApplication404JSONResponse) VisitPublishApplicationRespons
 type PublishApplication409JSONResponse ErrorEnvelope
 
 func (response PublishApplication409JSONResponse) VisitPublishApplicationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewApplicationPublishRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *PreviewApplicationPublishJSONRequestBody
+}
+
+type PreviewApplicationPublishResponseObject interface {
+	VisitPreviewApplicationPublishResponse(w http.ResponseWriter) error
+}
+
+type PreviewApplicationPublish200JSONResponse PublishReview
+
+func (response PreviewApplicationPublish200JSONResponse) VisitPreviewApplicationPublishResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewApplicationPublish400JSONResponse struct{ ErrorJSONResponse }
+
+func (response PreviewApplicationPublish400JSONResponse) VisitPreviewApplicationPublishResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewApplicationPublish401JSONResponse ErrorEnvelope
+
+func (response PreviewApplicationPublish401JSONResponse) VisitPreviewApplicationPublishResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewApplicationPublish404JSONResponse ErrorEnvelope
+
+func (response PreviewApplicationPublish404JSONResponse) VisitPreviewApplicationPublishResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewApplicationPublish409JSONResponse ErrorEnvelope
+
+func (response PreviewApplicationPublish409JSONResponse) VisitPreviewApplicationPublishResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -7077,6 +8035,1125 @@ func (response ChangePassword500JSONResponse) VisitChangePasswordResponse(w http
 	return err
 }
 
+type ListModulesRequestObject struct {
+	Params ListModulesParams
+}
+
+type ListModulesResponseObject interface {
+	VisitListModulesResponse(w http.ResponseWriter) error
+}
+
+type ListModules200JSONResponse ModulesResponse
+
+func (response ListModules200JSONResponse) VisitListModulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListModules401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListModules401JSONResponse) VisitListModulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateModuleRequestObject struct {
+	Params CreateModuleParams
+	Body   *CreateModuleJSONRequestBody
+}
+
+type CreateModuleResponseObject interface {
+	VisitCreateModuleResponse(w http.ResponseWriter) error
+}
+
+type CreateModule200JSONResponse ModuleResponse
+
+func (response CreateModule200JSONResponse) VisitCreateModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateModule400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateModule400JSONResponse) VisitCreateModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateModule401JSONResponse ErrorEnvelope
+
+func (response CreateModule401JSONResponse) VisitCreateModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateModule403JSONResponse ErrorEnvelope
+
+func (response CreateModule403JSONResponse) VisitCreateModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateModule404JSONResponse ErrorEnvelope
+
+func (response CreateModule404JSONResponse) VisitCreateModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateModule413JSONResponse ErrorEnvelope
+
+func (response CreateModule413JSONResponse) VisitCreateModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ValidateModuleRequestObject struct {
+	Params ValidateModuleParams
+	Body   *ValidateModuleJSONRequestBody
+}
+
+type ValidateModuleResponseObject interface {
+	VisitValidateModuleResponse(w http.ResponseWriter) error
+}
+
+type ValidateModule200JSONResponse ModuleValidateResponse
+
+func (response ValidateModule200JSONResponse) VisitValidateModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ValidateModule401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ValidateModule401JSONResponse) VisitValidateModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ValidateModule404JSONResponse ErrorEnvelope
+
+func (response ValidateModule404JSONResponse) VisitValidateModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ValidateModule413JSONResponse ErrorEnvelope
+
+func (response ValidateModule413JSONResponse) VisitValidateModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteModuleRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type DeleteModuleResponseObject interface {
+	VisitDeleteModuleResponse(w http.ResponseWriter) error
+}
+
+type DeleteModule204Response struct {
+}
+
+func (response DeleteModule204Response) VisitDeleteModuleResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteModule401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteModule401JSONResponse) VisitDeleteModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteModule403JSONResponse ErrorEnvelope
+
+func (response DeleteModule403JSONResponse) VisitDeleteModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteModule404JSONResponse ErrorEnvelope
+
+func (response DeleteModule404JSONResponse) VisitDeleteModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetModuleRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type GetModuleResponseObject interface {
+	VisitGetModuleResponse(w http.ResponseWriter) error
+}
+
+type GetModule200JSONResponse ModuleResponse
+
+func (response GetModule200JSONResponse) VisitGetModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetModule401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetModule401JSONResponse) VisitGetModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetModule404JSONResponse ErrorEnvelope
+
+func (response GetModule404JSONResponse) VisitGetModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateModuleRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *UpdateModuleJSONRequestBody
+}
+
+type UpdateModuleResponseObject interface {
+	VisitUpdateModuleResponse(w http.ResponseWriter) error
+}
+
+type UpdateModule200JSONResponse ModuleResponse
+
+func (response UpdateModule200JSONResponse) VisitUpdateModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateModule400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateModule400JSONResponse) VisitUpdateModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateModule401JSONResponse ErrorEnvelope
+
+func (response UpdateModule401JSONResponse) VisitUpdateModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateModule403JSONResponse ErrorEnvelope
+
+func (response UpdateModule403JSONResponse) VisitUpdateModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateModule404JSONResponse ErrorEnvelope
+
+func (response UpdateModule404JSONResponse) VisitUpdateModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateModule409JSONResponse ErrorEnvelope
+
+func (response UpdateModule409JSONResponse) VisitUpdateModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateModule413JSONResponse ErrorEnvelope
+
+func (response UpdateModule413JSONResponse) VisitUpdateModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetModuleDebugRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type GetModuleDebugResponseObject interface {
+	VisitGetModuleDebugResponse(w http.ResponseWriter) error
+}
+
+type GetModuleDebug200JSONResponse ModuleDebugResponse
+
+func (response GetModuleDebug200JSONResponse) VisitGetModuleDebugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetModuleDebug401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetModuleDebug401JSONResponse) VisitGetModuleDebugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetModuleDebug403JSONResponse ErrorEnvelope
+
+func (response GetModuleDebug403JSONResponse) VisitGetModuleDebugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetModuleDebug404JSONResponse ErrorEnvelope
+
+func (response GetModuleDebug404JSONResponse) VisitGetModuleDebugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveModuleDebugRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *SaveModuleDebugJSONRequestBody
+}
+
+type SaveModuleDebugResponseObject interface {
+	VisitSaveModuleDebugResponse(w http.ResponseWriter) error
+}
+
+type SaveModuleDebug200JSONResponse ModuleDebugResponse
+
+func (response SaveModuleDebug200JSONResponse) VisitSaveModuleDebugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveModuleDebug400JSONResponse struct{ ErrorJSONResponse }
+
+func (response SaveModuleDebug400JSONResponse) VisitSaveModuleDebugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveModuleDebug401JSONResponse ErrorEnvelope
+
+func (response SaveModuleDebug401JSONResponse) VisitSaveModuleDebugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveModuleDebug403JSONResponse ErrorEnvelope
+
+func (response SaveModuleDebug403JSONResponse) VisitSaveModuleDebugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveModuleDebug404JSONResponse ErrorEnvelope
+
+func (response SaveModuleDebug404JSONResponse) VisitSaveModuleDebugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveModuleDebug409JSONResponse ErrorEnvelope
+
+func (response SaveModuleDebug409JSONResponse) VisitSaveModuleDebugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunModuleDebugRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *RunModuleDebugJSONRequestBody
+}
+
+type RunModuleDebugResponseObject interface {
+	VisitRunModuleDebugResponse(w http.ResponseWriter) error
+}
+
+type RunModuleDebug200JSONResponse ModuleDebugRun
+
+func (response RunModuleDebug200JSONResponse) VisitRunModuleDebugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunModuleDebug400JSONResponse struct{ ErrorJSONResponse }
+
+func (response RunModuleDebug400JSONResponse) VisitRunModuleDebugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunModuleDebug401JSONResponse ErrorEnvelope
+
+func (response RunModuleDebug401JSONResponse) VisitRunModuleDebugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunModuleDebug403JSONResponse ErrorEnvelope
+
+func (response RunModuleDebug403JSONResponse) VisitRunModuleDebugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunModuleDebug404JSONResponse ErrorEnvelope
+
+func (response RunModuleDebug404JSONResponse) VisitRunModuleDebugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunModuleDebug409JSONResponse ErrorEnvelope
+
+func (response RunModuleDebug409JSONResponse) VisitRunModuleDebugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishModuleRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *PublishModuleJSONRequestBody
+}
+
+type PublishModuleResponseObject interface {
+	VisitPublishModuleResponse(w http.ResponseWriter) error
+}
+
+type PublishModule200JSONResponse ModuleVersionResponse
+
+func (response PublishModule200JSONResponse) VisitPublishModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishModule400JSONResponse struct{ ErrorJSONResponse }
+
+func (response PublishModule400JSONResponse) VisitPublishModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishModule401JSONResponse ErrorEnvelope
+
+func (response PublishModule401JSONResponse) VisitPublishModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishModule403JSONResponse ErrorEnvelope
+
+func (response PublishModule403JSONResponse) VisitPublishModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishModule404JSONResponse ErrorEnvelope
+
+func (response PublishModule404JSONResponse) VisitPublishModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishModule409JSONResponse ErrorEnvelope
+
+func (response PublishModule409JSONResponse) VisitPublishModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewModuleRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *PreviewModuleJSONRequestBody
+}
+
+type PreviewModuleResponseObject interface {
+	VisitPreviewModuleResponse(w http.ResponseWriter) error
+}
+
+type PreviewModule200JSONResponse PublishReview
+
+func (response PreviewModule200JSONResponse) VisitPreviewModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewModule400JSONResponse struct{ ErrorJSONResponse }
+
+func (response PreviewModule400JSONResponse) VisitPreviewModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewModule401JSONResponse ErrorEnvelope
+
+func (response PreviewModule401JSONResponse) VisitPreviewModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewModule403JSONResponse ErrorEnvelope
+
+func (response PreviewModule403JSONResponse) VisitPreviewModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewModule404JSONResponse ErrorEnvelope
+
+func (response PreviewModule404JSONResponse) VisitPreviewModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PreviewModule409JSONResponse ErrorEnvelope
+
+func (response PreviewModule409JSONResponse) VisitPreviewModuleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListModuleVersionsRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type ListModuleVersionsResponseObject interface {
+	VisitListModuleVersionsResponse(w http.ResponseWriter) error
+}
+
+type ListModuleVersions200JSONResponse ModuleVersionsResponse
+
+func (response ListModuleVersions200JSONResponse) VisitListModuleVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListModuleVersions401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListModuleVersions401JSONResponse) VisitListModuleVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListModuleVersions404JSONResponse ErrorEnvelope
+
+func (response ListModuleVersions404JSONResponse) VisitListModuleVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompareModuleVersionsRequestObject struct {
+	Id     IdPath `json:"id"`
+	Params CompareModuleVersionsParams
+}
+
+type CompareModuleVersionsResponseObject interface {
+	VisitCompareModuleVersionsResponse(w http.ResponseWriter) error
+}
+
+type CompareModuleVersions200JSONResponse PublishReview
+
+func (response CompareModuleVersions200JSONResponse) VisitCompareModuleVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompareModuleVersions400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CompareModuleVersions400JSONResponse) VisitCompareModuleVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompareModuleVersions401JSONResponse ErrorEnvelope
+
+func (response CompareModuleVersions401JSONResponse) VisitCompareModuleVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompareModuleVersions403JSONResponse ErrorEnvelope
+
+func (response CompareModuleVersions403JSONResponse) VisitCompareModuleVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompareModuleVersions404JSONResponse ErrorEnvelope
+
+func (response CompareModuleVersions404JSONResponse) VisitCompareModuleVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetModuleVersionRequestObject struct {
+	Id      IdPath `json:"id"`
+	Version int64  `json:"version"`
+}
+
+type GetModuleVersionResponseObject interface {
+	VisitGetModuleVersionResponse(w http.ResponseWriter) error
+}
+
+type GetModuleVersion200JSONResponse ModuleVersionResponse
+
+func (response GetModuleVersion200JSONResponse) VisitGetModuleVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetModuleVersion401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetModuleVersion401JSONResponse) VisitGetModuleVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetModuleVersion404JSONResponse ErrorEnvelope
+
+func (response GetModuleVersion404JSONResponse) VisitGetModuleVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreModuleVersionRequestObject struct {
+	Id      IdPath `json:"id"`
+	Version int64  `json:"version"`
+	Body    *RestoreModuleVersionJSONRequestBody
+}
+
+type RestoreModuleVersionResponseObject interface {
+	VisitRestoreModuleVersionResponse(w http.ResponseWriter) error
+}
+
+type RestoreModuleVersion200JSONResponse ModuleResponse
+
+func (response RestoreModuleVersion200JSONResponse) VisitRestoreModuleVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreModuleVersion400JSONResponse struct{ ErrorJSONResponse }
+
+func (response RestoreModuleVersion400JSONResponse) VisitRestoreModuleVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreModuleVersion401JSONResponse ErrorEnvelope
+
+func (response RestoreModuleVersion401JSONResponse) VisitRestoreModuleVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreModuleVersion403JSONResponse ErrorEnvelope
+
+func (response RestoreModuleVersion403JSONResponse) VisitRestoreModuleVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreModuleVersion404JSONResponse ErrorEnvelope
+
+func (response RestoreModuleVersion404JSONResponse) VisitRestoreModuleVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreModuleVersion409JSONResponse ErrorEnvelope
+
+func (response RestoreModuleVersion409JSONResponse) VisitRestoreModuleVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListPoliciesRequestObject struct {
 	Params ListPoliciesParams
 }
@@ -8664,6 +10741,9 @@ type StrictServerInterface interface {
 	// (POST /api/v1/applications/{id}/publish)
 	PublishApplication(ctx context.Context, request PublishApplicationRequestObject) (PublishApplicationResponseObject, error)
 
+	// (POST /api/v1/applications/{id}/publish/preview)
+	PreviewApplicationPublish(ctx context.Context, request PreviewApplicationPublishRequestObject) (PreviewApplicationPublishResponseObject, error)
+
 	// (GET /api/v1/applications/{id}/runs)
 	ListRuns(ctx context.Context, request ListRunsRequestObject) (ListRunsResponseObject, error)
 
@@ -8789,6 +10869,51 @@ type StrictServerInterface interface {
 	// ChangePassword Change the current user's local password and revoke their sessions
 	// (POST /api/v1/me/password)
 	ChangePassword(ctx context.Context, request ChangePasswordRequestObject) (ChangePasswordResponseObject, error)
+
+	// (GET /api/v1/modules)
+	ListModules(ctx context.Context, request ListModulesRequestObject) (ListModulesResponseObject, error)
+
+	// (POST /api/v1/modules)
+	CreateModule(ctx context.Context, request CreateModuleRequestObject) (CreateModuleResponseObject, error)
+
+	// (POST /api/v1/modules/validate)
+	ValidateModule(ctx context.Context, request ValidateModuleRequestObject) (ValidateModuleResponseObject, error)
+
+	// (DELETE /api/v1/modules/{id})
+	DeleteModule(ctx context.Context, request DeleteModuleRequestObject) (DeleteModuleResponseObject, error)
+
+	// (GET /api/v1/modules/{id})
+	GetModule(ctx context.Context, request GetModuleRequestObject) (GetModuleResponseObject, error)
+
+	// (PATCH /api/v1/modules/{id})
+	UpdateModule(ctx context.Context, request UpdateModuleRequestObject) (UpdateModuleResponseObject, error)
+
+	// (GET /api/v1/modules/{id}/debug)
+	GetModuleDebug(ctx context.Context, request GetModuleDebugRequestObject) (GetModuleDebugResponseObject, error)
+
+	// (PUT /api/v1/modules/{id}/debug)
+	SaveModuleDebug(ctx context.Context, request SaveModuleDebugRequestObject) (SaveModuleDebugResponseObject, error)
+
+	// (POST /api/v1/modules/{id}/debug/run)
+	RunModuleDebug(ctx context.Context, request RunModuleDebugRequestObject) (RunModuleDebugResponseObject, error)
+
+	// (POST /api/v1/modules/{id}/publish)
+	PublishModule(ctx context.Context, request PublishModuleRequestObject) (PublishModuleResponseObject, error)
+
+	// (POST /api/v1/modules/{id}/publish/preview)
+	PreviewModule(ctx context.Context, request PreviewModuleRequestObject) (PreviewModuleResponseObject, error)
+
+	// (GET /api/v1/modules/{id}/versions)
+	ListModuleVersions(ctx context.Context, request ListModuleVersionsRequestObject) (ListModuleVersionsResponseObject, error)
+
+	// (GET /api/v1/modules/{id}/versions/compare)
+	CompareModuleVersions(ctx context.Context, request CompareModuleVersionsRequestObject) (CompareModuleVersionsResponseObject, error)
+
+	// (GET /api/v1/modules/{id}/versions/{version})
+	GetModuleVersion(ctx context.Context, request GetModuleVersionRequestObject) (GetModuleVersionResponseObject, error)
+
+	// (POST /api/v1/modules/{id}/versions/{version}/restore)
+	RestoreModuleVersion(ctx context.Context, request RestoreModuleVersionRequestObject) (RestoreModuleVersionResponseObject, error)
 
 	// (GET /api/v1/policies)
 	ListPolicies(ctx context.Context, request ListPoliciesRequestObject) (ListPoliciesResponseObject, error)
@@ -9121,6 +11246,39 @@ func (sh *strictHandler) PublishApplication(ctx *gin.Context, id IdPath) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(PublishApplicationResponseObject); ok {
 		if err := validResponse.VisitPublishApplicationResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PreviewApplicationPublish operation middleware
+func (sh *strictHandler) PreviewApplicationPublish(ctx *gin.Context, id IdPath) {
+	var request PreviewApplicationPublishRequestObject
+
+	request.Id = id
+
+	var body PreviewApplicationPublishJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.PreviewApplicationPublish(ctx, request.(PreviewApplicationPublishRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PreviewApplicationPublish")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(PreviewApplicationPublishResponseObject); ok {
+		if err := validResponse.VisitPreviewApplicationPublishResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {
@@ -10295,6 +12453,455 @@ func (sh *strictHandler) ChangePassword(ctx *gin.Context) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(ChangePasswordResponseObject); ok {
 		if err := validResponse.VisitChangePasswordResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListModules operation middleware
+func (sh *strictHandler) ListModules(ctx *gin.Context, params ListModulesParams) {
+	var request ListModulesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListModules(ctx, request.(ListModulesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListModules")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ListModulesResponseObject); ok {
+		if err := validResponse.VisitListModulesResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateModule operation middleware
+func (sh *strictHandler) CreateModule(ctx *gin.Context, params CreateModuleParams) {
+	var request CreateModuleRequestObject
+
+	request.Params = params
+
+	var body CreateModuleJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateModule(ctx, request.(CreateModuleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateModule")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(CreateModuleResponseObject); ok {
+		if err := validResponse.VisitCreateModuleResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ValidateModule operation middleware
+func (sh *strictHandler) ValidateModule(ctx *gin.Context, params ValidateModuleParams) {
+	var request ValidateModuleRequestObject
+
+	request.Params = params
+
+	var body ValidateModuleJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ValidateModule(ctx, request.(ValidateModuleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ValidateModule")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ValidateModuleResponseObject); ok {
+		if err := validResponse.VisitValidateModuleResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteModule operation middleware
+func (sh *strictHandler) DeleteModule(ctx *gin.Context, id IdPath) {
+	var request DeleteModuleRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteModule(ctx, request.(DeleteModuleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteModule")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(DeleteModuleResponseObject); ok {
+		if err := validResponse.VisitDeleteModuleResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetModule operation middleware
+func (sh *strictHandler) GetModule(ctx *gin.Context, id IdPath) {
+	var request GetModuleRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetModule(ctx, request.(GetModuleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetModule")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(GetModuleResponseObject); ok {
+		if err := validResponse.VisitGetModuleResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateModule operation middleware
+func (sh *strictHandler) UpdateModule(ctx *gin.Context, id IdPath) {
+	var request UpdateModuleRequestObject
+
+	request.Id = id
+
+	var body UpdateModuleJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateModule(ctx, request.(UpdateModuleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateModule")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(UpdateModuleResponseObject); ok {
+		if err := validResponse.VisitUpdateModuleResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetModuleDebug operation middleware
+func (sh *strictHandler) GetModuleDebug(ctx *gin.Context, id IdPath) {
+	var request GetModuleDebugRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetModuleDebug(ctx, request.(GetModuleDebugRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetModuleDebug")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(GetModuleDebugResponseObject); ok {
+		if err := validResponse.VisitGetModuleDebugResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SaveModuleDebug operation middleware
+func (sh *strictHandler) SaveModuleDebug(ctx *gin.Context, id IdPath) {
+	var request SaveModuleDebugRequestObject
+
+	request.Id = id
+
+	var body SaveModuleDebugJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.SaveModuleDebug(ctx, request.(SaveModuleDebugRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SaveModuleDebug")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(SaveModuleDebugResponseObject); ok {
+		if err := validResponse.VisitSaveModuleDebugResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RunModuleDebug operation middleware
+func (sh *strictHandler) RunModuleDebug(ctx *gin.Context, id IdPath) {
+	var request RunModuleDebugRequestObject
+
+	request.Id = id
+
+	var body RunModuleDebugJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.RunModuleDebug(ctx, request.(RunModuleDebugRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RunModuleDebug")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(RunModuleDebugResponseObject); ok {
+		if err := validResponse.VisitRunModuleDebugResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PublishModule operation middleware
+func (sh *strictHandler) PublishModule(ctx *gin.Context, id IdPath) {
+	var request PublishModuleRequestObject
+
+	request.Id = id
+
+	var body PublishModuleJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.PublishModule(ctx, request.(PublishModuleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PublishModule")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(PublishModuleResponseObject); ok {
+		if err := validResponse.VisitPublishModuleResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PreviewModule operation middleware
+func (sh *strictHandler) PreviewModule(ctx *gin.Context, id IdPath) {
+	var request PreviewModuleRequestObject
+
+	request.Id = id
+
+	var body PreviewModuleJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.PreviewModule(ctx, request.(PreviewModuleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PreviewModule")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(PreviewModuleResponseObject); ok {
+		if err := validResponse.VisitPreviewModuleResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListModuleVersions operation middleware
+func (sh *strictHandler) ListModuleVersions(ctx *gin.Context, id IdPath) {
+	var request ListModuleVersionsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListModuleVersions(ctx, request.(ListModuleVersionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListModuleVersions")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ListModuleVersionsResponseObject); ok {
+		if err := validResponse.VisitListModuleVersionsResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CompareModuleVersions operation middleware
+func (sh *strictHandler) CompareModuleVersions(ctx *gin.Context, id IdPath, params CompareModuleVersionsParams) {
+	var request CompareModuleVersionsRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.CompareModuleVersions(ctx, request.(CompareModuleVersionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CompareModuleVersions")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(CompareModuleVersionsResponseObject); ok {
+		if err := validResponse.VisitCompareModuleVersionsResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetModuleVersion operation middleware
+func (sh *strictHandler) GetModuleVersion(ctx *gin.Context, id IdPath, version int64) {
+	var request GetModuleVersionRequestObject
+
+	request.Id = id
+	request.Version = version
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetModuleVersion(ctx, request.(GetModuleVersionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetModuleVersion")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(GetModuleVersionResponseObject); ok {
+		if err := validResponse.VisitGetModuleVersionResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RestoreModuleVersion operation middleware
+func (sh *strictHandler) RestoreModuleVersion(ctx *gin.Context, id IdPath, version int64) {
+	var request RestoreModuleVersionRequestObject
+
+	request.Id = id
+	request.Version = version
+
+	var body RestoreModuleVersionJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.RestoreModuleVersion(ctx, request.(RestoreModuleVersionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RestoreModuleVersion")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(RestoreModuleVersionResponseObject); ok {
+		if err := validResponse.VisitRestoreModuleVersionResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

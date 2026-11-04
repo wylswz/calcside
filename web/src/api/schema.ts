@@ -565,6 +565,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/applications/{id}/publish/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["previewApplicationPublish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/applications/{id}/publish": {
         parameters: {
             query?: never;
@@ -607,6 +623,182 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["invokeApplication"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listModules"];
+        put?: never;
+        post: operations["createModule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["validateModule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getModule"];
+        put?: never;
+        post?: never;
+        delete: operations["deleteModule"];
+        options?: never;
+        head?: never;
+        patch: operations["updateModule"];
+        trace?: never;
+    };
+    "/api/v1/modules/{id}/publish/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["previewModule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/{id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["publishModule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/{id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listModuleVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/{id}/versions/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["compareModuleVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/{id}/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getModuleVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/{id}/versions/{version}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restoreModuleVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/{id}/debug": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getModuleDebug"];
+        put: operations["saveModuleDebug"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/{id}/debug/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["runModuleDebug"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1252,6 +1444,18 @@ export interface components {
                 [key: string]: unknown;
             };
             limits?: components["schemas"]["Limits"];
+            /** @description Module mounts (EP-0017): alias → module reference. Code loads files via load("@alias/path.star", ...). References are pinned to name/version/sum by the service at creation; version 0 resolves to the latest published version. */
+            modules?: {
+                [key: string]: {
+                    name?: string;
+                    /** Format: int64 */
+                    version?: number;
+                    sum?: string;
+                    /** @description extension aliases this mount introduced (provenance; server-recomputed) */
+                    ext?: string[];
+                };
+            } | null;
+            environment?: components["schemas"]["SpecEnvironment"];
             /** @description Policy names to attach (at most 32), including built-in policies. Omitted or null selects the default policies; none of the current built-ins are defaults, so this attaches none. builtin.block_private_network is opt-in via an explicit list; [] selects none. Library Rego is snapshotted at creation; server policies (--policy-dir) always apply in addition. */
             policies?: components["schemas"]["PolicyName"][] | null;
         };
@@ -1593,6 +1797,15 @@ export interface components {
         ApplicationPublishRequest: {
             /** Format: int64 */
             version: number;
+            /** @description base release id from preview; explicit "" for never published, explicit null or omission 400 */
+            expected_base: string | null;
+            /** @description release id (rel_<hex>) returned by publish preview */
+            candidate: string;
+            note?: string;
+        };
+        ApplicationPublishPreviewRequest: {
+            /** Format: int64 */
+            version: number;
         };
         ApplicationTestRequest: {
             /** Format: int64 */
@@ -1684,6 +1897,216 @@ export interface components {
         };
         InterruptResumeResponse: {
             status?: string;
+        };
+        ModuleRequirements: {
+            /** @description base capabilities the module requires granted (informational; io implicit) */
+            capabilities?: string[];
+            /** @description extension dependencies — source+sum only, never config or credentials */
+            ext?: {
+                [key: string]: {
+                    source: string;
+                    /** @description pinned h1: extension sum */
+                    sum: string;
+                };
+            };
+        };
+        Module: {
+            id: string;
+            workspace_id: string;
+            user_id: string;
+            name: string;
+            description?: string;
+            /** @description UTF-8 source map; module.yaml optional manifest, other files .star only */
+            files: {
+                [key: string]: string;
+            };
+            /** Format: int64 */
+            draft_version: number;
+            /** Format: int64 */
+            latest_version: number;
+            latest_sum?: string;
+            has_unpublished_changes: boolean;
+            requirements?: components["schemas"]["ModuleRequirements"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ModuleVersion: {
+            /** Format: int64 */
+            version: number;
+            sum: string;
+            files: {
+                [key: string]: string;
+            };
+            published_by: string;
+            note?: string;
+            /** Format: int64 */
+            base_version?: number;
+            requirements?: components["schemas"]["ModuleRequirements"];
+            /** Format: date-time */
+            created_at: string;
+        };
+        ReviewArtifact: {
+            digest: string;
+            /** Format: int64 */
+            version?: number;
+            /** Format: int64 */
+            draft_version?: number;
+            published_at?: string;
+            published_by?: string;
+            note?: string;
+            files?: {
+                [key: string]: string;
+            };
+            spec?: components["schemas"]["RawJSON"];
+            input_schema?: string;
+            output_schema?: string;
+            policies?: {
+                global?: {
+                    [key: string]: string;
+                };
+                user?: {
+                    [key: string]: string;
+                };
+            };
+            modules?: {
+                [key: string]: {
+                    name: string;
+                    /** Format: int64 */
+                    version: number;
+                    sum: string;
+                    files?: {
+                        [key: string]: string;
+                    };
+                };
+            };
+            requirements?: components["schemas"]["RawJSON"];
+        };
+        ReviewChange: {
+            /** @enum {string} */
+            category: "sources" | "contract" | "grants" | "rules" | "inputs" | "requirements";
+            path: string;
+            /** @enum {string} */
+            kind: "added" | "removed" | "modified";
+            /** @enum {string} */
+            direction?: "widening" | "narrowing" | "changed";
+            before?: components["schemas"]["RawJSON"];
+            after?: components["schemas"]["RawJSON"];
+            via_modules?: string[];
+        };
+        PublishReview: {
+            base?: components["schemas"]["ReviewArtifact"];
+            candidate: components["schemas"]["ReviewArtifact"];
+            changes: components["schemas"]["ReviewChange"][];
+            identical: boolean;
+        };
+        ModuleCreateRequest: {
+            name: string;
+            description?: string;
+            files: {
+                [key: string]: string;
+            };
+        };
+        ModuleUpdateRequest: {
+            /** Format: int64 */
+            draft_version: number;
+            name?: string;
+            description?: string;
+            files?: {
+                [key: string]: string;
+            };
+        };
+        ModuleValidateRequest: {
+            files: {
+                [key: string]: string;
+            };
+        };
+        ModulePreviewRequest: {
+            /** Format: int64 */
+            draft_version: number;
+        };
+        ModulePublishRequest: {
+            /** Format: int64 */
+            draft_version: number;
+            /** @description The base digest the preview compared against, or "" when no prior version exists. Explicit null or omission is a 400 — the field is required and may only be empty string. */
+            expected_base: string;
+            /** @description pinned candidate digest (h1:) returned by preview */
+            candidate: string;
+            note?: string;
+        };
+        ModuleRestoreRequest: {
+            /** Format: int64 */
+            draft_version: number;
+        };
+        ModuleValidateResponse: {
+            valid: boolean;
+            error?: string;
+        };
+        ModuleResponse: {
+            module?: components["schemas"]["Module"];
+        };
+        ModulesResponse: {
+            modules?: components["schemas"]["Module"][];
+        };
+        ModuleVersionResponse: {
+            version?: components["schemas"]["ModuleVersion"];
+        };
+        ModuleVersionsResponse: {
+            versions?: components["schemas"]["ModuleVersion"][];
+        };
+        /** @description Consumer-owned extension configuration: per-extension named bindings of vault-secret references. References only — never resolved values. The "default" binding is used at execution. */
+        SpecEnvironment: {
+            extensions?: {
+                [key: string]: {
+                    bindings?: {
+                        [key: string]: {
+                            secrets?: {
+                                [key: string]: {
+                                    /** @description workspace vault secret name */
+                                    ref: string;
+                                    /** @description narrowing; must be covered by the vault allowlist */
+                                    allowed_domains?: string[];
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        ModuleDebug: {
+            /** Format: int64 */
+            version: number;
+            script: string;
+            spec: components["schemas"]["RawJSON"];
+            /** @description canonical serialized spec */
+            spec_json?: string;
+            /** Format: date-time */
+            updated_at?: string;
+        };
+        ModuleDebugSaveRequest: {
+            /** Format: int64 */
+            version: number;
+            script: string;
+            spec: components["schemas"]["RawJSON"];
+        };
+        ModuleDebugRunRequest: {
+            /** Format: int64 */
+            draft_version: number;
+            /** Format: int64 */
+            debug_version: number;
+        };
+        ModuleDebugResponse: {
+            debug?: components["schemas"]["ModuleDebug"];
+        };
+        ModuleDebugRun: {
+            result?: components["schemas"]["ExecResult"];
+            instance_id?: string;
+            /** Format: int64 */
+            draft_version?: number;
+            /** Format: int64 */
+            debug_version?: number;
+            module_sum?: string;
         };
     };
     responses: {
@@ -2954,6 +3377,36 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
+    previewApplicationPublish: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationPublishPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description review diff of current published release vs pinned draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishReview"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
     publishApplication: {
         parameters: {
             query?: never;
@@ -3043,6 +3496,427 @@ export interface operations {
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             503: components["responses"]["Error"];
+        };
+    };
+    listModules: {
+        parameters: {
+            query?: {
+                workspace?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description module drafts in the workspace */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModulesResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    createModule: {
+        parameters: {
+            query?: {
+                workspace?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModuleCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description created draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+        };
+    };
+    validateModule: {
+        parameters: {
+            query?: {
+                workspace?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModuleValidateRequest"];
+            };
+        };
+        responses: {
+            /** @description validation outcome */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleValidateResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+        };
+    };
+    getModule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description module draft + latest version metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteModule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateModule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModuleUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description updated draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+        };
+    };
+    previewModule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModulePreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description review diff of latest published vs pinned draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishReview"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    publishModule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModulePublishRequest"];
+            };
+        };
+        responses: {
+            /** @description published immutable version (no-op returns base version) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleVersionResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    listModuleVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description immutable versions, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleVersionsResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    compareModuleVersions: {
+        parameters: {
+            query: {
+                base: number;
+                head: string;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description review diff */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishReview"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getModuleVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description immutable version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleVersionResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    restoreModuleVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModuleRestoreRequest"];
+            };
+        };
+        responses: {
+            /** @description draft restored from version files */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getModuleDebug: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description debug settings (scaffold when never saved) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleDebugResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    saveModuleDebug: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModuleDebugSaveRequest"];
+            };
+        };
+        responses: {
+            /** @description saved settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleDebugResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    runModuleDebug: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModuleDebugRunRequest"];
+            };
+        };
+        responses: {
+            /** @description scratch-run result; the instance is deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleDebugRun"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     listAudit: {
@@ -3778,3 +4652,6 @@ export const artifactPreviewKindValues: ReadonlyArray<FlattenedDeepRequired<comp
 export const memberRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MemberRole"]> = ["viewer", "editor", "owner"];
 export const policyKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Policy"]["kind"]> = ["builtin", "rego"];
 export const applicationStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ApplicationStatus"]> = ["draft", "preparing", "ready", "degraded", "disabled"];
+export const reviewChangeCategoryValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ReviewChange"]["category"]> = ["sources", "contract", "grants", "rules", "inputs", "requirements"];
+export const reviewChangeKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ReviewChange"]["kind"]> = ["added", "removed", "modified"];
+export const reviewChangeDirectionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ReviewChange"]["direction"]> = ["widening", "narrowing", "changed"];
