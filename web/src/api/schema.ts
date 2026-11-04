@@ -1910,6 +1910,17 @@ export interface components {
                 };
             };
         };
+        ModuleRequirementsInput: {
+            capabilities?: string[];
+            /** @description requested extension deps — source required, server pins the sum */
+            ext?: {
+                [key: string]: {
+                    source: string;
+                    /** @description optional pin; server pins when absent */
+                    sum?: string;
+                };
+            };
+        };
         Module: {
             id: string;
             workspace_id: string;
@@ -2013,6 +2024,7 @@ export interface components {
             draft_version: number;
             name?: string;
             description?: string;
+            requirements?: components["schemas"]["ModuleRequirementsInput"];
             files?: {
                 [key: string]: string;
             };

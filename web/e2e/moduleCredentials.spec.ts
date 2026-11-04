@@ -81,7 +81,7 @@ test('module debug executes ext with vault-injected credentials', async ({ page 
   await expect(page.getByText(/binding/i)).toHaveCount(0)
 
   // Add the credentials extension via the catalog card, then configure.
-  await page.getByRole('button', { name: 'Add credentials' }).click()
+  await page.getByTestId('module-deps').getByRole('button', { name: 'Add credentials' }).click()
   await page.getByRole('button', { name: 'Configure credentials' }).click()
   await page.getByLabel('credentials endpoint').fill(`http://127.0.0.1:${echoPort}/echo`)
   const pick = async (field: string, ref: string) => {
@@ -89,14 +89,12 @@ test('module debug executes ext with vault-injected credentials', async ({ page 
   }
   await pick('api_key', 'TEST_API_KEY')
   await pick('client_secret', 'TEST_CLIENT_SECRET')
-  // Save settings through the visible button, then inject the hidden
-  // stage binding via API to prove preservation.
-  const putResp0 = page.waitForResponse((r) => r.url().includes('/debug') && r.request().method() === 'PUT', { timeout: 15_000 })
-  await page.getByRole('button', { name: 'Save settings' }).click()
-  const pr0 = await putResp0
-  expect(pr0.status(), await pr0.text()).toBe(200)
-  const savedVersion = (await pr0.json()).debug.version
-  expect(savedVersion).toBeGreaterThan(0)
+  // Autosave persists the picks — poll until the env is stored.
+  await expect.poll(async () => {
+    const g = await client.get(`/api/v1/modules/${mod.id}/debug`)
+    const sp = (await g.json()).debug.spec
+    return JSON.stringify(sp?.environment ?? {})
+  }, { timeout: 15_000 }).toContain('TEST_API_KEY')
   const dbgSt = await client.get(`/api/v1/modules/${mod.id}/debug`)
   const stBody = await dbgSt.json()
   // Prove the UI picks persisted as the env default before stage inject.
@@ -164,9 +162,11 @@ test('module debug executes ext with vault-injected credentials', async ({ page 
   const rawText = await raw.inputValue()
   const edited = rawText.replace('/echo', '/echo?m=1')
   await raw.fill(edited)
-  const putResp = page.waitForResponse((r) => r.url().includes('/debug') && r.request().method() === 'PUT', { timeout: 15_000 })
-  await page.getByRole('button', { name: 'Save settings' }).click()
-  expect((await putResp).status()).toBe(200)
+  await page.getByLabel('Debug spec JSON').press('ControlOrMeta+a')
+  await expect.poll(async () => {
+    const g = await client.get(`/api/v1/modules/${mod.id}/debug`)
+    return JSON.stringify((await g.json()).debug.spec ?? {})
+  }, { timeout: 15_000 }).toContain('echo?m=1')
   const dbgRaw = await client.get(`/api/v1/modules/${mod.id}/debug`)
   const rawSpec = (await dbgRaw.json()).debug.spec
   expect(typeof rawSpec).toBe('object')
@@ -200,13 +200,15 @@ test('debug settings CAS conflict blocks save until explicit reload', async ({ p
   expect(ext.status()).toBe(200)
   const v1 = (await ext.json()).debug.version
 
-  // UI save: exactly one PUT, a 409, no auto-retry, remote unchanged.
+  // An edit triggers autosave on the stale version: exactly one PUT, a
+  // 409, no auto-retry, remote unchanged.
   const puts: string[] = []
   page.on('response', (r) => {
     if (r.url().includes('/debug') && r.request().method() === 'PUT') puts.push(String(r.status()))
   })
-  await page.getByRole('button', { name: 'Save settings' }).click()
-  await expect(page.getByText(/changed elsewhere/)).toBeVisible()
+  await page.getByLabel('Caller script editor').getByRole('textbox').fill('print("local edit")')
+  await expect(page.getByText(/changed elsewhere/)).toBeVisible({ timeout: 15_000 })
+  await page.waitForTimeout(1500) // beyond the debounce — no retry must fire
   expect(puts).toEqual(['409'])
   const remote = await client.get(`/api/v1/modules/${mod.id}/debug`)
   expect((await remote.json()).debug.version).toBe(v1)
@@ -217,7 +219,7 @@ test('debug settings CAS conflict blocks save until explicit reload', async ({ p
   await page.getByRole('button', { name: 'Cancel' }).click().catch(() => {})
   await expect(page.getByText(/changed elsewhere/)).toBeVisible()
 
-  // Confirm reload adopts the remote version; a later save works.
+  // Confirm reload adopts the remote version; the next edit saves.
   await page.getByTestId('debug-reload').click()
   await page.getByRole('button', { name: 'Reload', exact: true }).click()
   await expect(page.getByText(/changed elsewhere/)).toHaveCount(0)
@@ -225,7 +227,7 @@ test('debug settings CAS conflict blocks save until explicit reload', async ({ p
   page.on('response', (r) => {
     if (r.url().includes('/debug') && r.request().method() === 'PUT') puts2.push(String(r.status()))
   })
-  await page.getByRole('button', { name: 'Save settings' }).click()
-  await expect.poll(() => puts2.length, { timeout: 10_000 }).toBe(1)
-  expect(puts2).toEqual(['200'])
+  await page.getByLabel('Caller script editor').getByRole('textbox').fill('print("after reload")')
+  await expect.poll(() => puts2.length, { timeout: 15_000 }).toBeGreaterThanOrEqual(1)
+  expect(puts2[0]).toBe('200')
 })

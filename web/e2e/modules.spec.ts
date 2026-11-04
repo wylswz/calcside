@@ -40,7 +40,11 @@ test('module create → source edit → debug run → publish → instance use',
     await page.keyboard.insertText(text)
   }
   await fillCM('module-editor', 'def hello(name):\n    return "V1 hello " + name\n')
-  await page.getByRole('button', { name: 'Save draft' }).click()
+  // autosave: wait for the edit to persist
+  await expect.poll(async () => {
+    const g = await rt.client.get(`/api/v1/modules/${id}`)
+    return (await g.json()).module.files['main.star']
+  }, { timeout: 15_000 }).toContain('V1 hello')
   await expect(page.getByText(/Unsaved draft changes/)).toHaveCount(0, { timeout: 10_000 })
 
   // Caller script: print via @self and run.
@@ -78,19 +82,21 @@ test('module create → source edit → debug run → publish → instance use',
   // instance still runs V1; publish v2 → new instance sees V2; delete
   // the library module → existing instance still V1.
   await rt.client.patch(`/api/v1/modules/${id}`, {
-    data: { draft_version: 2, files: { 'main.star': 'def hello(name):\n    return "V2 hello " + name\n' } },
+    data: { draft_version: (await (await rt.client.get(`/api/v1/modules/${id}`)).json()).module.draft_version, files: { 'main.star': 'def hello(name):\n    return "V2 hello " + name\n' } },
   })
   const exec1 = await rt.client.post(`/api/v1/instances/${inst.id}/exec`, {
     data: { code: 'load("@m/main.star", "hello")\nprint(hello("live"))' },
   })
   expect(JSON.stringify(await exec1.json())).toContain('V1 hello live')
   // Publish v2 via API (UI publish already proven above).
-  const prev = await rt.client.post(`/api/v1/modules/${id}/publish/preview`, { data: { draft_version: 3 } })
+  const modNow = await rt.client.get(`/api/v1/modules/${id}`)
+  const dv2 = (await modNow.json()).module.draft_version
+  const prev = await rt.client.post(`/api/v1/modules/${id}/publish/preview`, { data: { draft_version: dv2 } })
   expect(prev.ok(), JSON.stringify(await prev.json())).toBeTruthy()
   const prevBody = await prev.json()
   const candidate = prevBody.candidate.digest
   const pub = await rt.client.post(`/api/v1/modules/${id}/publish`, {
-    data: { draft_version: 3, expected_base: inst.spec?.modules?.m?.sum ?? '', candidate },
+    data: { draft_version: dv2, expected_base: inst.spec?.modules?.m?.sum ?? '', candidate },
   })
   expect(pub.ok()).toBeTruthy()
   const create2 = await rt.client.post('/api/v1/instances', {

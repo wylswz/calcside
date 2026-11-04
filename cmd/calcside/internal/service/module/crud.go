@@ -4,9 +4,13 @@ import (
 	"context"
 	"strings"
 
+	"go.yaml.in/yaml/v3"
+
 	"calcside/cmd/calcside/internal/service"
 	"calcside/cmd/calcside/internal/service/access"
+	mod "calcside/internal/module"
 	"calcside/internal/store"
+	"calcside/internal/types"
 )
 
 // crud.go: draft lifecycle — create, read, list, update (draft CAS),
@@ -94,8 +98,23 @@ func (s *Service) Update(ctx context.Context, a service.Actor, id string, r Upda
 	if r.Files != nil {
 		next.Files = utf8Files(r.Files)
 	}
-	if err := s.checkSources(next.Files); err != nil {
+	// Shape checks only — autosave must accept incomplete .star drafts.
+	if err := s.checkShape(next.Files); err != nil {
 		return nil, err
+	}
+	if r.Requirements != nil {
+		files, err := s.applyRequirements(next.Files, m.Files[mod.ManifestFile], *r.Requirements)
+		if err != nil {
+			return nil, err
+		}
+		next.Files = files
+		// Pin structured deps before store so autosaved requirements
+		// carry h1 sums.
+		pinned, err := s.pinDependencies(ctx, next.Files)
+		if err != nil {
+			return nil, err
+		}
+		next.Files = pinned
 	}
 	next.UpdatedAt = s.o.Now().UTC()
 	if err := store.ValidateModule(next); err != nil {
@@ -124,4 +143,43 @@ func (s *Service) Delete(ctx context.Context, a service.Actor, id string) error 
 		return err
 	}
 	return fail(s.o.Store.DeleteModule(ctx, m.WorkspaceID, m.ID))
+}
+
+// applyRequirements rewrites module.yaml's requires block from the
+// structured edit. Values are strictly {source,sum} — no config or
+// environment is allowed through. When the patch lacks module.yaml,
+// prior manifest metadata (description/capabilities) is preserved.
+func (s *Service) applyRequirements(files map[string][]byte, prior []byte, req RequirementsView) (map[string][]byte, error) {
+	mf := &mod.Manifest{}
+	cur := files[mod.ManifestFile]
+	if cur == nil {
+		cur = prior // patch omitted module.yaml — keep prior metadata
+	}
+	if cur != nil {
+		parsed, err := mod.ParseManifest(cur)
+		if err != nil {
+			return nil, service.Errf(types.ErrCodeBadSpec, "%s", err)
+		}
+		mf = parsed
+	}
+	for a, r := range req.Ext {
+		if r.Source == "" || (r.Sum != "" && !mod.ValidSum(r.Sum)) {
+			return nil, service.Errf(types.ErrCodeBadSpec, "requirements ext %q: source+sum only, valid h1: sum required", a)
+		}
+	}
+	mf.Requires.Capabilities = req.Capabilities
+	mf.Requires.Ext = req.Ext
+	if err := mf.Validate(); err != nil {
+		return nil, service.Errf(types.ErrCodeBadSpec, "%s", err)
+	}
+	out, err := yaml.Marshal(mf)
+	if err != nil {
+		return nil, fail(err)
+	}
+	next := map[string][]byte{}
+	for k, v := range files {
+		next[k] = v
+	}
+	next[mod.ManifestFile] = out
+	return next, nil
 }

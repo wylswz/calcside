@@ -2,6 +2,7 @@ package module
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"calcside/cmd/calcside/internal/service"
 	"calcside/cmd/calcside/internal/service/access"
 	"calcside/internal/capability"
+	mod "calcside/internal/module"
 	"calcside/internal/store"
 	"calcside/internal/store/storetest"
 	"calcside/internal/types"
@@ -286,5 +288,152 @@ func TestModuleDebug(t *testing.T) {
 	}
 	if _, err := s.SaveDebug(ctx, a, v.ID, SaveDebugRequest{Version: 0, Script: "y", Spec: []byte(`{}`)}); err == nil {
 		t.Fatal("stale debug accepted")
+	}
+}
+
+// Autosave contracts: Update persists incomplete Starlark drafts;
+// compile-gated seams still reject them.
+func TestModuleUpdateIncompleteSource(t *testing.T) {
+	s, _, a, _ := newSvc(t)
+	ctx := context.Background()
+	v, err := s.Create(ctx, a, CreateRequest{Name: "badmod", Files: goodFiles()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := map[string]string{"u.star": "def hello("}
+	up, err := s.Update(ctx, a, v.ID, UpdateRequest{DraftVersion: v.DraftVersion, Files: bad})
+	if err != nil {
+		t.Fatalf("update must accept incomplete source: %v", err)
+	}
+	got, err := s.Get(ctx, a, v.ID)
+	if err != nil || got.Files["u.star"] != "def hello(" {
+		t.Fatalf("get: %v %+v", err, got)
+	}
+	// Compile-gated seams still reject the incomplete source.
+	if err := s.Validate(ctx, a, bad); err == nil {
+		t.Fatal("validate must reject incomplete source")
+	}
+	if _, err := s.Preview(ctx, a, v.ID, up.DraftVersion); err == nil {
+		t.Fatal("preview must reject incomplete source")
+	}
+}
+
+func TestModuleUpdateShapeStillRejected(t *testing.T) {
+	s, _, a, _ := newSvc(t)
+	ctx := context.Background()
+	v, err := s.Create(ctx, a, CreateRequest{Name: "shp", Files: goodFiles()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Update(ctx, a, v.ID, UpdateRequest{DraftVersion: v.DraftVersion, Files: map[string]string{"x.txt": "no"}}); err == nil {
+		t.Fatal("non-.star file must fail shape checks")
+	}
+	if _, err := s.Update(ctx, a, v.ID, UpdateRequest{DraftVersion: 99, Files: goodFiles()}); err == nil {
+		t.Fatal("stale CAS must 409")
+	}
+}
+
+// Structured requirements: add/remove, preserve manifest metadata,
+// pin before store, never config/env in module data.
+// fakePinner pins every ext requirement to a fixed h1 sum so the
+// structured-deps path can be exercised without a real repo.
+type fakePinner struct{}
+
+func (fakePinner) PinSpec(ctx context.Context, spec []byte) (json.RawMessage, error) {
+	var in struct {
+		Capabilities struct {
+			Ext map[string]map[string]string `json:"ext"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(spec, &in); err != nil {
+		return nil, err
+	}
+	out := map[string]any{"capabilities": map[string]any{"ext": map[string]any{}}}
+	for alias, req := range in.Capabilities.Ext {
+		out["capabilities"].(map[string]any)["ext"].(map[string]any)[alias] =
+			map[string]string{"source": req["source"], "sum": "h1:" + strings.Repeat("A", 43) + "="}
+	}
+	return json.Marshal(out)
+}
+
+func TestModuleRequirementsRoundTrip(t *testing.T) {
+	s, _, a, _ := newSvc(t)
+	s.o.SpecPinner = fakePinner{}
+	ctx := context.Background()
+	mf := "description: keep me\nrequires:\n  capabilities: [fs]\n"
+	files := map[string]string{"u.star": "x = 1", "module.yaml": mf}
+	v, err := s.Create(ctx, a, CreateRequest{Name: "req", Files: files})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Add a dep via the structured request (source-only; server pins).
+	src := &RequirementsView{
+		Capabilities: []string{"fs"},
+		Ext:          map[string]mod.ExtRequirement{"net": {Source: "contrib/net"}},
+	}
+	up, err := s.Update(ctx, a, v.ID, UpdateRequest{
+		DraftVersion: v.DraftVersion, Requirements: (*RequirementsView)(src),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = up
+	got, _ := s.Get(ctx, a, v.ID)
+	yaml := got.Files["module.yaml"]
+	if !strings.Contains(yaml, "keep me") {
+		t.Fatalf("description lost: %s", yaml)
+	}
+	if !strings.Contains(yaml, "fs") || !strings.Contains(yaml, "contrib/net") {
+		t.Fatalf("requirements not merged: %s", yaml)
+	}
+	// Remove the dep — empty requirements still keeps module.yaml.
+	empty := &RequirementsView{}
+	if _, err := s.Update(ctx, a, v.ID, UpdateRequest{DraftVersion: got.DraftVersion, Requirements: empty}); err != nil {
+		t.Fatal(err)
+	}
+	got2, _ := s.Get(ctx, a, v.ID)
+	if strings.Contains(got2.Files["module.yaml"], "contrib/net") {
+		t.Fatalf("dep not removed: %s", got2.Files["module.yaml"])
+	}
+}
+
+func TestModuleRequirementsPinIncompleteDraft(t *testing.T) {
+	s, _, a, _ := newSvc(t)
+	s.o.SpecPinner = fakePinner{}
+	ctx := context.Background()
+	v, err := s.Create(ctx, a, CreateRequest{Name: "incomplete-dep", Files: map[string]string{
+		"u.star": "x = 1", "module.yaml": "description: preserve this\nrequires:\n  capabilities: [fs]\n",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Autosave replaces the .star files and edits requirements atomically.
+	// The omitted manifest must retain its independent description.
+	up, err := s.Update(ctx, a, v.ID, UpdateRequest{
+		DraftVersion: v.DraftVersion, Files: map[string]string{"u.star": "def unfinished("},
+		Requirements: &RequirementsView{Capabilities: []string{"fs"},
+			Ext: map[string]mod.ExtRequirement{"helper": {Source: "contrib/helper"}}},
+	})
+	if err != nil {
+		t.Fatalf("pinning dependencies must not compile incomplete drafts: %v", err)
+	}
+	mf, err := mod.ParseManifest([]byte(up.Files[mod.ManifestFile]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if up.Files["u.star"] != "def unfinished(" || mf.Description != "preserve this" ||
+		len(mf.Requires.Capabilities) != 1 || mf.Requires.Capabilities[0] != "fs" ||
+		!mod.ValidSum(mf.Requires.Ext["helper"].Sum) {
+		t.Fatalf("draft source or manifest metadata lost: %+v", up)
+	}
+	if _, err := s.Preview(ctx, a, v.ID, up.DraftVersion); err == nil {
+		t.Fatal("preview accepted incomplete source after pinning")
+	}
+	base := ""
+	if _, err := s.Publish(ctx, a, v.ID, PublishRequest{
+		DraftVersion: up.DraftVersion, ExpectedBase: &base,
+		Candidate: "h1:" + strings.Repeat("A", 43) + "=",
+	}); err == nil {
+		t.Fatal("publish accepted incomplete source after pinning")
 	}
 }

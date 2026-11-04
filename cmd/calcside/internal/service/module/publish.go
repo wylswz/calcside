@@ -28,6 +28,29 @@ import (
 // already-pinned dep that matches stays untouched (bytes preserved so
 // comments/format do not drift). Returns the files to publish.
 func (s *Service) pinCandidate(ctx context.Context, files map[string][]byte) (map[string][]byte, error) {
+	if err := s.checkSources(files); err != nil {
+		return nil, err
+	}
+	return s.pinDependencies(ctx, files)
+}
+
+// pinDependencies resolves manifest ext pins only — no compile — so
+// debug saves work against incomplete sources.
+func (s *Service) pinDependencies(ctx context.Context, files map[string][]byte) (map[string][]byte, error) {
+	if err := s.checkShape(files); err != nil {
+		return nil, err
+	}
+	out, err := s.pinDeps(ctx, files)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.checkShape(out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *Service) pinDeps(ctx context.Context, files map[string][]byte) (map[string][]byte, error) {
 	data, ok := files[mod.ManifestFile]
 	if !ok {
 		return files, nil
@@ -100,7 +123,7 @@ func (s *Service) pinCandidate(ctx context.Context, files map[string][]byte) (ma
 	}
 	next := maps.Clone(files)
 	next[mod.ManifestFile] = nb
-	if err := s.checkSources(next); err != nil {
+	if err := s.checkShape(next); err != nil {
 		return nil, err
 	}
 	return next, nil

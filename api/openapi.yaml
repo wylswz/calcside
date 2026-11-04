@@ -2890,6 +2890,23 @@ components:
               source: { type: string }
               sum: { type: string, description: "pinned h1: extension sum" }
           description: extension dependencies — source+sum only, never config or credentials
+    ModuleRequirementsInput:
+      type: object
+      additionalProperties: false
+      properties:
+        capabilities:
+          type: array
+          items: { type: string }
+        ext:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: false
+            required: [source]
+            properties:
+              source: { type: string }
+              sum: { type: string, description: "optional pin; server pins when absent" }
+          description: requested extension deps — source required, server pins the sum
     Module:
       type: object
       required: [id, workspace_id, user_id, name, files, draft_version, latest_version, has_unpublished_changes, created_at, updated_at]
@@ -3009,6 +3026,7 @@ components:
         draft_version: { type: integer, format: int64 }
         name: { type: string }
         description: { type: string }
+        requirements: { $ref: '#/components/schemas/ModuleRequirementsInput' }
         files:
           type: object
           additionalProperties: { type: string }

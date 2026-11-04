@@ -126,9 +126,9 @@ func (s *Service) SaveDebug(ctx context.Context, a service.Actor, id string, r S
 	if !utf8.ValidString(r.Script) || len(r.Script) > 256<<10 {
 		return nil, service.BadRequest("script exceeds 256 KiB or is not UTF-8")
 	}
-	// Pin the current draft as the in-memory self tree — Version 0,
-	// hash of the pinned candidate.
-	pinned, err := s.pinCandidate(ctx, m.Files)
+	// Pin the current draft's deps as the in-memory self tree —
+	// Version 0, no compile so autosave works on incomplete sources.
+	pinned, err := s.pinDependencies(ctx, m.Files)
 	if err != nil {
 		return nil, err
 	}

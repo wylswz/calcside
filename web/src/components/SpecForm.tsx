@@ -32,6 +32,9 @@ interface Props {
   footer?: ReactNode
   /** Basics are already collected by the create flow; only keep lifetime. */
   hideBasics?: boolean
+  /** Module mode: static deps fixed by the dependency picker — merged
+      into the debug draft with config preserved; not addable/removable here. */
+  fixedExtensions?: Record<string, { source: string; sum?: string }>
 }
 
 // Item keys order the instance summary: 'fs', 'net' or 'ext:<id>'. The id
@@ -62,7 +65,7 @@ const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)'
 // page section for the forms. The instance summary beside them is short
 // (one fixed-height row per capability), so nothing needs its own scroll.
 export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
-  keyMode = false, application = false, debug = false, initial, workspaceId, onSpecChange, onRawDirtyChange, footer, hideBasics = false,
+  keyMode = false, application = false, debug = false, initial, workspaceId, onSpecChange, onRawDirtyChange, footer, hideBasics = false, fixedExtensions,
 }, ref) {
   // Application mode: vault-ref secrets only (same ceiling as key
   // specs) — never inline values in a durable spec.
@@ -78,6 +81,65 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
     ...(draft.fs ? ['fs'] : []), ...(draft.net ? ['net'] : []), ...extIds.current.map((id) => `ext:${id}`),
   ])
   const [removed, setRemoved] = useState<Removed | null>(null)
+  // Module mode: reconcile the debug draft against the statically
+  // declared deps — same alias+source keeps config/env, a changed
+  // source resets them, removed aliases prune env/errors.
+  const fixedPrev = useRef<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    if (!fixedExtensions) return
+    setDraft((d) => {
+      const fixed = fixedExtensions
+      // index-stable ids: extIds.current[i] pairs d.exts[i]
+      let changed = false
+      const keepIdx: number[] = []
+      const exts = d.exts.filter((e, i) => {
+        if (fixedPrev.current.has(e.alias) && !(e.alias in fixed)) { changed = true; return false }
+        keepIdx.push(i)
+        return true
+      })
+      const ids = keepIdx.map((i) => extIds.current[i])
+      const extra = { ...(d.extra ?? {}) }
+      const env = { ...((extra.environment as { extensions?: Record<string, unknown> } | undefined)?.extensions ?? {}) }
+      let envChanged = false
+      for (const [alias, dep] of Object.entries(fixed)) {
+        const i = exts.findIndex((e) => e.alias === alias)
+        if (i >= 0) {
+          if (exts[i].source !== dep.source) {
+            exts[i] = { alias, source: dep.source, config: {}, extra: dep.sum ? { sum: dep.sum } : {} }
+            ids[i] = extNext.current++
+            delete env[alias]; envChanged = true
+            changed = true
+          } else if (dep.sum && exts[i].extra?.sum !== dep.sum) {
+            exts[i] = { ...exts[i], extra: { ...(exts[i].extra ?? {}), sum: dep.sum } }
+            changed = true
+          }
+        } else {
+          exts.push({ alias, source: dep.source, config: {}, extra: dep.sum ? { sum: dep.sum } : {} })
+          ids.push(extNext.current++)
+          changed = true
+        }
+      }
+      extIds.current = ids
+      if (changed) {
+        // clone env map — never mutate the old draft's snapshot
+        for (const a of fixedPrev.current) if (!(a in fixed)) { delete env[a]; envChanged = true }
+        setOrder((o) => {
+          const keys = ids.map((i) => `ext:${i}`)
+          return [...o.filter((k) => !k.startsWith('ext:') || keys.includes(k)),
+                  ...keys.filter((k) => !o.includes(k))]
+        })
+        setExtErrors((errs) => {
+          const next = new Map(errs)
+          next.forEach((_, k) => { if (!ids.includes(k)) next.delete(k) })
+          return next
+        })
+      }
+      fixedPrev.current = new Set(Object.keys(fixed))
+      if (!changed && !envChanged) return d
+      if (envChanged) extra.environment = { ...((extra.environment as Record<string, unknown>) ?? {}), extensions: env } as never
+      return { ...d, exts, extra }
+    })
+  }, [fixedExtensions])
   const [flash, setFlash] = useState<ItemKey | null>(null)
   const [reveal, setReveal] = useState<ItemKey | null>(null)
   const tabsRef = useRef<HTMLDivElement>(null)
@@ -433,8 +495,10 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
             </div>
             <div className="extensions-block">
               <h4 className="mb-3 text-sm font-semibold text-ink">Extensions</h4>
-              <ExtensionPicker entries={extensions} selectedSources={selectedSources} loading={catalog.isPending} error={catalog.isError}
-                onRetry={() => catalog.refetch()} onAdd={addExtension} onShow={pointAtExtension} />
+              {fixedExtensions === undefined && (
+                <ExtensionPicker entries={extensions} selectedSources={selectedSources} loading={catalog.isPending} error={catalog.isError}
+                  onRetry={() => catalog.refetch()} onAdd={addExtension} onShow={pointAtExtension} />
+              )}
             </div>
             <div className="policies-block">
               <h4 className="mb-3 text-sm font-semibold text-ink">Policies</h4>

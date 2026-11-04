@@ -128,7 +128,7 @@ Every invariant has an owner mechanism, in order of preference:
 | S1 | `material.css` paint-only states; static CSS/Tailwind check; e2e "controls keep their box under hover and press" | enforced |
 | S2 | shared `Menu` (Radix); S1; e2e "the More menu stays where it opened" | enforced |
 | S3 | fixed reveal slot (`RevealNew`); e2e "palette controls stay put", run editor placement test | partial — builder and detail only |
-| S4 | `SwapLabel` and `RevealNew`; static label check; e2e "Show latest" and "Show N new" | enforced for state/request-driven labels and counters; module workbench Save draft/Save settings/Run use `SwapLabel` |
+| S4 | `SwapLabel` and `RevealNew`; static label check; e2e "Show latest" and "Show N new" | enforced for state/request-driven labels and counters; module workbench autosave status, Publish preparation and Run use `SwapLabel` |
 | S5 | `useHeldOrder` + "Show N new"/"Show latest"; `stableList` unit tests; e2e activity and instance list | enforced for polled lists |
 | S6 | scroll-locked `Modal`; e2e "opening a dialog does not shift the page" | enforced for dialogs |
 | C1 | `Modal`/`Menu` return focus, removal falls back to a neighbour; e2e primitives and removal tests | enforced for overlays and removals |
@@ -142,7 +142,7 @@ Every invariant has an owner mechanism, in order of preference:
 | P5 | policy editor footer reports validation and save failures; e2e "policy editor reports…" | partial — policy editor only |
 | P4 | `material.css` motion block; static duration/reduced-motion check | enforced in CSS, not measured |
 | F1 | S1, S2, `Confirm`; e2e menu and removal tests | enforced for menus and removals |
-| F2 | `Confirm`; static destructive-control check | enforced for destructive controls; module row delete and review-dialog discard use `Confirm`/dirty-note guard |
+| F2 | `Confirm`; static destructive-control check | enforced for destructive controls; module/extension removal, conflict reload and recovery discard use `Confirm`; review-dialog discard has a dirty-note guard |
 
 ## Known gaps
 
@@ -158,9 +158,15 @@ Every invariant has an owner mechanism, in order of preference:
 - **S6:** measured for dialogs only, not for menus or popovers.
 - **P6:** no static check; followed by review.
 - **Module workbench coverage:** module editor + caller script + stdout
-  are one page (no unmount/state loss, C); debug run captures the spec
-  snapshot at save, config edits mark the displayed result outdated
-  (P); the reviewed-publish dialog keeps the note on 409 and only
+  are one page (no unmount/state loss, C). Serial CAS autosave retains
+  newer edits across acknowledgements; tab-local pending backups and a
+  beforeunload guard protect unsaved source/debug settings (C2).
+  `moduleAutosave.spec.ts` holds a PATCH while editing again, verifies
+  the exact reviewed/published source, dependency-only add/remove
+  reviews and recovery across SPA navigation. Run waits for module and
+  debug autosaves and captures their returned versions; config edits
+  mark the displayed result outdated (P). The reviewed-publish dialog
+  keeps the note on 409 and only
   re-previews on explicit Refresh (P2/C2); ext secret selection writes
   the vault-ref environment default via the shared `SpecForm` editor —
   no manual secret names (C4 review).

@@ -35,3 +35,13 @@ func (s *Service) Validate(ctx context.Context, a service.Actor, files map[strin
 	}
 	return s.checkSources(utf8Files(files))
 }
+
+// checkShape validates paths/UTF-8/bounds/strict manifest only — no
+// static compile. Autosave persists incomplete .star drafts this way;
+// publish/run still call checkSources.
+func (s *Service) checkShape(files map[string][]byte) error {
+	if err := mod.ValidateFiles(files, ""); err != nil {
+		return service.Errf(types.ErrCodeBadSpec, "%s", err)
+	}
+	return nil
+}

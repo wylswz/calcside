@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -133,6 +134,38 @@ func TestModuleIsolation(t *testing.T) {
 }
 
 func itoa(v int64) string { return strconv.FormatInt(v, 10) }
+
+func TestModuleIncompleteAutosaveHTTP(t *testing.T) {
+	e := newEnv(t)
+	cookies := login(e, "autosave@x.com")
+	headers := map[string]string{"X-Requested-With": "calcside", "Content-Type": "application/json"}
+	code, body, _ := e.req("POST", "/api/v1/modules",
+		`{"name":"unfinished","files":{"u.star":"x = 1"}}`, headers, cookies)
+	if code != 200 {
+		t.Fatalf("create: %d %v", code, body)
+	}
+	id := body["module"].(map[string]any)["id"].(string)
+	code, body, _ = e.req("PATCH", "/api/v1/modules/"+id,
+		`{"draft_version":1,"files":{"u.star":"def unfinished("}}`, headers, cookies)
+	if code != 200 || body["module"].(map[string]any)["files"].(map[string]any)["u.star"] != "def unfinished(" {
+		t.Fatalf("incomplete draft was not saved: %d %v", code, body)
+	}
+	// Saving editor settings validates descriptors, not executable source.
+	code, body, _ = e.req("PUT", "/api/v1/modules/"+id+"/debug",
+		`{"version":0,"script":"print(\"caller also saved\")","spec":{}}`, headers, cookies)
+	if code != 200 {
+		t.Fatalf("debug autosave should work while source is incomplete: %d %v", code, body)
+	}
+	for _, tc := range []struct{ path, body string }{
+		{"/publish/preview", `{"draft_version":2}`},
+		{"/debug/run", `{"draft_version":2,"debug_version":1}`},
+	} {
+		code, body, _ = e.req("POST", "/api/v1/modules/"+id+tc.path, tc.body, headers, cookies)
+		if code != 400 || !strings.Contains(strings.ToLower(fmt.Sprint(body)), "u.star") {
+			t.Fatalf("execution/publish validation accepted incomplete source at %s: %d %v", tc.path, code, body)
+		}
+	}
+}
 
 // Debug end-to-end over HTTP: unpublished draft -> scaffold -> save ->
 // run @self -> stale conflicts -> delete cleanup.

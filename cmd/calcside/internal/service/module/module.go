@@ -131,6 +131,7 @@ type UpdateRequest struct {
 	Name         *string           `json:"name,omitempty"`
 	Description  *string           `json:"description,omitempty"`
 	Files        map[string]string `json:"files,omitempty"`
+	Requirements *RequirementsView `json:"requirements,omitempty"`
 }
 
 // PublishRequest carries the review outputs the caller already saw.

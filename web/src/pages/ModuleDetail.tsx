@@ -2,16 +2,38 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
-import { api, wsPath, workspaces, ApiError } from '../api'
+import { api, wsPath, workspaces, type ExtensionCatalog, type ExtensionInfo } from '../api'
+import { AutosaveQueue, type AutosaveState } from '../autosave'
+import { readPendingDraft, writePendingDraft, type PendingDraft } from '../pendingDraft'
+import { ExtensionPicker } from '../components/ExtensionPicker'
 import { Button, Confirm, Loading, Notice, PageHeader, SectionTitle, SwapLabel } from '../components/ui'
 import { PublishReviewDialog } from '../components/PublishReviewDialog'
 import { SpecForm, type SpecFormHandle } from '../components/SpecForm'
 import { cmTheme } from '../components/codemirror'
 import { useApplicationEditor } from '../components/editor'
-import type { InstanceSpec } from '../instanceDraft'
+import { uniqueExtensionAlias, validateRawSpec, type InstanceSpec } from '../instanceDraft'
 import './module.css'
 
+const EMPTY_DEPS: Record<string, { source: string; sum?: string }> = {}
+type ModuleRequirements = {
+  capabilities?: string[]
+  ext?: Record<string, { source: string; sum?: string }>
+}
+type ModuleDraft = { files: Record<string, string>; requirements: ModuleRequirements | undefined }
+type DebugDraft = { script: string; specText: string }
+function isModuleDraft(value: unknown): value is ModuleDraft {
+  if (!value || typeof value !== 'object' || !('files' in value)) return false
+  const files = value.files
+  return !!files && typeof files === 'object' && !Array.isArray(files) && Object.values(files).every((v) => typeof v === 'string')
+}
+function isDebugDraft(value: unknown): value is DebugDraft {
+  if (!value || typeof value !== 'object' || !('script' in value) || typeof value.script !== 'string' ||
+    !('specText' in value) || typeof value.specText !== 'string') return false
+  try { return validateRawSpec(JSON.parse(value.specText), true).length === 0 } catch { return false }
+}
+const pendingKey = (workspace: string, id: string, kind: 'source' | 'debug') => `calcside:module:${workspace}:${id}:${kind}`
 type ModuleFull = {
+  requirements?: ModuleRequirements
   id: string; workspace_id: string; name: string; description?: string
   draft_version: number; latest_version: number; latest_sum?: string
   files: Record<string, string>
@@ -41,52 +63,132 @@ function ModuleEditor({ id }: { id: string }) {
   })
   const [files, setFiles] = useState<Record<string, string>>({})
   const [active, setActive] = useState('')
-  const [dirty, setDirty] = useState(false)
   const filesRef = useRef<Record<string, string>>({})
-  const [saving, setSaving] = useState(false)
-  const [saveErr, setSaveErr] = useState('')
+  const [reqs, setReqs] = useState<ModuleRequirements | undefined>(undefined)
+  const reqsRef = useRef<ModuleRequirements | undefined>(undefined)
+  const modQ = useRef<AutosaveQueue<{ files: Record<string, string>; requirements: ModuleRequirements | undefined }> | null>(null)
+  const [modState, setModState] = useState<AutosaveState<{ files: Record<string, string>; requirements: ModuleRequirements | undefined }> | null>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
+  const [reviewVer, setReviewVer] = useState<number | null>(null)
+  const [pubBusy, setPubBusy] = useState(false)
+  const [pubErr, setPubErr] = useState('')
+  const [depRemove, setDepRemove] = useState<string | null>(null)
+  const [confirmModReload, setConfirmModReload] = useState(false)
+  const [recoveredModule, setRecoveredModule] = useState<PendingDraft<ModuleDraft> | null>(null)
+  const [recoverModuleConfirm, setRecoverModuleConfirm] = useState<'restore' | 'discard' | null>(null)
   const runtimeRef = useRef<SpecFormHandle | null>(null)
   const [debugBusy, setDebugBusy] = useState(false)
-  const [specText, setSpecText] = useState('')
+  const [specText, setSpecText] = useState('{}')
+  const [configError, setConfigError] = useState('')
   const [configRevision, setConfigRevision] = useState(0)
   const [debugEpoch, setDebugEpoch] = useState(0)
+  const dbgPending = useRef<() => boolean>(() => false)
   const m = q.data?.module
 
+  // Module autosave queue — serial CAS writes of {files, requirements}.
+  // Ack files carry the server-pinned manifest; reconcile keeps newer
+  // .star edits while adopting the pinned module.yaml.
   useEffect(() => {
-    if (m && !dirty) {
-      setFiles({ ...m.files })
-      setActive((a) => (a && a in m.files ? a : Object.keys(m.files)[0] ?? ''))
+    if (!m || wsq.isLoading || modQ.current) return
+    setFiles({ ...m.files })
+    setActive((a) => (a && a in m.files ? a : Object.keys(m.files).filter((f) => f !== 'module.yaml')[0] ?? ''))
+    reqsRef.current = m.requirements
+    setReqs(m.requirements)
+    filesRef.current = { ...m.files }
+    modQ.current = new AutosaveQueue({
+      initial: { value: { files: m.files, requirements: m.requirements }, version: m.draft_version },
+      fingerprint: (v) => JSON.stringify({ files: v.files, requirements: v.requirements }),
+      save: async (v, ver) => {
+        const r = await api.patch<{ module: ModuleFull }>(wsPath(`/api/v1/modules/${id}`), {
+          draft_version: ver, files: v.files, requirements: v.requirements,
+        })
+        qc.setQueryData(['module', id], r)
+        return { value: { files: r.module.files, requirements: r.module.requirements }, version: r.module.draft_version }
+      },
+      reconcile: (cur, sent, ack) => ({
+        // Keep the user's current .star edits; adopt the server
+        // manifest only when requirements are still what we sent.
+        files: { ...cur.files, 'module.yaml': ack.files['module.yaml'] },
+        requirements: JSON.stringify(cur.requirements) === JSON.stringify(sent.requirements)
+          ? ack.requirements : cur.requirements,
+      }),
+      onChange: (st) => {
+        writePendingDraft(pendingKey(m.workspace_id, id, 'source'),
+          st.dirty ? { version: st.saved.version, value: st.latest } : null)
+        setModState(st)
+        const l = st.latest
+        if (JSON.stringify(l.files) !== JSON.stringify(filesRef.current)) {
+          filesRef.current = { ...l.files }
+          setFiles({ ...l.files })
+        }
+        if (JSON.stringify(l.requirements) !== JSON.stringify(reqsRef.current)) {
+          reqsRef.current = l.requirements
+          setReqs(l.requirements)
+        }
+      },
+    })
+    setModState(modQ.current.snapshot)
+    const pending = readPendingDraft(pendingKey(m.workspace_id, id, 'source'), isModuleDraft)
+    const role = wsq.data?.find((w) => w.id === m.workspace_id)?.role
+    if (pending && (role === 'owner' || role === 'editor')) {
+      if (pending.version === m.draft_version) modQ.current.update(pending.value)
+      else setRecoveredModule(pending)
     }
-  }, [m, dirty])
+  }, [m, id, qc, wsq.data, wsq.isLoading])
+  // Dispose only on unmount — never on query ack/refresh.
+  useEffect(() => () => { modQ.current?.dispose(); modQ.current = null }, [])
 
-  const save = async () => {
-    if (!m || saving) return
-    setSaving(true)
-    setSaveErr('')
-    const snapshot = { ...files }
-    try {
-      const r = await api.patch<{ module: ModuleFull }>(wsPath(`/api/v1/modules/${id}`), {
-        draft_version: m.draft_version, files: snapshot,
-      })
-      qc.setQueryData(['module', id], r)
-      if (JSON.stringify(filesRef.current) === JSON.stringify(snapshot)) {
-        filesRef.current = { ...r.module.files }
-        setFiles({ ...r.module.files })
-        setDirty(false)
-      }
-    } catch (e) {
-      setSaveErr((e as Error).message)
-    } finally {
-      setSaving(false)
-    }
+  const pushModule = (nextFiles: Record<string, string>, nextReqs = reqsRef.current) => {
+    modQ.current?.update({ files: nextFiles, requirements: nextReqs })
+  }
+  const addDep = (entry: ExtensionInfo) => {
+    const ext = { ...(reqsRef.current?.ext ?? {}) }
+    const alias = uniqueExtensionAlias(entry.name, new Set(Object.keys(ext)))
+    const next: ModuleRequirements = { ...reqsRef.current, ext: { ...ext, [alias]: { source: entry.source } } }
+    reqsRef.current = next
+    setReqs(next)
+    pushModule(filesRef.current, next)
+  }
+  const removeDep = (alias: string) => {
+    const ext = { ...(reqsRef.current?.ext ?? {}) }
+    delete ext[alias]
+    const next: ModuleRequirements = { ...reqsRef.current, ext }
+    reqsRef.current = next
+    setReqs(next)
+    pushModule(filesRef.current, next)
+  }
+  const doModuleReload = async () => {
+    const r = await api.get<{ module: ModuleFull }>(wsPath(`/api/v1/modules/${id}`))
+    qc.setQueryData(['module', id], r)
+    modQ.current?.reset({ value: { files: r.module.files, requirements: r.module.requirements }, version: r.module.draft_version })
+    filesRef.current = { ...r.module.files }
+    setFiles({ ...r.module.files })
+    reqsRef.current = r.module.requirements
+    setReqs(r.module.requirements)
+    setConfirmModReload(false)
+    writePendingDraft(pendingKey(r.module.workspace_id, id, 'source'), null)
   }
 
-  if (q.isLoading || dq.isLoading) return <Loading />
+  useEffect(() => {
+    const h = (e: BeforeUnloadEvent) => {
+      if (modState?.dirty || modState?.saving || dbgPending.current() || configError || recoveredModule) e.preventDefault()
+    }
+    window.addEventListener('beforeunload', h)
+    return () => window.removeEventListener('beforeunload', h)
+  }, [modState?.dirty, modState?.saving, configError, recoveredModule])
+  const catalogQ = useQuery({ queryKey: ['extensions', m?.workspace_id], queryFn: () => api.get<ExtensionCatalog>(wsPath('/api/v1/extensions')), retry: false })
+
+  if (q.isLoading || dq.isLoading || wsq.isLoading) return <Loading />
   if (q.isError) return <Notice tone="warning">Module unavailable: {(q.error as Error).message}</Notice>
   if (!m) return null
   const wsRole = wsq.data?.find((w) => w.id === m.workspace_id)?.role ?? 'viewer'
   const canEdit = wsRole === 'owner' || wsRole === 'editor'
+  const modConflict = modState?.conflict ?? false
+  const saveStatus = modConflict ? "Couldn't save"
+    : modState?.error ? "Couldn't save"
+    : modState?.saving ? 'Saving…'
+    : modState?.dirty ? 'Unsaved'
+    : modState ? 'Saved' : ''
 
   return (
     <div className="app-page">
@@ -94,27 +196,65 @@ function ModuleEditor({ id }: { id: string }) {
         actions={<div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-mute">draft v{m.draft_version}{m.latest_version ? ` · published v${m.latest_version}` : ''}</span>
           <Link to="/modules" className="text-xs text-sec hover:underline">← Modules</Link>
-          {canEdit && (
-            <Button size="sm" variant="primary" disabled={saving || !dirty}
-              onClick={() => void save()} data-testid="module-save">
-              <SwapLabel show={saving ? 'Saving…' : 'Save draft'} options={['Save draft', 'Saving…'] as const} />
-            </Button>
+          {canEdit && saveStatus && (
+            <span className="text-xs text-mute" data-testid="module-save-status">
+              <SwapLabel show={saveStatus} options={['Saved', 'Saving…', 'Unsaved', "Couldn't save"] as const} />
+            </span>
+          )}
+          {canEdit && modState?.error && (
+            <Button size="sm" onClick={() => { void modQ.current?.retry().catch(() => undefined) }}>Retry</Button>
           )}
           {canEdit && (
-            <Button size="sm" variant="primary" disabled={dirty}
-              title={dirty ? 'Save the draft first' : undefined}
-              onClick={() => setReviewOpen(true)} data-testid="module-publish">
-              Publish…
+            <Button size="sm" variant="primary" disabled={modConflict || pubBusy || debugBusy || !!recoveredModule}
+              onClick={async () => {
+                setPubBusy(true); setPubErr('')
+                try {
+                  const v = await modQ.current?.flush()
+                  if (v) { setReviewVer(v.version); setReviewOpen(true) }
+                } catch (e) { setPubErr((e as Error).message) }
+                finally { setPubBusy(false) }
+              }} data-testid="module-publish">
+              <SwapLabel show={pubBusy ? 'Preparing…' : 'Publish…'} options={['Publish…', 'Preparing…'] as const} />
             </Button>
           )}
         </div>} /></div>
-      {dirty && <Notice tone="neutral">Unsaved draft changes — save before publishing or running.</Notice>}
-      {saveErr && <Notice tone="warning">{saveErr}</Notice>}
+      {modConflict && (
+        <Notice tone="warning">
+          Module draft changed elsewhere.{' '}
+          <button type="button" className="link" data-testid="module-reload" onClick={() => setConfirmModReload(true)}>Reload draft</button>
+        </Notice>
+      )}
+      {recoveredModule && <Notice tone="warning">
+        An unsaved local draft belongs to an older server version.{' '}
+        <button type="button" className="link" onClick={() => setRecoverModuleConfirm('restore')}>Restore local edits</button>{' · '}
+        <button type="button" className="link" onClick={() => setRecoverModuleConfirm('discard')}>Use server draft</button>
+      </Notice>}
+      {recoverModuleConfirm && <Confirm title={recoverModuleConfirm === 'restore' ? 'Restore local draft' : 'Discard local backup'}
+        confirm={recoverModuleConfirm === 'restore' ? 'Restore' : 'Discard'} pending="Updating…" tone="danger"
+        onClose={() => setRecoverModuleConfirm(null)} action={async () => {
+          if (recoverModuleConfirm === 'restore' && recoveredModule) modQ.current?.update(recoveredModule.value)
+          else writePendingDraft(pendingKey(m.workspace_id, id, 'source'), null)
+          setRecoveredModule(null)
+          setRecoverModuleConfirm(null)
+        }}>
+        {recoverModuleConfirm === 'restore'
+          ? 'Replace the current server draft with your recovered local edits? Publishing still requires review.'
+          : 'Discard the recovered local edits and keep the current server draft?'}
+      </Confirm>}
+      {confirmModReload && (
+        <Confirm title="Reload module draft" tone="danger" confirm="Reload" pending="Reloading…"
+          action={async () => { await doModuleReload() }}
+          onClose={() => setConfirmModReload(false)}>
+          Discard local edits and load the latest draft?
+        </Confirm>
+      )}
+      {modState?.error && !modConflict && <Notice tone="warning">{modState.error.message}</Notice>}
+      {pubErr && <Notice tone="warning">{pubErr}</Notice>}
       <div className="module-workbench grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
         <section className="min-w-0 rounded border border-line bg-panel p-3">
           <SectionTitle>Module source</SectionTitle>
           <div className="mb-2 flex flex-wrap gap-1" data-testid="module-files">
-            {Object.keys(files).map((f) => (
+            {Object.keys(files).filter((f) => f !== 'module.yaml').map((f) => (
               <button key={f} onClick={() => setActive(f)}
                 className={`rounded border px-2 py-0.5 text-xs ${f === active ? 'border-accent bg-accent-10' : 'border-line text-sec hover:bg-hover'}`}>
                 {f}
@@ -122,24 +262,68 @@ function ModuleEditor({ id }: { id: string }) {
             ))}
           </div>
           <div data-testid="module-editor" aria-label="Module source editor" className="module-cm">
-            <ModuleCodeMirror value={files[active] ?? ''} readOnly={!canEdit} height="var(--module-source-h, 500px)"
+            <ModuleCodeMirror value={files[active] ?? ''} readOnly={!canEdit || modConflict || pubBusy || reviewOpen || debugBusy || !!recoveredModule} height="var(--module-source-h, 500px)"
               specText={specText} workspaceId={m.workspace_id}
               onChange={(v) => {
-                setFiles((f) => { const next = { ...f, [active]: v }; filesRef.current = next; return next })
-                setDirty(true)
+                const next = { ...filesRef.current, [active]: v }
+                filesRef.current = next
+                setFiles(next)
+                pushModule(next)
               }} />
           </div>
         </section>
         <DebugWorkspace key={`dw-${debugEpoch}`} id={id} draftVersion={m.draft_version} workspaceId={m.workspace_id}
-          debug={dq.data?.debug} sourceDirty={dirty} canEdit={canEdit} specRef={runtimeRef}
+          debug={dq.data?.debug} modDirty={modState?.dirty ?? false} modConflict={modConflict}
+          flushModule={() => modQ.current?.flush() ?? null}
+          locked={pubBusy || reviewOpen}
+          configurationError={configError}
+          canEdit={canEdit} specRef={runtimeRef}
           specText={specText} configRevision={configRevision} onBusyChange={setDebugBusy}
-          onEpochChange={() => setDebugEpoch((e) => e + 1)} />
+          onEpochChange={() => setDebugEpoch((e) => e + 1)}
+          onPendingChange={(f) => { dbgPending.current = f }} />
       </div>
+      <section className="rounded border border-line bg-panel p-3" data-testid="module-deps">
+        <fieldset disabled={!canEdit || modConflict || pubBusy || reviewOpen || debugBusy || !!recoveredModule}>
+        <SectionTitle>Extension dependencies</SectionTitle>
+        <p className="text-xs text-mute">Static dependencies publish with the module; settings and credentials below are only used for debugging.</p>
+        {Object.keys(reqs?.ext ?? {}).length === 0 && <p className="mt-2 text-xs text-mute">No extension dependencies.</p>}
+        <ul className="mt-2 flex flex-col gap-1">
+          {Object.entries(reqs?.ext ?? {}).map(([alias, dep]) => (
+            <li key={alias} className="flex flex-wrap items-center gap-2 break-all text-xs">
+              <code>{alias}</code>
+              <span className="text-sec">{dep.source}</span>
+              {dep.sum && <code className="text-mute">{dep.sum}</code>}
+              {canEdit && (
+                <Button size="sm" variant="danger" disabled={modConflict}
+                  onClick={() => setDepRemove(alias)}>Remove</Button>
+              )}
+            </li>
+          ))}
+        </ul>
+        {depRemove && (
+          <Confirm title={`Remove ${depRemove}?`} tone="danger" confirm="Remove" pending="Removing…"
+            action={async () => { removeDep(depRemove); setDepRemove(null) }}
+            onClose={() => setDepRemove(null)}>
+            Remove the static dependency {depRemove}? Caller scripts referencing it will fail until re-added.
+          </Confirm>
+        )}
+        {canEdit && (
+          <ExtensionPicker entries={(catalogQ.data?.extensions ?? []).filter((e) => e.interface !== 'llm')}
+            selectedSources={new Set(Object.values(reqs?.ext ?? {}).map((d) => d.source))}
+            loading={catalogQ.isPending} error={catalogQ.isError}
+            onRetry={() => void catalogQ.refetch()}
+            onAdd={addDep} onShow={(entry) => {
+              const alias = Object.entries(reqsRef.current?.ext ?? {}).find(([, d]) => d.source === entry.source)?.[0]
+              if (alias) document.querySelector<HTMLElement>(`[data-ext-settings="${alias}"]`)?.scrollIntoView({ block: 'nearest' })
+            }} />
+        )}
+        </fieldset>
+      </section>
       <DebugRuntime key={`dr-${debugEpoch}`} id={id} workspaceId={m.workspace_id} debug={dq.data?.debug}
-        canEdit={canEdit && !debugBusy} specRef={runtimeRef}
-        onSpecText={setSpecText} onConfigChange={() => setConfigRevision((r) => r + 1)} />
-      {reviewOpen && m && !dirty && (
-        <PublishReviewDialog resource="modules" id={id} version={m.draft_version} onClose={() => setReviewOpen(false)}
+        canEdit={canEdit && !debugBusy && !pubBusy && !reviewOpen} specRef={runtimeRef} fixedExtensions={reqs?.ext ?? EMPTY_DEPS}
+        onSpecText={setSpecText} onValidationChange={setConfigError} onConfigChange={() => setConfigRevision((r) => r + 1)} />
+      {reviewOpen && m && reviewVer !== null && (
+        <PublishReviewDialog resource="modules" id={id} version={reviewVer} onClose={() => setReviewOpen(false)}
           onPublished={() => { setReviewOpen(false); void qc.invalidateQueries({ queryKey: ['module', id] }); void qc.invalidateQueries({ queryKey: ['modules'] }) }} />
       )}
     </div>
@@ -157,89 +341,114 @@ function ModuleCodeMirror({ value, readOnly, height, workspaceId, specText, onCh
     theme={cmTheme} readOnly={readOnly} onChange={onChange} />
 }
 
-function DebugWorkspace({ id, draftVersion, workspaceId, debug, sourceDirty, canEdit, specRef, specText, configRevision, onBusyChange, onEpochChange }: {
+function DebugWorkspace({ id, draftVersion, workspaceId, debug, modDirty, modConflict, flushModule, canEdit, locked, configurationError, specRef, specText, configRevision, onBusyChange, onEpochChange, onPendingChange }: {
   id: string; draftVersion: number; workspaceId: string
-  debug?: DebugView; sourceDirty: boolean; canEdit: boolean
+  debug?: DebugView; modDirty: boolean; modConflict: boolean
+  flushModule: () => { value: { files: Record<string, string> }; version: number } | null | Promise<{ value: { files: Record<string, string> }; version: number } | null>
+  canEdit: boolean
+  locked: boolean
+  configurationError: string
   specRef: React.MutableRefObject<SpecFormHandle | null>
   specText: string
   configRevision: number
   onBusyChange: (busy: boolean) => void
   onEpochChange?: () => void
+  onPendingChange?: (f: () => boolean) => void
 }) {
   const qc = useQueryClient()
   const [resultRev, setResultRev] = useState<number | null>(null)
   const [script, setScript] = useState<string | null>(null)
   const [version, setVersion] = useState(0)
-  const [saving, setSaving] = useState(false)
+  const dbgQ = useRef<AutosaveQueue<{ script: string; specText: string }> | null>(null)
+  const [dbgState, setDbgState] = useState<AutosaveState<{ script: string; specText: string }> | null>(null)
+  const latestSpecRef = useRef('')
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<RunView | null>(null)
   const [outdated, setOutdated] = useState(false)
   const [err, setErr] = useState('')
-  const [conflict, setConflict] = useState(false)
   const [confirmReload, setConfirmReload] = useState(false)
+  const [recovered, setRecovered] = useState<PendingDraft<DebugDraft> | null>(null)
+  const [recoverConfirm, setRecoverConfirm] = useState<'restore' | 'discard' | null>(null)
+  const recovering = useRef(false)
+  const configErrorRef = useRef(configurationError)
+  configErrorRef.current = configurationError
+  const conflict = dbgState?.conflict ?? false
 
   // Initialize once per identity — empty script is a valid config.
   useEffect(() => {
-    if (debug && script === null) {
-      setVersion(debug.version)
-      setScript(debug.script)
+    if (!debug) return
+    setVersion(debug.version)
+    if (!dbgQ.current) {
+      const pending = readPendingDraft(pendingKey(workspaceId, id, 'debug'), isDebugDraft)
+      const restore = canEdit && pending?.version === debug.version ? pending : null
+      setScript(restore?.value.script ?? debug.script)
+      if (pending && !restore && canEdit) setRecovered(pending)
+      dbgQ.current = new AutosaveQueue({
+        initial: { value: { script: debug.script, specText: debug.spec_json ?? JSON.stringify(debug.spec ?? {}) }, version: debug.version },
+        initialDirty: debug.version === 0,
+        fingerprint: (v) => JSON.stringify(v),
+        save: async (v, ver) => {
+          if (configErrorRef.current) throw new Error(configErrorRef.current)
+          // Deps must exist server-side before the debug PUT.
+          await flushModule()
+          // Persist the SNAPSHOT specText — never the live editor state.
+          const body = `{"version":${ver},"script":${JSON.stringify(v.script ?? '')},"spec":${v.specText}}`
+          const r = await api.putRawJson<{ debug: DebugView }>(wsPath(`/api/v1/modules/${id}/debug`), body)
+          qc.setQueryData(['module-debug', id], r)
+          setVersion(r.debug.version)
+          return { value: v, version: r.debug.version }
+        },
+        onChange: (st) => {
+          setDbgState(st)
+          writePendingDraft(pendingKey(workspaceId, id, 'debug'),
+            st.dirty ? { version: st.saved.version, value: st.latest } : null)
+        },
+      })
+      if (restore) dbgQ.current.update(restore.value)
     }
-  }, [debug, script])
+  }, [debug, script, id, qc, specRef, canEdit, workspaceId])
+  useEffect(() => () => { dbgQ.current?.dispose(); dbgQ.current = null }, [])
+  useEffect(() => {
+    latestSpecRef.current = specText
+    // Spec edits autosave too — queue no-ops when unchanged.
+    if (script !== null && !recovering.current) dbgQ.current?.update({ script, specText })
+  }, [specText, script])
 
-  const busy = saving || running
+  const busy = running
   useEffect(() => { onBusyChange(busy) }, [busy, onBusyChange])
-
-  const saveSettings = async (): Promise<number | null> => {
-    if (!specRef.current) { setErr('Configuration still loading — try again.'); return null }
-    const built = specRef.current.buildSpec()
-    if (built?.err) { setErr(built.err); return null }
-    setSaving(true)
-    setErr('')
-    try {
-      const rawSpec = built?.specJSON ?? JSON.stringify(built?.spec ?? {})
-      const body = `{"version":${version},"script":${JSON.stringify(script ?? '')},"spec":${rawSpec}}`
-      let r: { debug: DebugView }
-      try {
-        r = await api.putRawJson<{ debug: DebugView }>(wsPath(`/api/v1/modules/${id}/debug`), body)
-      } catch (e) {
-        // CAS conflict: the settings changed elsewhere. Never
-        // silently overwrite — block until explicit reload.
-        if (e instanceof ApiError && e.status === 409) {
-          setConflict(true)
-          return null
-        }
-        throw e
-      }
-      qc.setQueryData(['module-debug', id], r)
-      setVersion(r.debug.version)
-      return r.debug.version
-    } catch (e) {
-      setErr((e as Error).message)
-      return null
-    } finally {
-      setSaving(false)
-    }
-  }
+  useEffect(() => { onPendingChange?.(() => (dbgState?.dirty ?? false) || (dbgState?.saving ?? false) || !!recovered) }, [dbgState, onPendingChange, recovered])
 
   const doReload = async () => {
     const r = await api.get<{ debug: DebugView }>(wsPath(`/api/v1/modules/${id}/debug`))
     qc.setQueryData(['module-debug', id], r)
+    dbgQ.current?.reset({ value: { script: r.debug.script, specText: latestSpecRef.current }, version: r.debug.version })
     setVersion(r.debug.version)
     setScript(r.debug.script)
-    setConflict(false)
     setConfirmReload(false)
+    writePendingDraft(pendingKey(workspaceId, id, 'debug'), null)
     onEpochChange?.()
   }
 
   const run = async () => {
-    if (running || saving || conflict) return
+    if (running || locked || conflict || modConflict) return
     setRunning(true)
     setErr('')
     try {
-      const v = canEdit ? await saveSettings() : version
-      if (v === null) { setRunning(false); return }
+      let dv = version
+      let mvVer = draftVersion
+      if (canEdit) {
+        const mv = await flushModule()
+        if (mv === null) { setErr('Module save conflict — reload the draft first.'); setRunning(false); return }
+        mvVer = mv.version
+        if (dbgQ.current) {
+          const built = specRef.current?.buildSpec()
+          if (built?.err) { setErr(built.err); setRunning(false); return }
+          const res = await dbgQ.current.flush()
+          dv = res.version
+        }
+      }
       const r = await api.post<RunView>(wsPath(`/api/v1/modules/${id}/debug/run`), {
-        draft_version: draftVersion, debug_version: v,
+        draft_version: mvVer, debug_version: dv,
       })
       setResult(r)
       setResultRev(configRevision)
@@ -256,25 +465,49 @@ function DebugWorkspace({ id, draftVersion, workspaceId, debug, sourceDirty, can
   return (
     <section className="flex min-w-0 flex-col gap-3">
       <div className="rounded border border-line bg-panel p-3">
-        <SectionTitle aside={canEdit && <div className="flex gap-2">
-          <Button size="sm" disabled={saving || running || conflict} onClick={() => void saveSettings()}>
-            <SwapLabel show={saving ? 'Saving…' : 'Save settings'} options={['Save settings', 'Saving…'] as const} />
-          </Button>
-          <Button size="sm" variant="primary" disabled={running || saving || sourceDirty || conflict}
-            title={sourceDirty ? 'Save the draft first' : undefined}
+        <SectionTitle aside={canEdit && <div className="flex items-center gap-2">
+          {dbgState?.saving && <span className="text-xs text-mute">Saving…</span>}
+          {dbgState?.error && !conflict && <span className="text-xs text-error">Couldn't save</span>}
+          <Button size="sm" variant="primary" disabled={running || locked || conflict || modConflict}
             onClick={() => void run()} data-testid="debug-run">
             <SwapLabel show={running ? 'Running…' : 'Run'} options={['Run', 'Running…'] as const} />
           </Button>
         </div>}>
           Caller script
         </SectionTitle>
-        {sourceDirty && <Notice tone="warning">Save the draft first — run always uses the saved source.</Notice>}
+        {modDirty && <Notice tone="neutral">Module edits are autosaving. Run waits for the latest changes.</Notice>}
+        {dbgState?.error && !conflict && <Notice tone="warning">
+          {dbgState.error.message}{' '}
+          <button type="button" className="link" onClick={() => { void dbgQ.current?.retry().catch(() => {}) }}>Retry</button>
+        </Notice>}
         {conflict && (
           <Notice tone="warning">
             Debug settings changed elsewhere.{' '}
             <button type="button" className="link" data-testid="debug-reload" onClick={() => setConfirmReload(true)}>Reload settings</button>
           </Notice>
         )}
+        {recovered && <Notice tone="warning">
+          A local debug draft belongs to an older server version.{' '}
+          <button type="button" className="link" onClick={() => setRecoverConfirm('restore')}>Restore local settings</button>{' · '}
+          <button type="button" className="link" onClick={() => setRecoverConfirm('discard')}>Use server settings</button>
+        </Notice>}
+        {recoverConfirm && <Confirm title={recoverConfirm === 'restore' ? 'Restore local settings' : 'Discard local debug backup'}
+          confirm={recoverConfirm === 'restore' ? 'Restore' : 'Discard'} pending="Updating…" tone="danger"
+          onClose={() => setRecoverConfirm(null)} action={async () => {
+            recovering.current = true
+            try {
+              if (recoverConfirm === 'restore' && recovered) {
+                dbgQ.current?.update(recovered.value)
+                await dbgQ.current?.flush()
+              }
+              writePendingDraft(pendingKey(workspaceId, id, 'debug'), null)
+              setRecovered(null)
+              setRecoverConfirm(null)
+              if (recoverConfirm === 'restore') onEpochChange?.()
+            } finally { recovering.current = false }
+          }}>
+          {recoverConfirm === 'restore' ? 'Replace the saved debug settings with your recovered local edits?' : 'Discard the recovered debug script and settings?'}
+        </Confirm>}
         {confirmReload && (
           <Confirm title="Reload debug settings" tone="danger" confirm="Reload" pending="Reloading…"
             action={async () => { await doReload() }}
@@ -284,19 +517,19 @@ function DebugWorkspace({ id, draftVersion, workspaceId, debug, sourceDirty, can
         )}
         {err && <Notice tone="warning">{err}</Notice>}
         <div className="mt-2" data-testid="debug-script" aria-label="Caller script editor">
-          <ModuleCodeMirror value={scriptText} readOnly={!canEdit || saving || running}
+          <ModuleCodeMirror value={scriptText} readOnly={!canEdit || running || locked || conflict || !!recovered}
             height="260px" specText={specText} workspaceId={workspaceId}
-            onChange={(v) => { setScript(v); if (result) setOutdated(true) }} />
+            onChange={(v) => { setScript(v); if (result) setOutdated(true); dbgQ.current?.update({ script: v, specText: latestSpecRef.current }) }} />
         </div>
       </div>
       <div className="rounded border border-line bg-panel p-3" data-testid="debug-result" style={{ minHeight: 200 }}>
         <SectionTitle aside={canEdit && result && (
-          <Button size="sm" disabled={saving || running} onClick={() => { setResult(null); setErr(''); setOutdated(false) }}>Clear output</Button>
+          <Button size="sm" disabled={running} onClick={() => { setResult(null); setErr(''); setOutdated(false) }}>Clear output</Button>
         )}>stdout</SectionTitle>
         {!result && !err && <p className="text-xs text-mute">Run the script to see output.</p>}
         {result && (
           <>
-            {(outdated || sourceDirty || (resultRev !== null && resultRev !== configRevision) ||
+            {(outdated || modDirty || (resultRev !== null && resultRev !== configRevision) ||
               (result.draft_version !== undefined && result.draft_version !== draftVersion)) && (
               <Notice tone="neutral">Edits made after this run — result is outdated.</Notice>
             )}
@@ -317,34 +550,58 @@ function DebugWorkspace({ id, draftVersion, workspaceId, debug, sourceDirty, can
 
 // DebugRuntime renders the full-width extensions/runtime form below
 // the source+script grid; saving builds through SpecForm.buildSpec.
-function DebugRuntime({ workspaceId, debug, canEdit, specRef, onSpecText, onConfigChange }: {
+function DebugRuntime({ id, workspaceId, debug, canEdit, specRef, fixedExtensions, onSpecText, onValidationChange, onConfigChange }: {
   id: string; workspaceId: string; debug?: DebugView; canEdit: boolean
   specRef: React.MutableRefObject<SpecFormHandle | null>
+  fixedExtensions?: Record<string, { source: string; sum?: string }>
   onSpecText: (text: string) => void
+  onValidationChange: (error: string) => void
   onConfigChange: () => void
 }) {
   // Fingerprint stable drafts — only real config edits bump the
   // revision (which marks any displayed result outdated).
   const lastFp = useRef('')
   const first = useRef(true)
+  const edited = useRef(false)
+  const wasInvalid = useRef(false)
+  const hydrated = useRef(false)
+  const [incomplete, setIncomplete] = useState(false)
+  const [seed] = useState(() => {
+    const pending = readPendingDraft(pendingKey(workspaceId, id, 'debug'), isDebugDraft)
+    const raw = pending && pending.version === debug?.version ? pending.value.specText
+      : debug?.spec_json ?? JSON.stringify(debug?.spec ?? {})
+    return { raw, spec: JSON.parse(raw) as InstanceSpec }
+  })
   useEffect(() => {
-    if (debug) onSpecText(debug.spec_json ?? JSON.stringify(debug.spec ?? {}, null, 2))
-    // once per settings load
-  }, [debug?.version]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (debug && !hydrated.current) {
+      hydrated.current = true
+      onSpecText(seed.raw)
+    }
+  }, [debug, onSpecText, seed])
   if (!debug) return null
   return (
     <section className="mt-3 rounded border border-line bg-panel p-3">
       <SectionTitle>Extensions & runtime</SectionTitle>
       <p className="mb-2 text-xs text-mute">Debug settings are not published with the module.</p>
+      {incomplete && <Notice tone="neutral">Debug configuration incomplete. Fix the indicated fields before running; module publishing is unaffected.</Notice>}
       <fieldset disabled={!canEdit}>
-        <SpecForm ref={specRef} debug hideBasics workspaceId={workspaceId}
-          initial={debug.spec ?? {}}
-          onSpecChange={(draft, _errors, built) => {
-            const text = built?.specJSON ?? JSON.stringify(built?.spec ?? {}, null, 2)
-            onSpecText(text)
-            const fp = JSON.stringify(draft)
+        <SpecForm ref={specRef} debug hideBasics workspaceId={workspaceId} fixedExtensions={fixedExtensions}
+          initial={seed.spec}
+          onSpecChange={(draft, errors, built) => {
+            const invalid = (errors?.length ?? 0) > 0 || !built?.spec
+            const becameValid = wasInvalid.current && !invalid
+            wasInvalid.current = invalid
+            setIncomplete(invalid)
+            onValidationChange(invalid ? 'Debug configuration incomplete' : '')
+            const fp = JSON.stringify([draft, built?.specJSON])
             if (first.current) { first.current = false; lastFp.current = fp; return }
-            if (fp !== lastFp.current) { lastFp.current = fp; onConfigChange() }
+            const changed = fp !== lastFp.current
+            if (changed) { edited.current = true; lastFp.current = fp; onConfigChange() }
+            // Keep the original raw JSON until configuration actually changes;
+            // caller-only edits must not normalize or round unrelated fields.
+            if (!invalid && edited.current && (changed || becameValid)) {
+              onSpecText(built.specJSON ?? JSON.stringify(built.spec))
+            }
           }} />
       </fieldset>
     </section>

@@ -474,17 +474,27 @@ source control over shared library code, same bar as policy writes.
 
 - **Workspace → Modules** page: list, create, and a detail editor — a file
   list plus the shared code editor (codemirror/editor.ts), add/rename/delete
-  files (destructive file delete uses `Confirm`, F2), Save draft, and a
+  files (destructive file delete uses `Confirm`, F2), automatic draft saving, and a
   **Review & publish** action that opens the shared EP-0018 review dialog
   (file diffs, manifest/requirements changes, cascaded-extension changes,
   note). Detail shows draft vs latest-published divergence
   (`has_unpublished_changes`, the application-status shape) and a History
   tab where any two versions can be compared or restored into the draft.
-- **Module dependencies editor**: a Requirements panel edits `module.yaml`
-  (alias, `source`, pinned `sum`, base-capability checkboxes) with a raw
-  YAML mode that never silently drops fields. It never edits extension
-  config or credentials — those belong to the consumer. Published versions
-  show their pinned extension revisions.
+- **Module dependencies editor**: a catalog picker edits static extension
+  requirements in `module.yaml`. Aliases are generated; source and pinned
+  sum are read-only. Dependency additions/removals autosave under the same
+  draft CAS as source edits, and appear in publish review even when no
+  code changed. Manifest description and existing base-capability
+  declarations are preserved. Extension config and credentials belong to
+  the debug/consumer environment, never the published module.
+- **Autosave**: source drafts may contain incomplete Starlark; preview,
+  publish and run still compile and reject invalid code. Source, caller
+  script and valid debug settings save automatically; there are no manual
+  Save draft/Save settings actions. Publish waits for pending module
+  writes before previewing the exact returned draft version. Run also
+  waits for debug settings. Missing debug credentials never prevent a
+  source-only module publication. Conflicts retain local edits until an
+  explicit reload; tab-local pending backups support navigation recovery.
 - **Module debug**: a Debug panel on the module detail page runs the
   *current draft* (unpublished trees allowed) mounted as `@self` inside a
   scratch instance, against a user-editable debug script and per-module

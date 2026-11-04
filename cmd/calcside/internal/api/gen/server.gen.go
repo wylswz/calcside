@@ -1254,6 +1254,19 @@ type ModuleRequirements struct {
 	} `json:"ext,omitempty"`
 }
 
+// ModuleRequirementsInput defines model for ModuleRequirementsInput.
+type ModuleRequirementsInput struct {
+	Capabilities *[]string `json:"capabilities,omitempty"`
+
+	// Ext requested extension deps — source required, server pins the sum
+	Ext *map[string]struct {
+		Source string `json:"source"`
+
+		// Sum optional pin; server pins when absent
+		Sum *string `json:"sum,omitempty"`
+	} `json:"ext,omitempty"`
+}
+
 // ModuleResponse defines model for ModuleResponse.
 type ModuleResponse struct {
 	Module *Module `json:"module,omitempty"`
@@ -1266,10 +1279,11 @@ type ModuleRestoreRequest struct {
 
 // ModuleUpdateRequest defines model for ModuleUpdateRequest.
 type ModuleUpdateRequest struct {
-	Description  *string            `json:"description,omitempty"`
-	DraftVersion int64              `json:"draft_version"`
-	Files        *map[string]string `json:"files,omitempty"`
-	Name         *string            `json:"name,omitempty"`
+	Description  *string                  `json:"description,omitempty"`
+	DraftVersion int64                    `json:"draft_version"`
+	Files        *map[string]string       `json:"files,omitempty"`
+	Name         *string                  `json:"name,omitempty"`
+	Requirements *ModuleRequirementsInput `json:"requirements,omitempty"`
 }
 
 // ModuleValidateRequest defines model for ModuleValidateRequest.
