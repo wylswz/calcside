@@ -19,10 +19,12 @@ import (
 	"calcside/cmd/calcside/internal/scheduler"
 	"calcside/cmd/calcside/internal/service/access"
 	appsvc "calcside/cmd/calcside/internal/service/application"
+	modsvc "calcside/cmd/calcside/internal/service/module"
 	policysvc "calcside/cmd/calcside/internal/service/policy"
 	runsvc "calcside/cmd/calcside/internal/service/run"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/cmd/calcside/internal/service/serving"
+	"calcside/cmd/calcside/internal/service/vault"
 	"calcside/cmd/calcside/internal/vaultcipher"
 	"calcside/internal/capability"
 	capext "calcside/internal/capability/ext"
@@ -186,7 +188,7 @@ func provideGlobalPolicies(cfg config.Config) (map[string]string, error) {
 	return globalPolicies, nil
 }
 
-func provideSandboxOptions(ctx context.Context, cfg config.Config, st store.Store, rt runtime.Runtime, vaultSvc sandbox.SecretResolver, rec sandbox.AuditSink, reg *capability.Registry, limits capability.ServerLimits, globalPolicies map[string]string, ac *access.Checker, repo *extensions.Repository) (sandbox.Options, error) {
+func provideSandboxOptions(ctx context.Context, cfg config.Config, st store.Store, rt runtime.Runtime, vaultSvc *vault.Service, rec sandbox.AuditSink, reg *capability.Registry, limits capability.ServerLimits, globalPolicies map[string]string, ac *access.Checker, repo *extensions.Repository) (sandbox.Options, error) {
 	extOpts := repo.Options()
 	return sandbox.Options{
 		Store:               st,
@@ -196,10 +198,24 @@ func provideSandboxOptions(ctx context.Context, cfg config.Config, st store.Stor
 		Registry:            reg,
 		Ext:                 &extOpts,
 		SpecPinner:          repo,
+		Manifests:           repo,
 		Limits:              limits,
 		GlobalPolicies:      globalPolicies,
 		Access:              ac,
 		MaxInstancesPerUser: cfg.MaxInstancesPerUser,
+		// Transaction-rebound boundaries: every store-backed
+		// dependency is re-anchored on the tx so a reviewed publish
+		// inside tx sees the tx snapshot and never the root store.
+		Rebind: func(tx store.Store) (sandbox.BoundaryBindings, error) {
+			txRepo := repo.WithStore(tx)
+			txOpts := txRepo.Options()
+			return sandbox.BoundaryBindings{
+				Secrets:    vaultSvc.WithStore(tx),
+				SpecPinner: txRepo,
+				Manifests:  txRepo,
+				Ext:        &txOpts,
+			}, nil
+		},
 	}, nil
 }
 
@@ -318,6 +334,15 @@ func provideApplicationService(st store.Store, rt runtime.Runtime, sb *sandbox.S
 	return appsvc.New(appsvc.Options{
 		Store: st, Runtime: rt, Sandbox: sb, Access: ac, Audit: rec, Runs: rs,
 		MaxPerUser: cfg.MaxInstancesPerUser,
+	})
+}
+
+// provideModuleService wires the workspace module library service:
+// drafts, source validation, publish preview/publish, history.
+func provideModuleService(st store.Store, ac *access.Checker, reg *capability.Registry,
+	repo *extensions.Repository, sb *sandbox.Service) (*modsvc.Service, error) {
+	return modsvc.New(modsvc.Options{
+		Store: st, Access: ac, Registry: reg, SpecPinner: repo, Sandbox: sb,
 	})
 }
 

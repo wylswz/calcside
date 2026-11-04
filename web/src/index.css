@@ -252,7 +252,6 @@
 .workspace-tabs a { padding: 8px 14px; border: 1px solid transparent; border-radius: var(--radius-control); color: rgb(var(--sec)); font-size: 14px; white-space: nowrap; }
 .workspace-tabs a { font-weight: 500; }
 .workspace-tabs a[aria-current='page'] { color: rgb(var(--accent)); }
-.console-nav { gap: 24px; }
 @media (max-width: 640px) {
   .console-main { padding: 24px 16px; }
   .builder-work-panel { padding: 16px; }

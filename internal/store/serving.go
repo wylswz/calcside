@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"calcside/internal/module"
 	"calcside/internal/runtime"
 	"calcside/internal/secrets"
 	"calcside/internal/serving"
@@ -47,7 +48,12 @@ type ServingRelease struct {
 	Spec        json.RawMessage       `json:"spec"`
 	Policies    runtime.PolicyBundle  `json:"policies"`
 	Program     runtime.ProgramBundle `json:"program"`
-	CreatedAt   time.Time             `json:"created_at"`
+	// Modules carries the resolved, pinned module trees the release
+	// spec's spec.modules references point at — the durable snapshot
+	// a replica prepares from, so deleting a module from the library
+	// never breaks an already-published release.
+	Modules   map[string]module.Tree `json:"modules"`
+	CreatedAt time.Time              `json:"created_at"`
 }
 
 // releaseFrame is the exact hashed document for a release id. Any
@@ -60,6 +66,10 @@ type releaseFrame struct {
 	Spec        json.RawMessage       `json:"spec"`
 	Policies    runtime.PolicyBundle  `json:"policies"`
 	Program     runtime.ProgramBundle `json:"program"`
+	// Modules is omitted from the hash when nil so existing
+	// release ids stay stable; a release that references modules
+	// without trees fails construction, never hashes module-less.
+	Modules map[string]module.Tree `json:"modules,omitempty"`
 }
 
 const releaseFrameFormat = "calcside.serving-release/v1"
@@ -69,6 +79,21 @@ const releaseFrameFormat = "calcside.serving-release/v1"
 // from the hash so identical content dedups. Plaintext secrets and
 // extension snapshots are rejected — the boundary carries refs only.
 func NewServingRelease(workspaceID, userID string, spec json.RawMessage, policies runtime.PolicyBundle, program runtime.ProgramBundle, createdAt time.Time) (*ServingRelease, error) {
+	return NewServingReleaseWithModules(workspaceID, userID, spec, policies, program, nil, createdAt)
+}
+
+// NewServingReleaseWithModules is NewServingRelease with the resolved
+// module trees: every spec.modules reference must have a matching
+// pinned tree (name/version/sum identical) and every tree must
+// satisfy module.ValidateTree. A spec declaring mounts with nil
+// trees fails closed — releases never silently drop declared modules.
+func NewServingReleaseWithModules(workspaceID, userID string, spec json.RawMessage, policies runtime.PolicyBundle, program runtime.ProgramBundle, modules map[string]module.Tree, createdAt time.Time) (*ServingRelease, error) {
+	if err := validateModuleTrees(modules); err != nil {
+		return nil, err
+	}
+	if err := runtime.VerifyModuleMounts(specModulesOf(spec), modules); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidServingRecord, err)
+	}
 	if workspaceID == "" || userID == "" {
 		return nil, fmt.Errorf("%w: workspace and user required", ErrInvalidServingRecord)
 	}
@@ -168,6 +193,7 @@ func NewServingRelease(workspaceID, userID string, spec json.RawMessage, policie
 		return nil, fmt.Errorf("%w: spec", ErrInvalidServingRecord)
 	}
 	pol := clonePolicies(policies)
+	mods := cloneModuleTrees(modules)
 
 	frame, err := json.Marshal(releaseFrame{
 		Format: releaseFrameFormat, WorkspaceID: workspaceID, UserID: userID,
@@ -176,6 +202,7 @@ func NewServingRelease(workspaceID, userID string, spec json.RawMessage, policie
 			Entrypoint: prog.Entrypoint, Sources: prog.Sources, Assets: prog.Assets,
 			InputSchema: canonSchema["input_schema"], OutputSchema: canonSchema["output_schema"],
 		},
+		Modules: mods,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%w: release frame", ErrInvalidServingRecord)
@@ -190,8 +217,44 @@ func NewServingRelease(workspaceID, userID string, spec json.RawMessage, policie
 		Spec:        json.RawMessage(normSpec),
 		Policies:    pol,
 		Program:     prog,
+		Modules:     mods,
 		CreatedAt:   createdAt.UTC(),
 	}, nil
+}
+
+// specModulesOf extracts the spec.modules references without failing
+// on malformed specs — NormalizeSpec reports those separately.
+func specModulesOf(spec json.RawMessage) map[string]module.Reference {
+	var typed runtime.Spec
+	if err := json.Unmarshal(spec, &typed); err != nil {
+		return nil
+	}
+	return typed.Modules
+}
+
+func cloneModuleTrees(in map[string]module.Tree) map[string]module.Tree {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]module.Tree, len(in))
+	for alias, t := range in {
+		ct := module.Tree{Name: t.Name, Version: t.Version, Sum: t.Sum, Files: cloneModuleFiles(t.Files)}
+		out[alias] = ct
+	}
+	return out
+}
+
+// validateModuleTrees verifies the attached mount map independently
+// of the spec match — mount grammar plus per-tree and aggregate
+// bounds — so a stored release snapshot is checked on the way in.
+func validateModuleTrees(in map[string]module.Tree) error {
+	if in == nil {
+		return nil
+	}
+	if err := module.ValidateMounts(in); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidServingRecord, err)
+	}
+	return nil
 }
 
 // portablePath matches the engine's portable-path boundary: clean,
@@ -204,9 +267,12 @@ func portablePath(p string) error {
 	if path.Clean(p) != p {
 		return fmt.Errorf("%w: unsafe path", ErrInvalidServingRecord)
 	}
-	for _, seg := range strings.Split(p, "/") {
+	for i, seg := range strings.Split(p, "/") {
 		if seg == "" || seg == "." || seg == ".." {
 			return fmt.Errorf("%w: unsafe path", ErrInvalidServingRecord)
+		}
+		if i == 0 && strings.HasPrefix(seg, "@") {
+			return fmt.Errorf("%w: @ is reserved for module mounts", ErrInvalidServingRecord)
 		}
 		for _, c := range seg {
 			if c < 0x20 || c == 0x7f {

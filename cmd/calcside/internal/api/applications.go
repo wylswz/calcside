@@ -260,6 +260,30 @@ func (s *strictImpl) DeleteApplication(ctx context.Context, req gen.DeleteApplic
 	return deleteApplicationResp{rawJSON{http.StatusNoContent, nil}}, nil
 }
 
+// PreviewApplicationPublish returns the reviewed-publish diff — the
+// client must read this before publish can commit.
+func (s *strictImpl) PreviewApplicationPublish(ctx context.Context, req gen.PreviewApplicationPublishRequestObject) (gen.PreviewApplicationPublishResponseObject, error) {
+	ctx = realCtx(ctx)
+	p, e := needAuth(ctx)
+	if e != nil {
+		return previewApplicationPublishResp{*e}, nil
+	}
+	if req.Body == nil {
+		return previewApplicationPublishResp{appFail(service.BadRequest("body required"))}, nil
+	}
+	rev, err := s.d.Application.Preview(ctx, actorOf(p), req.Id, req.Body.Version)
+	if err != nil {
+		return previewApplicationPublishResp{appFail(err)}, nil
+	}
+	return previewApplicationPublishResp{rawJSON{http.StatusOK, rev}}, nil
+}
+
+type previewApplicationPublishResp struct{ rawJSON }
+
+func (r previewApplicationPublishResp) VisitPreviewApplicationPublishResponse(w http.ResponseWriter) error {
+	return r.write(w)
+}
+
 func (s *strictImpl) PublishApplication(ctx context.Context, req gen.PublishApplicationRequestObject) (gen.PublishApplicationResponseObject, error) {
 	ctx = realCtx(ctx)
 	p, e := needAuth(ctx)
@@ -269,7 +293,20 @@ func (s *strictImpl) PublishApplication(ctx context.Context, req gen.PublishAppl
 	if req.Body == nil {
 		return publishApplicationResp{appFail(service.BadRequest("body required"))}, nil
 	}
-	v, err := s.d.Application.Publish(ctx, actorOf(p), req.Id, req.Body.Version)
+	var note string
+	if req.Body.Note != nil {
+		note = *req.Body.Note
+	}
+	_, _, err := s.d.Application.PublishReviewed(ctx, actorOf(p), req.Id, application.PublishRequest{
+		Version:      req.Body.Version,
+		ExpectedBase: req.Body.ExpectedBase,
+		Candidate:    req.Body.Candidate,
+		Note:         note,
+	})
+	if err != nil {
+		return publishApplicationResp{appFail(err)}, nil
+	}
+	v, err := s.d.Application.Get(ctx, actorOf(p), req.Id)
 	if err != nil {
 		return publishApplicationResp{appFail(err)}, nil
 	}

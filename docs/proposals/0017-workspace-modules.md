@@ -27,9 +27,10 @@ an optional `module.yaml` manifest, pinned to `source` + `h1:` sum at publish.
 Attaching a module **cascades** those extensions into the consumer:
 resolution merges them into `spec.capabilities.ext` exactly as if the consumer
 had installed them, so module code calls `ext.<alias>.<op>` through the
-ordinary, gated ext binding. The cascade installs extension code and its
-secret references only; it never grants a base capability, widens
-`net.allow_hosts`, or attaches a policy (EP-0012).
+ordinary, gated ext binding. The cascade installs extension code only —
+pinned to `source` + `sum`; all config and credentials come from the
+consumer. It never grants a base capability, widens `net.allow_hosts`, or
+attaches a policy (EP-0012).
 
 ## Motivation and current state
 
@@ -207,17 +208,16 @@ requires:
     tavily:                    # alias the module code calls: ext.tavily.*
       source: contrib/tavily
       sum: h1:...              # filled at publish; required in versions
-      config:
-        api_key: "{{secrets.TAVILY_API_KEY}}"
-        max_results: 5
 ```
 
 - Decoding is strict (unknown fields rejected), like `capability.yaml`.
-- `requires.ext` uses the existing `capabilities.ext[alias]` entry shape
-  (`source`, `sum`, `config`) and existing validation: alias is a Starlark
-  identifier, the source loads, config keys/types match the extension's
-  manifest, `secret` fields are whole `{{secrets.NAME}}` references, and
-  non-secret fields reject placeholders.
+- `requires.ext` entries carry only `source` and `sum` — never config,
+  secret names or references, env, or runtime limits. A module declares
+  *which* extension its code calls; the consumer supplies all extension
+  config and credentials (through `spec.capabilities.ext` and the
+  consumer's `spec.environment` bindings). Validation: alias is a
+  Starlark identifier, the source is a valid identifier, the sum is
+  `h1:`-shaped when pinned; source loading and pinning happen at publish.
 - `requires.capabilities` lists base capabilities (`net`, `fs`, `io`) the
   module or its extensions need. It is informational in the manifest and
   enforced at attach time: every listed capability and every required
@@ -247,27 +247,65 @@ During spec resolution (`validateSpec` for instances, `ApplicationBoundary`
 for applications, before `NormalizeSpec`), each resolved module version's
 `requires.ext` entries merge into `spec.capabilities.ext`:
 
-1. **New alias** → installed with the module's `source`, `sum`, and config.
+1. **New alias** → installed with the module's `source` and `sum` only.
+   All extension config and credentials come from the consumer — its
+   explicit `capabilities.ext[alias].config` and its `spec.environment`
+   bindings for that alias. The module itself carries none.
 2. **Same alias, same `source` + `sum`** (another module, or an explicit
-   consumer entry) → deduplicated into one ext binding. Config merges per
-   key: an explicit consumer entry wins (the consumer owns credentials and
-   tuning); two modules with conflicting values for the same key are
-   rejected.
+   consumer entry) → deduplicated into one ext binding.
 3. **Same alias, different `source` or `sum`** → creation fails, naming the
    alias and both modules/the explicit entry. No silent winner, no renaming:
    module code calls `ext.<alias>` literally, so the alias is an interface.
 
-Secret references in cascaded config are handled like the LLM provider
-precedent (`resolveLLMProviders`): each referenced `NAME` missing from
-`spec.secrets` gets `{"ref": NAME}`, resolved against the workspace vault
-with the vault secret's own `allowed_domains`. A missing vault secret fails
-creation naming the module, alias, and secret; inline secret values never
-come from a module.
+There is no config cascade: a module can declare *that* it needs
+`tavily`, never *how* it is credentialed. Required secret fields on the
+extension's manifest are satisfied by the consumer's environment
+bindings (see below); a missing binding fails creation naming the
+module, alias, and field. Explicit legacy `ext.config` values keep
+working for current clients; an explicit legacy config value and an
+environment binding for the same field conflict and are rejected rather
+than silently overridden.
 
 After the merge, the ordinary pipeline runs unchanged: `PinSpec`,
 `NormalizeSpec` (dependency check — e.g. `tavily` needs `net`), secret
 resolution, policy selection. The engine and worker see a normal ext map;
 **no engine or worker change is needed for the cascade**.
+
+### Consumer environment
+
+`spec.environment` is the consumer-owned configuration scope shared by
+instances, applications and module debug runs — not a globally shared
+mutable environment resource. Its shape:
+
+```json
+{
+  "environment": {
+    "extensions": {
+      "tavily": {
+        "bindings": {
+          "default": {
+            "secrets": {
+              "api_key": {"ref": "TAVILY_PROD", "allowed_domains": ["api.tavily.com"]}
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+- Aliases map to `spec.capabilities.ext` aliases, field names to the
+  pinned extension manifest's `secret` fields (validated at resolution).
+- Bindings carry vault **references** only — inline values are rejected.
+  Multiple binding names and multiple secret fields exist in the data
+  model; v1 execution always selects `default`, never falling back.
+- `allowed_domains` narrows the vault entry's own allowlist.
+- Modules have no environment. A module's debug settings (environment +
+  execution boundary) are stored per module separately from its files
+  and never enter a version's hash.
+- `spec.env` keeps its existing semantics inside the same logical
+  consumer scope; capability/policy/limit boundaries stay in the spec.
 
 ### Provenance and round-trip
 
@@ -280,7 +318,7 @@ and Create similar can round-trip the draft:
     "strkit": {"name": "strkit", "version": 3, "sum": "h1:...",
                "ext": ["tavily"]}
   },
-  "capabilities": {"ext": {"tavily": {"source": "contrib/tavily", "sum": "h1:...", "config": {}}}}
+  "capabilities": {"ext": {"tavily": {"source": "contrib/tavily", "sum": "h1:..."}}}
 }
 ```
 
@@ -354,9 +392,9 @@ gets an access-table entry (`TestRouteCoverage`):
   mirroring `policies/validate`.
 
 Publish validation: bounds and path rules, `.star` plus optional
-`module.yaml`, strict manifest decoding, ext entry validation (source loads,
-config matches the extension manifest, secret fields are references, remote
-allowlist), compile every file against the union predeclared set (stdlib +
+`module.yaml`, strict manifest decoding, ext entry validation (valid
+alias + source identifier, `h1:` sum — there is no module-side config to
+validate), compile every file against the union predeclared set (stdlib +
 `env` + `secrets` + every registered capability name), static intra-tree
 load-cycle check, reject `@` loads. The same validation runs on `PATCH`
 before a draft is stored — an invalid draft should not be savable — except
@@ -364,8 +402,8 @@ ext pinning and artifact capture, which happen only on publish preview and
 publish.
 
 `GET /api/v1/modules/{id}/versions/{version}` also returns the parsed
-requirements (ext aliases with source/sum, secret names, base capabilities)
-so pickers can show them without parsing YAML client-side.
+requirements (ext aliases with source/sum, base capabilities) so pickers
+can show them without parsing YAML client-side.
 
 ## Worker transport and runtime contract
 
@@ -411,22 +449,22 @@ policy set, secret injection rules, step/time/output budgets, and audit.
 The ext cascade is the one thing a module adds to the boundary, and its
 limits are explicit:
 
-- It installs extension code (new gated ops) and adds vault secret
-  **references**. This matches what the consumer could have done by adding
-  the extension themselves, and the LLM provider precedent for secret refs.
-- It never grants a base capability, never adds or widens
-  `net.allow_hosts`/methods, never changes `spec.policies`, and never carries
-  inline secret values. A vault secret reaches only its own `allowed_domains`.
+- It installs extension code (new gated ops) pinned to `source` + `sum`.
+  This matches what the consumer could have done by adding the extension
+  themselves.
+- It never carries config, credentials, or secret references — the
+  consumer owns all of those. It never grants a base capability, never
+  adds or widens `net.allow_hosts`/methods, never changes
+  `spec.policies`, and never carries inline secret values.
 - The review step and the instance's Boundary panel show every cascaded
   alias with its originating module. Nothing is installed that the human
   creating the instance cannot see before Create.
-- Restricted (key) specs keep their vault-references-only rule. Cascaded
-  secret refs satisfy it.
+- Restricted (key) specs keep their vault-references-only rule.
 
-Writing a manifest that pulls in an extension wired to a workspace secret is
-a `Configure`-level act. Anyone who can publish a module can already create
-instances with that extension and secret, so the cascade adds no new
-privilege; it makes the dependency reusable and visible.
+Writing a manifest that declares an extension requirement is a
+`Configure`-level act. The module grants no credentials — the consumer
+still has to supply them — so the dependency declaration is reusable and
+visible without widening what a publisher can do.
 
 Because module source is rendered in the console to any workspace viewer,
 publish is a `Configure` action and `POST /api/v1/modules` requires it too —
@@ -436,17 +474,40 @@ source control over shared library code, same bar as policy writes.
 
 - **Workspace → Modules** page: list, create, and a detail editor — a file
   list plus the shared code editor (codemirror/editor.ts), add/rename/delete
-  files (destructive file delete uses `Confirm`, F2), Save draft, and a
+  files (destructive file delete uses `Confirm`, F2), automatic draft saving, and a
   **Review & publish** action that opens the shared EP-0018 review dialog
   (file diffs, manifest/requirements changes, cascaded-extension changes,
   note). Detail shows draft vs latest-published divergence
   (`has_unpublished_changes`, the application-status shape) and a History
   tab where any two versions can be compared or restored into the draft.
-- **Module dependencies editor**: a Requirements panel edits `module.yaml`
-  through the existing `ExtensionPicker` / `InstanceExtensionEditor` (alias,
-  source, typed config, secret references) and base-capability checkboxes,
-  with a raw YAML mode that never silently drops fields. Published versions
-  show their pinned extension revisions.
+- **Module dependencies editor**: a catalog picker edits static extension
+  requirements in `module.yaml`. Aliases are generated; source and pinned
+  sum are read-only. Dependency additions/removals autosave under the same
+  draft CAS as source edits, and appear in publish review even when no
+  code changed. Manifest description and existing base-capability
+  declarations are preserved. Extension config and credentials belong to
+  the debug/consumer environment, never the published module.
+- **Autosave**: source drafts may contain incomplete Starlark; preview,
+  publish and run still compile and reject invalid code. Source, caller
+  script and valid debug settings save automatically; there are no manual
+  Save draft/Save settings actions. Publish waits for pending module
+  writes before previewing the exact returned draft version. Run also
+  waits for debug settings. Missing debug credentials never prevent a
+  source-only module publication. Conflicts retain local edits until an
+  explicit reload; tab-local pending backups support navigation recovery.
+- **Module debug**: a Debug panel on the module detail page runs the
+  *current draft* (unpublished trees allowed) mounted as `@self` inside a
+  scratch instance, against a user-editable debug script and per-module
+  debug settings — a separate environment (extension bindings, vault
+  references only) and execution boundary (capabilities, policies,
+  limits) stored per module, never part of the module files, version, or
+  hash. **Run** always starts a *fresh* scratch instance (a new session —
+  source or settings changes always take effect on the next run, never
+  mid-run); **Reset** clears results and tears the scratch instance
+  down. Nothing persists between runs — there is no stateful debug REPL.
+  Debugging requires `Configure` and uses the real Gate, policies, and
+  audit — a module debug run is just an instance exec with `@self`
+  attached.
 - **Instance create** gains a Modules card under a Libraries heading:
   mount alias, module, and version (`latest` by default). Selecting a
   module immediately shows its cascaded extensions as read-only entries
@@ -455,7 +516,8 @@ source control over shared library code, same bar as policy writes.
   validation that names the item to fix. Network is never toggled on
   automatically. Alias conflicts are shown inline before submission.
   Removing a module removes only the extensions it alone introduced. The
-  review step lists cascaded extensions and secret names. The
+  review step lists cascaded extensions and the environment bindings they
+  need. The
   **application editor** gets the same attachment control and preview, and
   the draft spec round-trips modules and provenance.
 - **Completion and help**: the editor completion source suggests
@@ -502,9 +564,9 @@ source control over shared library code, same bar as policy writes.
    `extensions.Repository`; access entries; OpenAPI + `make gen`.
 3. Spec: `runtime.Spec.Modules` normalization and name/alias/version rules;
    `SpecPinner` resolution; `selectedModules` snapshot in
-   `validateSpec`/`place` and `ApplicationBoundary`; ext cascade merge
-   (dedupe/conflict rules, config precedence, secret-ref installation,
-   recomputed provenance) before `PinSpec`/`NormalizeSpec`.
+   `validateSpec`/`place` and `ApplicationBoundary`; ext dependency merge
+   (source+sum dedupe/conflict rules, recomputed provenance — no config
+   cascade) before `PinSpec`/`NormalizeSpec`.
 4. Contract + engine: `ModuleTree` contract type; `CreateRequest.Modules`;
    `SessionCreation` tree handling, sum verification, compile-at-create;
    two-namespace `load()` resolver for `Exec` and `initModules`;
@@ -531,15 +593,19 @@ so the new interpretation breaks no working program.
 - Semantics: module-init once per session/invocation, cycle detection,
   module-root-relative loads, `@` rejection inside module files, collision
   between two aliases of one module, name vs alias defaults.
-- Cascade: attaching a module that requires `tavily` installs it with the
-  pinned sum and calls `ext.tavily.search` from module code; the call is
-  audited as `ext.tavily.search` with nested `net` records. Without a `net`
-  grant, creation fails with a message naming `net`; `allow_hosts` is never
-  modified. Cases covered: same-alias/same-sum dedupe across two modules and
-  with an explicit entry; consumer config overriding module config;
-  conflicting module configs rejected; same alias with different source/sum
-  rejected; missing vault secret rejected; spoofed `modules[*].ext`
-  provenance recomputed; removing a module removes only its aliases.
+- Cascade: attaching a module that requires `tavily` installs the
+  extension pinned to the module's `source` + `sum`; the consumer
+  supplies all config and credentials, and module code calling
+  `ext.tavily.search` is audited as `ext.tavily.search` with nested `net`
+  records. Without a `net` grant, creation fails with a message naming
+  `net`; `allow_hosts` is never modified. Cases covered: same-alias/
+  same-sum dedupe across two modules and with an explicit entry; same
+  alias with different source/sum rejected; missing consumer binding for
+  a required secret field rejected; spoofed `modules[*].ext` provenance
+  recomputed; removing a module removes only its aliases.
+- Debug: an unpublished draft runs under `@self` with the stored debug
+  environment and boundary; debug state never enters the published
+  tree, version, or hash.
 - Pinning: publish captures the ext artifact; editing the local extension
   root afterward does not change what an attached version runs (attach
   fails on a stale revision instead); a remote source removed from
@@ -566,9 +632,6 @@ so the new interpretation breaks no working program.
 - Should audit records note which module issued an ext/base call (via
   call-stack attribution in the Gate)? Useful for debugging; it must stay
   within the "metadata is JSON-able, no contents" rule.
-- Should a module be able to declare an ext requirement *without* config,
-  leaving secret wiring to the consumer (a "bring your own key" mode),
-  rather than hard-wiring `{{secrets.NAME}}` references?
 - Should the cascade also surface *suggested* `net.allow_hosts` (from the
   extension's documented domains) as a one-click, explicitly confirmed add in
   the create flow? It would never be automatic.

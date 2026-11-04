@@ -3,8 +3,11 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
+
+	"calcside/internal/extartifact"
 
 	_ "calcside/cmd/calcside/internal/gormstore"
 	"calcside/cmd/calcside/internal/service"
@@ -158,3 +161,112 @@ type nopSecrets struct{}
 func (nopSecrets) Resolve(ctx context.Context, ws string, in map[string]runtime.SecretSpec) ([]runtime.Secret, map[string]runtime.SecretSpec, error) {
 	return nil, in, nil
 }
+
+func (nopSecrets) Describe(ctx context.Context, ws string, in map[string]runtime.SecretSpec) (map[string]runtime.SecretSpec, error) {
+	return in, nil
+}
+
+// Module-backed application: spec.modules resolves to a pinned tree,
+// the program loads through @m, the release snapshot carries the tree,
+// and the snapshot survives the module being deleted afterwards.
+func TestApplicationModuleSnapshot(t *testing.T) {
+	svc, st := newSvc(t)
+	a := ownerActor(st)
+	ctx := context.Background()
+
+	files := map[string][]byte{"u.star": []byte("x = \"loaded-mod\"")}
+	sum, err := extartifact.TreeHash(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := store.NewModule(a.WorkspaceID, a.UserID, "strkit", "", files, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateModule(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.PublishModule(ctx, a.WorkspaceID, m.ID, 1, "",
+		&store.ModuleVersion{Sum: sum, Files: files, PublishedBy: a.UserID}); err != nil {
+		t.Fatal(err)
+	}
+
+	spec := json.RawMessage(`{"modules":{"m":{"name":"strkit"}}}`)
+	code := "load(\"@m/u.star\", \"x\")\ndef main(i):\n    return {\"v\": x}\n"
+	v, err := svc.Create(ctx, a, CreateRequest{Code: &code, Spec: spec})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rv, err := svc.Test(ctx, a, v.Application.ID, 1, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rv.Result.Error != nil || !strings.Contains(rv.OutputJSON, "loaded-mod") {
+		t.Fatalf("module load failed: %+v", rv)
+	}
+	pub, err := svc.Publish(ctx, a, v.Application.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel, err := st.GetServingRelease(ctx, a.WorkspaceID, pub.ReleaseID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := rel.Modules["m"]
+	if tr.Name != "strkit" || tr.Version != 1 || tr.Sum != sum || string(tr.Files["u.star"]) != "x = \"loaded-mod\"" {
+		t.Fatalf("release modules: %+v", rel.Modules)
+	}
+}
+
+// Reviewed publish: preview -> first publish (seq 1) -> identical
+// no-op -> stale draft/base/candidate -> history.
+func TestReviewedPublish(t *testing.T) {
+	svc, st := newSvc(t)
+	a := ownerActor(st)
+	ctx := context.Background()
+	v, err := svc.Create(ctx, a, CreateRequest{Name: "rev",
+		Code:         ptr(`def main(i): return i`),
+		InputSchema:  json.RawMessage(`{"type":"object"}`),
+		OutputSchema: json.RawMessage(`{"type":"object"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev, err := svc.Preview(ctx, a, v.Application.ID, v.Application.Version)
+	if err != nil || rev.Candidate.Digest == "" {
+		t.Fatalf("preview: %v %v", rev, err)
+	}
+	cand := rev.Candidate.Digest
+	// Missing/malformed publish fields.
+	if _, _, err := svc.PublishReviewed(ctx, a, v.Application.ID, PublishRequest{Version: v.Application.Version, Candidate: cand}); err == nil {
+		t.Fatal("missing expected_base accepted")
+	}
+	if _, _, err := svc.PublishReviewed(ctx, a, v.Application.ID, PublishRequest{Version: v.Application.Version, ExpectedBase: ptr(""), Candidate: "rel_zzz"}); err == nil {
+		t.Fatal("malformed candidate accepted")
+	}
+	pin, hist, err := svc.PublishReviewed(ctx, a, v.Application.ID,
+		PublishRequest{Version: v.Application.Version, ExpectedBase: ptr(""), Candidate: cand, Note: "v1"})
+	if err != nil || pin == nil || hist == nil || hist.Seq != 1 {
+		t.Fatalf("publish: pin=%v hist=%v err=%v", pin, hist, err)
+	}
+	// Identical republish: no history row, no gen bump.
+	pin2, hist2, err := svc.PublishReviewed(ctx, a, v.Application.ID,
+		PublishRequest{Version: v.Application.Version, ExpectedBase: ptr(cand), Candidate: cand})
+	if err != nil || hist2 != nil || pin2.Generation != pin.Generation {
+		t.Fatalf("no-op: %v %v", hist2, err)
+	}
+	// Stale base/candidate/draft all 409.
+	if _, _, err := svc.PublishReviewed(ctx, a, v.Application.ID,
+		PublishRequest{Version: v.Application.Version, ExpectedBase: ptr("rel_" + "0000000000000000000000000000000000000000000000000000000000000000"), Candidate: cand}); err == nil {
+		t.Fatal("stale base accepted")
+	}
+	if _, _, err := svc.PublishReviewed(ctx, a, v.Application.ID,
+		PublishRequest{Version: v.Application.Version + 9, ExpectedBase: ptr(cand), Candidate: cand}); err == nil {
+		t.Fatal("stale draft accepted")
+	}
+	rels, err := st.ListApplicationReleases(ctx, a.WorkspaceID, v.Application.ID)
+	if err != nil || len(rels) != 1 {
+		t.Fatalf("history: %v %v", rels, err)
+	}
+}
+
+func ptr(s string) *string { return &s }

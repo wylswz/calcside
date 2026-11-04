@@ -125,7 +125,7 @@ func (s *Service) dispatch(ctx context.Context, intr *store.Interrupt) {
 		return
 	}
 	a := s.actorFor(ctx, app, intr)
-	spec, pols, secs, err := s.o.Sandbox.ApplicationBoundary(ctx, a, rel.Spec)
+	b, err := s.o.Sandbox.ReleaseBoundary(ctx, a, rel)
 	if err != nil {
 		s.deferrable(ctx, intr)
 		return
@@ -143,7 +143,7 @@ func (s *Service) dispatch(ctx context.Context, intr *store.Interrupt) {
 		CreateRequest: runtime.CreateRequest{
 			InstanceID: replicaID, Owner: owner,
 			Labels: map[string]string{"name": app.Name, "application_id": app.ID},
-			Spec:   spec, Policies: pols, Secrets: secs,
+			Spec:   b.Spec, Policies: b.Policies, Modules: b.Modules, Secrets: b.Secrets,
 			ExpiresAt: now.Add(prepareLease), Epoch: 1,
 		},
 		ReleaseID: rel.ID, Generation: 1, Program: rel.Program,
@@ -200,7 +200,7 @@ func (s *Service) dispatch(ctx context.Context, intr *store.Interrupt) {
 	// Mint the new step's slots, then start the handler step.
 	var slots []*store.Interrupt
 	var wire []runtime.InterruptSlot
-	if s.o.Cipher != nil && serving.UsesInterrupt(rel.Program.Sources) {
+	if s.o.Cipher != nil && serving.UsesModuleInterrupt(rel.Program.Sources, rel.Modules) {
 		var err error
 		slots, wire, err = s.mintSlots(ctx, app, run.ID, seq, now)
 		if err != nil {

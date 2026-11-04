@@ -115,6 +115,19 @@ func (s *Service) boundary(ctx context.Context, a service.Actor, appWS string, r
 	return spec, policies, secrets, nil
 }
 
+// draftBoundary is the descriptor-mode twin of boundary for draft
+// writes: identical normalization and policy snapshot but the vault is
+// described, never decrypted — saving a draft must never open
+// ciphertext. Publish/test still resolve through boundary.
+func (s *Service) draftBoundary(ctx context.Context, a service.Actor, appWS string, raw json.RawMessage) (json.RawMessage, runtime.PolicyBundle, []runtime.Secret, error) {
+	a.WorkspaceID = appWS
+	spec, policies, secrets, err := s.o.Sandbox.ApplicationReviewBoundary(ctx, a, raw)
+	if err != nil {
+		return nil, runtime.PolicyBundle{}, nil, fail(err)
+	}
+	return spec, policies, secrets, nil
+}
+
 func (s *Service) Create(ctx context.Context, a service.Actor, r CreateRequest) (*View, error) {
 	if err := s.o.Access.Workspace(ctx, a, a.WorkspaceID, access.Configure); err != nil {
 		return nil, err
@@ -130,10 +143,11 @@ func (s *Service) Create(ctx context.Context, a service.Actor, r CreateRequest) 
 	// Normalize + validate the spec before persistence: refs only,
 	// capabilities pass through the same boundary as instances;
 	// extension refs arrive already pinned by SpecPinner.
-	spec, _, _, err := s.boundary(ctx, a, a.WorkspaceID, specOr(r.Spec))
+	spec, _, _, err := s.draftBoundary(ctx, a, a.WorkspaceID, specOr(r.Spec))
 	if err != nil {
 		return nil, fail(err)
 	}
+	spec = applicationDraftSpec(specOr(r.Spec), spec)
 	app, err := store.NewApplication(a.WorkspaceID, a.UserID, name, code, spec, r.InputSchema, r.OutputSchema, s.o.Now())
 	if err != nil {
 		return nil, fail(err)
@@ -179,10 +193,11 @@ func (s *Service) Update(ctx context.Context, a service.Actor, id string, r Upda
 	if len(spec) == 0 {
 		spec = app.Spec
 	}
-	norm, _, _, err := s.boundary(ctx, a, app.WorkspaceID, spec)
+	norm, _, _, err := s.draftBoundary(ctx, a, app.WorkspaceID, spec)
 	if err != nil {
 		return nil, fail(err)
 	}
+	norm = applicationDraftSpec(spec, norm)
 	next := &store.Application{
 		ID: app.ID, WorkspaceID: app.WorkspaceID, UserID: app.UserID,
 		Name: name, Code: r.Code, Spec: norm,
@@ -287,6 +302,12 @@ func fail(err error) error {
 		}
 	}
 	switch {
+	case errors.Is(err, store.ErrApplicationDraftConflict):
+		return service.Conflict("application draft changed")
+	case errors.Is(err, store.ErrApplicationBaseConflict):
+		return service.Conflict("published base changed")
+	case errors.Is(err, store.ErrConflict):
+		return service.Conflict("application changed")
 	case err == nil:
 		return nil
 	case errors.Is(err, store.ErrNotFound):

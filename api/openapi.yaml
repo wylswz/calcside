@@ -952,6 +952,28 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
+  /api/v1/applications/{id}/publish/preview:
+    post:
+      operationId: previewApplicationPublish
+      tags: [applications]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplicationPublishPreviewRequest'
+      responses:
+        '200':
+          description: review diff of current published release vs pinned draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishReview'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
   /api/v1/applications/{id}/publish:
     post:
       operationId: publishApplication
@@ -1019,6 +1041,287 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '503': { $ref: '#/components/responses/Error' }
+  /api/v1/modules:
+    get:
+      operationId: listModules
+      tags: [modules]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
+      responses:
+        '200':
+          description: module drafts in the workspace
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModulesResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createModule
+      tags: [modules]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModuleCreateRequest' }
+      responses:
+        '200':
+          description: created draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModuleResponse' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
+  /api/v1/modules/validate:
+    post:
+      operationId: validateModule
+      tags: [modules]
+      parameters:
+        - name: workspace
+          in: query
+          schema: { type: string, description: workspace id; omitted = personal workspace }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModuleValidateRequest' }
+      responses:
+        '200':
+          description: validation outcome
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModuleValidateResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
+  /api/v1/modules/{id}:
+    get:
+      operationId: getModule
+      tags: [modules]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: module draft + latest version metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModuleResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    patch:
+      operationId: updateModule
+      tags: [modules]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModuleUpdateRequest' }
+      responses:
+        '200':
+          description: updated draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModuleResponse' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deleteModule
+      tags: [modules]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '204': { description: deleted }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/modules/{id}/publish/preview:
+    post:
+      operationId: previewModule
+      tags: [modules]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModulePreviewRequest' }
+      responses:
+        '200':
+          description: review diff of latest published vs pinned draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublishReview' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/modules/{id}/publish:
+    post:
+      operationId: publishModule
+      tags: [modules]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModulePublishRequest' }
+      responses:
+        '200':
+          description: published immutable version (no-op returns base version)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModuleVersionResponse' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/modules/{id}/versions:
+    get:
+      operationId: listModuleVersions
+      tags: [modules]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: immutable versions, newest first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModuleVersionsResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/modules/{id}/versions/compare:
+    get:
+      operationId: compareModuleVersions
+      tags: [modules]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: base
+          in: query
+          required: true
+          schema: { type: integer, format: int64, minimum: 0, description: base version; 0 = no base }
+        - name: head
+          in: query
+          required: true
+          schema: { type: string, description: version number or "draft" }
+      responses:
+        '200':
+          description: review diff
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublishReview' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/modules/{id}/versions/{version}:
+    get:
+      operationId: getModuleVersion
+      tags: [modules]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: version
+          in: path
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '200':
+          description: immutable version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModuleVersionResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/modules/{id}/versions/{version}/restore:
+    post:
+      operationId: restoreModuleVersion
+      tags: [modules]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: version
+          in: path
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModuleRestoreRequest' }
+      responses:
+        '200':
+          description: draft restored from version files
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModuleResponse' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/modules/{id}/debug:
+    get:
+      operationId: getModuleDebug
+      tags: [modules]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: debug settings (scaffold when never saved)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModuleDebugResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    put:
+      operationId: saveModuleDebug
+      tags: [modules]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModuleDebugSaveRequest' }
+      responses:
+        '200':
+          description: saved settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModuleDebugResponse' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/modules/{id}/debug/run:
+    post:
+      operationId: runModuleDebug
+      tags: [modules]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModuleDebugRunRequest' }
+      responses:
+        '200':
+          description: scratch-run result; the instance is deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModuleDebugRun' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
   /api/v1/audit:
     get:
       operationId: listAudit
@@ -1973,6 +2276,27 @@ components:
           type: object
           additionalProperties: true
         limits: { $ref: '#/components/schemas/Limits' }
+        modules:
+          type: object
+          description: >-
+            Module mounts (EP-0017): alias → module reference. Code
+            loads files via load("@alias/path.star", ...). References
+            are pinned to name/version/sum by the service at creation;
+            version 0 resolves to the latest published version.
+          additionalProperties:
+            type: object
+            properties:
+              name: { type: string }
+              version: { type: integer, format: int64 }
+              sum: { type: string }
+              ext:
+                type: array
+                items: { type: string }
+                description: extension aliases this mount introduced (provenance; server-recomputed)
+          nullable: true
+        environment:
+          $ref: '#/components/schemas/SpecEnvironment'
+          nullable: true
         policies:
           type: array
           description: >-
@@ -2417,6 +2741,20 @@ components:
           nullable: true
     ApplicationPublishRequest:
       type: object
+      required: [version, expected_base, candidate]
+      properties:
+        version: { type: integer, format: int64, minimum: 1 }
+        expected_base:
+          type: string
+          nullable: true
+          description: base release id from preview; explicit "" for never published, explicit null or omission 400
+        candidate:
+          type: string
+          pattern: '^rel_[0-9a-f]{64}$'
+          description: release id (rel_<hex>) returned by publish preview
+        note: { type: string, maxLength: 500 }
+    ApplicationPublishPreviewRequest:
+      type: object
       required: [version]
       properties:
         version: { type: integer, format: int64, minimum: 1 }
@@ -2535,6 +2873,302 @@ components:
       type: object
       properties:
         status: { type: string }
+    # --- modules (EP-0017 workspace module library) ---
+    ModuleRequirements:
+      type: object
+      properties:
+        capabilities:
+          type: array
+          items: { type: string }
+          description: base capabilities the module requires granted (informational; io implicit)
+        ext:
+          type: object
+          additionalProperties:
+            type: object
+            required: [source, sum]
+            properties:
+              source: { type: string }
+              sum: { type: string, description: "pinned h1: extension sum" }
+          description: extension dependencies — source+sum only, never config or credentials
+    ModuleRequirementsInput:
+      type: object
+      additionalProperties: false
+      properties:
+        capabilities:
+          type: array
+          items: { type: string }
+        ext:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: false
+            required: [source]
+            properties:
+              source: { type: string }
+              sum: { type: string, description: "optional pin; server pins when absent" }
+          description: requested extension deps — source required, server pins the sum
+    Module:
+      type: object
+      required: [id, workspace_id, user_id, name, files, draft_version, latest_version, has_unpublished_changes, created_at, updated_at]
+      properties:
+        id: { type: string }
+        workspace_id: { type: string }
+        user_id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        files:
+          type: object
+          additionalProperties: { type: string }
+          description: UTF-8 source map; module.yaml optional manifest, other files .star only
+        draft_version: { type: integer, format: int64 }
+        latest_version: { type: integer, format: int64 }
+        latest_sum: { type: string }
+        has_unpublished_changes: { type: boolean }
+        requirements: { $ref: '#/components/schemas/ModuleRequirements' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ModuleVersion:
+      type: object
+      required: [version, sum, files, published_by, created_at]
+      properties:
+        version: { type: integer, format: int64 }
+        sum: { type: string }
+        files:
+          type: object
+          additionalProperties: { type: string }
+        published_by: { type: string }
+        note: { type: string }
+        base_version: { type: integer, format: int64 }
+        requirements: { $ref: '#/components/schemas/ModuleRequirements' }
+        created_at: { type: string, format: date-time }
+    ReviewArtifact:
+      type: object
+      required: [digest]
+      properties:
+        digest: { type: string }
+        version: { type: integer, format: int64 }
+        draft_version: { type: integer, format: int64 }
+        published_at: { type: string }
+        published_by: { type: string }
+        note: { type: string }
+        files:
+          type: object
+          additionalProperties: { type: string }
+        spec: { $ref: '#/components/schemas/RawJSON' }
+        input_schema: { type: string }
+        output_schema: { type: string }
+        policies:
+          type: object
+          properties:
+            global:
+              type: object
+              additionalProperties: { type: string }
+            user:
+              type: object
+              additionalProperties: { type: string }
+        modules:
+          type: object
+          additionalProperties:
+            type: object
+            required: [name, version, sum]
+            properties:
+              name: { type: string }
+              version: { type: integer, format: int64 }
+              sum: { type: string }
+              files:
+                type: object
+                additionalProperties: { type: string }
+        requirements: { $ref: '#/components/schemas/RawJSON' }
+    ReviewChange:
+      type: object
+      required: [category, path, kind]
+      properties:
+        category:
+          type: string
+          enum: [sources, contract, grants, rules, inputs, requirements]
+        path: { type: string }
+        kind:
+          type: string
+          enum: [added, removed, modified]
+        direction:
+          type: string
+          enum: [widening, narrowing, changed]
+        before: { $ref: '#/components/schemas/RawJSON' }
+        after: { $ref: '#/components/schemas/RawJSON' }
+        via_modules:
+          type: array
+          items: { type: string }
+    PublishReview:
+      type: object
+      required: [candidate, changes, identical]
+      properties:
+        base:
+          $ref: '#/components/schemas/ReviewArtifact'
+          nullable: true
+        candidate: { $ref: '#/components/schemas/ReviewArtifact' }
+        changes:
+          type: array
+          items: { $ref: '#/components/schemas/ReviewChange' }
+        identical: { type: boolean }
+    ModuleCreateRequest:
+      type: object
+      required: [name, files]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        files:
+          type: object
+          additionalProperties: { type: string }
+    ModuleUpdateRequest:
+      type: object
+      required: [draft_version]
+      properties:
+        draft_version: { type: integer, format: int64 }
+        name: { type: string }
+        description: { type: string }
+        requirements: { $ref: '#/components/schemas/ModuleRequirementsInput' }
+        files:
+          type: object
+          additionalProperties: { type: string }
+    ModuleValidateRequest:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: object
+          additionalProperties: { type: string }
+    ModulePreviewRequest:
+      type: object
+      required: [draft_version]
+      properties:
+        draft_version: { type: integer, format: int64, minimum: 1 }
+    ModulePublishRequest:
+      type: object
+      required: [draft_version, expected_base, candidate]
+      properties:
+        draft_version: { type: integer, format: int64, minimum: 1 }
+        expected_base:
+          type: string
+          x-go-type: '*string'
+          description: >-
+            The base digest the preview compared against, or "" when no
+            prior version exists. Explicit null or omission is a 400 —
+            the field is required and may only be empty string.
+        candidate:
+          type: string
+          description: pinned candidate digest (h1:) returned by preview
+        note: { type: string, maxLength: 500 }
+    ModuleRestoreRequest:
+      type: object
+      required: [draft_version]
+      properties:
+        draft_version: { type: integer, format: int64, minimum: 1 }
+    ModuleValidateResponse:
+      type: object
+      required: [valid]
+      properties:
+        valid: { type: boolean }
+        error: { type: string }
+    ModuleResponse:
+      type: object
+      properties:
+        module: { $ref: '#/components/schemas/Module' }
+    ModulesResponse:
+      type: object
+      properties:
+        modules:
+          type: array
+          items: { $ref: '#/components/schemas/Module' }
+    ModuleVersionResponse:
+      type: object
+      properties:
+        version: { $ref: '#/components/schemas/ModuleVersion' }
+    ModuleVersionsResponse:
+      type: object
+      properties:
+        versions:
+          type: array
+          items: { $ref: '#/components/schemas/ModuleVersion' }
+
+    SpecEnvironment:
+      type: object
+      description: >-
+        Consumer-owned extension configuration: per-extension named
+        bindings of vault-secret references. References only — never
+        resolved values. The "default" binding is used at execution.
+      properties:
+        extensions:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              bindings:
+                type: object
+                additionalProperties:
+                  type: object
+                  properties:
+                    secrets:
+                      type: object
+                      additionalProperties:
+                        type: object
+                        required: [ref]
+                        properties:
+                          ref: { type: string, description: workspace vault secret name }
+                          allowed_domains:
+                            type: array
+                            items: { type: string }
+                            description: narrowing; must be covered by the vault allowlist
+    ModuleDebug:
+      type: object
+      required: [version, script, spec]
+      properties:
+        version: { type: integer, format: int64 }
+        script: { type: string }
+        spec: { $ref: '#/components/schemas/RawJSON' }
+        spec_json: { type: string, description: canonical serialized spec }
+        updated_at: { type: string, format: date-time }
+    ModuleDebugSaveRequest:
+      type: object
+      required: [version, script, spec]
+      properties:
+        version:
+          type: integer
+          format: int64
+          minimum: 0
+          x-go-type: '*int64'
+        script:
+          type: string
+          maxLength: 262144
+          x-go-type: '*string'
+        spec:
+          $ref: '#/components/schemas/RawJSON'
+          x-go-type: '*json.RawMessage'
+    ModuleDebugRunRequest:
+      type: object
+      required: [draft_version, debug_version]
+      properties:
+        draft_version:
+          type: integer
+          format: int64
+          minimum: 1
+          x-go-type: '*int64'
+        debug_version:
+          type: integer
+          format: int64
+          minimum: 1
+          x-go-type: '*int64'
+    ModuleDebugResponse:
+      type: object
+      properties:
+        debug: { $ref: '#/components/schemas/ModuleDebug' }
+    ModuleDebugRun:
+      type: object
+      properties:
+        result: { $ref: '#/components/schemas/ExecResult' }
+        instance_id: { type: string }
+        draft_version: { type: integer, format: int64 }
+        debug_version: { type: integer, format: int64 }
+        module_sum: { type: string }
 security:
   - bearerAuth: []
   - cookieAuth: []

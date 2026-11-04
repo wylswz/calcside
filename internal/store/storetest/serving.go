@@ -10,9 +10,20 @@ import (
 	"testing"
 	"time"
 
+	"calcside/internal/extartifact"
+	"calcside/internal/module"
 	"calcside/internal/runtime"
 	"calcside/internal/store"
 )
+
+// cloneModuleFilesForTest deep-copies a file map for fixtures.
+func cloneModuleFilesForTest(in map[string][]byte) map[string][]byte {
+	out := make(map[string][]byte, len(in))
+	for k, v := range in {
+		out[k] = append([]byte(nil), v...)
+	}
+	return out
+}
 
 var sNow = time.Now().UTC().Truncate(time.Second)
 
@@ -104,6 +115,84 @@ func serving(t *testing.T, s store.Store) {
 			json.RawMessage(`{"capabilities":{"ext":{"local/x":"h1:abc"}}}`),
 			runtime.PolicyBundle{}, sBundle(), sNow); !errors.Is(err, store.ErrInvalidServingRecord) {
 			t.Fatalf("ext: %v", err)
+		}
+	})
+
+	t.Run("release_modules", func(t *testing.T) {
+		// A valid module tree: spec references it by mount, tree pins it.
+		files := map[string][]byte{"u.star": []byte("x = 1")}
+		sum, err := extartifact.TreeHash(files)
+		if err != nil {
+			t.Fatal(err)
+		}
+		modSpec := func() json.RawMessage {
+			return json.RawMessage(`{"modules":{"m":{"name":"strkit","version":1,"sum":"` + sum + `"}}}`)
+		}
+		tree := func() map[string]module.Tree {
+			return map[string]module.Tree{"m": {Name: "strkit", Version: 1, Sum: sum, Files: cloneModuleFilesForTest(files)}}
+		}
+		rel, err := store.NewServingReleaseWithModules("ws_1", "usr_1", modSpec(),
+			runtime.PolicyBundle{}, sBundle(), tree(), sNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Hash differs from the module-less release of the same spec.
+		plain, err := store.NewServingRelease("ws_1", "usr_1", modSpec(),
+			runtime.PolicyBundle{}, sBundle(), sNow)
+		if !errors.Is(err, store.ErrInvalidServingRecord) || plain != nil {
+			t.Fatalf("refs without trees must fail: %v", err)
+		}
+		// Hash differs when module content differs.
+		f2 := map[string][]byte{"u.star": []byte("x = 2")}
+		sum2, _ := extartifact.TreeHash(f2)
+		spec2 := json.RawMessage(`{"modules":{"m":{"name":"strkit","version":2,"sum":"` + sum2 + `"}}}`)
+		rel2, err := store.NewServingReleaseWithModules("ws_1", "usr_1", spec2,
+			runtime.PolicyBundle{}, sBundle(), map[string]module.Tree{"m": {Name: "strkit", Version: 2, Sum: sum2, Files: f2}}, sNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rel2.ID == rel.ID {
+			t.Fatal("module change did not change release id")
+		}
+		// Defensive clone: mutating the caller's tree leaves the release intact.
+		tr := tree()
+		r3, err := store.NewServingReleaseWithModules("ws_1", "usr_1", modSpec(),
+			runtime.PolicyBundle{}, sBundle(), tr, sNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tr["m"].Files["u.star"][0] = 'Z'
+		if string(r3.Modules["m"].Files["u.star"]) != "x = 1" {
+			t.Fatal("release shares caller file bytes")
+		}
+		// GORM roundtrip.
+		if err := s.CreateServingRelease(ctx, rel); err != nil && !errors.Is(err, store.ErrConflict) {
+			t.Fatal(err)
+		}
+		got, err := s.GetServingRelease(ctx, "ws_1", rel.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Modules["m"].Sum != sum || string(got.Modules["m"].Files["u.star"]) != "x = 1" || got.Modules["m"].Version != 1 {
+			t.Fatalf("roundtrip: %+v", got.Modules)
+		}
+		// Forged id with valid content rejected.
+		forged := *rel
+		forged.ID = "rel_" + string(make([]byte, 64))
+		if err := s.CreateServingRelease(ctx, &forged); !errors.Is(err, store.ErrInvalidServingRecord) {
+			t.Fatalf("forged id: %v", err)
+		}
+		// Nil modules preserve the old content-address behavior.
+		n1, err := store.NewServingRelease("ws_1", "usr_1", sSpec(), runtime.PolicyBundle{}, sBundle(), sNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n2, err := store.NewServingReleaseWithModules("ws_1", "usr_1", sSpec(), runtime.PolicyBundle{}, sBundle(), nil, sNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n1.ID != n2.ID {
+			t.Fatal("nil modules changed release id")
 		}
 	})
 

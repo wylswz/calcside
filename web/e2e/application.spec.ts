@@ -38,6 +38,14 @@ async function startApplication(page: Page, name?: string) {
   await page.getByRole('button', { name: 'Continue to configuration' }).click()
 }
 
+
+// Publishing now routes through the review dialog: header Publish…
+// saves the draft then opens it; the dialog's own Publish commits.
+async function publishViaDialog(page: Page) {
+  await page.getByRole('button', { name: 'Publish…' }).click()
+  await page.getByTestId('review-publish').click()
+}
+
 test('a) create -> scaffold -> test -> publish -> ready -> live invoke', async ({ page }) => {
   await startApplication(page, 'Greeter')
   await page.getByRole('button', { name: 'Create application' }).click()
@@ -48,10 +56,11 @@ test('a) create -> scaffold -> test -> publish -> ready -> live invoke', async (
   await page.getByRole('button', { name: 'Run' }).click()
   await expect(page.locator('.app-out-pre:not(.app-call-out)')).toContainText('Hello, world', { timeout: 30_000 })
 
-  await page.getByRole('button', { name: 'Publish' }).click()
+  await publishViaDialog(page)
   await waitReady(id)
   // the Invoke button is always rendered; it enables once ready
-  const invokeCard = page.locator('section.app-card').filter({ hasText: 'Invoke' })
+  await page.getByRole('tablist', { name: 'Application views' }).getByRole('tab', { name: 'Invoke' }).click()
+  const invokeCard = page.getByRole('tabpanel', { name: 'Invoke', exact: true })
   await expect(invokeCard.getByRole('button', { name: 'Invoke' })).toBeEnabled({ timeout: 10_000 })
   await invokeCard.getByRole('button', { name: 'Invoke' }).click()
   await expect(page.locator('.app-call-out')).toContainText('Hello, world', { timeout: 30_000 })
@@ -64,7 +73,7 @@ test('b) draft change stays unpublished until republish', async ({ page }) => {
   const id = page.url().split('/').pop()!
 
   // publish the scaffold, wait ready, note its output
-  await page.getByRole('button', { name: 'Publish' }).click()
+  await publishViaDialog(page)
   await waitReady(id)
   const inv0 = await client.post(`/api/v1/applications/${id}/invoke`, {
     headers: { 'Content-Type': 'application/json' },
@@ -91,7 +100,7 @@ test('b) draft change stays unpublished until republish', async ({ page }) => {
   expect((await inv1.json()).output_json).toContain('Hello, a')
 
   // republish — the live output flips
-  await page.getByRole('button', { name: 'Publish' }).click()
+  await publishViaDialog(page)
   await waitReady(id)
   await expect.poll(async () => {
     const r = await client.post(`/api/v1/applications/${id}/invoke`, {
@@ -119,12 +128,14 @@ test('c) mid-save edits abort the chained publish', async ({ page }) => {
   await cm.click()
   await page.keyboard.press('Meta+A')
   await page.keyboard.type('def main(input): return {"first":1}')
-  const publish = page.getByRole('button', { name: 'Publish' }).click()
+  const publish = page.getByRole('button', { name: 'Publish…' }).click()
   await page.waitForTimeout(80)
   await cm.click()
   await page.keyboard.press('Meta+A')
   await page.keyboard.type('def main(input): return {"second":2}')
   await publish
+  // the in-flight edit aborted the chain — the dialog must NOT open.
+  await expect(page.getByTestId('review-publish')).toHaveCount(0)
   // the in-flight edit must abort the publish chain — the PUT saved the
   // FIRST code (v2); nothing was published.
   await page.waitForTimeout(500)
@@ -138,7 +149,7 @@ test('c) mid-save edits abort the chained publish', async ({ page }) => {
     return (await rr.json()).application.code
   }, { timeout: 15_000 }).toContain('"second":2')
   // then publish + invoke actually serves the SECOND code
-  await page.getByRole('button', { name: 'Publish' }).click()
+  await publishViaDialog(page)
   await waitReady(id)
   const iv = await client.post(`/api/v1/applications/${id}/invoke`, {
     headers: { 'Content-Type': 'application/json' }, data: '{}',

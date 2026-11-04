@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"calcside/internal/module"
 	"calcside/internal/store"
 )
 
@@ -27,6 +28,7 @@ type servingReleaseRow struct {
 	Spec        string    `gorm:"column:spec"`
 	Policies    string    `gorm:"column:policies"`
 	Program     string    `gorm:"column:program"`
+	Modules     string    `gorm:"column:modules"`
 	CreatedAt   time.Time `gorm:"column:created_at"`
 }
 
@@ -100,9 +102,18 @@ func releaseToRow(r *store.ServingRelease) (*servingReleaseRow, error) {
 	if err != nil {
 		return nil, err
 	}
+	mods := r.Modules
+	if mods == nil {
+		mods = map[string]module.Tree{}
+	}
+	mj, err := json.Marshal(mods)
+	if err != nil {
+		return nil, err
+	}
 	return &servingReleaseRow{
 		ID: r.ID, WorkspaceID: r.WorkspaceID, UserID: r.UserID,
 		Spec: string(r.Spec), Policies: string(pol), Program: string(prog),
+		Modules:   string(mj),
 		CreatedAt: r.CreatedAt.UTC(),
 	}, nil
 }
@@ -119,6 +130,11 @@ func (r *servingReleaseRow) toDomain() (*store.ServingRelease, error) {
 	if err := json.Unmarshal([]byte(r.Program), &out.Program); err != nil {
 		return nil, err
 	}
+	var mods map[string]module.Tree
+	if err := json.Unmarshal([]byte(r.Modules), &mods); err != nil {
+		return nil, err
+	}
+	out.Modules = mods
 	return out, nil
 }
 
@@ -191,7 +207,7 @@ func (r *servingReplicaRow) toDomain() *store.ServingReplica {
 func (d *sqlDB) CreateServingRelease(ctx context.Context, r *store.ServingRelease) error {
 	// Recompute the content hash so a forged id or tampered payload
 	// cannot claim an existing identity.
-	check, err := store.NewServingRelease(r.WorkspaceID, r.UserID, r.Spec, r.Policies, r.Program, r.CreatedAt)
+	check, err := store.NewServingReleaseWithModules(r.WorkspaceID, r.UserID, r.Spec, r.Policies, r.Program, r.Modules, r.CreatedAt)
 	if err != nil {
 		return err
 	}

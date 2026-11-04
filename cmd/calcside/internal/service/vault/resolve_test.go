@@ -166,3 +166,43 @@ func TestResolveSanitizesInlineValues(t *testing.T) {
 		t.Fatalf("sanitized spec wrong: %v", ss)
 	}
 }
+
+// Describe runs identical checks to Resolve — shape, existence,
+// narrowing — but never decrypts: corrupted ciphertext still passes,
+// and only Resolve fails on Open.
+func TestDescribe(t *testing.T) {
+	ctx := context.Background()
+	c := testCipher(t)
+	svc, st, u := testSvc(t, c)
+	addVaultSecret(t, st, c, u, "GH_TOKEN", "ghp_x", []string{"*.github.com"})
+	ws := store.PersonalWorkspaceID(u.ID)
+
+	san, err := svc.Describe(ctx, ws, parseSecrets(t, `{"secrets":{"T":{"ref":"GH_TOKEN","allowed_domains":["api.github.com"]}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if san["T"].Ref != "GH_TOKEN" || len(san["T"].AllowedDomains) != 1 || san["T"].Source != types.SecretVault {
+		t.Fatalf("descriptor: %+v", san["T"])
+	}
+	if _, err := svc.Describe(ctx, ws, parseSecrets(t, `{"secrets":{"T":{"ref":"GH_TOKEN","allowed_domains":["other.com"]}}}`)); err == nil || !strings.Contains(err.Error(), "not covered") {
+		t.Fatalf("widening accepted: %v", err)
+	}
+	if _, err := svc.Describe(ctx, ws, parseSecrets(t, `{"secrets":{"T":{"ref":"NOPE"}}}`)); err == nil || !strings.Contains(err.Error(), "unknown vault ref") {
+		t.Fatalf("unknown ref accepted: %v", err)
+	}
+	// Corrupt the ciphertext: Describe still passes (no Open), Resolve fails.
+	sec, err := st.GetSecretByName(ctx, ws, "GH_TOKEN")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec.Ciphertext = []byte("corrupted-ciphertext")
+	if err := st.UpdateSecret(ctx, sec); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Describe(ctx, ws, parseSecrets(t, `{"secrets":{"T":{"ref":"GH_TOKEN"}}}`)); err != nil {
+		t.Fatalf("describe decrypted: %v", err)
+	}
+	if _, _, err := svc.Resolve(ctx, ws, parseSecrets(t, `{"secrets":{"T":{"ref":"GH_TOKEN"}}}`)); err == nil {
+		t.Fatal("corrupted ciphertext resolved")
+	}
+}

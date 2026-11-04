@@ -50,6 +50,7 @@ test('a) develop waiting -> resume -> handler output on run page', async ({ page
 	const { run_id: runID, int_id: intID } = await testRun(appID)
 
 	await page.goto(`${viteURL}/applications/${appID}`)
+	await page.getByRole('tablist', { name: 'Application views' }).getByRole('tab', { name: 'Activity' }).click()
 	await expect(page.locator('section.app-card').filter({ hasText: 'Runs' })).toBeVisible()
 	await page.screenshot({ path: '/tmp/calcside-ep16-logs/app-detail.png' })
 
@@ -112,6 +113,7 @@ test('c) cancel run; retry absent while waiting; count slot stable (S4)', async 
 test('d) settings have no handler declarations', async ({ page }) => {
 	const appID = await makeApp('int-no-decl')
 	await page.goto(`${viteURL}/applications/${appID}`)
+	await page.getByRole('tablist', { name: 'Application views' }).getByRole('tab', { name: 'Activity' }).click()
 	await expect(page.locator('section.app-card').filter({ hasText: 'Runs' })).toBeVisible()
 	await expect(page.getByRole('button', { name: 'Add handler' })).toHaveCount(0)
 	await expect(page.getByText('Handlers', { exact: true })).toHaveCount(0)

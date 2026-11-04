@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import * as Tabs from '@radix-ui/react-tabs'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { api, ApiError, Application, Run, workspaces } from '../api'
 import { applicationDescription } from '../activity'
 import { Button, Confirm, Loading, Notice, PageHeader, RevealNew, SwapLabel } from '../components/ui'
+import { PublishReviewDialog } from '../components/PublishReviewDialog'
 import { cmTheme } from '../components/codemirror'
 import { useApplicationEditor } from '../components/editor'
 import { RunProgress, useRunProgress } from '../components/RunProgress'
@@ -15,6 +17,10 @@ import { ApplicationCallExamples } from '../components/ApplicationCallExamples'
 import { AppKeyModal } from '../components/AppKeyModal'
 import { useHeldOrder } from '../stableList'
 import { fmtDateTime, type RunPhase } from '../interrupts'
+import { ApplicationResources, type ResourceDocument } from '../components/ApplicationResources'
+import { CopyBlock } from '../components/MCP'
+import { parseModuleMounts } from '../moduleMounts'
+import type { JsonValue } from '../instanceDraft'
 
 type Draft = {
   name: string
@@ -164,6 +170,25 @@ function Editor({ app, role, userID, qc }: Props) {
   const [published, setPublished] = useState(false)
   const [reloadOpen, setReloadOpen] = useState<Application | null>(null)
   const [adv, setAdv] = useState(true)
+  const [resourceDocument, setResourceDocument] = useState<ResourceDocument | null>(null)
+  const documentMounts = parseModuleMounts(parseSpec(draft.spec)?.modules as JsonValue | undefined)
+  const resourceExtensions = parseSpec(draft.spec)?.capabilities?.ext as Record<string, unknown> | undefined
+  const resourceIsCurrent = resourceDocument !== null && (resourceDocument.kind === 'module'
+    ? documentMounts.ok && documentMounts.mounts.some(
+      (mount) => mount.alias === resourceDocument.alias && JSON.stringify(mount.ref) === resourceDocument.mountFingerprint)
+    : JSON.stringify(resourceExtensions?.[resourceDocument.alias]) === resourceDocument.extensionFingerprint)
+  const resourceTitle = resourceDocument?.kind === 'module' ? `@${resourceDocument.alias}/${resourceDocument.path}`
+    : resourceDocument ? `ext.${resourceDocument.alias}.${resourceDocument.operation}` : ''
+  const [params, setParams] = useSearchParams()
+  const activeView = params.get('view') === 'invoke' ? 'invoke' : params.get('view') === 'activity' ? 'activity' : 'develop'
+  const settingsRef = useRef<HTMLDetailsElement>(null)
+  const configureResources = () => {
+    setAdv(true)
+    window.requestAnimationFrame(() => {
+      settingsRef.current?.scrollIntoView({ block: 'start' })
+      settingsRef.current?.querySelector('summary')?.focus()
+    })
+  }
   // SpecForm remount key: bumped on reset so a corrupt stored spec is
   // re-parsed, never remounted while the user is editing.
   const [specKey, setSpecKey] = useState(0)
@@ -344,14 +369,13 @@ function Editor({ app, role, userID, qc }: Props) {
     setRun(r)
   })
 
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [reviewVer, setReviewVer] = useState(0)
   const onPublish = () => guarded('publish', async () => {
     const s = await attemptSave()
     if (!s) return
-    await api.post<{ application: Application }>(`/api/v1/applications/${s.app2.id}/publish`, { version: s.app2.version })
-    if (mounted.current) {
-      setPublished(true)
-      qc.invalidateQueries({ queryKey: ['application', app.id] })
-    }
+    setReviewVer(s.app2.version)
+    setReviewOpen(true)
   })
 
   const onInvoke = () => guarded('invoke', async () => {
@@ -407,21 +431,54 @@ function Editor({ app, role, userID, qc }: Props) {
       </PageHeader>
       <p className="app-dim"><Link to="/applications" className="link">← Applications</Link> · <span className="app-mono">{app.id}</span></p>
       {applicationDescription(app) && <p className="app-dim max-w-3xl">{applicationDescription(app)}</p>}
+      {/* P5/F3: invocation and background-save failures stay visible in every view. */}
+      {warn && <Notice tone="warning">{warn}</Notice>}
+      {storeFailed && <Notice tone="warning">Not saved to this tab.</Notice>}
+      {corrupt && (
+        <Notice tone="warning">
+          Saved editor state for this application is unreadable.
+          <button className="link-btn" onClick={() => setResetOpen(true)}>Reset it</button>
+        </Notice>
+      )}
 
+      <Tabs.Root value={activeView} onValueChange={(value) => {
+        const next = new URLSearchParams(params)
+        if (value === 'develop') next.delete('view')
+        else next.set('view', value)
+        setParams(next)
+      }}>
+      <Tabs.List className="app-view-tabs" aria-label="Application views">
+        <Tabs.Trigger value="develop">Develop</Tabs.Trigger>
+        <Tabs.Trigger value="invoke">Invoke</Tabs.Trigger>
+        <Tabs.Trigger value="activity">Activity</Tabs.Trigger>
+      </Tabs.List>
+      {/* C2/C3: switching views hides panels, never remounts their editors. */}
+      <Tabs.Content value="develop" forceMount hidden={activeView !== 'develop'} className="app-view-panel">
       <section className="app-card">
         <div className="app-card-head">
           <span className="app-card-title">Develop</span>
           <div className="flex items-center gap-2">
             <Button onClick={onRun} disabled={busy !== '' || view === 'view' || corrupt || specErrs.length > 0}><SwapLabel show={busy === 'run' ? 'Running…' : 'Run'} options={['Run', 'Running…']} /></Button>
-            <Button variant="primary" onClick={onPublish} disabled={busy !== '' || view === 'view' || corrupt || specErrs.length > 0}><SwapLabel show={busy === 'publish' ? 'Publishing…' : 'Publish'} options={['Publish', 'Publishing…']} /></Button>
+            <Button variant="primary" onClick={onPublish} disabled={busy !== '' || view === 'view' || corrupt || specErrs.length > 0} data-testid="app-publish"><SwapLabel show={busy === 'publish' ? 'Publishing…' : 'Publish…'} options={['Publish…', 'Publishing…']} /></Button>
           </div>
         </div>
         <label className="app-label" htmlFor="app-name">Name</label>
         <input id="app-name" className="app-input" value={draft.name} disabled={view === 'view'} onChange={(e) => edit({ name: e.target.value })} />
-        <div className="app-grid mt-3">
-          <div>
-            <label className="app-label" id="app-code-label">Code — main.star</label>
-            <div className="app-cm" aria-labelledby="app-code-label">
+        <div className="app-workbench mt-3">
+          <ApplicationResources specText={draft.spec} workspaceId={app.workspace_id} onConfigure={configureResources}
+            onOpenDocument={setResourceDocument} selectedDocument={resourceIsCurrent ? resourceDocument : null} />
+          <div className="app-editor-frame" data-testid="app-editor-frame">
+            <div className="app-editor-files" aria-label="Open files">
+              <button type="button" aria-pressed={!resourceDocument} onClick={() => setResourceDocument(null)}>main.star</button>
+              {resourceDocument && (
+                <button type="button" aria-pressed="true" title={resourceTitle}>
+                  {resourceTitle}
+                </button>
+              )}
+            </div>
+            {/* C2/C3: retain the draft editor, including selection and undo history. */}
+            <div hidden={resourceDocument !== null} className="app-editor-pane">
+            <div className="app-cm" aria-label="Application source — main.star">
               <CodeMirror value={draft.code} height="320px" extensions={editor.extensions} theme={cmTheme}
                 basicSetup={{ autocompletion: false }}
                 readOnly={view === 'view'} onChange={(v) => edit({ code: v })} />
@@ -432,8 +489,42 @@ function Editor({ app, role, userID, qc }: Props) {
                   : <span>{editor.isFetching ? 'Refreshing symbols…' : 'Suggestions use this application’s spec'}</span>}
               </div>
             </div>
+            </div>
+            {resourceDocument && (
+              <div className="app-editor-pane" data-testid="resource-document">
+                {resourceIsCurrent && resourceDocument.kind === 'module' ? (
+                  <>
+                    <div className="app-document-head">
+                      <div className="app-document-meta">
+                        <span>{resourceDocument.moduleName} · v{resourceDocument.version} · Read-only</span>
+                        <code title={resourceDocument.sum}>{resourceDocument.sum}</code>
+                      </div>
+                      <CopyBlock text={`load("@${resourceDocument.alias}/${resourceDocument.path}", "<symbol>")`} />
+                    </div>
+                    <div className="app-resource-cm" aria-label={`Read-only module source @${resourceDocument.alias}/${resourceDocument.path}`}>
+                      <CodeMirror value={resourceDocument.source} height="320px" extensions={editor.extensions} theme={cmTheme}
+                        basicSetup={{ autocompletion: false }} readOnly editable={false} />
+                    </div>
+                    <p className="app-document-note">Run executes main.star, not this read-only file.</p>
+                  </>
+                ) : resourceIsCurrent && resourceDocument.kind === 'extension' ? (
+                  <div className="app-document-head">
+                    <div className="app-document-meta"><span>Extension operation · Read-only</span><code>{resourceDocument.source}</code></div>
+                    <CopyBlock text={resourceDocument.signature} />
+                    {resourceDocument.documentation && <p className="app-operation-doc">{resourceDocument.documentation}</p>}
+                    <p className="app-document-note">Run executes main.star, not this reference.</p>
+                  </div>
+                ) : (
+                  <div className="app-document-head" role="status">
+                    <p>This resource reference changed or was removed. Reopen it from Resources to browse its current version.</p>
+                    <Button onClick={() => setResourceDocument(null)}>Return to main.star</Button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-          <div>
+        </div>
+          <div className="app-draft-test">
             <label className="app-label" htmlFor="app-input">Input — a JSON object</label>
             <textarea id="app-input" className="app-area" rows={5} spellCheck={false}
               value={draft.input} onChange={(e) => edit({ input: e.target.value })} />
@@ -450,26 +541,27 @@ function Editor({ app, role, userID, qc }: Props) {
               )}
             </div>
           </div>
-        </div>
         <div className="app-result" role="status" aria-live="polite">
           {specErrs.length > 0 && <Notice tone="warning">{specErrs[0].section}: {specErrs[0].message}</Notice>}
-          {warn && <Notice tone="warning">{warn}</Notice>}
-          {storeFailed && <Notice tone="warning">Not saved to this tab.</Notice>}
-          {published && (
+          {reviewOpen && (
+        <PublishReviewDialog resource="applications" id={app.id} version={reviewVer}
+          onClose={() => setReviewOpen(false)}
+          onPublished={() => {
+            setReviewOpen(false)
+            setPublished(true)
+            qc.invalidateQueries({ queryKey: ['application', app.id] })
+            qc.invalidateQueries({ queryKey: ['applications'] })
+          }} />
+      )}
+      {published && (
             <Notice><SwapLabel
               show={app.status === 'preparing' ? 'Published — deploying. Invoke becomes available when status is ready.' : 'Published.'}
               options={['Published — deploying. Invoke becomes available when status is ready.', 'Published.']} /></Notice>
           )}
-          {corrupt && (
-            <Notice tone="warning">
-              Saved editor state for this application is unreadable.
-              <button className="link-btn" onClick={() => setResetOpen(true)}>Reset it</button>
-            </Notice>
-          )}
         </div>
       </section>
 
-      <details className="app-card" open={adv} onToggle={(e) => setAdv((e.target as HTMLDetailsElement).open)}>
+      <details ref={settingsRef} className="app-card" open={adv} onToggle={(e) => setAdv((e.target as HTMLDetailsElement).open)}>
         <summary><span className="app-card-title">Settings</span></summary>
         <div className="app-card-body">
         <fieldset disabled={view === 'view'} className="app-fieldset">
@@ -499,12 +591,15 @@ function Editor({ app, role, userID, qc }: Props) {
         ))}
         </div>
       </details>
+      </Tabs.Content>
 
+      <Tabs.Content value="invoke" forceMount hidden={activeView !== 'invoke'} className="app-view-panel">
       <section className="app-card">
         <div className="app-card-head">
           <span className="app-card-title">Invoke</span>
           {view === 'edit' && <Button onClick={() => setKeyOpen(true)}>Create API key</Button>}
         </div>
+        <p className="app-dim">Calls the published version. Unpublished draft changes are not used.</p>
         {!ready && <p className="app-dim">{statusHint[app.status] ?? 'Not ready.'}</p>}
         <div className="app-grid">
           <div>
@@ -532,6 +627,14 @@ function Editor({ app, role, userID, qc }: Props) {
           </div>
         </div>
       </section>
+      </Tabs.Content>
+      <Tabs.Content value="activity" forceMount hidden={activeView !== 'activity'} className="app-view-panel">
+        <section className="app-card">
+          <div className="app-card-head"><span className="app-card-title">Runs</span></div>
+          <div className="app-card-body"><RunsTable appId={app.id} /></div>
+        </section>
+      </Tabs.Content>
+      </Tabs.Root>
 
 
       {delOpen && (
@@ -556,10 +659,6 @@ function Editor({ app, role, userID, qc }: Props) {
           This draft was changed by another session. Reload the newer version? Your current edits are kept in this tab until you confirm.
         </Confirm>
       )}
-      <section className="app-card">
-        <div className="app-card-head"><span className="app-card-title">Runs</span></div>
-        <div className="app-card-body"><RunsTable appId={app.id} /></div>
-      </section>
       {keyOpen && <AppKeyModal appId={app.id} appName={app.name} workspaceId={app.workspace_id} onClose={() => setKeyOpen(false)} />}
       {busy === 'delete' && <Loading />}
     </div>

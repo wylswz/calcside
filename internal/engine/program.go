@@ -250,7 +250,7 @@ func (e *Engine) PrepareProgram(ctx context.Context, config ProgramConfig, deps 
 		programs[name] = pr
 	}
 	prog.programs = programs
-	if perr := checkLoadGraph(programs); perr != nil {
+	if perr := checkLoadGraph(programs, s.modules); perr != nil {
 		res.Error = perr
 		return nil, res
 	}
@@ -261,7 +261,7 @@ func (e *Engine) PrepareProgram(ctx context.Context, config ProgramConfig, deps 
 		return nil, res
 	}
 	// Pure init: gate stays disarmed; denied calls fail the prepare.
-	globals, ierr := prog.initModules(scope.thread, s.Predeclared)
+	globals, ierr := prog.initModules(scope.thread, s)
 	if ierr == nil {
 		ierr = checkEntry(globals, "main")
 	}
@@ -423,7 +423,7 @@ func (e *Engine) InvokeProgram(ctx context.Context, program *Program, input json
 		return res
 	}
 
-	globals, err := program.initModules(scope.thread, s.Predeclared)
+	globals, err := program.initModules(scope.thread, s)
 	if err == nil {
 		err = checkEntry(globals, "main")
 	}
@@ -706,31 +706,18 @@ func (s *callScope) redactedStdout() string {
 }
 
 // initModules loads the entrypoint and everything it reaches via the
-// compiled-program map with a fresh per-invocation globals cache; every
-// selected source is initialized at most once. The gate stays whatever
-// the caller left it -- callers run this disarmed.
-func (p *Program) initModules(thread *starlark.Thread, pre starlark.StringDict) (starlark.StringDict, error) {
-	modules := map[string]starlark.StringDict{}
-	inited := map[string]bool{}
-	thread.Load = func(t *starlark.Thread, module string) (starlark.StringDict, error) {
-		if g, ok := modules[module]; ok {
-			return g, nil
-		}
-		prog, ok := p.programs[module]
-		if !ok {
-			return nil, fmt.Errorf("load of unselected module")
-		}
-		if inited[module] {
-			return nil, fmt.Errorf("load cycle in module graph")
-		}
-		inited[module] = true
-		g, err := prog.Init(t, pre)
-		if err != nil {
-			return nil, err
-		}
-		modules[module] = g
-		return g, nil
+// unified two-namespace resolver: bundle sources keep their ordinary
+// load() namespace while attached module trees serve @ mounts (when
+// the session has none, a bare per-invocation set resolves only the
+// bundle). Every selected source — bundle or module — initializes at
+// most once per invocation. The gate stays whatever the caller left
+// it -- callers run this disarmed.
+func (p *Program) initModules(thread *starlark.Thread, s *Session) (starlark.StringDict, error) {
+	ms := s.modules
+	if ms == nil {
+		ms = &moduleSet{cache: map[string]starlark.StringDict{}, inited: map[string]bool{}}
 	}
+	thread.Load = ms.loadFunc(s.Predeclared, p.programs)
 	return thread.Load(thread, p.entrypoint)
 }
 
@@ -775,16 +762,38 @@ func interruptHost(p *Program, call ProgramCall, sec *secrets.Set) *capinterrupt
 }
 
 // checkLoadGraph statically rejects missing, non-canonical or cyclic
-// loads before any source is executed.
-func checkLoadGraph(programs map[string]*starlark.Program) *ProgramError {
+// loads before any source is executed. Loads with a leading @ dispatch
+// against the attached module mounts (a missing mount or file is a
+// prepare error); everything else resolves in the bundle namespace.
+// Module files themselves were graph-checked when the session compiled
+// them, and cannot load back into the bundle — so cycles can only form
+// within the bundle edges checked below.
+func checkLoadGraph(programs map[string]*starlark.Program, ms *moduleSet) *ProgramError {
 	for _, name := range slices.Sorted(maps.Keys(programs)) {
 		pr := programs[name]
 		for i := 0; i < pr.NumLoads(); i++ {
-			module, _ := pr.Load(i)
-			if err := checkReleaseName(module, true); err != nil {
+			mod, _ := pr.Load(i)
+			if strings.HasPrefix(mod, "@") {
+				mount, file, err := splitMountRef(mod)
+				if err != nil {
+					return invalidProgramf("invalid load in source %s", name)
+				}
+				if ms == nil {
+					return invalidProgramf("source %s loads unmounted module %s", name, mount)
+				}
+				files, ok := ms.programs[mount]
+				if !ok {
+					return invalidProgramf("source %s loads unmounted module %s", name, mount)
+				}
+				if _, ok := files[file]; !ok {
+					return invalidProgramf("source %s loads missing module file %s", name, mod)
+				}
+				continue
+			}
+			if err := checkReleaseName(mod, true); err != nil {
 				return invalidProgramf("invalid load in source %s", name)
 			}
-			if _, ok := programs[module]; !ok {
+			if _, ok := programs[mod]; !ok {
 				return invalidProgramf("source %s loads an unselected module", name)
 			}
 		}
@@ -807,8 +816,11 @@ func checkLoadGraph(programs map[string]*starlark.Program) *ProgramError {
 		color[name] = gray
 		pr := programs[name]
 		for i := 0; i < pr.NumLoads(); i++ {
-			module, _ := pr.Load(i)
-			if err := visit(module); err != nil {
+			mod, _ := pr.Load(i)
+			if strings.HasPrefix(mod, "@") {
+				continue // module mounts cannot load back into the bundle
+			}
+			if err := visit(mod); err != nil {
 				return err
 			}
 		}
@@ -935,9 +947,12 @@ func checkReleaseName(name string, star bool) error {
 	if path.IsAbs(name) || strings.Contains(name, "\\") || path.Clean(name) != name {
 		return errors.New("non-canonical path")
 	}
-	for _, part := range strings.Split(name, "/") {
+	for i, part := range strings.Split(name, "/") {
 		if part == "" || part == "." || part == ".." {
 			return errors.New("non-canonical path")
+		}
+		if i == 0 && strings.HasPrefix(part, "@") {
+			return errors.New("@ is reserved for module mounts")
 		}
 	}
 	if star && !strings.HasSuffix(name, ".star") {

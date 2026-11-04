@@ -802,4 +802,72 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 	t.Run("extension_artifacts", func(t *testing.T) {
 		RunExtensionArtifacts(t, newStore(t))
 	})
+	t.Run("workspace_write_lock", func(t *testing.T) {
+		workspaceWriteLockSuite(t, newStore(t))
+	})
+	t.Run("modules", func(t *testing.T) {
+		RunModules(t, newStore(t))
+	})
+}
+
+// Workspace write-lock contention: a held workspace transaction blocks
+// another connection's workspace-scoped mutation until released — the
+// serialization point the reviewed publish depends on.
+func workspaceWriteLockSuite(t *testing.T, s store.Store) {
+	ctx := context.Background()
+	u, err := s.UpsertUserByEmail(ctx, "wwl@x.com", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws := store.PersonalWorkspaceID(u.ID)
+	if err := s.CreatePolicy(ctx, &store.Policy{UserID: u.ID, WorkspaceID: ws, Name: "p", Rego: "package t"}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.ListPolicies(ctx, ws)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("seed policy: %v", err)
+	}
+	pol := list[0]
+
+	// Hold the workspace lock in a tx; concurrent UpdatePolicy must
+	// block until the holder commits.
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- s.Tx(ctx, func(tx store.Store) error {
+			if err := tx.LockWorkspace(ctx, ws); err != nil {
+				return err
+			}
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+
+	blocked := make(chan error, 1)
+	go func() {
+		p := *pol
+		p.Rego = "package t2"
+		blocked <- s.UpdatePolicy(ctx, &p)
+	}()
+	// The update must NOT finish while the lock is held.
+	select {
+	case err := <-blocked:
+		t.Fatalf("update finished under held lock: %v", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("lock tx: %v", err)
+	}
+	select {
+	case err := <-blocked:
+		if err != nil {
+			t.Fatalf("blocked update: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("update never completed after lock release")
+	}
 }

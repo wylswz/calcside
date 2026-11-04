@@ -1,6 +1,13 @@
 # EP-0019: Workspace default credentials for extensions
 
-- **Status:** Draft
+- **Status:** Superseded (design refined; not implemented)
+- **Superseded by:** the per-consumer environment design accepted with
+  EP-0017/EP-0018 — `spec.environment` extension bindings (named
+  bindings of vault-secret references, `default` selected at execution)
+  cover the same "which vault entry feeds this extension's secret
+  field" need as an owned consumer scope rather than workspace-level
+  recommendations. This document's workspace-default mechanism is not
+  the plan going forward; keep it only as background.
 - **Created:** 2026-11-03
 - **Area:** store, API, console (Secrets, instance/application editor)
 - **Related:** [EP-0003](0003-community-extensions.md) (extensions), [EP-0004](0004-extension-discovery-ui.md) (discovery UI), [EP-0010](0010-workspaces-and-access.md) (access), [EP-0013](0013-llm-providers.md) (LLM providers)

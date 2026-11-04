@@ -25,9 +25,10 @@ func TestApplicationIsolation(t *testing.T) {
 		{"get", "GET", "/api/v1/applications/" + appID, ""},
 		{"update", "PUT", "/api/v1/applications/" + appID, `{"version":1,"name":"x","code":"y"}`},
 		{"delete", "DELETE", "/api/v1/applications/" + appID + "?version=1", ""},
-		{"publish", "POST", "/api/v1/applications/" + appID + "/publish", `{"version":1}`},
+		{"publish", "POST", "/api/v1/applications/" + appID + "/publish", `{"version":1,"expected_base":"","candidate":"rel_0000000000000000000000000000000000000000000000000000000000000000"}`},
 		{"test", "POST", "/api/v1/applications/" + appID + "/test", `{"version":1,"input":{}}`},
 		{"invoke", "POST", "/api/v1/applications/" + appID + "/invoke", `{}`},
+		{"preview", "POST", "/api/v1/applications/" + appID + "/publish/preview", `{"version":1}`},
 	} {
 		code, _, _ := e.req(tc.method, tc.path, tc.body, csrf, cookiesB)
 		if code != 404 {
@@ -42,9 +43,10 @@ func TestApplicationIsolation(t *testing.T) {
 		{"get", "GET", "/api/v1/applications/" + appID, ""},
 		{"update", "PUT", "/api/v1/applications/" + appID, `{"version":1,"name":"x","code":"y"}`},
 		{"delete", "DELETE", "/api/v1/applications/" + appID + "?version=1", ""},
-		{"publish", "POST", "/api/v1/applications/" + appID + "/publish", `{"version":1}`},
+		{"publish", "POST", "/api/v1/applications/" + appID + "/publish", `{"version":1,"expected_base":"","candidate":"rel_0000000000000000000000000000000000000000000000000000000000000000"}`},
 		{"test", "POST", "/api/v1/applications/" + appID + "/test", `{"version":1,"input":{}}`},
 		{"invoke", "POST", "/api/v1/applications/" + appID + "/invoke", `{}`},
+		{"preview", "POST", "/api/v1/applications/" + appID + "/publish/preview", `{"version":1}`},
 	} {
 		code, _, _ := e.req(tc.method, tc.path, tc.body, nil, nil)
 		if code != 401 {
@@ -57,9 +59,10 @@ func TestApplicationIsolation(t *testing.T) {
 		{"create", "POST", "/api/v1/applications", `{"name":"x"}`},
 		{"update", "PUT", "/api/v1/applications/" + appID, `{"version":1,"name":"x","code":"y"}`},
 		{"delete", "DELETE", "/api/v1/applications/" + appID + "?version=1", ""},
-		{"publish", "POST", "/api/v1/applications/" + appID + "/publish", `{"version":1}`},
+		{"publish", "POST", "/api/v1/applications/" + appID + "/publish", `{"version":1,"expected_base":"","candidate":"rel_0000000000000000000000000000000000000000000000000000000000000000"}`},
 		{"test", "POST", "/api/v1/applications/" + appID + "/test", `{"version":1,"input":{}}`},
 		{"invoke", "POST", "/api/v1/applications/" + appID + "/invoke", `{}`},
+		{"preview", "POST", "/api/v1/applications/" + appID + "/publish/preview", `{"version":1}`},
 	} {
 		code, _, _ := e.req(tc.method, tc.path, tc.body, nil, cookiesA)
 		if code != 403 {
@@ -95,7 +98,7 @@ func TestApplicationKeyCeiling(t *testing.T) {
 	if code != 403 {
 		t.Fatalf("view-only update: %d", code)
 	}
-	code, _, _ = e.req("POST", "/api/v1/applications/"+appID+"/publish", `{"version":1}`, voBearer, nil)
+	code, _, _ = e.req("POST", "/api/v1/applications/"+appID+"/publish", `{"version":1,"expected_base":"","candidate":"rel_0000000000000000000000000000000000000000000000000000000000000000"}`, voBearer, nil)
 	if code != 403 {
 		t.Fatalf("view-only publish: %d", code)
 	}
@@ -173,7 +176,7 @@ func TestApplicationBoundKey(t *testing.T) {
 	if code != 403 {
 		t.Fatalf("bound test: %d", code)
 	}
-	code, _, _ = e.req("POST", "/api/v1/applications/"+appID+"/publish", `{"version":1}`, bearer, nil)
+	code, _, _ = e.req("POST", "/api/v1/applications/"+appID+"/publish", `{"version":1,"expected_base":"","candidate":"rel_0000000000000000000000000000000000000000000000000000000000000000"}`, bearer, nil)
 	if code != 403 {
 		t.Fatalf("bound publish: %d", code)
 	}
@@ -308,13 +311,76 @@ func TestApplicationSessionViewer(t *testing.T) {
 	for _, tc := range []struct{ name, method, path, body string }{
 		{"update", "PUT", "/api/v1/applications/" + appID, `{"version":1,"name":"x","code":"y"}`},
 		{"delete", "DELETE", "/api/v1/applications/" + appID + "?version=1", ""},
-		{"publish", "POST", "/api/v1/applications/" + appID + "/publish", `{"version":1}`},
+		{"publish", "POST", "/api/v1/applications/" + appID + "/publish", `{"version":1,"expected_base":"","candidate":"rel_0000000000000000000000000000000000000000000000000000000000000000"}`},
 		{"test", "POST", "/api/v1/applications/" + appID + "/test", `{"version":1,"input":{}}`},
 		{"invoke", "POST", "/api/v1/applications/" + appID + "/invoke", `{}`},
+		{"preview", "POST", "/api/v1/applications/" + appID + "/publish/preview", `{"version":1}`},
 	} {
 		code, _, _ := e.req(tc.method, tc.path, tc.body, hdrV, cookiesV)
 		if code != 403 {
 			t.Fatalf("viewer %s: %d", tc.name, code)
 		}
 	}
+}
+
+// Reviewed publish over HTTP: preview → publish → identical no-op →
+// stale draft/base/candidate all rejected.
+func TestApplicationReviewedPublish(t *testing.T) {
+	e := newEnv(t)
+	cookies := login(e, "a@x.com")
+	csrf := map[string]string{"X-Requested-With": "calcside"}
+	_, m, _ := e.req("POST", "/api/v1/applications",
+		`{"name":"svc","code":"def main(i): return i"}`, csrf, cookies)
+	appID := m["application"].(map[string]any)["id"].(string)
+
+	// Old-shape request is now a 400.
+	code, _, _ := e.req("POST", "/api/v1/applications/"+appID+"/publish",
+		`{"version":1}`, csrf, cookies)
+	if code != 400 {
+		t.Fatalf("legacy publish: %d", code)
+	}
+	// Missing / null expected_base both 400.
+	code, _, _ = e.req("POST", "/api/v1/applications/"+appID+"/publish",
+		`{"version":1,"candidate":"rel_`+repeat0(64)+`"}`, csrf, cookies)
+	if code != 400 {
+		t.Fatalf("missing base: %d", code)
+	}
+	// Preview returns a candidate digest.
+	code, m, _ = e.req("POST", "/api/v1/applications/"+appID+"/publish/preview",
+		`{"version":1}`, csrf, cookies)
+	if code != 200 {
+		t.Fatalf("preview: %d %v", code, m)
+	}
+	cand := m["candidate"].(map[string]any)["digest"].(string)
+	// Publish: first 202 + seq1.
+	code, _, _ = e.req("POST", "/api/v1/applications/"+appID+"/publish",
+		`{"version":1,"expected_base":"","candidate":"`+cand+`","note":"v1"}`, csrf, cookies)
+	if code != 202 {
+		t.Fatalf("publish: %d", code)
+	}
+	// Identical republish: no-op (202, no new history).
+	code, _, _ = e.req("POST", "/api/v1/applications/"+appID+"/publish",
+		`{"version":1,"expected_base":"`+cand+`","candidate":"`+cand+`"}`, csrf, cookies)
+	if code != 202 {
+		t.Fatalf("no-op: %d", code)
+	}
+	// Stale base / stale draft both 409.
+	code, _, _ = e.req("POST", "/api/v1/applications/"+appID+"/publish",
+		`{"version":1,"expected_base":"rel_`+repeat0(64)+`","candidate":"`+cand+`"}`, csrf, cookies)
+	if code != 409 {
+		t.Fatalf("stale base: %d", code)
+	}
+	code, _, _ = e.req("POST", "/api/v1/applications/"+appID+"/publish",
+		`{"version":9,"expected_base":"`+cand+`","candidate":"`+cand+`"}`, csrf, cookies)
+	if code != 409 {
+		t.Fatalf("stale draft: %d", code)
+	}
+}
+
+func repeat0(n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = '0'
+	}
+	return string(b)
 }

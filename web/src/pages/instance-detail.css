@@ -27,7 +27,6 @@
 
 /* shell header hooks — only inside detail */
 body:has(.instance-detail) .console-header-inner { gap: 24px; }
-body:has(.instance-detail) .console-nav { gap: 24px; }
 body:has(.instance-detail) .console-dev {
   font-size: 12px; border: 0; text-transform: none; letter-spacing: normal;
   color: rgb(var(--sec)); padding: 0;

@@ -520,6 +520,7 @@ func (s *Service) PrepareReplica(ctx context.Context, req *runtime.NodePrepareRe
 				Owner:      runtime.Owner{UserID: inst.UserID, Email: u.Email},
 				Spec:       rel.Spec,
 				Policies:   runtime.PolicyBundle{Global: global, User: rel.Policies.User},
+				Modules:    rel.Modules,
 				Secrets:    secrets,
 				Labels:     inst.Labels,
 				ExpiresAt:  rep.LeaseUntil,

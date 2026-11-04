@@ -19,6 +19,15 @@ var ErrNotFound = errors.New("store: not found")
 // ErrConflict is returned when a uniqueness constraint is violated.
 var ErrConflict = errors.New("store: conflict")
 
+// ErrApplicationDraftConflict is a stale draft CAS on the reviewed
+// application publish path.
+var ErrApplicationDraftConflict = errors.New("store: application draft changed")
+
+// ErrApplicationBaseConflict is the reviewed-publish base sentinel:
+// the app's current published release differs from the release the
+// reviewer compared against.
+var ErrApplicationBaseConflict = errors.New("store: application published base changed")
+
 // IDPrefix is the fixed string identifying the entity kind in an ID.
 type IDPrefix string
 
@@ -402,6 +411,7 @@ type Store interface {
 	ApplicationStore
 	RunStore
 	ExtensionArtifactStore
+	ModuleStore
 
 	Tx(ctx context.Context, fn func(Store) error) error
 

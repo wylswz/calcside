@@ -125,9 +125,14 @@ entries such as:
   for a policy present on both sides (snapshot drift), with a text diff.
 - **Inputs**: secret names added/removed and allowed-domain changes (never
   values); env keys added/removed/changed (env values are non-secret spec
-  data already visible to viewers); limits and TTL changes.
-- **Module-specific**: manifest `requires` changes (ext alias, source, sum,
-  config keys, secret names, base capabilities).
+  data already visible to viewers); environment bindings — extension
+  aliases, binding names, secret-field mappings and effective domain
+  allowlists added/removed/changed, always shown as references, never
+  values; limits and TTL changes.
+- **Module-specific**: manifest `requires` changes (ext alias, source,
+  sum, base capabilities). Module debug settings — the per-module debug
+  script, environment and execution boundary — are not publish artifacts:
+  they are never diffed, reviewed, or hashed into a version.
 
 Grant widening is marked distinctly from narrowing. For example, a new host,
 a new extension, or a new capability is shown as widening, while a removed

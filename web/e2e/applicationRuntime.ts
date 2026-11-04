@@ -36,7 +36,7 @@ async function freePort(): Promise<number> {
   return a.port
 }
 
-export async function startApplicationRuntime(opts: { secretKey?: string } = {}): Promise<ApplicationRuntime> {
+export async function startApplicationRuntime(opts: { secretKey?: string; secretsAllowHTTP?: boolean } = {}): Promise<ApplicationRuntime> {
   const dir = await mkdtemp(join(tmpdir(), 'calcside-apprt-'))
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('CALCSIDE_') && !k.startsWith('ATLAS_')))
   const apiBin = join(dir, 'calcside')
@@ -122,6 +122,7 @@ export async function startApplicationRuntime(opts: { secretKey?: string } = {})
     '--shared-key', key, '--node-id', 'w1',
     '--ext-cache-dir', join(dir, 'workercache'),
     '--instance-memory-max', '0']
+  if (opts.secretsAllowHTTP) { apiArgs.push('-secrets-allow-http'); workerArgs.push('-secrets-allow-http') }
 
   let api = start(apiBin, apiArgs, 'api')
   let worker = start(workerBin, workerArgs, 'worker')

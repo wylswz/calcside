@@ -37,16 +37,17 @@ export default function WorkspaceSwitcher() {
   }
 
   return (
-    <div className="flex items-center">
+    <div className="ws-switcher flex items-center">
       {list.length > 1 ? (
         <Menu trigger={
-          <button className="border border-line px-2 py-1 text-xs text-ink transition-colors hover:border-ink aria-expanded:border-ink">
-            {active?.name ?? 'workspace'} {active?.personal ? '' : `· ${active?.role}`} ▾
+          <button className="flex min-w-0 max-w-full items-center gap-1.5 border border-line px-2 py-1 text-xs text-ink transition-colors hover:border-ink aria-expanded:border-ink">
+            <span className="ws-name">{active?.name ?? 'workspace'} {active?.personal ? '' : `· ${active?.role}`}</span>
+            <span className="flex-none" aria-hidden>▾</span>
           </button>
         }>
           {list.map((w) => (
             <MenuItem key={w.id} onSelect={() => pick(w.personal ? null : w.id)}>
-              <span className="min-w-0 flex-1 truncate">{w.name}{w.personal ? ' (personal)' : ''}</span>
+              <span className="ws-name min-w-0 flex-1 truncate">{w.name}{w.personal ? ' (personal)' : ''}</span>
               <span className="text-xs text-mute">{w.role}</span>
             </MenuItem>
           ))}
@@ -55,7 +56,7 @@ export default function WorkspaceSwitcher() {
           {active && <MenuItem onSelect={() => nav(`/workspaces/${active.id}`)}>Workspace settings</MenuItem>}
         </Menu>
       ) : (
-        <span className="text-xs text-mute">{active?.name}</span>
+        <span className="ws-name text-xs text-mute">{active?.name}</span>
       )}
       {showNew && (
         <Modal title="New workspace" onClose={() => setShowNew(false)} footer={

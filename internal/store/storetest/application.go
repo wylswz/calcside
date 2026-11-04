@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 func RunApplications(t *testing.T, s store.Store) {
 	t.Helper()
 	ctx := context.Background()
+	seedWS(t, s, "ws_1", "ws_2")
 	u, err := s.UpsertUserByEmail(ctx, "app@x.com", "App", "sub-app")
 	if err != nil {
 		t.Fatal(err)
@@ -117,6 +119,7 @@ func RunApplications(t *testing.T, s store.Store) {
 		}
 	})
 
+	t.Run("reviewed_publish", func(t *testing.T) { applicationReviewedSuite(t, s) })
 	t.Run("publish_and_delete", func(t *testing.T) {
 		a, _ := store.NewApplication("ws_1", u.ID, "pub", "def main(i): return i", spec, nil, nil, time.Now())
 		if err := s.CreateApplication(ctx, a); err != nil {
@@ -225,4 +228,137 @@ func RunApplications(t *testing.T, s store.Store) {
 
 func jsonBytesContain(r json.RawMessage, sub string) bool {
 	return r != nil && strings.Contains(string(r), sub)
+}
+
+// Reviewed publish: base-pointer CAS, immutable seq history, no-op
+// stability, soft-delete retention.
+func applicationReviewedSuite(t *testing.T, s store.Store) {
+	ctx := context.Background()
+	u, err := s.UpsertUserByEmail(ctx, "rp@x.com", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedWS(t, s, "other")
+	mkRel := func(code string) *store.ServingRelease {
+		prog := runtime.ProgramBundle{Sources: map[string][]byte{"main.star": []byte(code)},
+			InputSchema: json.RawMessage(`{"type":"object"}`), OutputSchema: json.RawMessage(`{"type":"object"}`)}
+		r, err := store.NewServingReleaseWithModules("ws_1", u.ID, json.RawMessage(`{"ttl_seconds":300}`),
+			runtime.PolicyBundle{}, prog, nil, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	a, err := store.NewApplication("ws_1", u.ID, "svc", "", json.RawMessage(`{"ttl_seconds":300}`), nil, nil, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateApplication(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	rel := mkRel("def main(i): return 1")
+	pin, hist, err := s.PublishReviewedApplication(ctx, "ws_1", a.ID, 1, "", rel, u.ID, "first", time.Now())
+	if err != nil || pin == nil || hist == nil || hist.Seq != 1 {
+		t.Fatalf("first publish: %v %v", hist, err)
+	}
+	// Same draft + same candidate -> no-op, no history, no generation bump.
+	pin2, hist2, err := s.PublishReviewedApplication(ctx, "ws_1", a.ID, 1, rel.ID, rel, u.ID, "", time.Now())
+	if err != nil || hist2 != nil || pin2.Generation != pin.Generation {
+		t.Fatalf("no-op: hist=%v gen=%d err=%v", hist2, pin2.Generation, err)
+	}
+	// Stale base -> base sentinel; stale draft -> draft sentinel.
+	if _, _, err := s.PublishReviewedApplication(ctx, "ws_1", a.ID, 1, "bogus", rel, u.ID, "", time.Now()); !errors.Is(err, store.ErrApplicationBaseConflict) {
+		t.Fatalf("stale base: %v", err)
+	}
+	if _, _, err := s.PublishReviewedApplication(ctx, "ws_1", a.ID, 99, rel.ID, rel, u.ID, "", time.Now()); !errors.Is(err, store.ErrApplicationDraftConflict) {
+		t.Fatalf("stale draft: %v", err)
+	}
+	// Same draft, changed content -> seq 2 + generation bump.
+	rel2 := mkRel("def main(i): return 2")
+	pin3, hist3, err := s.PublishReviewedApplication(ctx, "ws_1", a.ID, 1, rel.ID, rel2, u.ID, "v2", time.Now())
+	if err != nil || hist3 == nil || hist3.Seq != 2 || pin3.Generation != pin.Generation+1 {
+		t.Fatalf("second publish: %v %v", hist3, err)
+	}
+	// History: oldest first, workspace-isolated, tampered candidate rejected.
+	rels, err := s.ListApplicationReleases(ctx, "ws_1", a.ID)
+	if err != nil || len(rels) != 2 || rels[0].Seq != 1 || rels[1].Seq != 2 {
+		t.Fatalf("history: %v %v", rels, err)
+	}
+	if _, err := s.GetApplicationRelease(ctx, "ws_1", a.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetApplicationRelease(ctx, "other", a.ID, 1); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("ws isolation: %v", err)
+	}
+	forged := *rel2
+	forged.Spec = json.RawMessage(`{"ttl_seconds":1}`)
+	if _, _, err := s.PublishReviewedApplication(ctx, "ws_1", a.ID, 1, rel2.ID, &forged, u.ID, "", time.Now()); !errors.Is(err, store.ErrInvalidServingRecord) {
+		t.Fatalf("tampered accepted: %v", err)
+	}
+	// Concurrent same-base publishes: exactly one writes history.
+	var wg sync.WaitGroup
+	one, two := make(chan error, 1), make(chan error, 1)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, _, e := s.PublishReviewedApplication(ctx, "ws_1", a.ID, 1, rel2.ID, rel, u.ID, "race", time.Now())
+		one <- e
+	}()
+	go func() {
+		defer wg.Done()
+		_, _, e := s.PublishReviewedApplication(ctx, "ws_1", a.ID, 1, rel2.ID, rel, u.ID, "race", time.Now())
+		two <- e
+	}()
+	wg.Wait()
+	e1, e2 := <-one, <-two
+	if (e1 == nil) == (e2 == nil) {
+		t.Fatalf("both raced publishes got same outcome: %v %v", e1, e2)
+	}
+	if e1 != nil && !errors.Is(e1, store.ErrApplicationBaseConflict) {
+		t.Fatalf("loser error %v", e1)
+	}
+	if e2 != nil && !errors.Is(e2, store.ErrApplicationBaseConflict) {
+		t.Fatalf("loser error %v", e2)
+	}
+	if rels, err := s.ListApplicationReleases(ctx, "ws_1", a.ID); err != nil || len(rels) != 3 {
+		t.Fatalf("race produced %d history rows", len(rels))
+	}
+
+	// Identical candidate republish does not bump generation even when
+	// the persistent instance is disabled by delete + republish.
+	// (DeleteApplication soft-deletes the app too, so re-create an app
+	// publishing the same release, then soft-delete it.)
+	a2, err := store.NewApplication("ws_1", u.ID, "svc2", "", json.RawMessage(`{"ttl_seconds":300}`), nil, nil, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateApplication(ctx, a2); err != nil {
+		t.Fatal(err)
+	}
+	p1, _, err := s.PublishReviewedApplication(ctx, "ws_1", a2.ID, 1, "", rel, u.ID, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Disable the persistent instance, then identical republish must
+	// stay disabled + same generation + no history row.
+	if ok, err := s.SetPersistentEnabled(ctx, "ws_1", p1.ID, p1.Generation, false, time.Now()); err != nil || !ok {
+		t.Fatalf("disable: %v %v", ok, err)
+	}
+	disabled, err := s.GetPersistentInstance(ctx, "ws_1", p1.ID)
+	if err != nil || disabled.Enabled {
+		t.Fatalf("disable did not stick: %+v err=%v", disabled, err)
+	}
+	p2, h2, err := s.PublishReviewedApplication(ctx, "ws_1", a2.ID, 1, rel.ID, rel, u.ID, "", time.Now())
+	if err != nil || h2 != nil || p2.Generation != disabled.Generation || p2.Enabled {
+		t.Fatalf("disabled no-op: %+v hist=%v err=%v", p2, h2, err)
+	}
+
+	// Soft delete retains history.
+	if ok, err := s.DeleteApplication(ctx, "ws_1", a.ID, a.Version, time.Now()); err != nil || !ok {
+		t.Fatalf("delete: %v %v", ok, err)
+	}
+	if rels, err := s.ListApplicationReleases(ctx, "ws_1", a.ID); err != nil || len(rels) != 3 {
+		t.Fatalf("history lost: %v %v", rels, err)
+	}
+
 }

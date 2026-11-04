@@ -142,6 +142,9 @@ func (m *Manager) Prepare(ctx context.Context, req *runtime.PrepareRequest) (*ru
 	if err != nil {
 		return nil, runtime.Errf(runtime.ErrBadSpec, "invalid spec")
 	}
+	if err := runtime.VerifyModuleMounts(spec.Modules, req.Modules); err != nil {
+		return nil, err
+	}
 	hook, err := policy.NewHook(req.Policies.Global, req.Policies.User, m.evalTimeout)
 	if err != nil {
 		return nil, runtime.Errf(runtime.ErrBadSpec, "invalid policies")
@@ -173,6 +176,7 @@ func (m *Manager) Prepare(ctx context.Context, req *runtime.PrepareRequest) (*ru
 		Policies:       spec.Policies,
 		MaxSteps:       spec.Limits.MaxSteps,
 		MaxOutputBytes: spec.Limits.MaxOutputBytes,
+		Modules:        req.Modules,
 	}
 	r.mu.Unlock()
 

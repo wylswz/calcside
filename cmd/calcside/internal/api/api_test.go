@@ -21,6 +21,7 @@ import (
 	"calcside/cmd/calcside/internal/service/catalog"
 	"calcside/cmd/calcside/internal/service/iam"
 	llmprovidersvc "calcside/cmd/calcside/internal/service/llmprovider"
+	modsvc "calcside/cmd/calcside/internal/service/module"
 	policysvc "calcside/cmd/calcside/internal/service/policy"
 	runsvc "calcside/cmd/calcside/internal/service/run"
 	"calcside/cmd/calcside/internal/service/sandbox"
@@ -119,6 +120,9 @@ func newArtifactEnv(t *testing.T, cipher *vaultcipher.Cipher, global map[string]
 	e.sbx = sandbox.New(sandbox.Options{
 		Store: st, Runtime: mgr, Secrets: vaultSvc, Audit: rec,
 		Registry: reg, Limits: limits, Access: ac, MaxInstancesPerUser: 10, GlobalPolicies: global,
+		Rebind: func(tx store.Store) (sandbox.BoundaryBindings, error) {
+			return sandbox.BoundaryBindings{Secrets: vaultSvc.WithStore(tx)}, nil
+		},
 	})
 	previews, err := NewArtifactPreviews(cfg, e.sbx)
 	if err != nil {
@@ -146,6 +150,7 @@ func newArtifactEnv(t *testing.T, cipher *vaultcipher.Cipher, global map[string]
 	h := Handler(Deps{
 		IAM: iam.New(st, ac, e.sbx, 10, nil), Vault: vaultSvc,
 		Application: appSvc,
+		Module:      mustModule(st, ac, reg, e.sbx),
 		Policy:      policysvc.New(st, ac), LLMProvider: llmprovidersvc.New(st, ac, &capext.Options{}),
 		Audit:   auditsvc.New(st, ac),
 		Catalog: catalog.New(reg, nil), Sandbox: e.sbx, Access: ac, Workspace: workspacesvc.New(st, ac),
@@ -1092,4 +1097,12 @@ func TestFileUpload(t *testing.T) {
 	if !found {
 		t.Fatal("no console fs.write audit event")
 	}
+}
+
+func mustModule(st store.Store, ac *access.Checker, reg *capability.Registry, sb *sandbox.Service) *modsvc.Service {
+	s, err := modsvc.New(modsvc.Options{Store: st, Access: ac, Registry: reg, Sandbox: sb})
+	if err != nil {
+		panic(err)
+	}
+	return s
 }

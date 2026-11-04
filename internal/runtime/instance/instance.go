@@ -256,6 +256,11 @@ func (m *Manager) Create(ctx context.Context, req *runtime.CreateRequest) (*runt
 	if err != nil {
 		return nil, err
 	}
+	// Fail closed: declared mounts must arrive as matching pinned
+	// trees, and undeclared trees are rejected.
+	if err := runtime.VerifyModuleMounts(spec.Modules, req.Modules); err != nil {
+		return nil, err
+	}
 
 	// Compile the policy snapshot the API tier captured for us.
 	hook, err := policy.NewHook(req.Policies.Global, req.Policies.User, m.evalTimeout)
@@ -286,6 +291,7 @@ func (m *Manager) Create(ctx context.Context, req *runtime.CreateRequest) (*runt
 		Policies:       spec.Policies,
 		MaxSteps:       spec.Limits.MaxSteps,
 		MaxOutputBytes: spec.Limits.MaxOutputBytes,
+		Modules:        req.Modules,
 	})
 	if err != nil {
 		return nil, runtime.Errf(runtime.ErrBadSpec, "%s", err)

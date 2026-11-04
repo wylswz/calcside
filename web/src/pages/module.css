@@ -1,0 +1,10 @@
+/* Module workbench (scoped): compact source pane + stacked header on
+   small screens. Never touches shared PageHeader outside this page. */
+.module-workbench { --module-source-h: 500px; }
+@media (max-width: 1023px) {
+  .module-workbench { --module-source-h: 280px; }
+}
+@media (max-width: 640px) {
+  .module-head > div:first-child { flex-direction: column; align-items: stretch; }
+  .module-head > div:first-child > div:last-child { align-self: flex-start; }
+}

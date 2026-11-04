@@ -12,6 +12,7 @@ import (
 	capext "calcside/internal/capability/ext"
 	"calcside/internal/extartifact"
 	"calcside/internal/store"
+	"calcside/internal/types"
 )
 
 // Repository is the API-owned source boundary. Workers receive only
@@ -96,6 +97,32 @@ func (r *Repository) Capture(ctx context.Context, source, sum string) (*store.Ex
 	return artifact, nil
 }
 
+// Manifest returns the validated capability.yaml metadata for a
+// pinned (source,sum), re-checking the source allowlists through
+// Capture — a revoked source cannot be inspected either. It reads and
+// validates the manifest only: nothing is initialized, executed or
+// materialized to disk, and the returned struct is a copy.
+func (r *Repository) Manifest(ctx context.Context, source, sum string) (*capext.CapabilityManifest, error) {
+	artifact, err := r.Capture(ctx, source, sum)
+	if err != nil {
+		return nil, err
+	}
+	data, ok := artifact.Files["capability.yaml"]
+	if !ok {
+		return nil, errors.New("extensions: source has no capability.yaml")
+	}
+	m, err := capext.ParseManifest(data)
+	if err != nil {
+		return nil, err
+	}
+	out := *m
+	out.Ops = append([]capext.OpSpec(nil), m.Ops...)
+	out.Config = append([]capext.ConfigField(nil), m.Config...)
+	out.Dependencies = append([]types.CapabilityName(nil), m.Dependencies...)
+	out.Models = append([]string(nil), m.Models...)
+	return &out, nil
+}
+
 func (r *Repository) Resolve(ctx context.Context, source, sum string) (string, error) {
 	artifact, err := r.Capture(ctx, source, sum)
 	if err != nil {
@@ -169,4 +196,12 @@ func (r *Repository) pin(ctx context.Context, config map[string]json.RawMessage)
 	}
 	config["sum"], _ = json.Marshal(artifact.Sum)
 	return nil
+}
+
+// WithStore returns a clone bound to a different artifact store —
+// same options, same policy — so transaction-rebound boundaries never
+// escape to the root store. Options() on the clone binds the clone's
+// Resolve as SourceResolver.
+func (r *Repository) WithStore(st store.ExtensionArtifactStore) *Repository {
+	return &Repository{store: st, opts: r.opts}
 }

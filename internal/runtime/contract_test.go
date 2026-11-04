@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"calcside/internal/completion"
+	"calcside/internal/module"
 	"calcside/internal/types"
 )
 
@@ -29,6 +30,12 @@ func TestMessagesRoundTrip(t *testing.T) {
 			Policies: PolicyBundle{
 				Global: map[string]string{"deny.rego": "package calcside.hooks"},
 				User:   map[string]string{"deny_net": "package calcside.hooks"},
+			},
+			Modules: map[string]module.Tree{
+				"strkit": {
+					Name: "strkit", Version: 3, Sum: "h1:abc=",
+					Files: map[string][]byte{"u.star": []byte("x = 1")},
+				},
 			},
 			Secrets: []Secret{{
 				Name: "TOK", Value: "s3cr3t",
@@ -178,6 +185,18 @@ func TestNormalizeRejects(t *testing.T) {
 		{"env/secret overlap", `{"env":{"T":"x"},"secrets":{"T":{"value":"v"}}}`, "also used by env"},
 		{"bad policy name", `{"policies":["has space"]}`, "policies: invalid name"},
 		{"duplicate policy", `{"policies":["p","p"]}`, "policies: duplicate"},
+		{"bad mount alias", `{"modules":{"bad alias!":{"version":1}}}`, "mount alias"},
+		{"bad module name", `{"modules":{"m":{"name":"bad name","version":1}}}`, "invalid name"},
+		{"negative version", `{"modules":{"m":{"version":-1}}}`, "invalid version"},
+		{"bad sum", `{"modules":{"m":{"version":1,"sum":"sha256:x"}}}`, "h1:"},
+		{"bad module ext alias", `{"modules":{"m":{"version":1,"ext":["bad-alias!"]}}}`, "ext alias"},
+		{"env bad alias", `{"environment":{"extensions":{"bad-alias!":{"bindings":{"default":{"secrets":{"k":{"ref":"TOK"}}}}}}}}`, "extension alias"},
+		{"env bad binding", `{"environment":{"extensions":{"tavily":{"bindings":{"bad binding!":{"secrets":{"k":{"ref":"TOK"}}}}}}}}`, "binding name"},
+		{"env bad field", `{"environment":{"extensions":{"tavily":{"bindings":{"default":{"secrets":{"bad field!":{"ref":"TOK"}}}}}}}}`, "secret field"},
+		{"env bad ref", `{"environment":{"extensions":{"tavily":{"bindings":{"default":{"secrets":{"api_key":{"ref":"lowercase"}}}}}}}}`, "vault reference"},
+		{"env too many domains", `{"environment":{"extensions":{"tavily":{"bindings":{"default":{"secrets":{"api_key":{"ref":"TOK","allowed_domains":["a","a","a","a","a","a","a","a","a","a","a","a","a","a","a","a","a","a","a","a","a","a","a","a","a","a","a","a","a","a","a","a","a"]}}}}}}}}`, "allowed_domains"},
+		{"env no bindings", `{"environment":{"extensions":{"tavily":{"bindings":{}}}}}`, "bindings"},
+		{"env empty secrets", `{"environment":{"extensions":{"tavily":{"bindings":{"default":{"secrets":{}}}}}}}`, "secret fields"},
 	}
 	for _, tc := range cases {
 		var spec Spec
@@ -191,6 +210,52 @@ func TestNormalizeRejects(t *testing.T) {
 		if err != nil && !errors.Is(err, ErrBadSpec) {
 			t.Errorf("%s: error is not ErrBadSpec: %v", tc.name, err)
 		}
+	}
+}
+
+func TestEnvironmentNormalization(t *testing.T) {
+	// Multiple bindings and secret fields, references only: valid.
+	var spec Spec
+	if err := json.Unmarshal([]byte(`{"environment":{"extensions":{"tavily":{"bindings":{
+		"default":{"secrets":{"api_key":{"ref":"TAVILY_PROD","allowed_domains":["api.tavily.com"]},"backup_key":{"ref":"TAVILY_DEV"}}},
+		"staging":{"secrets":{"api_key":{"ref":"TAVILY_STAGING"}}}
+	}}}}}`), &spec); err != nil {
+		t.Fatal(err)
+	}
+	if err := spec.Normalize(Bounds{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	b := spec.Environment.Extensions["tavily"].Bindings
+	if len(b) != 2 || b["default"].Secrets["api_key"].Ref != "TAVILY_PROD" || len(b["default"].Secrets["api_key"].AllowedDomains) != 1 {
+		t.Fatalf("environment lost: %+v", spec.Environment)
+	}
+
+	// Inline credential material is rejected at decode, not silently kept.
+	var bad Spec
+	err := json.Unmarshal([]byte(`{"environment":{"extensions":{"tavily":{"bindings":{"default":{"secrets":{"api_key":{"value":"plaintext"}}}}}}}}`), &bad)
+	if err == nil {
+		if err = bad.Normalize(Bounds{}, nil); err == nil {
+			t.Fatal("inline value accepted")
+		}
+	}
+
+	// Module mount name defaults to the alias and round-trips.
+	var m Spec
+	if err := json.Unmarshal([]byte(`{"modules":{"strkit":{"version":3}}}`), &m); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Normalize(Bounds{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if m.Modules["strkit"].Name != "strkit" || m.Modules["strkit"].Version != 3 {
+		t.Fatalf("module ref lost: %+v", m.Modules)
+	}
+	var rt Spec
+	if err := json.Unmarshal(m.Sanitized(nil), &rt); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(m.Modules, rt.Modules) {
+		t.Fatalf("modules changed across boundary: %+v -> %+v", m.Modules, rt.Modules)
 	}
 }
 

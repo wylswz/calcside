@@ -9,6 +9,7 @@ import (
 	"calcside/cmd/calcside/internal/service"
 	"calcside/cmd/calcside/internal/service/access"
 	runsvc "calcside/cmd/calcside/internal/service/run"
+	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/internal/runtime"
 	"calcside/internal/store"
 	"calcside/internal/types"
@@ -71,10 +72,21 @@ func (s *Service) owner(ctx context.Context, userID string) (runtime.Owner, erro
 // release builds the immutable release from the app's draft —
 // normalized boundary, default object schemas materialized here.
 func (s *Service) release(ctx context.Context, a service.Actor, app *store.Application) (*store.ServingRelease, []runtime.Secret, error) {
-	spec, pols, secs, err := s.boundary(ctx, a, app.WorkspaceID, app.Spec)
+	// Module and vault resolution are workspace-scoped: the app's own
+	// workspace is authoritative, never the caller's selection.
+	a.WorkspaceID = app.WorkspaceID
+	b, err := s.o.Sandbox.BuildBoundary(ctx, a, app.Spec, true)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fail(err)
 	}
+	rel, err := newRelease(app, b, s.o.Now())
+	if err != nil {
+		return nil, nil, fail(err)
+	}
+	return rel, b.Secrets, nil
+}
+
+func newRelease(app *store.Application, b *sandbox.Boundary, at time.Time) (*store.ServingRelease, error) {
 	in, out := app.InputSchema, app.OutputSchema
 	if in == nil {
 		in = store.DefaultApplicationSchema()
@@ -82,16 +94,12 @@ func (s *Service) release(ctx context.Context, a service.Actor, app *store.Appli
 	if out == nil {
 		out = store.DefaultApplicationSchema()
 	}
-	rel, err := store.NewServingRelease(app.WorkspaceID, app.UserID, spec, pols,
+	return store.NewServingReleaseWithModules(app.WorkspaceID, app.UserID, b.Spec, b.Policies,
 		runtime.ProgramBundle{
 			Sources:      map[string][]byte{"main.star": []byte(app.Code)},
 			InputSchema:  in,
 			OutputSchema: out,
-		}, s.o.Now())
-	if err != nil {
-		return nil, nil, fail(err)
-	}
-	return rel, secs, nil
+		}, b.Modules, at)
 }
 
 // Publish: access -> exact version -> build release -> prepare once ->
@@ -123,7 +131,7 @@ func (s *Service) Publish(ctx context.Context, a service.Actor, id string, versi
 		CreateRequest: runtime.CreateRequest{
 			InstanceID: replicaID, Owner: owner,
 			Labels: map[string]string{"name": app.Name, "application_id": app.ID},
-			Spec:   rel.Spec, Policies: rel.Policies, Secrets: secs,
+			Spec:   rel.Spec, Policies: rel.Policies, Modules: rel.Modules, Secrets: secs,
 			ExpiresAt: s.o.Now().Add(30 * time.Second), Epoch: 1,
 		},
 		ReleaseID: rel.ID, Generation: 1, Program: rel.Program,
@@ -179,7 +187,7 @@ func (s *Service) Test(ctx context.Context, a service.Actor, id string, version 
 		CreateRequest: runtime.CreateRequest{
 			InstanceID: replicaID, Owner: owner,
 			Labels: map[string]string{"name": app.Name, "application_id": app.ID},
-			Spec:   rel.Spec, Policies: rel.Policies, Secrets: secs,
+			Spec:   rel.Spec, Policies: rel.Policies, Modules: rel.Modules, Secrets: secs,
 			ExpiresAt: s.o.Now().Add(30 * time.Second), Epoch: 1,
 		},
 		ReleaseID: rel.ID, Generation: 1, Program: rel.Program,

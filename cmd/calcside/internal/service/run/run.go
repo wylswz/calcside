@@ -136,7 +136,7 @@ func (s *Service) Begin(ctx context.Context, app *store.Application, rel *store.
 	}
 	var slots []*store.Interrupt
 	var wire []runtime.InterruptSlot
-	if s.o.Cipher != nil && serving.UsesInterrupt(rel.Program.Sources) {
+	if s.o.Cipher != nil && serving.UsesModuleInterrupt(rel.Program.Sources, rel.Modules) {
 		var err error
 		slots, wire, err = s.mintSlots(ctx, app, run.ID, 0, now)
 		if err != nil {

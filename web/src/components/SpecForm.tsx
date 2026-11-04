@@ -4,13 +4,19 @@ import * as Tabs from '@radix-ui/react-tabs'
 import { api, currentWorkspace, type ExtensionCatalog, type ExtensionInfo, type Policy, type Secret } from '../api'
 import {
   buildInstanceSpec, draftFromSpec, uniqueExtensionAlias, validateRawSpec,
-  type BuildResult, type DraftError, type ExtDraft, type InstanceDraft, type InstanceSpec,
+  type BuildResult, type DraftError, type ExtDraft, type InstanceDraft, type InstanceSpec, type JsonValue,
 } from '../instanceDraft'
 import { fmtBytes } from '../format'
-import { Field, inputCls } from './ui'
+import { Confirm, Field, inputCls } from './ui'
 import { InstanceExtensionEditor } from './InstanceExtensionEditor'
+import { setBindingField, removeBindingField } from '../environment'
 import { ExtensionPicker } from './ExtensionPicker'
+import { ModulePicker, type ModuleEntry } from './ModulePicker'
 import { PolicyPicker } from './PolicyPicker'
+import {
+  addMount, canAddModule, mountName, parseModuleMounts, removeMount, uniqueMountAlias,
+  type ModuleMount,
+} from '../moduleMounts'
 import { ExtensionIcon } from './ExtensionIcon'
 import { InputsSection, LimitsSection } from './SpecSections'
 
@@ -24,11 +30,25 @@ interface Props {
   application?: boolean
   initial?: InstanceSpec
   workspaceId?: string
+  /** module-debug variant: refs-only like application, own labels */
+  debug?: boolean
   onSpecChange?: (draft: InstanceDraft, errors?: DraftError[], built?: { spec?: InstanceSpec; specJSON?: string }) => void
   onRawDirtyChange?: (dirty: boolean) => void
   footer?: ReactNode
   /** Basics are already collected by the create flow; only keep lifetime. */
   hideBasics?: boolean
+  /** Module mode: static deps fixed by the dependency picker — merged
+      into the debug draft with config preserved; not addable/removable here. */
+  fixedExtensions?: Record<string, { source: string; sum?: string }>
+  /** Module mode: catalog Add — the parent pins the dep and pushes a new
+      fixedExtensions; there is no transient local add. */
+  onAddFixedExtension?: (entry: ExtensionInfo) => void
+  /** Module mode: summary Remove — routed to the parent's named Confirm
+      rather than the local remove/undo path (F2). */
+  onRemoveFixedExtension?: (alias: string) => void
+  /** Module mode: disables dependency add/remove while leaving the rest
+      of the runtime configuration editable (e.g. source save conflict). */
+  fixedDepsDisabled?: boolean
 }
 
 // Item keys order the instance summary: 'fs', 'net' or 'ext:<id>'. The id
@@ -59,11 +79,12 @@ const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)'
 // page section for the forms. The instance summary beside them is short
 // (one fixed-height row per capability), so nothing needs its own scroll.
 export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
-  keyMode = false, application = false, initial, workspaceId, onSpecChange, onRawDirtyChange, footer, hideBasics = false,
+  keyMode = false, application = false, debug = false, initial, workspaceId, onSpecChange, onRawDirtyChange, footer, hideBasics = false, fixedExtensions,
+  onAddFixedExtension, onRemoveFixedExtension, fixedDepsDisabled = false,
 }, ref) {
   // Application mode: vault-ref secrets only (same ceiling as key
   // specs) — never inline values in a durable spec.
-  const refsOnly = keyMode || application
+  const refsOnly = keyMode || application || debug
   const [draft, setDraft] = useState(() => draftFromSpec(initial))
   const [advanced, setAdvanced] = useState(false)
   const [json, setJSON] = useState('')
@@ -75,6 +96,69 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
     ...(draft.fs ? ['fs'] : []), ...(draft.net ? ['net'] : []), ...extIds.current.map((id) => `ext:${id}`),
   ])
   const [removed, setRemoved] = useState<Removed | null>(null)
+  // Module mounts (application mode): named Confirm, then a same-slot
+  // placeholder like capability removals (S3/F1/F2).
+  const [modRemove, setModRemove] = useState<ModuleMount | null>(null)
+  const [modRemoved, setModRemoved] = useState<{ at: number; title: string; alias: string; ref: Record<string, JsonValue> } | null>(null)
+  // Module mode: reconcile the debug draft against the statically
+  // declared deps — same alias+source keeps config/env, a changed
+  // source resets them, removed aliases prune env/errors.
+  const fixedPrev = useRef<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    if (!fixedExtensions) return
+    setDraft((d) => {
+      const fixed = fixedExtensions
+      // index-stable ids: extIds.current[i] pairs d.exts[i]
+      let changed = false
+      const keepIdx: number[] = []
+      const exts = d.exts.filter((e, i) => {
+        if (fixedPrev.current.has(e.alias) && !(e.alias in fixed)) { changed = true; return false }
+        keepIdx.push(i)
+        return true
+      })
+      const ids = keepIdx.map((i) => extIds.current[i])
+      const extra = { ...(d.extra ?? {}) }
+      const env = { ...((extra.environment as { extensions?: Record<string, unknown> } | undefined)?.extensions ?? {}) }
+      let envChanged = false
+      for (const [alias, dep] of Object.entries(fixed)) {
+        const i = exts.findIndex((e) => e.alias === alias)
+        if (i >= 0) {
+          if (exts[i].source !== dep.source) {
+            exts[i] = { alias, source: dep.source, config: {}, extra: dep.sum ? { sum: dep.sum } : {} }
+            ids[i] = extNext.current++
+            delete env[alias]; envChanged = true
+            changed = true
+          } else if (dep.sum && exts[i].extra?.sum !== dep.sum) {
+            exts[i] = { ...exts[i], extra: { ...(exts[i].extra ?? {}), sum: dep.sum } }
+            changed = true
+          }
+        } else {
+          exts.push({ alias, source: dep.source, config: {}, extra: dep.sum ? { sum: dep.sum } : {} })
+          ids.push(extNext.current++)
+          changed = true
+        }
+      }
+      extIds.current = ids
+      if (changed) {
+        // clone env map — never mutate the old draft's snapshot
+        for (const a of fixedPrev.current) if (!(a in fixed)) { delete env[a]; envChanged = true }
+        setOrder((o) => {
+          const keys = ids.map((i) => `ext:${i}`)
+          return [...o.filter((k) => !k.startsWith('ext:') || keys.includes(k)),
+                  ...keys.filter((k) => !o.includes(k))]
+        })
+        setExtErrors((errs) => {
+          const next = new Map(errs)
+          next.forEach((_, k) => { if (!ids.includes(k)) next.delete(k) })
+          return next
+        })
+      }
+      fixedPrev.current = new Set(Object.keys(fixed))
+      if (!changed && !envChanged) return d
+      if (envChanged) extra.environment = { ...((extra.environment as Record<string, unknown>) ?? {}), extensions: env } as never
+      return { ...d, exts, extra }
+    })
+  }, [fixedExtensions])
   const [flash, setFlash] = useState<ItemKey | null>(null)
   const [reveal, setReveal] = useState<ItemKey | null>(null)
   const tabsRef = useRef<HTMLDivElement>(null)
@@ -97,6 +181,13 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
     queryKey: ['extensions', ws],
     queryFn: () => api.get<ExtensionCatalog>(scope('/api/v1/extensions')),
     retry: false,
+  })
+  // Application mode: workspace module library for spec.modules mounts.
+  const modulesQ = useQuery({
+    queryKey: ['modules', ws],
+    queryFn: () => api.get<{ modules: ModuleEntry[] }>(scope('/api/v1/modules')),
+    retry: false,
+    enabled: application,
   })
   const set = (patch: Partial<InstanceDraft>) => setDraft((d) => ({ ...d, ...patch }))
   const extensions = useMemo(() => (catalog.data?.extensions ?? []).filter((e) => e.interface !== 'llm'), [catalog.data])
@@ -236,12 +327,60 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
     const index = draft.exts.findIndex((e) => e.source === entry.source)
     if (index >= 0) setFlash(`ext:${extIds.current[index]}`)
   }
+
+  // Application module mounts (spec.modules). The raw map stays
+  // authoritative: malformed values are never rewritten by the visual
+  // editor — the user fixes them in Advanced JSON (C2/F3).
+  const modParsed = application ? parseModuleMounts(draft.extra?.modules) : { ok: true as const, mounts: [] as ModuleMount[] }
+  const modMounts = modParsed.ok ? modParsed.mounts : []
+  const modNames = new Set(modMounts.map((x) => mountName(x)))
+  const addModule = (entry: ModuleEntry) => {
+    if (!canAddModule(modParsed, entry)) return
+    const alias = uniqueMountAlias(entry.name, new Set(modMounts.map((x) => x.alias)))
+    const ref: Record<string, JsonValue> = { name: entry.name }
+    if (entry.latest_version) ref.version = entry.latest_version
+    if (entry.latest_sum) ref.sum = entry.latest_sum
+    setDraft((d) => ({ ...d, extra: { ...d.extra, modules: addMount(d.extra?.modules, alias, ref) } }))
+    setModRemoved(null)
+    setFlash(`mod:${alias}`)
+  }
+  const pointAtModule = (entry: ModuleEntry) => {
+    const mount = modMounts.find((x) => mountName(x) === entry.name)
+    if (mount) setFlash(`mod:${mount.alias}`)
+  }
+  const doRemoveModule = (mount: ModuleMount) => {
+    const at = modMounts.findIndex((x) => x.alias === mount.alias)
+    setModRemoved({ at, title: mountName(mount), alias: mount.alias, ref: mount.ref })
+    setDraft((d) => {
+      const extra = { ...d.extra }
+      const next = removeMount(extra.modules, mount.alias)
+      if (next === undefined) delete extra.modules
+      else extra.modules = next
+      return { ...d, extra }
+    })
+  }
+  const undoModule = () => {
+    if (!modRemoved) return
+    const { alias, ref } = modRemoved
+    setDraft((d) => ({ ...d, extra: { ...d.extra, modules: addMount(d.extra?.modules, alias, ref) } }))
+    setModRemoved(null)
+  }
   const setExtError = (id: number, message: string) =>
     setExtErrors((m) => { const n = new Map(m); if (message) n.set(id, message); else n.delete(id); return n })
 
   // Removing leaves an undo row of the same height in the same slot, so
   // the next row does not slide under the pointer.
   const remove = (key: ItemKey, title: string) => {
+    // Module mode: fixed deps route to the parent's named Confirm before
+    // ANY local state changes — cancelling the dialog must not drop or
+    // reorder the row (C2/C3/F2).
+    if (fixedExtensions !== undefined && key.startsWith('ext:')) {
+      const index = extIds.current.indexOf(Number(key.slice(4)))
+      if (index >= 0 && draft.exts[index].alias in fixedExtensions) {
+        if (!fixedDepsDisabled) onRemoveFixedExtension?.(draft.exts[index].alias)
+        return
+      }
+    }
     const at = order.indexOf(key)
     setOrder((o) => o.filter((k) => k !== key))
     if (key === 'fs' && draft.fs) { setRemoved({ key, at, title, data: draft.fs }); set({ fs: null }); return }
@@ -323,12 +462,36 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
       issues: [...errors.filter((e) => e.section === 'Extensions' && own(e.message) && !e.message.includes('— add it explicitly')).map((e) => e.message), ...(extErrors.has(id) ? [extErrors.get(id)!] : [])],
       body: <InstanceExtensionEditor value={ext} catalog={extensions}
         secretNames={draft.secrets.map((s) => s.name).filter(Boolean)}
+        legacySecretRefs={Object.fromEntries(draft.secrets.filter((x) => x.name && x.kind === 'vault').map((x) => [x.name, x.ref || x.name]))}
         vaultNames={(vault.data?.secrets ?? []).map((s) => s.name)}
         onUseVault={(name) => set({ secrets: draft.secrets.some((s) => s.name === name) ? draft.secrets : [...draft.secrets, { name, kind: 'vault', ref: name, value: '', domains: [], extra: {} }] })}
+        secretBindings={(((draft.extra?.environment as { extensions?: Record<string, { bindings?: Record<string, { secrets?: Record<string, { ref: string; allowed_domains?: string[] }> }> }> } | undefined)?.extensions?.[ext.alias]?.bindings?.default?.secrets) ?? {})}
+        onSecretBindingChange={(field, sf) => setDraft((d) => {
+          const env = (d.extra?.environment ?? {}) as never
+          const nextEnv = sf === undefined
+            ? removeBindingField(env, ext.alias, 'default', field)
+            : setBindingField(env, ext.alias, 'default', field, sf)
+          // A new env selection removes the legacy config placeholder
+          // for that field only — siblings and secondary bindings stay.
+          const exts = d.exts.map((e, i) => {
+            if (i !== index || sf === undefined) return e
+            const cfg = { ...e.config }
+            delete cfg[field]
+            return { ...e, config: cfg }
+          })
+          return { ...d, exts, extra: { ...d.extra, environment: nextEnv } }
+        })}
         onValidityChange={(m) => setExtError(id, m)} onChange={(value) => set({ exts: draft.exts.map((e, i) => i === index ? value : e) })} />,
     }
   }
   const items = keys.map(describe).filter((x): x is Item => x !== null)
+  // Module mode: a fixed dep's Remove routes to the parent's Confirm —
+  // and is disabled while dependency mutations are locked.
+  const isFixedRow = (key: ItemKey) => {
+    if (!key.startsWith('ext:') || fixedExtensions === undefined) return false
+    const ext = draft.exts[extIds.current.indexOf(Number(key.slice(4)))]
+    return !!ext && ext.alias in fixedExtensions
+  }
 
   // One line, fixed height: "Needs Network" becomes the summary in place.
   const status = (item: Item) => {
@@ -350,7 +513,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
         {status(item)}
       </div>
       <button type="button" className="text-btn" aria-label={`Configure ${item.title}`} onClick={() => openSettings(item.key)}>Configure</button>
-      <button type="button" className="text-btn" aria-label={`Remove ${item.title}`} onClick={() => remove(item.key, item.title)}>Remove</button>
+      <button type="button" className="text-btn" aria-label={`Remove ${item.title}`} disabled={isFixedRow(item.key) && fixedDepsDisabled} onClick={() => remove(item.key, item.title)}>Remove</button>
     </div>
   ))
   if (removed) {
@@ -374,7 +537,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
             <p className="text-sm text-sec">{refsOnly ? 'Secrets must use vault references.' : 'Advanced editing includes any inline secret values.'} Invalid edits cannot be submitted.</p>
             <button type="button" className="text-btn underline" onClick={toggleAdvanced}>Back to editor</button>
           </div>
-          <textarea aria-label={application ? 'Application spec JSON' : 'Instance spec JSON'} className={inputCls + ' min-h-[420px] font-mono text-xs'} value={json} spellCheck={false} onChange={(e) => setJSON(e.target.value)} />
+          <textarea aria-label={application ? 'Application spec JSON' : debug ? 'Debug spec JSON' : 'Instance spec JSON'} className={inputCls + ' min-h-[420px] font-mono text-xs'} value={json} spellCheck={false} onChange={(e) => setJSON(e.target.value)} />
           {alert}
           {footer && <div className="spec-json-footer">{footer}</div>}
         </div>
@@ -387,7 +550,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
       <div className="spec-builder">
         <Tabs.Root className="spec-main" value={view} onValueChange={(v) => switchView(v as View)}>
           <div className="spec-tabs" ref={tabsRef}>
-            <Tabs.List className="segmented" aria-label={application ? 'Application configuration' : 'Instance configuration'}>
+            <Tabs.List className="segmented" aria-label={application ? 'Application configuration' : debug ? 'Debug configuration' : 'Instance configuration'}>
               <Tabs.Trigger value="capabilities">Add capabilities</Tabs.Trigger>
               <Tabs.Trigger value="settings">
                 Settings{errors.length > 0 && <span className="tab-badge" aria-label={`${errors.length} issues`}>{errors.length}</span>}
@@ -398,7 +561,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
 
           {/* forceMount keeps both views mounted so editor state survives switching */}
           <Tabs.Content value="capabilities" forceMount className="spec-palette">
-            <p className="spec-pane-note">Optional. {application ? 'Applied when published.' : 'Settings are fixed after creation.'}</p>
+            <p className="spec-pane-note">Optional. {application ? 'Applied when published.' : debug ? 'Used only for this module debug run.' : 'Settings are fixed after creation.'}</p>
             <div className="ability-choices">
               <button type="button" className="ability-choice" data-selected={!!draft.fs} aria-label={draft.fs ? 'Files added' : 'Add Files'} onClick={addFiles}>
                 <FilesIcon />
@@ -413,9 +576,25 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
             </div>
             <div className="extensions-block">
               <h4 className="mb-3 text-sm font-semibold text-ink">Extensions</h4>
-              <ExtensionPicker entries={extensions} selectedSources={selectedSources} loading={catalog.isPending} error={catalog.isError}
-                onRetry={() => catalog.refetch()} onAdd={addExtension} onShow={pointAtExtension} onCustom={() => addExtension({ name: '', source: '' })} />
+              <fieldset className="m-0 min-w-0 border-0 p-0" disabled={fixedExtensions !== undefined && fixedDepsDisabled}>
+                <ExtensionPicker entries={extensions} selectedSources={selectedSources} loading={catalog.isPending} error={catalog.isError}
+                  onRetry={() => catalog.refetch()}
+                  onAdd={fixedExtensions !== undefined ? (entry) => onAddFixedExtension?.(entry) : addExtension}
+                  onShow={pointAtExtension} />
+              </fieldset>
             </div>
+            {application && (
+              <div className="modules-block">
+                <h4 className="mb-3 text-sm font-semibold text-ink">Modules</h4>
+                {!modParsed.ok ? (
+                  <p className="spec-pane-note">The spec declares modules this editor can't display — edit them in Advanced JSON.</p>
+                ) : (
+                  <ModulePicker entries={modulesQ.data?.modules ?? []} selectedNames={modNames}
+                    loading={modulesQ.isPending} error={modulesQ.isError} onRetry={() => modulesQ.refetch()}
+                    onAdd={addModule} onShow={pointAtModule} canAdd={(e) => canAddModule(modParsed, e)} />
+                )}
+              </div>
+            )}
             <div className="policies-block">
               <h4 className="mb-3 text-sm font-semibold text-ink">Policies</h4>
               <p className="spec-pane-note">Policies constrain what capabilities may do; they never grant access.</p>
@@ -464,8 +643,8 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
           </Tabs.Content>
         </Tabs.Root>
 
-        <aside className="spec-selection" aria-label={application ? 'Application settings' : 'This instance'}>
-          <h3 className="spec-pane-title">{application ? 'This application' : 'This instance'}</h3>
+        <aside className="spec-selection" aria-label={application ? 'Application settings' : debug ? 'Debug environment' : 'This instance'}>
+          <h3 className="spec-pane-title">{application ? 'This application' : debug ? 'Debug environment' : 'This instance'}</h3>
           {!application && (
             hideBasics ? (
               <Field label="Lifetime (seconds)"><input className={inputCls} type="number" min="1" value={draft.ttlSeconds} onChange={(e) => set({ ttlSeconds: e.target.value === '' ? '' : Number(e.target.value) })} /></Field>
@@ -490,6 +669,59 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
               {rows}
             </div>
           </div>
+          {application && (
+            <div>
+              <p className="sidebar-label">Modules</p>
+              <div className="selected-list">
+                {!modParsed.ok && (
+                  <div className="selected-row is-empty">
+                    <div className="min-w-0 flex-1">
+                      <h4 className="config-item-title">Modules declared</h4>
+                      <span className="selected-status">Edit them in Advanced JSON</span>
+                    </div>
+                  </div>
+                )}
+                {modParsed.ok && modMounts.length === 0 && !modRemoved && (
+                  <div className="selected-row is-empty">
+                    <div className="min-w-0 flex-1">
+                      <h4 className="config-item-title">No modules</h4>
+                      <span className="selected-status">Mount published modules to load() them</span>
+                    </div>
+                  </div>
+                )}
+                {(() => {
+                  const modRows: ReactNode[] = modMounts.map((mount) => {
+                    const name = mountName(mount)
+                    const v = mount.ref.version
+                    const sum = mount.ref.sum
+                    return (
+                      <div key={mount.alias} data-row={`mod:${mount.alias}`} className={'selected-row' + (flash === `mod:${mount.alias}` ? ' is-flash' : '')}>
+                        <div className="min-w-0 flex-1">
+                          <p className="config-item-title">{name}</p>
+                          <span className="selected-status">
+                            @{mount.alias}
+                            {typeof v === 'number' && v > 0 ? ` · v${v}` : ''}
+                            {typeof sum === 'string' && sum ? ` · ${sum.slice(0, 20)}…` : ''}
+                          </span>
+                          <code className="block truncate text-xs text-mute" title="Use a .star file from the module and an exported symbol">{`load("@${mount.alias}/<file>.star", "<symbol>")`}</code>
+                        </div>
+                        <button type="button" className="text-btn" aria-label={`Remove module ${name}`} onClick={() => setModRemove(mount)}>Remove</button>
+                      </div>
+                    )
+                  })
+                  if (modRemoved) {
+                    modRows.splice(Math.min(modRemoved.at, modRows.length), 0, (
+                      <div key="mod-removed" className="selected-row is-removed" role="status">
+                        <span>{modRemoved.title} removed</span>
+                        <button type="button" className="text-btn" onClick={undoModule}>Undo</button>
+                      </div>
+                    ))
+                  }
+                  return modRows
+                })()}
+              </div>
+            </div>
+          )}
           <div>
             <p className="sidebar-label">Policies</p>
             <div className="selected-list">
@@ -523,6 +755,13 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
           {alert}
           {footer}
         </aside>
+        {modRemove && (
+          <Confirm title={`Remove module ${mountName(modRemove)}?`} tone="danger" confirm="Remove" pending="Removing…"
+            action={async () => { doRemoveModule(modRemove); setModRemove(null) }}
+            onClose={() => setModRemove(null)}>
+            Remove the {mountName(modRemove)} module mounted as @{modRemove.alias}? Scripts calling load("@{modRemove.alias}/…") will fail until it is added again.
+          </Confirm>
+        )}
       </div>
     </div>
   )

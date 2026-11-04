@@ -125,6 +125,14 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		cleanup()
 		return nil, nil, err
 	}
+	moduleService, err := provideModuleService(store, checker, registry, repository, sandboxService)
+	if err != nil {
+		cleanup4()
+		cleanup3()
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
 	deps := api.Deps{
 		IAM:         iamService,
 		Vault:       service,
@@ -142,6 +150,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		Previews:    artifactPreviews,
 		Application: applicationService,
 		Run:         runService,
+		Module:      moduleService,
 	}
 	googleFlow, err := provideGoogle(ctx, cfg)
 	if err != nil {
