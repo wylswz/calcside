@@ -205,6 +205,7 @@ test('call examples tabs show real request shapes', async ({ page }) => {
   const id = (await r.json()).application.id
   await page.goto(`${viteURL}/applications/${id}`)
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: viteURL })
+  await page.getByRole('tablist', { name: 'Application views' }).getByRole('tab', { name: 'Invoke', exact: true }).click()
   const examples = page.locator('.app-examples')
   await examples.scrollIntoViewIfNeeded()
   await page.getByRole('tab', { name: 'curl', exact: true }).focus()

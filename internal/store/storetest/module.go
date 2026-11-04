@@ -96,6 +96,34 @@ func RunModules(t *testing.T, s store.Store) {
 		}
 	})
 
+	t.Run("rename_collision", func(t *testing.T) {
+		a, _ := store.NewModule("ws_1", u.ID, "ren-a", "", files, now)
+		b, _ := store.NewModule("ws_1", u.ID, "ren-b", "", files, now)
+		if err := s.CreateModule(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.CreateModule(ctx, b); err != nil {
+			t.Fatal(err)
+		}
+		// Renaming onto a taken name fails and writes nothing.
+		b.Name = "ren-a"
+		b.Description = "lost"
+		ok, err := s.UpdateModuleDraft(ctx, b, 1)
+		if !errors.Is(err, store.ErrConflict) || ok {
+			t.Fatalf("rename collision: %v %v", err, ok)
+		}
+		got, err := s.GetModule(ctx, b.ID)
+		if err != nil || got.Name != "ren-b" || got.DraftVersion != 1 || got.Description != "" {
+			t.Fatalf("collision overwrote draft: %v %+v", err, got)
+		}
+		// A name taken only in another workspace stays available.
+		b.Name = "shared"
+		ok, err = s.UpdateModuleDraft(ctx, b, 1)
+		if err != nil || !ok {
+			t.Fatalf("cross-workspace name rejected: %v %v", err, ok)
+		}
+	})
+
 	t.Run("draft_cas", func(t *testing.T) {
 		m, _ := store.NewModule("ws_1", u.ID, "cas", "", files, now)
 		if err := s.CreateModule(ctx, m); err != nil {

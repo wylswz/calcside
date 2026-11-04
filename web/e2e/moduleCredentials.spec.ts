@@ -174,6 +174,37 @@ test('module debug executes ext with vault-injected credentials', async ({ page 
   // back to the structured editor keeps the fields
   await page.getByRole('button', { name: 'Back to editor' }).click()
 
+  // Integrated layout: the dependency catalog sits left of the Debug
+  // environment summary while a dep is selected (S3) — capture it
+  // before the removal below leaves the row empty.
+  const deps = page.getByTestId('module-deps')
+  await deps.getByRole('tab', { name: 'Add capabilities' }).click()
+  const libBox = await deps.locator('.extensions-block .ext-library').boundingBox()
+  const asideBox = await deps.locator('aside').boundingBox()
+  expect(libBox && asideBox && libBox.x < asideBox.x).toBeTruthy()
+  await page.screenshot({ path: 'e2e/screenshots/module-credentials-deps.png' })
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false)
+  await page.setViewportSize({ width: 1280, height: 900 })
+
+  // A confirmed dependency removal prunes the dep's config and env.
+  await page.getByTestId('module-deps').getByRole('button', { name: 'Remove credentials' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Remove' }).click()
+  await expect.poll(async () => {
+    const g = await client.get(`/api/v1/modules/${mod.id}`)
+    return JSON.stringify((await g.json()).module.requirements ?? {})
+  }, { timeout: 15_000 }).not.toContain('fixture/credentials')
+  await expect.poll(async () => {
+    const g = await client.get(`/api/v1/modules/${mod.id}/debug`)
+    const sp = (await g.json()).debug.spec
+    return JSON.stringify(sp?.environment?.extensions ?? {})
+  }, { timeout: 15_000 }).not.toContain('credentials')
+  await expect.poll(async () => {
+    const g = await client.get(`/api/v1/modules/${mod.id}/debug`)
+    const sp = (await g.json()).debug.spec
+    return JSON.stringify(sp?.capabilities?.ext ?? {})
+  }, { timeout: 15_000 }).not.toContain('credentials')
+
   await page.screenshot({ path: 'e2e/screenshots/module-credentials.png' })
   await page.setViewportSize({ width: 390, height: 844 })
   await page.screenshot({ path: 'e2e/screenshots/module-credentials-mobile.png' })

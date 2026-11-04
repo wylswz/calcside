@@ -60,6 +60,17 @@ func New(o Options) (*Service, error) {
 	return &Service{o: o}, nil
 }
 
+// nameFail maps the (workspace_id, name) uniqueness conflict to a
+// name-specific message — used only by Create/Update, where ErrConflict
+// can only come from the name constraint; publish/base conflicts keep
+// the generic mapping in fail.
+func nameFail(err error) error {
+	if errors.Is(err, store.ErrConflict) {
+		return service.Conflict("A module with this name already exists in this workspace")
+	}
+	return fail(err)
+}
+
 func fail(err error) error {
 	if err == nil {
 		return nil

@@ -132,9 +132,9 @@ Every invariant has an owner mechanism, in order of preference:
 | S5 | `useHeldOrder` + "Show N new"/"Show latest"; `stableList` unit tests; e2e activity and instance list | enforced for polled lists |
 | S6 | scroll-locked `Modal`; e2e "opening a dialog does not shift the page" | enforced for dialogs |
 | C1 | `Modal`/`Menu` return focus, removal falls back to a neighbour; e2e primitives and removal tests | enforced for overlays and removals |
-| C2 | `Modal` asks before Escape, the close control or an outside click discards input; create flow keeps configuration mounted behind Back; e2e "a dialog with unsaved input asks…", "guide -> configuration carries basics, Back keeps them"; extension editor keeps invalid JSON | enforced for dialogs and the create flow |
-| C3 | `useHeldOrder` keeps shown order across refetches; review for expansion, selection and scroll | partial — polled lists keep order |
-| C4 | create steps are addressable as `?step=config`; other view state | partial — create step is addressable |
+| C2 | `Modal` asks before Escape, the close control or an outside click discards input; create flow keeps configuration mounted behind Back; application view panels stay mounted; `applicationWorkbench.spec.ts` preserves code, inputs and invalid Settings JSON | enforced for dialogs, create flow and application view switching |
+| C3 | `useHeldOrder` keeps shown order across refetches; application view panels retain editor DOM and resource expansion (`applicationWorkbench.spec.ts`) | partial — polling and application view continuity covered; other scroll/selection by review |
+| C4 | create steps are addressable as `?step=config`; application views use `?view=invoke` / `?view=activity`, with browser history coverage | partial — create steps and application views are addressable |
 | P1 | pending guards; static `mutate` check; e2e removal test | partial — async forms by review |
 | P2 | `ui.tsx` primitives; static browser-dialog check; e2e primitives test | enforced for buttons, menus, dialogs and labels |
 | P3, F3 | application autosave indicator | review |
@@ -170,6 +170,15 @@ Every invariant has an owner mechanism, in order of preference:
   re-previews on explicit Refresh (P2/C2); ext secret selection writes
   the vault-ref environment default via the shared `SpecForm` editor —
   no manual secret names (C4 review).
+  Static extension dependencies live inside the same `SpecForm`
+  (catalog left, selected summary right) as instance/application
+  configuration: catalog Add routes to the requirements CAS, summary
+  Remove routes to the named dep `Confirm` (F2) — never the local
+  remove/undo path — and a confirmed removal prunes the dep's debug
+  config and environment bindings (`moduleCredentials.spec.ts`).
+  Dep add/remove locks on a source-draft save conflict or a pending
+  local-draft recovery while runtime configuration stays editable;
+  publish busy/review and a running debug lock the whole form.
 - **P1:** pending guards are enforced on `Confirm` and by the static
   `mutate` check; longer inline forms are review-only.
 
@@ -177,7 +186,26 @@ Every invariant has an owner mechanism, in order of preference:
 
 `/applications/:id` is covered by `e2e/application.spec.ts` against a
 live Vite dev server (React StrictMode) proxying a scratch dev API. The
-page is divided into bounded cards (P6): Develop, Settings and Invoke.
+page has three addressable views (P6): Develop (workbench and Settings),
+Invoke (published-version calls), and Activity (Runs). Shared Radix tabs
+hide inactive panels without unmounting their editors or inputs (C2/C3).
+- `applicationWorkbench.spec.ts` verifies CodeMirror DOM identity,
+  draft/call input and invalid Settings JSON survive view switches,
+  browser Back restores the selected view, and hidden controls are absent
+  from the accessibility tree.
+- Develop has a directory-style Resources pane to the left of the editor.
+  It lists configured extension aliases with operation documentation and
+  mounted module aliases with nested `.star` files. Module files come
+  from the referenced published version, never the mutable library draft;
+  mismatched pins and unavailable versions show errors instead of falling
+  back (F3). Reference browsing never inserts or executes code, changes the
+  spec, or renders credentials. Native disclosures keep expansion state
+  across view and viewport changes; mobile stacks the pane above code.
+  Module files and extension operations open read-only references in the
+  main editor frame; the sidebar contains navigation only. The draft
+  editor remains mounted, and Run always executes main.star (C2/F3).
+  The resource/frame top and bottom edges are measured by the workbench
+  browser test; both panels scroll internally above the separate test area.
 - Develop's title bar holds its actions — Run and Publish (primary),
   with `SwapLabel` Run/Running… and Publish/Publishing… (S4). There is
   no Save button: edits autosave 1200 ms after the last change (only
@@ -216,6 +244,20 @@ Application creation keeps the optional capability/extension form mounted
 when collapsed (C2). Application-mode forms omit instance lifetime fields
 and allow only vault references. Raw Advanced JSON is submitted without a
 browser-number round trip.
+
+Application Settings also carries a Modules library (`ModulePicker`,
+same fixed-geometry palette as `ExtensionPicker`, S1/S3): adding a
+published module writes a pinned `{name,version,sum}` mount under a
+generated `@alias` (≤32 mounts, `self` reserved), and the selected
+summary shows the mount alias, pin and a `load("@alias/…")` example.
+Unpublished modules are visible but not addable; a malformed
+`spec.modules` value is never rewritten by the visual editor — it is
+left for Advanced JSON (C2/F3). Removal goes through the named
+`Confirm` and leaves a same-slot placeholder with Undo (S3/F1/F2).
+`applicationModule.spec.ts` covers add → pinned draft spec → reload →
+Run/published invoke, proves a later library publish does not move the
+pinned reference, and asserts confirmed removal drops only the named
+mount.
 
 Invocation examples use Radix keyboard tabs and the shared `CopyBlock`
 with `SwapLabel` feedback (P2/S4). Their code panel has a fixed height

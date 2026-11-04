@@ -2,16 +2,17 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
-import { api, wsPath, workspaces, type ExtensionCatalog, type ExtensionInfo } from '../api'
+import { api, wsPath, workspaces, type ExtensionInfo } from '../api'
 import { AutosaveQueue, type AutosaveState } from '../autosave'
 import { readPendingDraft, writePendingDraft, type PendingDraft } from '../pendingDraft'
-import { ExtensionPicker } from '../components/ExtensionPicker'
+import { CopyBlock } from '../components/MCP'
 import { Button, Confirm, Loading, Notice, PageHeader, SectionTitle, SwapLabel } from '../components/ui'
 import { PublishReviewDialog } from '../components/PublishReviewDialog'
 import { SpecForm, type SpecFormHandle } from '../components/SpecForm'
 import { cmTheme } from '../components/codemirror'
 import { useApplicationEditor } from '../components/editor'
 import { uniqueExtensionAlias, validateRawSpec, type InstanceSpec } from '../instanceDraft'
+import { uniqueMountAlias } from '../moduleMounts'
 import './module.css'
 
 const EMPTY_DEPS: Record<string, { source: string; sum?: string }> = {}
@@ -176,14 +177,20 @@ function ModuleEditor({ id }: { id: string }) {
     window.addEventListener('beforeunload', h)
     return () => window.removeEventListener('beforeunload', h)
   }, [modState?.dirty, modState?.saving, configError, recoveredModule])
-  const catalogQ = useQuery({ queryKey: ['extensions', m?.workspace_id], queryFn: () => api.get<ExtensionCatalog>(wsPath('/api/v1/extensions')), retry: false })
-
   if (q.isLoading || dq.isLoading || wsq.isLoading) return <Loading />
   if (q.isError) return <Notice tone="warning">Module unavailable: {(q.error as Error).message}</Notice>
   if (!m) return null
   const wsRole = wsq.data?.find((w) => w.id === m.workspace_id)?.role ?? 'viewer'
   const canEdit = wsRole === 'owner' || wsRole === 'editor'
   const modConflict = modState?.conflict ?? false
+  // Reference example: an actual .star file from the current draft
+  // (main.star when present), under the same alias the pickers would
+  // generate — the mount grammar is narrower than names and 'self' is
+  // the debug mount, so dotted/reserved names differ here.
+  const refFile = Object.keys(m.files).filter((f) => f.endsWith('.star'))
+    .sort((a, b) => (a === 'main.star' ? -1 : b === 'main.star' ? 1 : a.localeCompare(b)))[0] ?? 'main.star'
+  const refAlias = uniqueMountAlias(m.name, new Set())
+  const refExample = `load("@${refAlias}/${refFile}", "func")`
   const saveStatus = modConflict ? "Couldn't save"
     : modState?.error ? "Couldn't save"
     : modState?.saving ? 'Saving…'
@@ -250,6 +257,14 @@ function ModuleEditor({ id }: { id: string }) {
       )}
       {modState?.error && !modConflict && <Notice tone="warning">{modState.error.message}</Notice>}
       {pubErr && <Notice tone="warning">{pubErr}</Notice>}
+      <section className="module-identity rounded border border-line bg-panel p-3">
+        <p className="mb-2 text-xs text-sec">
+          Name <code className="font-mono text-ink">{m.name}</code> — unique in this workspace.
+          The debug run mounts this draft as <code>@self</code>; applications and instances mount a published
+          version by name under a mount alias. Example with this draft's files:
+        </p>
+        <CopyBlock text={refExample} mono />
+      </section>
       <div className="module-workbench grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
         <section className="min-w-0 rounded border border-line bg-panel p-3">
           <SectionTitle>Module source</SectionTitle>
@@ -282,45 +297,17 @@ function ModuleEditor({ id }: { id: string }) {
           onEpochChange={() => setDebugEpoch((e) => e + 1)}
           onPendingChange={(f) => { dbgPending.current = f }} />
       </div>
-      <section className="rounded border border-line bg-panel p-3" data-testid="module-deps">
-        <fieldset disabled={!canEdit || modConflict || pubBusy || reviewOpen || debugBusy || !!recoveredModule}>
-        <SectionTitle>Extension dependencies</SectionTitle>
-        <p className="text-xs text-mute">Static dependencies publish with the module; settings and credentials below are only used for debugging.</p>
-        {Object.keys(reqs?.ext ?? {}).length === 0 && <p className="mt-2 text-xs text-mute">No extension dependencies.</p>}
-        <ul className="mt-2 flex flex-col gap-1">
-          {Object.entries(reqs?.ext ?? {}).map(([alias, dep]) => (
-            <li key={alias} className="flex flex-wrap items-center gap-2 break-all text-xs">
-              <code>{alias}</code>
-              <span className="text-sec">{dep.source}</span>
-              {dep.sum && <code className="text-mute">{dep.sum}</code>}
-              {canEdit && (
-                <Button size="sm" variant="danger" disabled={modConflict}
-                  onClick={() => setDepRemove(alias)}>Remove</Button>
-              )}
-            </li>
-          ))}
-        </ul>
-        {depRemove && (
-          <Confirm title={`Remove ${depRemove}?`} tone="danger" confirm="Remove" pending="Removing…"
-            action={async () => { removeDep(depRemove); setDepRemove(null) }}
-            onClose={() => setDepRemove(null)}>
-            Remove the static dependency {depRemove}? Caller scripts referencing it will fail until re-added.
-          </Confirm>
-        )}
-        {canEdit && (
-          <ExtensionPicker entries={(catalogQ.data?.extensions ?? []).filter((e) => e.interface !== 'llm')}
-            selectedSources={new Set(Object.values(reqs?.ext ?? {}).map((d) => d.source))}
-            loading={catalogQ.isPending} error={catalogQ.isError}
-            onRetry={() => void catalogQ.refetch()}
-            onAdd={addDep} onShow={(entry) => {
-              const alias = Object.entries(reqsRef.current?.ext ?? {}).find(([, d]) => d.source === entry.source)?.[0]
-              if (alias) document.querySelector<HTMLElement>(`[data-ext-settings="${alias}"]`)?.scrollIntoView({ block: 'nearest' })
-            }} />
-        )}
-        </fieldset>
-      </section>
+      {depRemove && (
+        <Confirm title={`Remove ${depRemove}?`} tone="danger" confirm="Remove" pending="Removing…"
+          action={async () => { removeDep(depRemove); setDepRemove(null) }}
+          onClose={() => setDepRemove(null)}>
+          Remove the static dependency {depRemove}? Caller scripts referencing it will fail until re-added.
+        </Confirm>
+      )}
       <DebugRuntime key={`dr-${debugEpoch}`} id={id} workspaceId={m.workspace_id} debug={dq.data?.debug}
         canEdit={canEdit && !debugBusy && !pubBusy && !reviewOpen} specRef={runtimeRef} fixedExtensions={reqs?.ext ?? EMPTY_DEPS}
+        depsDisabled={!canEdit || modConflict || pubBusy || reviewOpen || debugBusy || !!recoveredModule}
+        onAddDep={addDep} onRemoveDep={(alias) => setDepRemove(alias)}
         onSpecText={setSpecText} onValidationChange={setConfigError} onConfigChange={() => setConfigRevision((r) => r + 1)} />
       {reviewOpen && m && reviewVer !== null && (
         <PublishReviewDialog resource="modules" id={id} version={reviewVer} onClose={() => setReviewOpen(false)}
@@ -550,10 +537,17 @@ function DebugWorkspace({ id, draftVersion, workspaceId, debug, modDirty, modCon
 
 // DebugRuntime renders the full-width extensions/runtime form below
 // the source+script grid; saving builds through SpecForm.buildSpec.
-function DebugRuntime({ id, workspaceId, debug, canEdit, specRef, fixedExtensions, onSpecText, onValidationChange, onConfigChange }: {
+// It also owns the static dependency picker: adds/removes go through
+// onAddDep/onRemoveDep (module requirements CAS), while the selected
+// summary's Configure rows edit the debug-only environment.
+function DebugRuntime({ id, workspaceId, debug, canEdit, specRef, fixedExtensions, depsDisabled, onAddDep, onRemoveDep, onSpecText, onValidationChange, onConfigChange }: {
   id: string; workspaceId: string; debug?: DebugView; canEdit: boolean
   specRef: React.MutableRefObject<SpecFormHandle | null>
   fixedExtensions?: Record<string, { source: string; sum?: string }>
+  /** locks dep add/remove only — runtime config stays editable (e.g. while a source save conflicts) */
+  depsDisabled?: boolean
+  onAddDep: (entry: ExtensionInfo) => void
+  onRemoveDep: (alias: string) => void
   onSpecText: (text: string) => void
   onValidationChange: (error: string) => void
   onConfigChange: () => void
@@ -580,12 +574,13 @@ function DebugRuntime({ id, workspaceId, debug, canEdit, specRef, fixedExtension
   }, [debug, onSpecText, seed])
   if (!debug) return null
   return (
-    <section className="mt-3 rounded border border-line bg-panel p-3">
+    <section className="mt-3 rounded border border-line bg-panel p-3" data-testid="module-deps">
       <SectionTitle>Extensions & runtime</SectionTitle>
-      <p className="mb-2 text-xs text-mute">Debug settings are not published with the module.</p>
+      <p className="mb-2 text-xs text-mute">Dependencies publish with the module (source and sum only); settings and credentials below are debug-only.</p>
       {incomplete && <Notice tone="neutral">Debug configuration incomplete. Fix the indicated fields before running; module publishing is unaffected.</Notice>}
-      <fieldset disabled={!canEdit}>
+      <fieldset disabled={!canEdit} className="m-0 min-w-0 border-0 p-0">
         <SpecForm ref={specRef} debug hideBasics workspaceId={workspaceId} fixedExtensions={fixedExtensions}
+          onAddFixedExtension={onAddDep} onRemoveFixedExtension={onRemoveDep} fixedDepsDisabled={depsDisabled}
           initial={seed.spec}
           onSpecChange={(draft, errors, built) => {
             const invalid = (errors?.length ?? 0) > 0 || !built?.spec

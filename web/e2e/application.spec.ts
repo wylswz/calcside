@@ -59,7 +59,8 @@ test('a) create -> scaffold -> test -> publish -> ready -> live invoke', async (
   await publishViaDialog(page)
   await waitReady(id)
   // the Invoke button is always rendered; it enables once ready
-  const invokeCard = page.locator('section.app-card').filter({ hasText: 'Invoke' })
+  await page.getByRole('tablist', { name: 'Application views' }).getByRole('tab', { name: 'Invoke' }).click()
+  const invokeCard = page.getByRole('tabpanel', { name: 'Invoke', exact: true })
   await expect(invokeCard.getByRole('button', { name: 'Invoke' })).toBeEnabled({ timeout: 10_000 })
   await invokeCard.getByRole('button', { name: 'Invoke' }).click()
   await expect(page.locator('.app-call-out')).toContainText('Hello, world', { timeout: 30_000 })

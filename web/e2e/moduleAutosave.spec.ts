@@ -125,7 +125,7 @@ test('autosave: dep remove publishes the deletion', async ({ page }) => {
     return (await g.json()).module.latest_version
   }).toBe(1)
   // remove via UI + Confirm, review shows removal, publish v2
-  await page.getByTestId('module-deps').getByRole('button', { name: 'Remove', exact: true }).click()
+  await page.getByTestId('module-deps').getByRole('button', { name: 'Remove probe' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Remove' }).click()
   await expect.poll(async () => {
     const g = await rt.client.get(`/api/v1/modules/${id}`)
@@ -145,6 +145,38 @@ test('autosave: dep remove publishes the deletion', async ({ page }) => {
   const v2 = (await (await rt.client.get(`/api/v1/modules/${id}/versions/2`)).json()).version
   expect(v1.requirements.ext.probe.source).toBe('fixture/probe')
   expect(v2.requirements?.ext?.probe).toBeUndefined()
+})
+
+test('dep remove: cancel keeps row order, confirm drops only the dep (C2/C3/F2)', async ({ page }) => {
+  const cr = await rt.client.post('/api/v1/modules', {
+    data: { name: 'ordmod', files: { 'main.star': 'x = 1' } },
+  })
+  const id = (await cr.json()).module.id
+  await page.goto(`${rt.viteURL}/modules/${id}`)
+  const deps = page.getByTestId('module-deps')
+  // Two fixed deps plus a non-dep capability (Files) so the summary
+  // mixes managed and unmanaged rows.
+  await deps.getByRole('button', { name: 'Add needkey' }).click()
+  await deps.getByRole('button', { name: 'Add probe' }).click()
+  await deps.getByRole('button', { name: 'Add Files' }).click()
+  const rowOrder = () => deps.locator('aside .selected-list').first().locator('[data-row]').evaluateAll(
+    (rows) => rows.map((r) => r.getAttribute('data-row')))
+  await expect.poll(rowOrder).toEqual(['ext:0', 'ext:1', 'fs'])
+
+  // Cancelling the named Confirm must not drop or reorder the row.
+  await deps.getByRole('button', { name: 'Remove needkey' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
+  await expect(deps.locator('aside .selected-list').first().locator('[data-row]')).toHaveCount(3)
+  expect(await rowOrder()).toEqual(['ext:0', 'ext:1', 'fs'])
+
+  // Confirming drops only that dep; the remaining rows keep their slots.
+  await deps.getByRole('button', { name: 'Remove needkey' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Remove' }).click()
+  await expect.poll(rowOrder).toEqual(['ext:1', 'fs'])
+  await expect.poll(async () => {
+    const g = await rt.client.get(`/api/v1/modules/${id}`)
+    return JSON.stringify((await g.json()).module.requirements ?? {})
+  }, { timeout: 15_000 }).not.toContain('fixture/needkey')
 })
 
 test('C2: pending source and caller edits survive SPA navigation', async ({ page }) => {

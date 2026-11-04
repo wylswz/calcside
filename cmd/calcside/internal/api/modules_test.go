@@ -106,6 +106,58 @@ func TestModuleEndpoints(t *testing.T) {
 	}
 }
 
+// Module names are workspace-unique: duplicate create and colliding
+// rename return a named 409 without touching the existing draft;
+// the same name in another workspace is allowed.
+func TestModuleNameUniqueness(t *testing.T) {
+	e := newEnv(t)
+	cookies := login(e, "dup@x.com")
+	csrf := map[string]string{"X-Requested-With": "calcside", "Content-Type": "application/json"}
+
+	code, m, _ := e.req("POST", "/api/v1/modules", `{"name":"dup","files":{"u.star":"x = 1"}}`, csrf, cookies)
+	if code != 200 {
+		t.Fatalf("create: %d %v", code, m)
+	}
+	id := m["module"].(map[string]any)["id"].(string)
+	dv := int64(m["module"].(map[string]any)["draft_version"].(float64))
+
+	// Duplicate create: 409 with the name-specific message.
+	code, m, _ = e.req("POST", "/api/v1/modules", `{"name":"dup","files":{"u.star":"x = 2"}}`, csrf, cookies)
+	if code != 409 || !strings.Contains(fmt.Sprint(m), "already exists") {
+		t.Fatalf("duplicate create: %d %v", code, m)
+	}
+
+	// Rename collision: 409, and the losing draft keeps all its data.
+	code, m, _ = e.req("POST", "/api/v1/modules", `{"name":"other","files":{"u.star":"x = 9"}}`, csrf, cookies)
+	if code != 200 {
+		t.Fatalf("second create: %d %v", code, m)
+	}
+	id2 := m["module"].(map[string]any)["id"].(string)
+	code, m, _ = e.req("PATCH", "/api/v1/modules/"+id2,
+		`{"draft_version":1,"name":"dup","files":{"u.star":"x = 10"}}`, csrf, cookies)
+	if code != 409 || !strings.Contains(fmt.Sprint(m), "already exists") {
+		t.Fatalf("rename collision: %d %v", code, m)
+	}
+	code, m, _ = e.req("GET", "/api/v1/modules/"+id2, "", nil, cookies)
+	mod := m["module"].(map[string]any)
+	if code != 200 || mod["name"] != "other" || mod["files"].(map[string]any)["u.star"] != "x = 9" {
+		t.Fatalf("rename collision wrote draft data: %d %v", code, mod)
+	}
+	// The original draft is untouched — same name and draft_version.
+	code, m, _ = e.req("GET", "/api/v1/modules/"+id, "", nil, cookies)
+	mod = m["module"].(map[string]any)
+	if code != 200 || mod["name"] != "dup" || int64(mod["draft_version"].(float64)) != dv {
+		t.Fatalf("collision touched the other draft: %d %v", code, mod)
+	}
+
+	// The same name in another workspace is fine.
+	other := login(e, "dup2@x.com")
+	code, m, _ = e.req("POST", "/api/v1/modules", `{"name":"dup","files":{"u.star":"x = 3"}}`, csrf, other)
+	if code != 200 {
+		t.Fatalf("cross-workspace duplicate rejected: %d %v", code, m)
+	}
+}
+
 // Cross-workspace and key scoping: another user sees nothing; a
 // restricted/bound key is invisible on list/create/validate.
 func TestModuleIsolation(t *testing.T) {

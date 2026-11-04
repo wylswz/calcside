@@ -31,7 +31,7 @@ func (s *Service) Create(ctx context.Context, a service.Actor, r CreateRequest) 
 		return nil, fail(err)
 	}
 	if err := s.o.Store.CreateModule(ctx, m); err != nil {
-		return nil, fail(err)
+		return nil, nameFail(err)
 	}
 	return s.toView(ctx, m, nil), nil
 }
@@ -122,7 +122,7 @@ func (s *Service) Update(ctx context.Context, a service.Actor, id string, r Upda
 	}
 	ok, err := s.o.Store.UpdateModuleDraft(ctx, next, r.DraftVersion)
 	if err != nil {
-		return nil, fail(err)
+		return nil, nameFail(err)
 	}
 	if !ok {
 		return nil, fail(store.ErrModuleDraftConflict)

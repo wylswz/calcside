@@ -124,3 +124,26 @@ test('module create → source edit → debug run → publish → instance use',
   expect(overflow).toBe(false)
   expect(errors.filter((e) => !/favicon|DevTools|ResizeObserver|Failed to load resource/.test(e))).toEqual([])
 })
+
+test('create modal validates the unique name and keeps input on conflict', async ({ page }) => {
+  // Seed a module with the colliding name via API.
+  const cr = await rt.client.post('/api/v1/modules', {
+    data: { name: 'dupmod', files: { 'main.star': 'x = 1\n' } },
+  })
+  expect(cr.status()).toBe(200)
+
+  await page.goto(`${viteURL}/modules`)
+  await page.getByRole('button', { name: 'New module' }).click()
+  const input = page.getByLabel('Unique name')
+  // Grammar violation → the local help text, no request fires.
+  await input.fill('bad name!')
+  await page.getByRole('button', { name: 'Create' }).click()
+  // The grammar help is always present once; the error notice is a second copy.
+  await expect(page.getByText(/Workspace-unique name/)).toHaveCount(2)
+  // Duplicate → the server conflict message; the modal keeps the
+  // entered name so a rename retry is one edit (C2/P5).
+  await input.fill('dupmod')
+  await page.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText(/already exists in this workspace/)).toBeVisible({ timeout: 10_000 })
+  await expect(input).toHaveValue('dupmod')
+})

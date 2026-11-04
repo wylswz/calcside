@@ -14,6 +14,12 @@ export type Module = {
 
 const DEFAULT_SOURCE = 'def hello(name):\n    return "Hello, " + name\n'
 
+// Module names are workspace-unique identifiers (schema UNIQUE on
+// workspace_id + name); the grammar is shared with spec.modules
+// references. Store conflicts surface as a name-specific error.
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/
+const NAME_HELP = 'Workspace-unique name: 1–64 ASCII letters or digits first, then letters, digits, _, . or -.'
+
 export default function Modules() {
   const nav = useNavigate()
   const qc = useQueryClient()
@@ -34,6 +40,10 @@ export default function Modules() {
   const create = async () => {
     const trimmed = name.trim()
     if (!trimmed || saving) return
+    if (!NAME_RE.test(trimmed)) {
+      setCreateErr(NAME_HELP)
+      return
+    }
     setSaving(true)
     setCreateErr('')
     try {
@@ -94,8 +104,11 @@ export default function Modules() {
             </Button>
           </>}>
           {createErr && <Notice tone="warning">{createErr}</Notice>}
-          <Field label="Name"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="strkit" autoFocus /></Field>
-          <p className="app-dim mt-2 text-xs">Creates main.star with a hello example — edit it on the module page.</p>
+          <Field label="Unique name">
+            <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="strkit"
+              maxLength={64} pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}" title={NAME_HELP} autoFocus />
+          </Field>
+          <p className="app-dim mt-2 text-xs">{NAME_HELP} Creates main.star with a hello example — edit it on the module page.</p>
         </Modal>
       )}
       {deleting && (
