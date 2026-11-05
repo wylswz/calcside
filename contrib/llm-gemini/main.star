@@ -95,3 +95,83 @@ def structured(messages, schema, model):
     v = json.decode(_text(d))
     _check_schema(v, schema)
     return v
+
+
+_streams = stream
+
+
+def stream(messages, model, options=None):
+    system, contents = _split(messages)
+    body = {"contents": contents}
+    if system != "":
+        body["systemInstruction"] = {"parts": [{"text": system}]}
+    if options != None:
+        gc = {}
+        for k in options:
+            if k != "stream":  # the route selects streaming; stream is not a generationConfig field
+                gc[k] = options[k]
+        if len(gc) > 0:
+            body["generationConfig"] = gc
+    u = (config["base_url"] + "/v1beta/models/" + url.path_escape(model) +
+         ":streamGenerateContent?alt=sse")
+    resp = net.stream("POST", u, body=json.encode(body),
+                      headers={"x-goog-api-key": config["api_key"],
+                               "Content-Type": "application/json"})
+    if resp["status"] < 200 or resp["status"] >= 300:
+        resp["body"].close()
+        fail("llm provider: status " + str(resp["status"]))
+    ct = resp["headers"].get("Content-Type") or ""
+    if ct.split(";", 1)[0].strip().lower() != "text/event-stream":
+        resp["body"].close()
+        fail("llm provider: unexpected response content type")
+    events = _streams.sse(resp["body"])
+    state = {"done": False, "pending": None, "usage": None}
+
+    def nxt():
+        if state["done"]:
+            return (False, None)
+        if state["pending"] != None:
+            p = state["pending"]
+            state["pending"] = None
+            state["done"] = True
+            events.close()
+            return (True, p)
+        while True:
+            has, ev = events.next()
+            if not has:
+                fail("llm provider: stream ended without finishReason")
+            d = json.decode(ev["data"])
+            um = d.get("usageMetadata")
+            if type(um) == "dict":
+                state["usage"] = {"input_tokens": um.get("promptTokenCount"),
+                                  "output_tokens": um.get("candidatesTokenCount")}
+            udict = state["usage"]
+            text = ""
+            finish = ""
+            cands = d.get("candidates", [])
+            if len(cands) > 1:
+                fail("llm provider: multi-candidate responses are not supported in streaming")
+            for c in cands:
+                for p in c.get("content", {}).get("parts", []):
+                    if p.get("functionCall") != None:
+                        fail("llm provider: function calls are not supported in streaming")
+                    if not p.get("thought", False):
+                        text += p.get("text", "")
+                fr = c.get("finishReason")
+                if fr != None and fr != "":
+                    if fr not in ["STOP", "MAX_TOKENS"]:
+                        fail("llm provider: generation stopped without text completion")
+                    finish = fr
+            if finish != "":
+                done = {"type": "done", "finish_reason": finish, "usage": udict}
+                events.close()  # release the network as soon as terminal is parsed
+                if text != "":
+                    # deliver the delta first; done follows on next pull
+                    state["pending"] = done
+                    return (True, {"type": "text_delta", "text": text})
+                state["done"] = True
+                return (True, done)
+            if text != "":
+                return (True, {"type": "text_delta", "text": text})
+
+    return _streams.new(nxt)

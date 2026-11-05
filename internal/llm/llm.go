@@ -20,6 +20,14 @@ const Capability = "llm"
 // manifest's models metadata.
 var ProviderOps = []string{"respond", "structured"}
 
+// ProviderStreamOp is the OPTIONAL provider stream protocol member
+// (EP-0021): a provider may export stream(messages, model, options)
+// returning a single-execution stream of {type:"text_delta",text}
+// events plus one terminal {type:"done",finish_reason,usage}. It is
+// deliberately NOT in ProviderOps — providers without it get a
+// pre-network unsupported_stream stub in ext.
+const ProviderStreamOp = "stream"
+
 var (
 	secretRefRe  = regexp.MustCompile(`^\{\{\s*secrets\.([A-Z_][A-Z0-9_]{0,63})\s*\}\}$`)
 	secretFindRe = regexp.MustCompile(`\{\{\s*secrets\.([A-Z_][A-Z0-9_]{0,63})\s*\}\}`)

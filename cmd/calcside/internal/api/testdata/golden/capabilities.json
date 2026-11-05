@@ -265,6 +265,42 @@
               "secrets_injected": "number",
               "status": "number"
             }
+          },
+          {
+            "doc": "Streaming HTTP request; returns {status,headers,body}; body is a single-execution byte stream.",
+            "name": "stream",
+            "params": [
+              "method",
+              "url",
+              "body",
+              "headers"
+            ],
+            "policy_args": {
+              "bytes": "number",
+              "host": "string",
+              "method": "string",
+              "port": "string",
+              "pulls": "number",
+              "raw_bytes": "number",
+              "scheme": "string",
+              "secrets": "array\u003cstring\u003e",
+              "status": "number",
+              "stream_action": "string",
+              "stream_id": "number",
+              "stream_status": "string",
+              "url": "string"
+            },
+            "result_meta": {
+              "bytes": "number",
+              "chunks": "number",
+              "pulls": "number",
+              "raw_bytes": "number",
+              "secrets_injected": "number",
+              "status": "number",
+              "stream_id": "number",
+              "stream_state": "string",
+              "stream_status": "string"
+            }
           }
         ]
       }

@@ -11,6 +11,9 @@ ops:
   - name: structured
     doc: Completion parsed as JSON; schema enforced by prompt, verified locally
     params: [messages, schema, model]
+  - name: stream
+    doc: Stream text_delta and done events; requires a streaming provider.
+    params: [messages, model, options]
 config:
   - name: base_url
     type: string

@@ -28,6 +28,7 @@ var moduleDocs = map[string]string{
 	"series":   "diff, pct_change, log_return, shift, cumsum/cumprod, drawdown, rolling, ewma",
 	"decimal":  "exact decimal arithmetic on strings/ints; minor-unit conversion",
 	"linalg":   "matrix matmul, solve, lstsq, inv, det",
+	"stream":   "Pull-based, single-execution streams; iteration consumes values and exec end closes unclosed streams.",
 }
 
 // helpIndex is the per-instance documentation catalog: stdlib modules

@@ -12,6 +12,9 @@ ops:
   - name: structured
     doc: Forced tool call parsed as JSON conforming to schema; returns the parsed value
     params: [messages, schema, model]
+  - name: stream
+    doc: Stream text_delta and done events; requires a streaming provider.
+    params: [messages, model, options]
 config:
   - name: base_url
     type: string
