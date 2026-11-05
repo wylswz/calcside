@@ -248,7 +248,22 @@ ops:
 provider.list_models()                  # -> [model ids from provider metadata]
 provider.respond(messages, model, options)
 provider.structured(messages, schema, model)
+provider.stream(messages, model, options=None)   # optional
 ```
+
+`stream` is an optional protocol member: when a provider exports it,
+`ext.llm.stream(provider, messages, model=None, options=None)` returns a
+single-execution stream of `{type:"text_delta",text}` events plus one
+terminal `{type:"done",finish_reason,usage}` (usage `None` or
+`{input_tokens,output_tokens}`, reported fields only). Providers that do
+not export `stream` fail before any network call with
+`unsupported_stream`. The bundled providers
+(`contrib/llm-openai`, `-openai-compat`, `-anthropic`, `-gemini`)
+implement it over `net.stream` + `stream.sse` + `stream.new`; the native
+validator rejects non-stream returns, malformed events, unknown usage
+keys and streams that end without `done`. See
+[docs/streams.md](streams.md) for stream semantics, caps and failure
+behavior.
 
 `list_models` is synthesized from the provider manifest; no model ids
 are hardcoded in the server or console. Provider `config` fields

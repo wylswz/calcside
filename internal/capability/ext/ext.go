@@ -15,6 +15,7 @@ import (
 	"calcside/internal/capability"
 	"calcside/internal/llm"
 	"calcside/internal/runtime"
+	"calcside/internal/stream"
 	"calcside/internal/types"
 )
 
@@ -562,7 +563,8 @@ func bindProvider(alias string, pc *providerCfg, env capability.InstanceEnv) (st
 			return nil, fmt.Errorf("ext %s llm: provider %s config %s references secret %q which this instance does not define", alias, pc.name, cf.Name, name)
 		}
 	}
-	globals, err := pc.mod.init(env.Context, env.Bindings, pc.config, env.MaxSteps, nil)
+	globals, err := pc.mod.init(env.Context, env.Bindings, pc.config, env.MaxSteps,
+		starlark.StringDict{"_redact_error": providerErrorRedactor(env.Secrets)})
 	if err != nil {
 		return nil, err
 	}
@@ -592,17 +594,56 @@ func bindProvider(alias string, pc *providerCfg, env capability.InstanceEnv) (st
 				return starlark.Call(thread, callable, args, kwargs)
 			})
 	}
+	// Optional provider protocol: stream(messages, model, options). When
+	// exported it is wrapped in the native event validator; otherwise a
+	// deterministic stub fails BEFORE any network call.
+	if fn, ok := globals["stream"].(starlark.Callable); ok {
+		callable := fn
+		members["stream"] = starlark.NewBuiltin("provider.stream",
+			func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+				v, err := starlark.Call(thread, callable, args, kwargs)
+				if err != nil {
+					return nil, err
+				}
+				var model string
+				if len(args) > 1 {
+					ms, _ := args[1].(starlark.String)
+					model = string(ms)
+				}
+				return validateProviderStream(thread, pc.name, model, v)
+			})
+	} else {
+		pname := pc.name
+		members["stream"] = starlark.NewBuiltin("provider.stream",
+			func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+				return nil, fmt.Errorf("unsupported_stream: provider %s does not support streaming", pname)
+			})
+	}
 	return starlarkstruct.FromStringDict(starlarkstruct.Default, members), nil
 }
 
 // opBuiltin builds the starlark builtin for ext.<alias>.<op>: args are
 // summarized into gate Call.Args and the real call runs inside
 // Gate.Invoke on the same thread (inheriting step limit + cancellation).
+// An op that returns a *stream.Stream gets it wrapped by
+// Gate.WrapStream so deferred pulls and the final close stay inside the
+// same ext.<alias>.<op> gate scope (EP-0021); if the opening After hook
+// denies the op, the just-acquired resource is closed immediately.
 func opBuiltin(alias string, op OpSpec, fn starlark.Value, ac aliasCfg, gate *capability.Gate) starlark.Value {
+	opName := types.Op(alias + "." + op.Name)
 	return starlark.NewBuiltin("ext."+alias+"."+op.Name,
 		func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-			return gate.Invoke(capability.ThreadContext(thread), types.CapExt,
-				types.Op(alias+"."+op.Name), callArgs(op, args, kwargs),
+			cargs := callArgs(op, args, kwargs)
+			// The open phase cannot know the stream id yet; a
+			// correlation id is reserved from the execution scope while
+			// pull/close records use the wrapped stream's own id.
+			if scope := stream.FromThread(thread); scope != nil {
+				cargs[capability.StreamActionArg] = "open"
+				cargs[capability.StreamIDArg] = scope.Reserve()
+			}
+			var wrapped *stream.Stream
+			v, err := gate.Invoke(capability.ThreadContext(thread), types.CapExt,
+				opName, cargs,
 				func(ctx context.Context, _ map[string]any) (starlark.Value, map[string]any, error) {
 					v, err := starlark.Call(thread, fn, args, kwargs)
 					meta := map[string]any{"source": ac.source}
@@ -612,8 +653,26 @@ func opBuiltin(alias string, op OpSpec, fn starlark.Value, ac aliasCfg, gate *ca
 					if ac.mod.Commit != "" {
 						meta["commit"] = ac.mod.Commit
 					}
-					return v, meta, err
+					s, isStream := v.(*stream.Stream)
+					if err != nil || !isStream {
+						return v, meta, err
+					}
+					w, werr := gate.WrapStream(thread, types.CapExt, opName, cargs, meta, s)
+					if werr != nil {
+						return nil, meta, werr
+					}
+					wrapped = w
+					return w, meta, nil
 				})
+			if err != nil && wrapped != nil {
+				// After denied at open: mark the wrapper failed with the
+				// ORIGINAL open denial before cleanup so a later close
+				// denial cannot replace it, then close natively now
+				// rather than abandoning the resource until teardown.
+				wrapped.Fail(err)
+				_ = wrapped.Close()
+			}
+			return v, err
 		})
 }
 
@@ -627,12 +686,42 @@ func callArgs(op OpSpec, args starlark.Tuple, kwargs []starlark.Tuple) map[strin
 		if i < len(op.Params) {
 			name = op.Params[i]
 		}
-		out[name] = argValue(a)
+		out[name] = gateArgValue(name, a)
 	}
 	for _, kw := range kwargs {
-		out[string(kw[0].(starlark.String))] = argValue(kw[1])
+		out[string(kw[0].(starlark.String))] = gateArgValue(string(kw[0].(starlark.String)), kw[1])
 	}
 	return out
+}
+
+// gateArgValue normalizes one call argument for audit. Prompt-bearing
+// parameters (messages/options) are summarized to shape before any
+// traversal — never serialized and never containing content.
+func gateArgValue(name string, v starlark.Value) any {
+	switch name {
+	case "messages", "options":
+		return shapeStarlark(v)
+	}
+	return argValue(v)
+}
+
+// shapeStarlark summarizes a Starlark value by type and size without
+// traversing its content. Only exact container types get counts.
+func shapeStarlark(v starlark.Value) any {
+	switch t := v.(type) {
+	case *starlark.List:
+		return map[string]any{"type": "list", "count": t.Len()}
+	case starlark.Tuple:
+		return map[string]any{"type": "tuple", "count": len(t)}
+	case *starlark.Dict:
+		return map[string]any{"type": "dict", "count": t.Len()}
+	case starlark.String:
+		return map[string]any{"type": "string", "count": len(string(t))}
+	}
+	if v == starlark.None {
+		return map[string]any{"type": "none"}
+	}
+	return map[string]any{"type": v.Type()}
 }
 
 func argValue(v starlark.Value) any {

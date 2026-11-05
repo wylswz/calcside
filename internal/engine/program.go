@@ -22,6 +22,7 @@ import (
 	capinterrupt "calcside/internal/capability/interrupt"
 	"calcside/internal/secrets"
 	"calcside/internal/serving"
+	"calcside/internal/stream"
 	"calcside/internal/types"
 )
 
@@ -423,11 +424,13 @@ func (e *Engine) InvokeProgram(ctx context.Context, program *Program, input json
 		return res
 	}
 
+	sscope := scope.sscope
 	globals, err := program.initModules(scope.thread, s)
 	if err == nil {
 		err = checkEntry(globals, "main")
 	}
 	if err != nil {
+		s.streamScope = nil
 		res.Error = initFailureErr(scope.ctx, scope.thread, scope.maxSteps)
 		return res
 	}
@@ -445,7 +448,28 @@ func (e *Engine) InvokeProgram(ctx context.Context, program *Program, input json
 		return res
 	}
 	s.Gate.Arm(s.execContext(call.ID))
+	// The scope was attached before init; it activates only for the
+	// armed entry window and tears down before Disarm so deferred
+	// streams (including never-consumed handles) close natively while
+	// the gate is still armed.
+	sscope.Activate()
+	// Same safety net: a panic during the entry call still reaches the
+	// registered native teardown and disarms the gate on unwinding
+	// (Close and Disarm are idempotent; normal explicit close and error
+	// reconciliation below are unchanged).
+	defer func() {
+		_ = sscope.Close()
+		s.streamScope = nil
+		s.Gate.Disarm()
+	}()
 	out, callErr := starlark.Call(scope.thread, globals[entry], starlark.Tuple{arg}, nil)
+	_ = sscope.Close()
+	s.streamScope = nil
+	// Sticky stream errors outrank success and interrupt.wait alike,
+	// but never real cancellation (context cause).
+	if serr := sscope.Err(); serr != nil && context.Cause(scope.ctx) == nil {
+		callErr = serr
+	}
 	s.Gate.Disarm()
 
 	if callErr != nil {
@@ -553,6 +577,7 @@ type callScope struct {
 	ctx       context.Context
 	thread    *starlark.Thread
 	session   *Session
+	sscope    *stream.Scope
 	secrets   *secrets.Set
 	maxSteps  uint64
 	outBound  int64
@@ -678,6 +703,16 @@ func (e *Engine) enterCall(ctx context.Context, call ProgramCall, deps SessionDe
 		return nil, invalidProgramf("session could not be created")
 	}
 	scope.session = s
+	// The (inactive) stream scope and its thread locals are attached at
+	// thread creation — before any module init runs — since SetLocal
+	// after execution began would violate the Starlark contract. Pure
+	// init still cannot create streams: the scope activates only inside
+	// the armed entry window.
+	sscope := stream.NewScope(ctx, thread, func() *stream.Scope { return s.streamScope })
+	scope.sscope = sscope
+	s.streamScope = sscope
+	thread.SetLocal(stream.ThreadKey, sscope)
+	thread.SetLocal(capability.ContextKey, sscope.Context())
 	if perr := cancelledProgramErr(ctx); perr != nil {
 		scope.close()
 		return nil, perr

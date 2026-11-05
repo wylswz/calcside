@@ -104,6 +104,8 @@ var functions = []function{
 	{"linalg.lstsq", []string{"a", "b"}, "Least-squares solution of a*x = b for any full-rank a (minimum-norm when underdetermined); b as in linalg.solve.", linalgCall},
 	{"linalg.inv", []string{"a"}, "Inverse of a square matrix; singular or ill-conditioned matrices fail.", linalgCall},
 	{"linalg.det", []string{"a"}, "Determinant of a square matrix.", linalgCall},
+	{"stream.new", []string{"next_fn"}, "Build a stream from a callback returning (has_value, value); close it explicitly to stop early.", streamNewCall},
+	{"stream.sse", []string{"source"}, "Parse bounded SSE events from a byte stream; returns {event,data,id} values.", streamSSECall},
 }
 
 func Modules() starlark.StringDict {

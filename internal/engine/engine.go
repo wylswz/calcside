@@ -32,6 +32,7 @@ import (
 	"calcside/internal/module"
 	"calcside/internal/secrets"
 	"calcside/internal/stdlib"
+	"calcside/internal/stream"
 	"calcside/internal/types"
 )
 
@@ -60,6 +61,10 @@ type Session struct {
 	// modules holds this session's compiled module attachments and the
 	// per-session init cache; nil when none are attached.
 	modules *moduleSet
+	// streamScope is the execution scope armed for the in-flight exec,
+	// or nil between execs. Written and read only under ExecMu; stale
+	// streams resolve the current scope through it.
+	streamScope *stream.Scope
 }
 
 // execContext builds the gate's ExecContext for one exec. The actor —
@@ -134,6 +139,8 @@ func inspectBudget(v starlark.Value, budget, depth int) int {
 			budget -= v.BigInt().BitLen()
 		}
 	case starlark.NoneType, starlark.Bool, starlark.Float, secretsStruct:
+	case *stream.Stream:
+		// Opaque handle: repr is safe and never pulls or renders body.
 	case *starlark.Function:
 		text = v.Name()
 	case *starlark.Builtin:
@@ -551,7 +558,13 @@ func (e *Engine) Exec(
 	if maxSteps > 0 {
 		thread.SetMaxExecutionSteps(maxSteps)
 	}
-	thread.SetLocal(capability.ContextKey, ctx)
+	// The stream scope is bound to this exec's thread and context;
+	// resolving the session's current scope lets stale handles fault
+	// the live execution rather than their dead owner.
+	sscope := stream.NewScope(ctx, thread, func() *stream.Scope { return s.streamScope })
+	s.streamScope = sscope
+	thread.SetLocal(stream.ThreadKey, sscope)
+	thread.SetLocal(capability.ContextKey, sscope.Context())
 	// Module attachments give exec chunks the @ mount namespace;
 	// ordinary loads stay an error (no consumer source namespace).
 	if s.modules != nil {
@@ -582,7 +595,15 @@ func (e *Engine) Exec(
 	defer close(cancelDone)
 
 	s.Gate.Arm(s.execContext(execID))
+	sscope.Activate()
 	defer s.Gate.Disarm()
+	// Safety net: a panic between activation and the explicit close
+	// below still tears the scope down during unwinding, before Disarm.
+	// Close is idempotent; the explicit close still runs first.
+	defer func() {
+		_ = sscope.Close()
+		s.streamScope = nil
+	}()
 
 	// Re-inject capability bindings + modules so exec N-1 shadowing does
 	// not leak into exec N.
@@ -591,6 +612,16 @@ func (e *Engine) Exec(
 	f, err := fileOpts.Parse(execID+".star", code, 0)
 	if err == nil {
 		err = starlark.ExecREPLChunk(f, thread, s.Globals)
+	}
+	// Deterministic stream teardown while the gate is still armed, then
+	// sticky-error reconciliation before the result is accepted: a
+	// stream failure inside for/list/any or a swallowed builtin pull
+	// must fail the exec with its original error. Real caller/timeout/
+	// memory cancellation outranks it via the context cause.
+	_ = sscope.Close()
+	s.streamScope = nil
+	if serr := sscope.Err(); serr != nil && context.Cause(ctx) == nil {
+		err = serr
 	}
 	res.Steps = thread.ExecutionSteps()
 	res.DurationMs = time.Since(start).Milliseconds()
@@ -618,7 +649,23 @@ func classify(ctx context.Context, err error, maxSteps, steps uint64) *Error {
 		msg = evalErr.Msg
 	}
 
-	if errors.Is(err, capability.ErrOutOfScope) {
+	// Real caller/deadline/memory cancellation outranks every other
+	// classification — including a stream sticky error like a denied
+	// close hook latched after the deadline fired.
+	if cause := context.Cause(ctx); cause != nil || ctx.Err() != nil {
+		switch {
+		case errors.Is(cause, ErrMemoryLimit):
+			return &Error{Type: types.ErrMemoryLimit, Message: msg, Backtrace: bt}
+		default:
+			return &Error{Type: types.ErrTimeout, Message: msg, Backtrace: bt}
+		}
+	}
+	// Step-cap exhaustion likewise outranks a concurrent stream fault.
+	if maxSteps > 0 && steps >= maxSteps {
+		return &Error{Type: types.ErrStepLimit, Message: msg, Backtrace: bt}
+	}
+
+	if errors.Is(err, capability.ErrOutOfScope) || errors.Is(err, stream.ErrOutOfScope) {
 		return &Error{Type: types.ErrOutOfScope, Message: msg, Backtrace: bt}
 	}
 	if errors.As(err, &denied) {
@@ -633,18 +680,5 @@ func classify(ctx context.Context, err error, maxSteps, steps uint64) *Error {
 		return &Error{Type: types.ErrSyntax, Message: msg, Backtrace: bt}
 	}
 
-	// Context cause distinguishes timeout from watchdog cancellation.
-	if cause := context.Cause(ctx); cause != nil || ctx.Err() != nil {
-		switch {
-		case errors.Is(cause, ErrMemoryLimit):
-			return &Error{Type: types.ErrMemoryLimit, Message: msg, Backtrace: bt}
-		default:
-			return &Error{Type: types.ErrTimeout, Message: msg, Backtrace: bt}
-		}
-	}
-
-	if maxSteps > 0 && steps >= maxSteps {
-		return &Error{Type: types.ErrStepLimit, Message: msg, Backtrace: bt}
-	}
 	return &Error{Type: types.ErrRuntime, Message: msg, Backtrace: bt}
 }

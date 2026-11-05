@@ -36,6 +36,11 @@ def respond(provider, messages, model=None, options=None):
     return p.respond(messages, _model(p, model), options)
 
 
+def stream(provider, messages, model=None, options=None):
+    p = _provider(provider)
+    return p.stream(messages, _model(p, model), options)
+
+
 def structured(provider, messages, schema, model=None):
     p = _provider(provider)
     return p.structured(messages, schema, _model(p, model))
