@@ -26,6 +26,10 @@ first-class:
 4. The console selects among versions, shows the exact `source` + `sum`
    being added, and requires an explicit change-version action with
    review for existing consumers.
+5. Local roots use a required per-version layout
+   `<root>/<extension>/<version>/` (e.g. `contrib/tavily/0.1.0/`); each
+   version subtree is captured and bound independently. Remote sources
+   and their layout are unchanged.
 
 Different content for the same version is rejected; the version binding is
 a promise that `family@version` means one tree forever. This is not
@@ -91,6 +95,17 @@ names.
   suffix must equal the `manifest.version` inside the archived tree. The
   only exception is the operator-registered legacy mapping documented
   under *Compatibility and migration*.
+- Local roots lay out each extension as
+  `<root>/<extension>/<version>/<extension files>` -- `capability.yaml`,
+  `main.star`, icons, and any resources live inside the version
+  directory. The root basename remains the namespace and the extension
+  directory remains the name, so `contrib/tavily/0.1.0/` is the family
+  `contrib/tavily` at version `0.1.0`, canonical source
+  `contrib/tavily@0.1.0`. The version directory name uses the same
+  version-token grammar and must exactly equal both the identifier
+  suffix and the subtree's `manifest.version`; a suffix, dirname, and
+  manifest that disagree are rejected. The legacy mapping exception is
+  registration-only and introduces no filesystem exception.
 - Remote identifiers keep the current ref support (tag-like or 40-hex
   SHA); the identifier version **is** the ref. `manifest.version` stays
   package display metadata and is never a second resolver input -- a
@@ -121,17 +136,47 @@ names.
 
 ### Catalog and operator workflow
 
-- The `<root>/<extension>/capability.yaml` layout stays; it provides the
-  *current candidate* only. On catalog refresh/admission the server
-  captures the candidate under its `manifest.version`, stores the archive,
-  and binds `family@version -> sum`.
+- Local discovery scans each configured root's immediate extension
+  directories, then each extension directory's immediate version
+  directories; a version directory containing `capability.yaml` is a
+  candidate. Every candidate is admitted independently under its own
+  `family@version`; there is no *latest* or *current* candidate and no
+  recursive arbitrary discovery.
+- On catalog refresh/admission the server captures each candidate under
+  its `manifest.version`, stores the archive, and binds
+  `family@version -> sum`. The captured artifact root is the version
+  subtree itself; the existing `TreeHash` file selection, ordering,
+  limits, manifest, and packaged icon rules are unchanged. Sibling
+  version directories and any family-level files outside the selected
+  version subtree are excluded, so dependencies and resources must be
+  self-contained within the version directory under the existing path
+  restrictions.
+- For example, `contrib` configured as a root:
+
+  ```text
+  contrib/
+    tavily/              # family contrib/tavily
+      0.1.0/             # contrib/tavily@0.1.0
+        capability.yaml
+        main.star
+        icon.png
+      0.2.0/             # contrib/tavily@0.2.0
+        capability.yaml
+        main.star
+    weather/
+      0.1.0/             # contrib/weather@0.1.0
+        capability.yaml
+        main.star
+  ```
+
 - All previously captured versions remain available from the database
-  after the current source changes or disappears, provided the family
-  stays configured. Multi-version needs **no** nested directory format.
+  after a version directory or an entire family tree changes or
+  disappears, provided the root stays configured and the family stays
+  permitted; removing the filesystem never unpublishes captured
+  versions.
 - Changing configured roots never deletes bindings. A revoked or
   unconfigured family hides its catalog entries and denies resolution even
-  on cache hit; removing the current directory does not unpublish captured
-  versions.
+  on cache hit.
 - A candidate edited under an already-bound version is rejected with a
   visible diagnostic. The catalog still shows the archived original for
   that version and never advertises the changed candidate.
@@ -139,7 +184,8 @@ names.
   never mutate bindings, and Starlark is never executed merely to inspect
   a candidate.
 - Remote versions become catalog entries only after an explicit,
-  successful reference/capture; there is no scan of remote tags.
+  successful reference/capture; there is no scan of remote tags and no
+  remote layout change.
 - Only captured/admitted entries a caller is permitted to see appear in
   the catalog; no new tenant sharing is introduced.
 
@@ -234,10 +280,19 @@ names.
 - A legacy local `source + sum` pin migrates by reading the manifest from
   the **exact stored artifact** -- never the mutable current root -- and
   binding its version.
-- A legacy unversioned reference without a sum is resolved against the
-  current manifest only at an explicit write or migration step and is
-  stored as canonical `source + sum`; unversioned references are never
-  newly persisted.
+- A legacy unversioned reference without a sum is resolved only at an
+  explicit write or migration step: a supplied explicit version wins, a
+  sole filesystem candidate may be resolved at that step, and multiple
+  candidates with no explicit selection fail rather than picking a
+  latest. The result is stored as canonical `source + sum`; unversioned
+  references are never newly persisted.
+- The planned repository migration moves each `contrib/<name>`
+  extension package into `contrib/<name>/<manifest.version>/` (all
+  current manifests are `0.1.0`); package-relative paths are unchanged,
+  and docs, examples, and fixtures referencing real disk files are
+  updated during implementation. The old flat layout is migration input
+  only, never an alternate admission format. Exact legacy `source + sum`
+  artifact lookup remains untouched.
 - Remote refs are unchanged; previously pinned remote artifacts are bound
   under their ref as the version.
 - Backfill never rewrites frozen published releases or audit history; a
@@ -260,10 +315,18 @@ names.
 - Parser: local vs remote distinction after version split; version-token
   safety rejections (`..` anywhere in the token, e.g. `1..2`; separators,
   whitespace, empty).
-- Two local versions captured across a root edit are both executable under
-  different aliases.
+- A fresh database discovers two simultaneously present version
+  directories of one family (e.g. `contrib/tavily/0.1.0/` and
+  `contrib/tavily/0.2.0/`) and admits each independently; both are
+  executable under different aliases.
+- Identifier suffix, version directory name, and `manifest.version`
+  must agree; any mismatch is rejected.
+- Captured version subtrees are isolated: editing a sibling version
+  directory or adding family-level files does not alter an already
+  captured version's sum.
 - Recapture with the same sum is idempotent; altered code, manifest, or
-  icon under an existing version is rejected.
+  icon under an existing version is rejected, and a version directory
+  that disappears leaves its archived binding resolvable.
 - Concurrent captures of one `(family, version)` yield a single winner
   across two repository handles/stores.
 - Expected-sum mismatch on capture/resolution is denied.
@@ -295,8 +358,11 @@ names.
    admission and diagnostics.
 4. `api/openapi.yaml` catalog shape (`family`, `version`, `sum`), then
    `make gen`.
-5. Console pickers and editors (SpecForm, modules, LLM providers) with
+5. Local layout migration: move `contrib` extensions into
+   `<name>/<version>/` subtrees, implement the two-level discovery, and
+   update docs, examples, and fixtures that reference real disk files.
+6. Console pickers and editors (SpecForm, modules, LLM providers) with
    change-version review.
-6. Staged backfill: dry-run audit, explicit mapping input, strict-admission
+7. Staged backfill: dry-run audit, explicit mapping input, strict-admission
    gate.
-7. Acceptance tests above; interaction-stability status update.
+8. Acceptance tests above; interaction-stability status update.
