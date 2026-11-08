@@ -9,6 +9,7 @@
 package stream
 
 import (
+	"calcside/internal/types"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +18,11 @@ import (
 	"sync/atomic"
 
 	"go.starlark.net/starlark"
+)
+
+var (
+	_ starlark.HasAttrs = (*Stream)(nil)
+	_ starlark.Iterable = (*Stream)(nil)
 )
 
 // MaxLive bounds the number of simultaneously open streams in one
@@ -627,11 +633,13 @@ func (s *Stream) Attr(name string) (starlark.Value, error) {
 		return starlark.NewBuiltin("stream.next", s.builtinNext), nil
 	case "close":
 		return starlark.NewBuiltin("stream.close", s.builtinClose), nil
+	case "map":
+		return types.BindMethod(s, starMap()), nil
 	}
 	return nil, nil
 }
 
-func (s *Stream) AttrNames() []string { return []string{"close", "next"} }
+func (s *Stream) AttrNames() []string { return []string{"close", "next", "map"} }
 
 func (s *Stream) builtinNext(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	if len(args) != 0 || len(kwargs) != 0 {
@@ -695,6 +703,35 @@ func (s *Stream) Iterate() starlark.Iterator {
 	s.iterating = true
 	s.mu.Unlock()
 	return &iterator{s: s}
+}
+
+func (s *Stream) Map(fn starlark.Callable) (*Stream, error) {
+	return New(
+		s.scope,
+		func(t *starlark.Thread) (starlark.Value, bool, error) {
+			nxt, ok, err := s.pull(t)
+			if err != nil {
+				return nil, false, err
+			}
+			if !ok {
+				return nil, false, nil
+			}
+			result, err := starlark.Call(
+				s.scope.thread,
+				fn,
+				starlark.Tuple{nxt},
+				nil,
+			)
+			if err != nil {
+				return nil, false, err
+			}
+			return result, true, nil
+		},
+		func() error {
+			return s.closeFn()
+		},
+		s,
+	)
 }
 
 type iterator struct {
