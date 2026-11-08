@@ -1,14 +1,13 @@
-package testutils
+package engine
 
 import (
 	"calcside/internal/capability"
-	"calcside/internal/engine"
 	"testing"
 )
 
 type TestEngine struct {
-	e    *engine.Engine
-	sess *engine.Session
+	e    *Engine
+	sess *Session
 }
 
 func newRegistry(t *testing.T) *capability.Registry {
@@ -19,18 +18,18 @@ func newRegistry(t *testing.T) *capability.Registry {
 func NewEngine(t *testing.T) (TestEngine, error) {
 	t.Helper()
 	ctx := t.Context()
-	eng := engine.New(
+	eng := New(
 		1,
 	)
-	session, err := engine.NewSession(
-		engine.SessionDeps{
+	session, err := NewSession(
+		SessionDeps{
 			Context:  ctx,
 			Registry: newRegistry(t),
 			Limits:   capability.ServerLimits{},
 			Hooks:    nil,
 			Observer: nil,
 		},
-		engine.SessionCreation{},
+		SessionCreation{},
 	)
 	if err != nil {
 		return TestEngine{}, err
@@ -41,7 +40,7 @@ func NewEngine(t *testing.T) (TestEngine, error) {
 	}, nil
 }
 
-func (e *TestEngine) Exec(t *testing.T, code string) (string, *engine.Error) {
+func (e *TestEngine) Exec(t *testing.T, code string) (string, *Error) {
 	result := e.e.Exec(
 		t.Context(),
 		e.sess,

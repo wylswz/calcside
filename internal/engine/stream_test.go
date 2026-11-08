@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	starjson "go.starlark.net/lib/json"
 	"go.starlark.net/starlark"
 	"go.starlark.net/starlarkstruct"
@@ -569,4 +570,27 @@ probe.panic()
 	if s.Gate.Armed() {
 		t.Fatal("gate still armed after panic unwind")
 	}
+}
+
+func TestStreamMap(t *testing.T) {
+	code := `
+def next():
+    i = [0]
+    def _next():
+	    if i[0] < 5:
+		    i[0] += 1
+		    return True, i[0]
+	    return False, None
+    return _next
+s = stream.new(next()).map(lambda x: x * 2).map(lambda x: print(x))
+for x in s:
+    pass
+`
+	e, err := NewEngine(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, starErr := e.Exec(t, code)
+	assert.Nil(t, starErr)
+	assert.Equal(t, "2\n4\n6\n8\n10\n", result)
 }

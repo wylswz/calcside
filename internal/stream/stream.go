@@ -9,7 +9,6 @@
 package stream
 
 import (
-	"calcside/internal/types"
 	"context"
 	"errors"
 	"fmt"
@@ -634,7 +633,7 @@ func (s *Stream) Attr(name string) (starlark.Value, error) {
 	case "close":
 		return starlark.NewBuiltin("stream.close", s.builtinClose), nil
 	case "map":
-		return types.BindMethod(s, starMap()), nil
+		return starMap(s), nil
 	}
 	return nil, nil
 }
@@ -728,7 +727,7 @@ func (s *Stream) Map(fn starlark.Callable) (*Stream, error) {
 			return result, true, nil
 		},
 		func() error {
-			return s.closeFn()
+			return nil
 		},
 		s,
 	)

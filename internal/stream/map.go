@@ -2,7 +2,7 @@ package stream
 
 import "go.starlark.net/starlark"
 
-func starMap() starlark.Callable {
+func starMap(self starlark.Value) starlark.Callable {
 	return starlark.NewBuiltin(
 		"map",
 		func(
@@ -11,19 +11,15 @@ func starMap() starlark.Callable {
 			args starlark.Tuple,
 			kwargs []starlark.Tuple,
 		) (starlark.Value, error) {
-			if len(args) < 2 {
-				return nil, starlark.NoSuchAttrError("map() takes at least 2 arguments")
-			}
-			self := args[0]
-			fn, ok := args[1].(*starlark.Builtin)
+			mapper, ok := args[0].(*starlark.Function)
 			if !ok {
-				return nil, starlark.NoSuchAttrError("map() requires a function as the second argument")
+				return nil, starlark.NoSuchAttrError("map() requires a function as the first argument")
 			}
 			selfStream, ok := self.(*Stream)
 			if !ok {
-				return nil, starlark.NoSuchAttrError("map() requires an iterable as the first argument")
+				return nil, starlark.NoSuchAttrError("map() requires a stream as the receiver")
 			}
-			return selfStream.Map(fn)
+			return selfStream.Map(mapper)
 		},
 	)
 }
