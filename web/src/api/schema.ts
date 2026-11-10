@@ -1756,6 +1756,7 @@ export interface components {
             spec_json?: string;
             /** @description optional pinned JSON Schema text; null = default open object */
             input_schema?: string | null;
+            /** @description omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema */
             output_schema?: string | null;
             /** Format: int64 */
             version: number;
@@ -1783,6 +1784,7 @@ export interface components {
             code?: string | null;
             spec?: components["schemas"]["RawJSON"];
             input_schema?: string | null;
+            /** @description omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema */
             output_schema?: string | null;
         };
         ApplicationUpdateRequest: {
@@ -1792,6 +1794,7 @@ export interface components {
             code: string;
             spec?: components["schemas"]["RawJSON"];
             input_schema?: string | null;
+            /** @description omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema */
             output_schema?: string | null;
         };
         ApplicationPublishRequest: {
@@ -1835,6 +1838,11 @@ export interface components {
             steps: number;
             interrupt_id?: string;
             error_code?: string;
+            streaming?: boolean;
+            /** Format: int64 */
+            stream_items?: number;
+            /** Format: int64 */
+            stream_bytes?: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -1854,6 +1862,11 @@ export interface components {
             error_code?: string;
             /** Format: int64 */
             duration_ms: number;
+            streaming?: boolean;
+            /** Format: int64 */
+            stream_items?: number;
+            /** Format: int64 */
+            stream_bytes?: number;
             /** Format: date-time */
             started_at: string;
             /** Format: date-time */
@@ -3464,13 +3477,14 @@ export interface operations {
             };
         };
         responses: {
-            /** @description ephemeral test run result; engine errors arrive in result */
+            /** @description ephemeral test run result; engine errors arrive in result. When main returns a stream the response is text/event-stream instead: `event: item` + `data: <exact redacted item JSON>` per validated item, then exactly one terminal event — `event: done` + `data: <ApplicationRunResponse>` on success or `event: error` + `data: <ApplicationRunResponse>` on failure. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ApplicationRunResponse"];
+                    "text/event-stream": string;
                 };
             };
             400: components["responses"]["Error"];
@@ -3496,13 +3510,14 @@ export interface operations {
             };
         };
         responses: {
-            /** @description invocation result; engine errors arrive in result */
+            /** @description invocation result; engine errors arrive in result. When main returns a stream the response is text/event-stream instead: `event: item` + `data: <exact redacted item JSON>` per validated item, then exactly one terminal event — `event: done` + `data: <ApplicationRunResponse>` on success or `event: error` + `data: <ApplicationRunResponse>` on failure. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ApplicationRunResponse"];
+                    "text/event-stream": string;
                 };
             };
             401: components["responses"]["Error"];

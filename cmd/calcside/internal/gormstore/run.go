@@ -3,6 +3,7 @@ package gormstore
 import (
 	"context"
 	"errors"
+	"maps"
 	"time"
 
 	"gorm.io/gorm"
@@ -28,6 +29,9 @@ type runRow struct {
 	InterruptID   string     `gorm:"column:interrupt_id"`
 	ErrorCode     string     `gorm:"column:error_code"`
 	Output        []byte     `gorm:"column:output"`
+	Streaming     bool       `gorm:"column:streaming"`
+	StreamItems   int64      `gorm:"column:stream_items"`
+	StreamBytes   int64      `gorm:"column:stream_bytes"`
 	CreatedAt     time.Time  `gorm:"column:created_at"`
 	UpdatedAt     time.Time  `gorm:"column:updated_at"`
 	EndedAt       *time.Time `gorm:"column:ended_at"`
@@ -44,6 +48,9 @@ type runStepRow struct {
 	Status      string     `gorm:"column:status"`
 	ErrorCode   string     `gorm:"column:error_code"`
 	DurationMs  int64      `gorm:"column:duration_ms"`
+	Streaming   bool       `gorm:"column:streaming"`
+	StreamItems int64      `gorm:"column:stream_items"`
+	StreamBytes int64      `gorm:"column:stream_bytes"`
 	StartedAt   time.Time  `gorm:"column:started_at"`
 	EndedAt     *time.Time `gorm:"column:ended_at"`
 }
@@ -84,6 +91,7 @@ func (r *runRow) toDomain() *store.Run {
 		ReleaseID: r.ReleaseID, UserID: r.UserID, Trigger: r.TriggerKind,
 		Status: r.Status, Steps: r.Steps, InterruptID: r.InterruptID,
 		ErrorCode: r.ErrorCode, Output: r.Output,
+		Streaming: r.Streaming, StreamItems: r.StreamItems, StreamBytes: r.StreamBytes,
 		CreatedAt: r.CreatedAt.UTC(), UpdatedAt: r.UpdatedAt.UTC(),
 	}
 	if r.EndedAt != nil {
@@ -99,6 +107,7 @@ func runToRow(r *store.Run) *runRow {
 		ReleaseID: r.ReleaseID, UserID: r.UserID, TriggerKind: r.Trigger,
 		Status: r.Status, Steps: r.Steps, InterruptID: r.InterruptID,
 		ErrorCode: r.ErrorCode, Output: r.Output,
+		Streaming: r.Streaming, StreamItems: r.StreamItems, StreamBytes: r.StreamBytes,
 		CreatedAt: r.CreatedAt.UTC(), UpdatedAt: r.UpdatedAt.UTC(), EndedAt: r.EndedAt,
 	}
 }
@@ -107,7 +116,9 @@ func (r *runStepRow) toDomain() *store.RunStep {
 	out := &store.RunStep{
 		RunID: r.RunID, Seq: r.Seq, Attempt: r.Attempt, Entry: r.Entry,
 		InterruptID: r.InterruptID, Status: r.Status, ErrorCode: r.ErrorCode,
-		DurationMs: r.DurationMs, StartedAt: r.StartedAt.UTC(),
+		DurationMs: r.DurationMs, Streaming: r.Streaming,
+		StreamItems: r.StreamItems, StreamBytes: r.StreamBytes,
+		StartedAt: r.StartedAt.UTC(),
 	}
 	if r.EndedAt != nil {
 		e := r.EndedAt.UTC()
@@ -120,7 +131,9 @@ func stepToRow(s *store.RunStep) *runStepRow {
 	return &runStepRow{
 		RunID: s.RunID, Seq: s.Seq, Attempt: s.Attempt, Entry: s.Entry,
 		InterruptID: s.InterruptID, Status: s.Status, ErrorCode: s.ErrorCode,
-		DurationMs: s.DurationMs, StartedAt: s.StartedAt.UTC(), EndedAt: s.EndedAt,
+		DurationMs: s.DurationMs, Streaming: s.Streaming,
+		StreamItems: s.StreamItems, StreamBytes: s.StreamBytes,
+		StartedAt: s.StartedAt.UTC(), EndedAt: s.EndedAt,
 	}
 }
 
@@ -393,6 +406,8 @@ func (d *sqlDB) FinishStep(ctx context.Context, out store.StepOutcome, acceptEar
 			Updates(map[string]any{
 				"status": out.Status, "error_code": out.ErrorCode,
 				"duration_ms": out.DurationMs, "ended_at": now,
+				"streaming": out.Streaming, "stream_items": out.StreamItems,
+				"stream_bytes": out.StreamBytes,
 			}).Error; err != nil {
 			return err
 		}
@@ -421,15 +436,22 @@ func (d *sqlDB) FinishStep(ctx context.Context, out store.StepOutcome, acceptEar
 			}
 		}
 
+		streamUpdates := map[string]any{
+			"streaming":    run.Streaming || out.Streaming,
+			"stream_items": run.StreamItems + out.StreamItems,
+			"stream_bytes": run.StreamBytes + out.StreamBytes,
+		}
 		switch out.Status {
 		case store.StepWaiting:
 			if err := commitWait(ctx, tx, out, now, acceptEarly); err != nil {
 				return err
 			}
+			upd := map[string]any{
+				"status": store.RunWaiting, "interrupt_id": waitID, "updated_at": now,
+			}
+			maps.Copy(upd, streamUpdates)
 			if err := tx.Model(&runRow{}).Where("id = ?", out.RunID).
-				Updates(map[string]any{
-					"status": store.RunWaiting, "interrupt_id": waitID, "updated_at": now,
-				}).Error; err != nil {
+				Updates(upd).Error; err != nil {
 				return err
 			}
 		case store.StepSucceeded, store.StepFailed:
@@ -440,6 +462,7 @@ func (d *sqlDB) FinishStep(ctx context.Context, out store.StepOutcome, acceptEar
 			if out.Status == store.StepSucceeded {
 				updates["output"] = out.Output
 			}
+			maps.Copy(updates, streamUpdates)
 			if err := tx.Model(&runRow{}).Where("id = ?", out.RunID).Updates(updates).Error; err != nil {
 				return err
 			}
@@ -456,15 +479,16 @@ func (d *sqlDB) FinishStep(ctx context.Context, out store.StepOutcome, acceptEar
 				return err
 			}
 		case store.StepUnknown:
+			upd := map[string]any{"status": store.RunUnknown, "updated_at": now}
+			maps.Copy(upd, streamUpdates)
 			if err := tx.Model(&runRow{}).Where("id = ?", out.RunID).
-				Updates(map[string]any{"status": store.RunUnknown, "updated_at": now}).Error; err != nil {
+				Updates(upd).Error; err != nil {
 				return err
 			}
 		default:
 			return store.ErrInvalidServingRecord
 		}
 
-		_ = run
 		if out.DispatchedInterruptID != "" && out.Status != store.StepUnknown {
 			if err := tx.Model(&interruptRow{}).
 				Where("id = ?", out.DispatchedInterruptID).

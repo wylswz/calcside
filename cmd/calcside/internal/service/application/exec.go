@@ -61,6 +61,22 @@ func runView(oc *runsvc.Outcome, res runtime.ProgramResult) *RunView {
 	return rv
 }
 
+func (s *Service) completeRun(ctx context.Context, st *runsvc.Started, invokeID string, out *runtime.InvokeResponse, invokeErr error) (*runsvc.Outcome, error) {
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	if out == nil && invokeErr != nil {
+		if ss, ok := runtime.InvokeStreamFromContext(ctx).(runtime.InvokeStreamSinkStats); ok {
+			if started, items, bytes := ss.Stats(); started {
+				out = &runtime.InvokeResponse{Result: runtime.ProgramResult{
+					ID: invokeID, Streaming: true,
+					StreamItems: items, StreamBytes: bytes,
+				}}
+			}
+		}
+	}
+	return s.o.Runs.Complete(cctx, st, 0, 1, "main", "", out, invokeErr)
+}
+
 func (s *Service) owner(ctx context.Context, userID string) (runtime.Owner, error) {
 	u, err := s.o.Store.GetUser(ctx, userID)
 	if err != nil {
@@ -92,7 +108,7 @@ func newRelease(app *store.Application, b *sandbox.Boundary, at time.Time) (*sto
 		in = store.DefaultApplicationSchema()
 	}
 	if out == nil {
-		out = store.DefaultApplicationSchema()
+		out = json.RawMessage(`{}`)
 	}
 	return store.NewServingReleaseWithModules(app.WorkspaceID, app.UserID, b.Spec, b.Policies,
 		runtime.ProgramBundle{
@@ -218,18 +234,19 @@ func (s *Service) Test(ctx context.Context, a service.Actor, id string, version 
 	if st != nil {
 		slots, runID = st.Interrupts, st.Run.ID
 	}
+	invokeID := store.NewID("inv_")
 	out, err := s.o.Runtime.Invoke(ctx, &runtime.InvokeRequest{
 		InstanceID: replicaID, Owner: owner,
 		Actor:     runtime.Owner{UserID: a.UserID, Email: a.Email},
 		ReleaseID: rel.ID, Generation: 1, Epoch: prep.Epoch,
-		InvokeID: store.NewID("inv_"), Input: input,
+		InvokeID: invokeID, Input: input,
 		RunID: runID, Step: 0, Interrupts: slots,
 	})
 	if out != nil {
 		s.o.Audit.RecordWorkspace(app.WorkspaceID, out.Audit)
 	}
 	if st != nil {
-		oc, cerr := s.o.Runs.Complete(ctx, st, 0, 1, "main", "", out, err)
+		oc, cerr := s.completeRun(ctx, st, invokeID, out, err)
 		if cerr != nil {
 			return nil, cerr
 		}
@@ -278,18 +295,19 @@ func (s *Service) Invoke(ctx context.Context, a service.Actor, id string, input 
 	if st != nil {
 		slots, runID = st.Interrupts, st.Run.ID
 	}
+	invokeID := store.NewID("inv_")
 	out, err := s.o.Runtime.Invoke(ctx, &runtime.InvokeRequest{
 		InstanceID: rep.ID, Owner: owner,
 		Actor:     runtime.Owner{UserID: a.UserID, Email: a.Email},
 		ReleaseID: rep.ReleaseID, Generation: rep.Generation, Epoch: rep.Epoch,
-		InvokeID: store.NewID("inv_"), Input: input,
+		InvokeID: invokeID, Input: input,
 		RunID: runID, Step: 0, Interrupts: slots,
 	})
 	if out != nil {
 		s.o.Audit.RecordWorkspace(app.WorkspaceID, out.Audit)
 	}
 	if st != nil {
-		oc, cerr := s.o.Runs.Complete(ctx, st, 0, 1, "main", "", out, err)
+		oc, cerr := s.completeRun(ctx, st, invokeID, out, err)
 		if cerr != nil {
 			return nil, cerr
 		}

@@ -3,9 +3,9 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import * as Tabs from '@radix-ui/react-tabs'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
-import { api, ApiError, Application, Run, workspaces } from '../api'
+import { api, ApiError, Application, Run, postApplication, workspaces } from '../api'
 import { applicationDescription } from '../activity'
-import { Button, Confirm, Loading, Notice, PageHeader, RevealNew, SwapLabel } from '../components/ui'
+import { Button, Confirm, Icon, Loading, Notice, PageHeader, RevealNew, SwapLabel } from '../components/ui'
 import { PublishReviewDialog } from '../components/PublishReviewDialog'
 import { cmTheme } from '../components/codemirror'
 import { useApplicationEditor } from '../components/editor'
@@ -205,7 +205,11 @@ function Editor({ app, role, userID, qc }: Props) {
   latest.current = draft
   const latestBase = useRef(base)
   latestBase.current = base
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  useEffect(() => { mounted.current = true; return () => {
+    mounted.current = false
+    streamCtl.current.dev?.abort()
+    streamCtl.current.call?.abort()
+  } }, [])
 
   const view = role === 'owner' || role === 'editor' ? 'edit' : 'view'
   const dirty = fp(draft) !== base.fp || draft.input !== base.draft.input
@@ -248,11 +252,19 @@ function Editor({ app, role, userID, qc }: Props) {
     try { curParsed = JSON.parse(cur.trim() || 'null') } catch { return } // keep unparseable stored text
     if (!sameJSON(curParsed, built.spec)) edit({ spec: JSON.stringify(built.spec) })
   }, [])
-  type Result = { id: string; output?: unknown; error?: { code: string; message: string }; duration_ms: number; steps: number }
+  type Result = { id: string; output?: unknown; error?: { code: string; message: string }; duration_ms: number; steps: number; streaming?: boolean; stream_items?: number; stream_bytes?: number }
   type RunView = { result: Result; output_json?: string; run_id?: string; run_status?: string; waiting?: { interrupt_id: string; console_url: string } }
+  type StreamView = { started: boolean; text: string; count: number; bytes: number; truncated: boolean; done?: RunView; error?: string; stopped?: boolean }
   // The Invoke card owns its own input/result; neither touches the draft.
   const [callInput, setCallInput] = useState(DEFAULT_INPUT)
   const [callRun, setCallRun] = useState<RunView | null>(null)
+  const [devStream, setDevStream] = useState<StreamView | null>(null)
+  const [callStream, setCallStream] = useState<StreamView | null>(null)
+  const [stopKind, setStopKind] = useState<'' | 'dev' | 'call'>('')
+  const streamCtl = useRef<{ dev?: AbortController; call?: AbortController }>({})
+  const streamSeq = useRef(0)
+  const STREAM_TEXT_CAP = 256 << 10
+  const STREAM_ITEM_CAP = 1000
 
   // Save pipeline: snapshot everything BEFORE the flight; a draft that
   // changed during the save aborts the chained test/publish instead of
@@ -353,20 +365,68 @@ function Editor({ app, role, userID, qc }: Props) {
     return () => window.removeEventListener('keydown', h)
   }, [view, corrupt, busy])
 
+  const runStream = async (kind: 'dev' | 'call', path: string, body: string, settle: (r: RunView | null) => void) => {
+    const seq = ++streamSeq.current
+    streamCtl.current[kind]?.abort()
+    const ctl = new AbortController()
+    streamCtl.current[kind] = ctl
+    const set = kind === 'dev' ? setDevStream : setCallStream
+    const encoder = new TextEncoder()
+    set(null)
+    if (kind === 'dev') { setRun(null); setOutdated(false) }
+    else setCallRun(null)
+    const view: StreamView = { started: false, text: '', count: 0, bytes: 0, truncated: false }
+    const push = () => { if (mounted.current && seq === streamSeq.current) set({ ...view }) }
+    try {
+      const r = await postApplication(path, body, {
+        signal: ctl.signal,
+        onStart: () => { view.started = true; push() },
+        onItem: (raw: string) => {
+          if (!mounted.current || seq !== streamSeq.current) return
+          view.count++
+          if (!view.truncated) {
+            const n = encoder.encode(raw).length + 1
+            if (view.count <= STREAM_ITEM_CAP && view.bytes + n <= STREAM_TEXT_CAP) {
+              view.text += (view.text ? '\n' : '') + raw
+              view.bytes += n
+            } else view.truncated = true
+          }
+          push()
+        },
+      })
+      if (!mounted.current || seq !== streamSeq.current) return
+      if (!view.started) { set(null); settle(r as RunView); return }
+      const res = (r as RunView).result
+      if (res?.error) view.error = `${res.error.code} — ${res.error.message}`
+      else view.done = r as RunView
+      push()
+      settle(r as RunView)
+    } catch (x: any) {
+      if (!mounted.current || seq !== streamSeq.current) return
+      if (!view.started) { set(null); settle(null); throw x }
+      if (ctl.signal.aborted) view.stopped = true
+      else view.error = x?.message ?? 'stream failed'
+      push()
+    } finally {
+      if (streamCtl.current[kind] === ctl) delete streamCtl.current[kind]
+    }
+  }
+
   const onRun = () => guarded('run', async () => {
     const s = await attemptSave()
     if (!s) return
     const snapInput = latest.current.input
-    const r = await api.postRawJson<RunView>(`/api/v1/applications/${s.app2.id}/test`,
-      `{"version":${s.app2.version},"input":${snapInput}}`)
-    if (!mounted.current) return
-    if (fp(latest.current) !== s.draftFp || latest.current.input !== snapInput) {
-      setOutdated(true) // edits made mid-flight: keep them, mark the result
-      setRun(r)
-      return
-    }
-    setOutdated(false)
-    setRun(r)
+    await runStream('dev', `/api/v1/applications/${s.app2.id}/test`,
+      `{"version":${s.app2.version},"input":${snapInput}}`, (r) => {
+        if (!r) return
+        if (fp(latest.current) !== s.draftFp || latest.current.input !== snapInput) {
+          setOutdated(true) // edits made mid-flight: keep them, mark the result
+          setRun(r)
+          return
+        }
+        setOutdated(false)
+        setRun(r)
+      })
   })
 
   const [reviewOpen, setReviewOpen] = useState(false)
@@ -380,9 +440,9 @@ function Editor({ app, role, userID, qc }: Props) {
 
   const onInvoke = () => guarded('invoke', async () => {
     const snapInput = callInput
-    const r = await api.postRawJson<RunView>(`/api/v1/applications/${app.id}/invoke`, snapInput)
-    if (!mounted.current) return
-    setCallRun(r)
+    await runStream('call', `/api/v1/applications/${app.id}/invoke`, snapInput, (r) => {
+      if (r) setCallRun(r)
+    })
   })
 
   const doDelete = async () => {
@@ -406,8 +466,27 @@ function Editor({ app, role, userID, qc }: Props) {
   // Follow each unfinished run to its real outcome: the handler's
   // return value is the application's output (S4 — the Output pre
   // keeps its box while the phase label changes).
-  const devPhase = useRunProgress(run?.run_id && !run.output_json && !run.result.error ? run.run_id : undefined).phase
-  const callPhase = useRunProgress(callRun?.run_id && !callRun.output_json && !callRun.result.error ? callRun.run_id : undefined).phase
+  const devPhase = useRunProgress(run?.run_id && !run.output_json && !run.result.error && !run.result.streaming ? run.run_id : undefined).phase
+  const callPhase = useRunProgress(callRun?.run_id && !callRun.output_json && !callRun.result.error && !callRun.result.streaming ? callRun.run_id : undefined).phase
+  const streamText = (sv: StreamView | null): string | null => {
+    if (!sv || !sv.started) return null
+    return sv.text
+  }
+  const streamMeta = (sv: StreamView | null): string => {
+    if (!sv || !sv.started) return ''
+    const items = `${sv.count} item${sv.count === 1 ? '' : 's'}`
+    const trunc = sv.truncated ? ' · display truncated' : ''
+    if (sv.stopped) return `${items}${trunc} · Stopped`
+    if (sv.error) return `${items}${trunc} · Failed`
+    if (sv.done) return `${items}${trunc} · Completed · not retained`
+    return `Streaming… ${items}${trunc}`
+  }
+  const streamError = (sv: StreamView | null): string | null => {
+    if (!sv || !sv.started) return null
+    if (sv.stopped) return 'Stopped — partial output above; outcome may be unknown.'
+    if (sv.error) return `error: ${sv.error}`
+    return null
+  }
   const preText = (r: RunView | null, p: RunPhase | undefined, placeholder: string): string => {
     if (!r) return placeholder
     if (r.output_json) return r.output_json
@@ -458,7 +537,6 @@ function Editor({ app, role, userID, qc }: Props) {
         <div className="app-card-head">
           <span className="app-card-title">Develop</span>
           <div className="flex items-center gap-2">
-            <Button onClick={onRun} disabled={busy !== '' || view === 'view' || corrupt || specErrs.length > 0}><SwapLabel show={busy === 'run' ? 'Running…' : 'Run'} options={['Run', 'Running…']} /></Button>
             <Button variant="primary" onClick={onPublish} disabled={busy !== '' || view === 'view' || corrupt || specErrs.length > 0} data-testid="app-publish"><SwapLabel show={busy === 'publish' ? 'Publishing…' : 'Publish…'} options={['Publish…', 'Publishing…']} /></Button>
           </div>
         </div>
@@ -468,13 +546,21 @@ function Editor({ app, role, userID, qc }: Props) {
           <ApplicationResources specText={draft.spec} workspaceId={app.workspace_id} onConfigure={configureResources}
             onOpenDocument={setResourceDocument} selectedDocument={resourceIsCurrent ? resourceDocument : null} />
           <div className="app-editor-frame" data-testid="app-editor-frame">
-            <div className="app-editor-files" aria-label="Open files">
-              <button type="button" aria-pressed={!resourceDocument} onClick={() => setResourceDocument(null)}>main.star</button>
-              {resourceDocument && (
-                <button type="button" aria-pressed="true" title={resourceTitle}>
-                  {resourceTitle}
-                </button>
-              )}
+            <div className="app-editor-toolbar">
+              <div className="app-editor-files" aria-label="Open files">
+                <button type="button" aria-pressed={!resourceDocument} onClick={() => setResourceDocument(null)}>main.star</button>
+                {resourceDocument && (
+                  <button type="button" aria-pressed="true" title={resourceTitle}>
+                    {resourceTitle}
+                  </button>
+                )}
+              </div>
+              <Button variant="primary" size="sm" className="app-run-icon" data-testid="app-run" onClick={onRun}
+                aria-label="Run" title={busy === 'run' ? 'Running main.star' : 'Run main.star'}
+                aria-busy={busy === 'run'}
+                disabled={busy !== '' || view === 'view' || corrupt || specErrs.length > 0}>
+                <Icon name="play" className="!h-3.5 !w-3.5" />
+              </Button>
             </div>
             {/* C2/C3: retain the draft editor, including selection and undo history. */}
             <div hidden={resourceDocument !== null} className="app-editor-pane">
@@ -482,12 +568,6 @@ function Editor({ app, role, userID, qc }: Props) {
               <CodeMirror value={draft.code} height="320px" extensions={editor.extensions} theme={cmTheme}
                 basicSetup={{ autocompletion: false }}
                 readOnly={view === 'view'} onChange={(v) => edit({ code: v })} />
-              <div className="editor-footer flex flex-wrap gap-x-4 border-t border-line px-3 py-2 text-xs text-sec">
-                <span>Ctrl+Space to complete</span>
-                {editor.error
-                  ? <span className="text-warn-text">Completion metadata unavailable</span>
-                  : <span>{editor.isFetching ? 'Refreshing symbols…' : 'Suggestions use this application’s spec'}</span>}
-              </div>
             </div>
             </div>
             {resourceDocument && (
@@ -505,14 +585,12 @@ function Editor({ app, role, userID, qc }: Props) {
                       <CodeMirror value={resourceDocument.source} height="320px" extensions={editor.extensions} theme={cmTheme}
                         basicSetup={{ autocompletion: false }} readOnly editable={false} />
                     </div>
-                    <p className="app-document-note">Run executes main.star, not this read-only file.</p>
                   </>
                 ) : resourceIsCurrent && resourceDocument.kind === 'extension' ? (
                   <div className="app-document-head">
                     <div className="app-document-meta"><span>Extension operation · Read-only</span><code>{resourceDocument.source}</code></div>
                     <CopyBlock text={resourceDocument.signature} />
                     {resourceDocument.documentation && <p className="app-operation-doc">{resourceDocument.documentation}</p>}
-                    <p className="app-document-note">Run executes main.star, not this reference.</p>
                   </div>
                 ) : (
                   <div className="app-document-head" role="status">
@@ -522,25 +600,41 @@ function Editor({ app, role, userID, qc }: Props) {
                 )}
               </div>
             )}
-          </div>
-        </div>
           <div className="app-draft-test">
-            <label className="app-label" htmlFor="app-input">Input — a JSON object</label>
-            <textarea id="app-input" className="app-area" rows={5} spellCheck={false}
-              value={draft.input} onChange={(e) => edit({ input: e.target.value })} />
+            <div className="app-draft-input">
+              <div className="app-io-toolbar">
+                <label className="app-label" htmlFor="app-input">Input — a JSON object</label>
+                <span className="app-dim">main.star</span>
+              </div>
+              <textarea id="app-input" className="app-area" rows={5} spellCheck={false}
+                value={draft.input} onChange={(e) => edit({ input: e.target.value })} />
+            </div>
             <div className="app-out">
-              <span className="app-label">Output</span>
+              <div className="app-out-head">
+                <span className="app-label">Output</span>
+                <span className="app-stream-stop" data-testid="app-stream-stop-slot">
+                  <Button size="sm" variant="danger" onClick={() => setStopKind('dev')} data-testid="app-stream-stop"
+                    disabled={!devStream || !!devStream.done || !!devStream.error || !!devStream.stopped}
+                    tabIndex={devStream && !devStream.done && !devStream.error && !devStream.stopped ? 0 : -1}
+                    style={{ visibility: devStream && !devStream.done && !devStream.error && !devStream.stopped ? 'visible' : 'hidden' }}
+                    aria-hidden={!(devStream && !devStream.done && !devStream.error && !devStream.stopped)}><SwapLabel show="Stop" options={['Stop', 'Stopping…']} /></Button>
+                </span>
+                <span className="app-dim app-stream-meta" data-testid="app-stream-meta">{streamMeta(devStream)}</span>
+              </div>
               <pre className="app-out-pre" aria-live="polite">
-                {preText(run, devPhase, 'Run to see output')}
+                {streamText(devStream) ?? preText(run, devPhase, 'Run to see output')}
               </pre>
+              {streamError(devStream) && <p className="app-dim">{streamError(devStream)}</p>}
               {outdated && <p className="app-dim">Result is from before your latest edits.</p>}
-              {run?.run_id && !run.output_json && !run.result.error && (
+              {run?.run_id && !run.output_json && !run.result.error && !run.result.streaming && !devStream && (
                 <RunProgress runId={run.run_id} appId={app.id} inline
                   scope={{ userId: userID, workspaceId: app.workspace_id }}
                   fallbackWaiting={run.waiting ?? undefined} />
               )}
+              </div>
             </div>
           </div>
+        </div>
         <div className="app-result" role="status" aria-live="polite">
           {specErrs.length > 0 && <Notice tone="warning">{specErrs[0].section}: {specErrs[0].message}</Notice>}
           {reviewOpen && (
@@ -603,18 +697,29 @@ function Editor({ app, role, userID, qc }: Props) {
         {!ready && <p className="app-dim">{statusHint[app.status] ?? 'Not ready.'}</p>}
         <div className="app-grid">
           <div>
-            <label className="app-label" htmlFor="app-call-input">Input — a JSON object</label>
-            <textarea id="app-call-input" className="app-area" rows={5} spellCheck={false}
-              value={callInput} onChange={(e) => setCallInput(e.target.value)} />
-            <div className="mt-2">
+            <div className="app-io-toolbar">
+              <label className="app-label" htmlFor="app-call-input">Input — a JSON object</label>
               <Button variant="primary" onClick={onInvoke} disabled={busy !== '' || !ready || view === 'view' || corrupt}><SwapLabel show={busy === 'invoke' ? 'Invoking…' : 'Invoke'} options={['Invoke', 'Invoking…']} /></Button>
             </div>
+            <textarea id="app-call-input" className="app-area" rows={5} spellCheck={false}
+              value={callInput} onChange={(e) => setCallInput(e.target.value)} />
             <div className="app-out">
-              <span className="app-label">Output</span>
+              <div className="app-out-head">
+                <span className="app-label">Output</span>
+                <span className="app-stream-stop" data-testid="app-call-stream-stop-slot">
+                  <Button size="sm" variant="danger" onClick={() => setStopKind('call')} data-testid="app-call-stream-stop"
+                    disabled={!callStream || !!callStream.done || !!callStream.error || !!callStream.stopped}
+                    tabIndex={callStream && !callStream.done && !callStream.error && !callStream.stopped ? 0 : -1}
+                    style={{ visibility: callStream && !callStream.done && !callStream.error && !callStream.stopped ? 'visible' : 'hidden' }}
+                    aria-hidden={!(callStream && !callStream.done && !callStream.error && !callStream.stopped)}><SwapLabel show="Stop" options={['Stop', 'Stopping…']} /></Button>
+                </span>
+                <span className="app-dim app-stream-meta" data-testid="app-call-stream-meta">{streamMeta(callStream)}</span>
+              </div>
               <pre className="app-out-pre app-call-out" aria-live="polite">
-                {preText(callRun, callPhase, 'Invoke to see output')}
+                {streamText(callStream) ?? preText(callRun, callPhase, 'Invoke to see output')}
               </pre>
-              {callRun?.run_id && !callRun.output_json && !callRun.result.error && (
+              {streamError(callStream) && <p className="app-dim">{streamError(callStream)}</p>}
+              {callRun?.run_id && !callRun.output_json && !callRun.result.error && !callRun.result.streaming && !callStream && (
                 <RunProgress runId={callRun.run_id} appId={app.id} inline
                   scope={{ userId: userID, workspaceId: app.workspace_id }}
                   fallbackWaiting={callRun.waiting ?? undefined} />
@@ -637,6 +742,12 @@ function Editor({ app, role, userID, qc }: Props) {
       </Tabs.Root>
 
 
+      {stopKind && (
+        <Confirm tone="danger" title="Stop streaming" confirm="Stop" pending="Stopping…" onClose={() => setStopKind('')}
+          action={async () => { streamCtl.current[stopKind]?.abort() }}>
+          Stopping aborts the call. Items already received stay; the run's outcome may be unknown.
+        </Confirm>
+      )}
       {delOpen && (
         <Confirm tone="danger" title="Delete application" confirm="Delete" pending="Deleting…" onClose={() => setDelOpen(false)}
           action={doDelete}>

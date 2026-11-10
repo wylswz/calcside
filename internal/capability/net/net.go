@@ -439,31 +439,7 @@ func (c *client) do(ctx context.Context, method, rawURL, body string, headers ma
 }
 
 func (c *client) doInner(ctx context.Context, method, rawURL, body string, headers map[string]string, contentType string) (*response, error) {
-	expURL, expHeaders, expBody, injected, err := c.expand(rawURL, headers, body)
-	if err != nil {
-		return nil, err
-	}
-	if _, _, err := c.authorize(method, expURL); err != nil {
-		return nil, err
-	}
-	if len(injected) > 0 {
-		ctx = context.WithValue(ctx, injectedKey, injected)
-	}
-	var rdr io.Reader
-	if expBody != "" {
-		rdr = strings.NewReader(expBody)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, expURL, rdr)
-	if err != nil {
-		return nil, fmt.Errorf("net: %w", err)
-	}
-	for k, v := range expHeaders {
-		req.Header.Set(k, v)
-	}
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-	resp, err := c.hc.Do(req)
+	resp, err := c.openRequest(ctx, method, rawURL, body, headers, contentType)
 	if err != nil {
 		return nil, err
 	}
@@ -507,6 +483,7 @@ func (factory) Ops() []capability.OpInfo {
 		{Name: OpGet, PolicyArgs: map[string]string{"method": "string", "url": "string", "host": "string", "port": "string", "scheme": "string", "secrets": "array<string>"}, ResultMeta: map[string]string{"status": "number", "bytes": "number", "secrets_injected": "number"}, Doc: "HTTP GET; returns {status,headers,body}; supports {{secrets.NAME}} placeholders; Accept-Encoding/Range/If-Range/TE headers are rejected", Params: []string{"url", "headers"}},
 		{Name: OpPost, PolicyArgs: map[string]string{"method": "string", "url": "string", "host": "string", "port": "string", "scheme": "string", "secrets": "array<string>"}, ResultMeta: map[string]string{"status": "number", "bytes": "number", "secrets_injected": "number"}, Doc: "HTTP POST; returns {status,headers,body}", Params: []string{"url", "body", "headers", "content_type"}},
 		{Name: OpRequest, PolicyArgs: map[string]string{"method": "string", "url": "string", "host": "string", "port": "string", "scheme": "string", "secrets": "array<string>"}, ResultMeta: map[string]string{"status": "number", "bytes": "number", "secrets_injected": "number"}, Doc: "HTTP request with arbitrary method", Params: []string{"method", "url", "body", "headers"}},
+		{Name: OpStream, PolicyArgs: map[string]string{"method": "string", "url": "string", "host": "string", "port": "string", "scheme": "string", "secrets": "array<string>", "stream_action": "string", "stream_id": "number", "stream_status": "string", "raw_bytes": "number", "pulls": "number", "bytes": "number", "status": "number"}, ResultMeta: map[string]string{"status": "number", "raw_bytes": "number", "bytes": "number", "chunks": "number", "stream_status": "string", "secrets_injected": "number", "stream_id": "number", "stream_state": "string", "pulls": "number"}, Doc: "Streaming HTTP request; returns {status,headers,body}; body is a single-execution byte stream.", Params: []string{"method", "url", "body", "headers"}},
 	}
 }
 
@@ -633,7 +610,7 @@ func (factory) New(cfgAny any, env capability.InstanceEnv) (starlark.Value, io.C
 	}
 	c.rules = rules
 	c.hc = c.newHTTPClient()
-	return bind(c, env.Gate), closer{c}, nil
+	return c.module(env.Gate), closer{c}, nil
 }
 
 type closer struct{ c *client }

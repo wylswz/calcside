@@ -32,9 +32,9 @@
 .app-view-panel[hidden] { display: none; }
 .app-page .app-workbench { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; align-items: stretch; }
 .app-page .app-code-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-.app-resources { min-width: 0; height: 520px; box-sizing: border-box; border: 1px solid rgb(var(--line)); border-radius: var(--radius-control); background: var(--fill-muted); font-size: 12px; }
+.app-resources { min-width: 0; height: auto; min-height: 0; position: relative; box-sizing: border-box; border: 1px solid rgb(var(--line)); border-radius: var(--radius-control); background: var(--fill-muted); font-size: 12px; }
 .app-resources > summary { height: 44px; box-sizing: border-box; padding: 12px; font-weight: 600; cursor: pointer; }
-.app-resource-body { padding: 0 10px 12px; height: calc(100% - 44px); box-sizing: border-box; overflow: auto; }
+.app-resource-body { padding: 0 10px 12px; position: absolute; inset: 44px 0 0; box-sizing: border-box; overflow: auto; }
 .app-resource-body h3 { margin: 18px 0 8px; color: rgb(var(--sec)); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 .app-resource-body p { overflow-wrap: anywhere; }
 .app-resource-hint { color: rgb(var(--sec)); }
@@ -45,13 +45,16 @@
 .app-resource-file { display: flex; align-items: center; width: 100%; padding: 6px 2px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
 .app-resource-file:hover { background: rgb(var(--hover)); }
 .app-resource-file[aria-current="true"] { color: rgb(var(--accent)); background: rgb(var(--accent) / .08); }
-.app-editor-frame { min-width: 0; height: 520px; box-sizing: border-box; display: flex; flex-direction: column; border: 1px solid rgb(var(--line)); border-radius: var(--radius-control); overflow: hidden; }
-.app-editor-files { display: flex; min-height: 44px; border-bottom: 1px solid rgb(var(--line)); background: var(--fill-muted); overflow-x: auto; }
+.app-editor-frame { min-width: 0; box-sizing: border-box; display: flex; flex-direction: column; border: 1px solid rgb(var(--line)); border-radius: var(--radius-control); overflow: hidden; }
+.app-editor-toolbar { display: flex; align-items: stretch; min-height: 44px; border-bottom: 1px solid rgb(var(--line)); background: var(--fill-muted); }
+.app-editor-toolbar .app-run-icon { flex: none; width: 32px; align-self: center; margin-right: 8px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.app-editor-toolbar .app-run-icon svg { fill: currentColor; stroke: none; }
+.app-editor-files { display: flex; flex: 1; min-width: 0; overflow-x: auto; }
 .app-editor-files > button { padding: 10px 12px; border: 0; border-bottom: 2px solid transparent; background: none; color: rgb(var(--sec)); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
 .app-editor-files > button[aria-pressed="true"] { color: rgb(var(--ink)); border-bottom-color: rgb(var(--accent)); }
 .app-editor-files > button:hover { background: rgb(var(--hover)); }
 .app-editor-pane[hidden] { display: none; }
-.app-editor-pane { flex: 1; min-height: 0; overflow: auto; }
+.app-editor-pane { flex: none; height: 320px; min-height: 0; overflow: auto; }
 .app-editor-files { flex-shrink: 0; }
 .app-operation-doc { white-space: pre-wrap; overflow-wrap: anywhere; }
 .app-page .app-editor-frame .app-cm { border: 0; border-radius: 0; }
@@ -59,7 +62,6 @@
 .app-document-meta { display: grid; gap: 4px; margin-bottom: 8px; font-size: 12px; color: rgb(var(--sec)); }
 .app-document-meta code { overflow-wrap: anywhere; font-size: 11px; }
 .app-document-head .pre { white-space: pre-wrap; }
-.app-document-note { margin: 0; padding: 10px 12px; font-size: 12px; color: rgb(var(--sec)); border-top: 1px solid rgb(var(--line)); }
 .app-resource-reference { padding: 6px 0; }
 .app-resource-reference > div > div:first-child { flex-direction: column; align-items: stretch; }
 .app-resource-reference > div > div:first-child > button { align-self: flex-end; }
@@ -71,7 +73,10 @@
 @media (max-width: 900px) {
   .app-page .app-workbench { grid-template-columns: minmax(0, 1fr); }
   .app-resources { height: auto; }
-  .app-resource-body { height: auto; max-height: 320px; }
+  .app-resource-body { position: static; inset: auto; height: auto; max-height: 320px; }
+  .app-editor-toolbar { min-height: 56px; }
+  .app-editor-toolbar .app-run-icon { width: 44px; }
+  .app-page .app-io-toolbar, .app-page .app-out-head { min-height: 44px; }
 }
 /* the Settings summary is its collapsed card's only row; the divider
    lives on the body wrapper, which exists only while open (S1) */
@@ -95,6 +100,7 @@
 .app-page .app-check { display: flex; gap: 6px; align-items: center; font-size: 13px; margin: 8px 0 4px }
 .app-page :is(.app-input, .app-area):focus { outline: none; background: rgb(var(--paper)); border-color: rgb(var(--accent)); box-shadow: 0 0 0 4px rgb(var(--accent) / 0.18) }
 @media (max-width: 768px) {
+  .app-page .app-resource-body { max-height: 200px; }
   .app-page .app-grid { grid-template-columns: minmax(0, 1fr); gap: 0 }
   .app-page .app-card { padding: 16px }
   .app-page .app-input { max-width: 100% }
@@ -118,3 +124,55 @@
 /* Inbox nav count: reserved width, tabular figures — nav never shifts (S3/S4) */
 .inbox-count { display: inline-block; min-width: 1.5em; text-align: center; font-variant-numeric: tabular-nums; color: rgb(var(--warn-text)); }
 .row-sel { outline: 1px solid rgb(var(--accent)); }
+
+.app-out-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+}
+.app-stream-stop {
+  width: 72px;
+  flex: none;
+}
+.app-stream-meta {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 20px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.app-draft-test .app-out-pre,
+.app-call-out {
+  height: 180px;
+  overflow: auto;
+}
+.app-draft-test {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+  border-top: 1px solid rgb(var(--line));
+  flex: none;
+}
+.app-draft-input { min-width: 0; }
+.app-io-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+}
+.app-io-toolbar .app-label { margin: 0; }
+.app-io-toolbar .app-dim { margin-left: auto; }
+.app-draft-input .app-area {
+  height: 180px;
+  box-sizing: border-box;
+}
+.app-draft-test .app-out { margin-top: 0; }
+.app-draft-test .app-out-head .app-label { margin: 0; }
+@media (max-width: 768px) {
+  .app-draft-test { grid-template-columns: minmax(0, 1fr); }
+}

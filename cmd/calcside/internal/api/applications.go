@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"calcside/cmd/calcside/internal/api/gen"
 	"calcside/cmd/calcside/internal/service"
 	"calcside/cmd/calcside/internal/service/application"
+	"calcside/internal/runtime"
+	"calcside/internal/store"
 	"calcside/internal/types"
 )
 
@@ -133,15 +136,160 @@ func (r publishApplicationResp) VisitPublishApplicationResponse(w http.ResponseW
 	return r.write(w)
 }
 
-type testApplicationResp struct{ rawJSON }
+const sseWriteGrace = 30 * time.Second
+
+type sseSink struct {
+	w        http.ResponseWriter
+	rc       *http.ResponseController
+	deadline time.Time
+	started  bool
+	items    int64
+	bytes    int64
+	err      error
+}
+
+var _ runtime.InvokeStreamSink = (*sseSink)(nil)
+var _ runtime.InvokeStreamSinkStats = (*sseSink)(nil)
+
+func (s *sseSink) Stats() (bool, int64, int64) { return s.started, s.items, s.bytes }
+
+func (s *sseSink) frame(b []byte) error {
+	if s.err != nil {
+		return s.err
+	}
+	deadline := time.Now().Add(sseWriteGrace)
+	if !s.deadline.IsZero() && s.deadline.Before(deadline) {
+		deadline = s.deadline
+	}
+	_ = s.rc.SetWriteDeadline(deadline)
+	if _, err := s.w.Write(b); err != nil {
+		s.err = err
+		return err
+	}
+	if err := s.rc.Flush(); err != nil {
+		s.err = err
+		return err
+	}
+	return nil
+}
+
+func (s *sseSink) Start() error {
+	if s.err != nil {
+		return s.err
+	}
+	s.w.Header().Set("Content-Type", "text/event-stream")
+	s.w.Header().Set("Cache-Control", "no-cache")
+	s.w.Header().Set("X-Accel-Buffering", "no")
+	if s.started {
+		return errors.New("duplicate stream start")
+	}
+	s.w.WriteHeader(http.StatusOK)
+	s.started = true
+	return s.frame([]byte(": stream\n\n"))
+}
+
+func (s *sseSink) Item(raw json.RawMessage) error {
+	if !s.started {
+		return errors.New("stream item before start")
+	}
+	frame := make([]byte, 0, len(raw)+24)
+	frame = append(frame, "event: item\ndata: "...)
+	frame = append(frame, raw...)
+	frame = append(frame, '\n', '\n')
+	if err := s.frame(frame); err != nil {
+		return err
+	}
+	s.items++
+	s.bytes += int64(len(raw))
+	return nil
+}
+
+func (s *sseSink) terminal(event string, v any) error {
+	body, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	frame := make([]byte, 0, len(body)+32)
+	frame = append(frame, "event: "...)
+	frame = append(frame, event...)
+	frame = append(frame, "\ndata: "...)
+	frame = append(frame, body...)
+	frame = append(frame, '\n', '\n')
+	return s.frame(frame)
+}
+
+type appRunResp struct {
+	ctx  context.Context
+	call func(ctx context.Context) (*application.RunView, error)
+}
+
+func (r appRunResp) serve(w http.ResponseWriter) error {
+	sink := &sseSink{w: w, rc: http.NewResponseController(w)}
+	if d, ok := r.ctx.Deadline(); ok {
+		sink.deadline = d
+	}
+	rv, err := r.call(runtime.WithInvokeStream(r.ctx, sink))
+	if !sink.started {
+		if err != nil {
+			return appFail(err).write(w)
+		}
+		return rawJSON{http.StatusOK, runDTO(rv)}.write(w)
+	}
+	if err != nil {
+		code, msg := "internal", "request failed"
+		var se *service.Error
+		if errors.As(err, &se) {
+			code, msg = string(se.Code), se.Msg
+		}
+		payload := gen.ApplicationRunResponse{Result: runtime.ProgramResult{
+			Error: &runtime.ProgramError{Code: code, Message: msg},
+			ID:    rvID(rv), Streaming: true,
+			StreamItems: sink.items, StreamBytes: sink.bytes,
+		}}
+		return sink.terminal("error", payload)
+	}
+	payload := runDTO(rv)
+	if payload.Result.Error == nil && rv != nil && rv.RunStatus != "" && rv.RunStatus != store.RunSucceeded {
+		payload.Result.Error = &runtime.ProgramError{Code: "internal", Message: "run outcome could not be confirmed"}
+	}
+	if payload.Result.Error != nil {
+		if payload.Result.StreamItems == 0 && sink.items > 0 {
+			payload.Result.StreamItems = sink.items
+			payload.Result.StreamBytes = sink.bytes
+		}
+		return sink.terminal("error", payload)
+	}
+	return sink.terminal("done", payload)
+}
+
+func rvID(rv *application.RunView) string {
+	if rv == nil {
+		return ""
+	}
+	return rv.Result.ID
+}
+
+type testApplicationResp struct {
+	rawJSON
+	deferred *appRunResp
+}
 
 func (r testApplicationResp) VisitTestApplicationResponse(w http.ResponseWriter) error {
+	if r.deferred != nil {
+		return r.deferred.serve(w)
+	}
 	return r.write(w)
 }
 
-type invokeApplicationResp struct{ rawJSON }
+type invokeApplicationResp struct {
+	rawJSON
+	deferred *appRunResp
+}
 
 func (r invokeApplicationResp) VisitInvokeApplicationResponse(w http.ResponseWriter) error {
+	if r.deferred != nil {
+		return r.deferred.serve(w)
+	}
 	return r.write(w)
 }
 
@@ -318,39 +466,37 @@ func (s *strictImpl) TestApplication(ctx context.Context, req gen.TestApplicatio
 	ctx = realCtx(ctx)
 	p, e := needAuth(ctx)
 	if e != nil {
-		return testApplicationResp{*e}, nil
+		return testApplicationResp{rawJSON: *e}, nil
 	}
 	if req.Body == nil {
-		return testApplicationResp{appFail(service.BadRequest("body required"))}, nil
+		return testApplicationResp{rawJSON: appFail(service.BadRequest("body required"))}, nil
 	}
 	var input json.RawMessage
 	if req.Body.Input != nil {
 		input = json.RawMessage(*req.Body.Input)
 	}
-	rv, err := s.d.Application.Test(ctx, actorOf(p), req.Id, req.Body.Version, input)
-	if err != nil {
-		return testApplicationResp{appFail(err)}, nil
-	}
-	return testApplicationResp{rawJSON{http.StatusOK, runDTO(rv)}}, nil
+	d := s.d
+	return testApplicationResp{deferred: &appRunResp{ctx: ctx, call: func(cctx context.Context) (*application.RunView, error) {
+		return d.Application.Test(cctx, actorOf(p), req.Id, req.Body.Version, input)
+	}}}, nil
 }
 
 func (s *strictImpl) InvokeApplication(ctx context.Context, req gen.InvokeApplicationRequestObject) (gen.InvokeApplicationResponseObject, error) {
 	ctx = realCtx(ctx)
 	p, e := needAuth(ctx)
 	if e != nil {
-		return invokeApplicationResp{*e}, nil
+		return invokeApplicationResp{rawJSON: *e}, nil
 	}
 	if req.Body == nil {
-		return invokeApplicationResp{appFail(service.BadRequest("body required"))}, nil
+		return invokeApplicationResp{rawJSON: appFail(service.BadRequest("body required"))}, nil
 	}
 	// The raw body IS the input — never re-parsed.
 	input := json.RawMessage(*req.Body)
 	if len(input) == 0 {
-		return invokeApplicationResp{appFail(service.BadRequest("input required"))}, nil
+		return invokeApplicationResp{rawJSON: appFail(service.BadRequest("input required"))}, nil
 	}
-	rv, err := s.d.Application.Invoke(ctx, actorOf(p), req.Id, input)
-	if err != nil {
-		return invokeApplicationResp{appFail(err)}, nil
-	}
-	return invokeApplicationResp{rawJSON{http.StatusOK, runDTO(rv)}}, nil
+	d := s.d
+	return invokeApplicationResp{deferred: &appRunResp{ctx: ctx, call: func(cctx context.Context) (*application.RunView, error) {
+		return d.Application.Invoke(cctx, actorOf(p), req.Id, input)
+	}}}, nil
 }

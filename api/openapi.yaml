@@ -1009,11 +1009,21 @@ paths:
               $ref: '#/components/schemas/ApplicationTestRequest'
       responses:
         '200':
-          description: ephemeral test run result; engine errors arrive in result
+          description: >
+            ephemeral test run result; engine errors arrive in result. When
+            main returns a stream the response is text/event-stream instead:
+            `event: item` + `data: <exact redacted item JSON>` per validated
+            item, then exactly one terminal event — `event: done` +
+            `data: <ApplicationRunResponse>` on success or `event: error` +
+            `data: <ApplicationRunResponse>` on failure.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApplicationRunResponse'
+            text/event-stream:
+              schema:
+                type: string
+                description: server-sent events as described above
         '400': { $ref: '#/components/responses/Error' }
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
@@ -1033,11 +1043,21 @@ paths:
               $ref: '#/components/schemas/RawJSON'
       responses:
         '200':
-          description: invocation result; engine errors arrive in result
+          description: >
+            invocation result; engine errors arrive in result. When main
+            returns a stream the response is text/event-stream instead:
+            `event: item` + `data: <exact redacted item JSON>` per validated
+            item, then exactly one terminal event — `event: done` +
+            `data: <ApplicationRunResponse>` on success or `event: error` +
+            `data: <ApplicationRunResponse>` on failure.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApplicationRunResponse'
+            text/event-stream:
+              schema:
+                type: string
+                description: server-sent events as described above
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '503': { $ref: '#/components/responses/Error' }
@@ -2689,6 +2709,7 @@ components:
         output_schema:
           type: string
           nullable: true
+          description: omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema
         version: { type: integer, format: int64, minimum: 1 }
         published_version: { type: integer, format: int64, minimum: 0 }
         persistent_instance_id: { type: string }
@@ -2724,6 +2745,7 @@ components:
         output_schema:
           type: string
           nullable: true
+          description: omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema
     ApplicationUpdateRequest:
       type: object
       required: [version, name, code]
@@ -2739,6 +2761,7 @@ components:
         output_schema:
           type: string
           nullable: true
+          description: omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema
     ApplicationPublishRequest:
       type: object
       required: [version, expected_base, candidate]
@@ -2800,6 +2823,9 @@ components:
         steps: { type: integer }
         interrupt_id: { type: string }
         error_code: { type: string }
+        streaming: { type: boolean }
+        stream_items: { type: integer, format: int64 }
+        stream_bytes: { type: integer, format: int64 }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         ended_at: { type: string, format: date-time }
@@ -2820,6 +2846,9 @@ components:
         status: { type: string }
         error_code: { type: string }
         duration_ms: { type: integer, format: int64 }
+        streaming: { type: boolean }
+        stream_items: { type: integer, format: int64 }
+        stream_bytes: { type: integer, format: int64 }
         started_at: { type: string, format: date-time }
         ended_at: { type: string, format: date-time }
     Interrupt:

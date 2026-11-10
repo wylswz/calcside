@@ -99,3 +99,73 @@ def structured(messages, schema, model):
         v = _decode(d["choices"][0]["message"]["content"])
     _check_schema(v, schema)
     return v
+
+
+_streams = stream
+
+
+def stream(messages, model, options=None):
+    body = {"model": model, "messages": messages,
+            "stream_options": {"include_usage": True}}
+    opts = _options(options)
+    for k in opts:
+        if k == "stream_options" and type(opts[k]) == "dict":
+            for kk in opts[k]:
+                body["stream_options"][kk] = opts[k][kk]
+        elif k != "stream":
+            body[k] = opts[k]
+    body["stream"] = True  # streaming cannot be disabled via options
+    hdrs = dict(_auth())
+    hdrs["Content-Type"] = "application/json"
+    resp = net.stream("POST", config["base_url"] + "/chat/completions",
+                      body=json.encode(body), headers=hdrs)
+    if resp["status"] < 200 or resp["status"] >= 300:
+        resp["body"].close()
+        fail("llm provider: status " + str(resp["status"]))
+    ct = resp["headers"].get("Content-Type") or ""
+    if ct.split(";", 1)[0].strip().lower() != "text/event-stream":
+        resp["body"].close()
+        fail("llm provider: unexpected response content type")
+    events = _streams.sse(resp["body"])
+    state = {"done": False, "finish": "", "usage": None}
+
+    def nxt():
+        if state["done"]:
+            return (False, None)
+        while True:
+            has, ev = events.next()
+            if not has:
+                fail("llm provider: stream ended before [DONE]")
+            data = ev["data"]
+            if data == "[DONE]":
+                if state["finish"] == "":
+                    fail("llm provider: missing finish_reason")
+                state["done"] = True
+                events.close()
+                return (True, {"type": "done",
+                               "finish_reason": state["finish"],
+                               "usage": state["usage"]})
+            d = json.decode(data)
+            if d.get("error"):
+                fail("llm provider: stream error")
+            u = d.get("usage")
+            if type(u) == "dict":
+                state["usage"] = {"input_tokens": u.get("prompt_tokens"),
+                                  "output_tokens": u.get("completion_tokens")}
+            ch = d.get("choices", [])
+            if len(ch) == 0:
+                continue
+            c = ch[0]
+            fr = c.get("finish_reason")
+            if fr != None and fr != "":
+                if fr in ["tool_calls", "function_call"]:
+                    fail("llm provider: tool calls are not supported in streaming")
+                state["finish"] = fr
+            delta = c.get("delta", {})
+            if delta.get("tool_calls") != None or delta.get("function_call") != None:
+                fail("llm provider: tool calls are not supported in streaming")
+            txt = delta.get("content")
+            if txt != None and txt != "":
+                return (True, {"type": "text_delta", "text": txt})
+
+    return _streams.new(nxt)

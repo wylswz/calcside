@@ -538,8 +538,10 @@ type Application struct {
 	Id                    string    `json:"id"`
 
 	// InputSchema optional pinned JSON Schema text; null = default open object
-	InputSchema          *string `json:"input_schema,omitempty"`
-	Name                 string  `json:"name"`
+	InputSchema *string `json:"input_schema,omitempty"`
+	Name        string  `json:"name"`
+
+	// OutputSchema omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema
 	OutputSchema         *string `json:"output_schema,omitempty"`
 	PersistentInstanceId *string `json:"persistent_instance_id,omitempty"`
 	PublishedVersion     int64   `json:"published_version"`
@@ -560,9 +562,11 @@ type Application struct {
 // ApplicationCreateRequest defines model for ApplicationCreateRequest.
 type ApplicationCreateRequest struct {
 	// Code omitted/null = scaffold
-	Code         *string `json:"code,omitempty"`
-	InputSchema  *string `json:"input_schema,omitempty"`
-	Name         *string `json:"name,omitempty"`
+	Code        *string `json:"code,omitempty"`
+	InputSchema *string `json:"input_schema,omitempty"`
+	Name        *string `json:"name,omitempty"`
+
+	// OutputSchema omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema
 	OutputSchema *string `json:"output_schema,omitempty"`
 
 	// Spec raw JSON preserved byte-for-byte; never re-parsed by the API tier
@@ -612,9 +616,11 @@ type ApplicationTestRequest struct {
 
 // ApplicationUpdateRequest defines model for ApplicationUpdateRequest.
 type ApplicationUpdateRequest struct {
-	Code         string  `json:"code"`
-	InputSchema  *string `json:"input_schema,omitempty"`
-	Name         string  `json:"name"`
+	Code        string  `json:"code"`
+	InputSchema *string `json:"input_schema,omitempty"`
+	Name        string  `json:"name"`
+
+	// OutputSchema omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema
 	OutputSchema *string `json:"output_schema,omitempty"`
 
 	// Spec raw JSON preserved byte-for-byte; never re-parsed by the API tier
@@ -1475,6 +1481,9 @@ type Run struct {
 	ReleaseId     string     `json:"release_id"`
 	Status        string     `json:"status"`
 	Steps         int        `json:"steps"`
+	StreamBytes   *int64     `json:"stream_bytes,omitempty"`
+	StreamItems   *int64     `json:"stream_items,omitempty"`
+	Streaming     *bool      `json:"streaming,omitempty"`
 	Trigger       string     `json:"trigger"`
 	UpdatedAt     time.Time  `json:"updated_at"`
 	UserId        string     `json:"user_id"`
@@ -1492,6 +1501,9 @@ type RunDetail struct {
 	ReleaseId     string     `json:"release_id"`
 	Status        string     `json:"status"`
 	Steps         int        `json:"steps"`
+	StreamBytes   *int64     `json:"stream_bytes,omitempty"`
+	StreamItems   *int64     `json:"stream_items,omitempty"`
+	Streaming     *bool      `json:"streaming,omitempty"`
 	Trigger       string     `json:"trigger"`
 	UpdatedAt     time.Time  `json:"updated_at"`
 	UserId        string     `json:"user_id"`
@@ -1515,6 +1527,9 @@ type RunStep struct {
 	Seq         int        `json:"seq"`
 	StartedAt   time.Time  `json:"started_at"`
 	Status      string     `json:"status"`
+	StreamBytes *int64     `json:"stream_bytes,omitempty"`
+	StreamItems *int64     `json:"stream_items,omitempty"`
+	Streaming   *bool      `json:"streaming,omitempty"`
 }
 
 // RunsResponse defines model for RunsResponse.
@@ -5095,6 +5110,49 @@ func (response InvokeApplication200JSONResponse) VisitInvokeApplicationResponse(
 	return err
 }
 
+type InvokeApplication200TexteventStreamResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response InvokeApplication200TexteventStreamResponse) VisitInvokeApplicationResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		// If w doesn't support flushing, fall back to io.Copy.
+		_, err := io.Copy(w, response.Body)
+		return err
+	}
+	// text/event-stream messages are typically small; use a
+	// modest buffer and flush after each chunk so clients see
+	// events immediately instead of waiting on OS buffering.
+	buf := make([]byte, 4096)
+	for {
+		n, err := response.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				return writeErr
+			}
+			flusher.Flush()
+		}
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
 type InvokeApplication401JSONResponse struct{ ErrorJSONResponse }
 
 func (response InvokeApplication401JSONResponse) VisitInvokeApplicationResponse(w http.ResponseWriter) error {
@@ -5367,6 +5425,49 @@ func (response TestApplication200JSONResponse) VisitTestApplicationResponse(w ht
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
+}
+
+type TestApplication200TexteventStreamResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response TestApplication200TexteventStreamResponse) VisitTestApplicationResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		// If w doesn't support flushing, fall back to io.Copy.
+		_, err := io.Copy(w, response.Body)
+		return err
+	}
+	// text/event-stream messages are typically small; use a
+	// modest buffer and flush after each chunk so clients see
+	// events immediately instead of waiting on OS buffering.
+	buf := make([]byte, 4096)
+	for {
+		n, err := response.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				return writeErr
+			}
+			flusher.Flush()
+		}
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+	}
 }
 
 type TestApplication400JSONResponse struct{ ErrorJSONResponse }

@@ -55,6 +55,14 @@ export default function RunDetail() {
 			</p>
 			{err !== '' && <Notice tone="warning">{err}</Notice>}
 
+			{run.streaming && (
+				<section className="app-card">
+					<div className="app-card-head"><span className="app-card-title">Output</span></div>
+					<div className="app-card-body">
+						<p className="app-dim">Streamed output was delivered live and is not retained. {run.stream_items ?? 0} item{(run.stream_items ?? 0) === 1 ? '' : 's'} · {run.stream_bytes ?? 0} bytes.</p>
+					</div>
+				</section>
+			)}
 			{run.status === 'succeeded' && run.output_json && (
 				<section className="app-card">
 					<div className="app-card-head"><span className="app-card-title">Output</span></div>

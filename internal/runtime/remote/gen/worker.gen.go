@@ -2657,6 +2657,9 @@ func ParseRuntimeInvokeResponse(rsp *http.Response) (*RuntimeInvokeResponse, err
 		}
 		response.JSONDefault = &dest
 
+	case rsp.StatusCode == 200:
+		// Content-type (application/x-ndjson) unsupported
+
 	}
 
 	return response, nil
@@ -3279,6 +3282,49 @@ func (response RuntimeInvoke200JSONResponse) VisitRuntimeInvokeResponse(w http.R
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
+}
+
+type RuntimeInvoke200ApplicationxNdjsonResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response RuntimeInvoke200ApplicationxNdjsonResponse) VisitRuntimeInvokeResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		// If w doesn't support flushing, fall back to io.Copy.
+		_, err := io.Copy(w, response.Body)
+		return err
+	}
+	// text/event-stream messages are typically small; use a
+	// modest buffer and flush after each chunk so clients see
+	// events immediately instead of waiting on OS buffering.
+	buf := make([]byte, 4096)
+	for {
+		n, err := response.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				return writeErr
+			}
+			flusher.Flush()
+		}
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+	}
 }
 
 type RuntimeInvokedefaultJSONResponse struct {

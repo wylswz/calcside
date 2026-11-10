@@ -275,3 +275,76 @@ def main(input): return {}
 		t.Fatal("actor audit lost over transport")
 	}
 }
+
+func TestDirectInvokeStreamNDJSON(t *testing.T) {
+	m := testManager(t)
+	srv := httptest.NewServer(remote.NewHandler(m, testKey))
+	defer srv.Close()
+	d, err := remote.NewDirect(srv.URL, srv.Client(), testKey, "api-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	prep := prepareReq("ins_s1", nil)
+	prep.Program.Sources = map[string][]byte{"main.star": []byte(`def main(input):
+    return stream.from_list([{"n": 1}, {"n": 2}])
+`)}
+	prep.Program.OutputSchema = json.RawMessage(`{"type":"object"}`)
+	pr, err := d.Prepare(ctx, prep)
+	if err != nil || pr.Result.Error != nil {
+		t.Fatalf("prepare: %v %+v", err, pr.Result)
+	}
+	var items []string
+	started := 0
+	sctx := runtime.WithInvokeStream(ctx, &testSink{start: func() error { started++; return nil },
+		item: func(b json.RawMessage) error { items = append(items, string(b)); return nil }})
+	resp, err := d.Invoke(sctx, &runtime.InvokeRequest{
+		InstanceID: "ins_s1", Owner: runtime.Owner{UserID: "u1"},
+		ReleaseID: "rel-1", Generation: 1, Epoch: prep.Epoch,
+		InvokeID: "inv-1", Input: json.RawMessage(`{"name":"x"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started != 1 || len(items) != 2 || items[0] != `{"n":1}` {
+		t.Fatalf("started=%d items=%v", started, items)
+	}
+	if !resp.Result.Streaming || resp.Result.StreamItems != 2 {
+		t.Fatalf("result %+v", resp.Result)
+	}
+
+	prep2 := prepareReq("ins_s2", nil)
+	prep2.Program.OutputSchema = json.RawMessage(`{"type":"object"}`)
+	if _, err := d.Prepare(ctx, prep2); err != nil {
+		t.Fatal(err)
+	}
+	resp2, err := d.Invoke(sctx, &runtime.InvokeRequest{
+		InstanceID: "ins_s2", Owner: runtime.Owner{UserID: "u1"},
+		ReleaseID: "rel-1", Generation: 1, Epoch: prep2.Epoch,
+		InvokeID: "inv-2", Input: json.RawMessage(`{"name":"x"}`),
+	})
+	if err != nil || resp2.Result.Error != nil {
+		t.Fatalf("invoke2: %v %+v", err, resp2.Result)
+	}
+	if resp2.Result.Streaming || resp2.Result.Output == nil {
+		t.Fatalf("plain result %+v", resp2.Result)
+	}
+}
+
+type testSink struct {
+	start func() error
+	item  func(json.RawMessage) error
+}
+
+func (s *testSink) Start() error {
+	if s.start != nil {
+		return s.start()
+	}
+	return nil
+}
+func (s *testSink) Item(b json.RawMessage) error {
+	if s.item != nil {
+		return s.item(b)
+	}
+	return nil
+}

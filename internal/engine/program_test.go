@@ -20,6 +20,7 @@ import (
 	capfs "calcside/internal/capability/fs"
 	"calcside/internal/secrets"
 	"calcside/internal/serving"
+	"calcside/internal/stream"
 	"calcside/internal/types"
 )
 
@@ -51,7 +52,7 @@ func (c *spyCloser) Close() error {
 
 func (f *spyFactory) Name() types.CapabilityName { return "probe" }
 func (f *spyFactory) Ops() []capability.OpInfo {
-	return []capability.OpInfo{{Name: "go"}}
+	return []capability.OpInfo{{Name: "go"}, {Name: "stream"}}
 }
 func (f *spyFactory) ConfigFields() []capability.FieldDoc { return nil }
 func (f *spyFactory) Validate(raw json.RawMessage, limits capability.ServerLimits) (any, error) {
@@ -90,7 +91,30 @@ func (f *spyFactory) New(cfg any, env capability.InstanceEnv) (starlark.Value, i
 				return starlark.None, map[string]any{}, nil
 			})
 	})
-	m := &starlarkstruct.Module{Name: "probe", Members: starlark.StringDict{"go": b}}
+	bs := starlark.NewBuiltin("probe.stream", func(thread *starlark.Thread, bi *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		return env.Gate.Invoke(capability.ThreadContext(thread), "probe", "stream", nil,
+			func(ctx context.Context, _ map[string]any) (starlark.Value, map[string]any, error) {
+				f.mu.Lock()
+				f.opCalls++
+				f.mu.Unlock()
+				scope := stream.FromThread(thread)
+				src, err := stream.New(scope, func(_ *starlark.Thread) (starlark.Value, bool, error) {
+					return starlark.None, false, nil
+				}, nil, nil)
+				if err != nil {
+					return nil, nil, err
+				}
+				w, err := env.Gate.WrapStream(thread, "probe", "stream", nil, nil, src)
+				if err != nil {
+					return nil, nil, err
+				}
+				return w, map[string]any{}, nil
+			})
+	})
+	bp := starlark.NewBuiltin("probe.panic", func(thread *starlark.Thread, bi *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		panic("deliberate test panic")
+	})
+	m := &starlarkstruct.Module{Name: "probe", Members: starlark.StringDict{"go": b, "stream": bs, "panic": bp}}
 	return m, cl, nil
 }
 

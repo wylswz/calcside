@@ -144,7 +144,7 @@ func TestRealDraftLifecycle(t *testing.T) {
 	}
 	rel, err := st.GetServingRelease(ctx, actor.WorkspaceID, pub.ReleaseID)
 	if err != nil || !strings.Contains(string(rel.Program.InputSchema), `"type":"object"`) ||
-		!strings.Contains(string(rel.Program.OutputSchema), `"type":"object"`) {
+		string(rel.Program.OutputSchema) != `{}` {
 		t.Fatalf("release default contracts: %+v, %v", rel, err)
 	}
 	updated, err := s.Update(ctx, actor, id, UpdateRequest{Version: 1, Code: code + "\n"})
