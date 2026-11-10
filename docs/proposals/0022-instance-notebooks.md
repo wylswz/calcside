@@ -50,16 +50,17 @@ tell the agent precisely where it is not.
 
 ## Research: what makes a notebook agent friendly
 
-Findings that shape the design (sources at the end):
+Findings that shape the design. `R1`–`R9` refer to *References* at the end,
+which summarises each source.
 
-| Finding | Consequence here |
-|---|---|
-| Classic notebooks let cells run in any order; state becomes a function of click history. Studies of GitHub notebooks report roughly a quarter run top to bottom and about 4% reproduce their outputs. | Order is semantics. Run state is tracked per section; out-of-order and edited sections are reported as `stale`, never silently trusted. |
-| "Restart and run all succeeds" is the only notebook property an agent can actually verify. | After restoration the instance is empty and every section is `not_run`; `run("all")` is that check, and its per-section report is the evidence. |
-| marimo derives a dataflow graph statically (names each cell defines and reads) and separates durable cells from an ephemeral scratchpad. | Server-derived `defines`/`uses` per section; plain `exec` stays as the scratchpad; scratch mutations are counted as drift. |
-| marimo validates durable changes as a batch and rejects with an error naming the violated invariant and the cells involved. | Section writes are validated (syntax, name, size) before anything is stored or run; errors name the section and line and say what to do next. |
-| MCP servers for Jupyter with ~15–20 cell tools were consolidated (Block went from 11 tools to 4); `.ipynb` JSON with embedded outputs is a poor editing format for LLMs. | Few tools, addressed by stable name instead of shifting index, code as plain text, outputs kept out of the outline. |
-| Tool results are prompts. Agents act on what the result says. | Every result is compact text that states the state and the next sensible call. |
+| Finding | Source | Consequence here |
+|---|---|---|
+| Classic notebooks let cells run in any order; state becomes a function of click history. Studies of GitHub notebooks report roughly a quarter run top to bottom and about 4% reproduce their outputs. | R1, R3 | Order is semantics. Run state is tracked per section; out-of-order and edited sections are reported as `stale`, never silently trusted. |
+| "Restart and run all succeeds" is the only notebook property an agent can actually verify. | R1 | After restoration the instance is empty and every section is `not_run`; `run("all")` is that check, and its per-section report is the evidence. |
+| marimo derives a dataflow graph statically (names each cell defines and reads) and separates durable cells from an ephemeral scratchpad. | R2, R4, R5 | Server-derived `defines`/`uses` per section; plain `exec` stays as the scratchpad; scratch mutations are counted as drift. |
+| marimo validates durable changes as a batch and answers with an error naming the violated invariant and the cells involved. | R6 | Errors name the section and line and say what to do next. Unlike marimo, a failed section is stored, with state `failed`. |
+| Jupyter MCP servers expose many fine-grained cell tools (19 in one); Block consolidated 11 tools into 4. `.ipynb` JSON with embedded outputs is a poor editing format for LLMs. | R5, R7, R8, R9 | Few tools, addressed by stable name instead of shifting index, code as plain text, outputs kept out of the outline. |
+| An agent acts on what a tool result says; errors should be actionable. | R6, R9 | Every result is compact text that states the state and the next sensible call. |
 
 Two things the Jupyter and marimo designs do not have to deal with, and this
 one does: sections have **external side effects** (re-running a section
@@ -472,9 +473,161 @@ re-runnable sections on a live instance.
   serving concept and there is no path from a notebook to an EP-0014
   application (no export, no publish).
 
-## Sources
+## References
 
-- marimo, "Python notebooks as dataflow graphs" and "Lessons learned reinventing the Python notebook" (static dataflow graph, hidden state, reproducibility figures).
-- "Beyond the Shell: Extending Agents with Reactive Python Notebooks" (marimo pair: scratchpad vs durable cells, transactional mutation, invariant-naming errors).
-- "Notebooks Are Hostile Territory for Coding Agents" (restart-and-run-all as the only verifiable property).
-- Jupyter MCP servers: datalayer/jupyter-mcp-server, Try3D/JupyterMCP (`notebook_as_script`), block/mcp-jupyter (tool consolidation from 11 to 4).
+What each source says, and what this proposal takes or declines from it.
+Figures are quoted as the sources report them and were not checked against
+the underlying studies.
+
+### Why notebooks are hard for agents
+
+**R1. Tian Pan, "Notebooks Are Hostile Territory for Coding Agents"**
+(<https://tianpan.co/blog/2026/07/02/notebooks-are-hostile-territory-for-coding-agents>)
+
+- Thesis: a notebook is "a REPL wearing a file costume". Behaviour is
+  decided by the kernel's accumulated memory, which is invisible and shaped
+  by the order of clicks, so the file is not the program.
+- Three ways the file and the state diverge: out-of-order execution, deleted
+  cells whose variables survive, and stale outputs. It cites a study of over
+  860,000 notebook executions on GitHub: about 24% ran top to bottom without
+  errors, about 4% reproduced their stored outputs, roughly 36% showed
+  out-of-order execution.
+- Why agents fare worse than humans: they treat stored outputs as ground
+  truth; their verification move (re-run) is itself a mutation that can
+  double-apply a transformation or re-fire an API call; and cell-level MCP
+  tools fix the file format, not the state problem.
+- "Restart and run all succeeds" is the only property an agent can verify;
+  the kernel should be treated as an untrusted cache.
+- Recommended style: cells as pure functions with named inputs and outputs,
+  no cross-cell mutation, no cell that depends on running exactly once.
+- Taken: order as semantics, the `stale` state, drift, `run("all")` on an
+  empty instance as the verification, and the `once` marker for the
+  "re-fires an API call" case.
+
+### Dataflow notebooks (marimo)
+
+**R2. marimo, "Python notebooks as dataflow graphs: reactive, reproducible,
+and reusable"** (<https://marimo.io/blog/dataflow>)
+
+- A notebook is modelled as a DAG on cells: an edge `(u, v)` means `v` reads
+  a variable `u` defines. Definitions and references are inferred statically,
+  with no runtime tracing, so there is no runtime overhead and mutations are
+  not tracked.
+- The same graph serves three uses: reactive notebook (run or mark stale the
+  dependents), executable script, and app.
+- Cites a 2020 JetBrains study: over a third of notebooks on GitHub had
+  invalid execution histories.
+- Taken: static `defines`/`uses` and their stated limit (no mutation
+  tracking). Declined: the graph does not decide execution order here;
+  notebook order does.
+
+**R3. marimo, "Lessons learned reinventing the Python notebook"**
+(<https://marimo.io/blog/lessons-learned>)
+
+- Defines hidden state: in a classic notebook, variable state is a function
+  of the code *and* the user's execution history. Two canonical examples:
+  cells run out of order, and a deleted cell whose variable still exists.
+- Explains the DAG as the fix: it imposes a well-defined execution order.
+- Taken: the problem statement. A deleted section here does not unbind its
+  names (the process is not reactive), so deletion is reported as drift
+  instead.
+
+**R4. marimo docs, "Running cells" and "Key concepts"**
+(<https://docs.marimo.io/guides/reactivity>,
+<https://docs.marimo.io/getting_started/key_concepts/>)
+
+- Runtime rule: running a cell runs every cell that references a global it
+  defines; alternatively dependents are only marked stale (user's choice).
+  Execution order comes from variables, not page position. Deleting a cell
+  deletes its variables. Attribute assignments and mutations are not
+  tracked; the advice is to minimise mutation.
+- Taken: "mark stale" as the only mode. Declined: automatic re-execution,
+  because sections here have external side effects.
+
+**R5. marimo, "The best AI agent for Jupyter notebooks" and "Python
+notebooks with AI"** (<https://marimo.io/features/best-agent-for-jupyter>,
+<https://marimo.io/features/feat-ai>)
+
+- Three reasons `.ipynb` is a poor target for agents: the format is JSON
+  with base64 outputs, so edits are fragile and diffs noisy; hidden state
+  breaks reproducibility (it quotes "over 75% don't run top to bottom, 96%
+  don't reproduce"); agents cannot verify their work because the file is not
+  a well-formed program.
+- Describes marimo pair: an agent works inside a running notebook, with an
+  ephemeral scratchpad for trying code, and can add or delete cells and
+  inspect in-memory variables.
+- Taken: code as plain text, outputs out of the outline, and the split
+  between scratch `exec` and durable sections.
+
+**R6. "Beyond the Shell: Extending Agents with Reactive Python Notebooks"**
+(SAO workshop paper, <https://bauplanlabs.github.io/SAO-workshop/papers/45.pdf>;
+listed on alphaXiv as "Reactive Python Notebooks as Tools for Coding
+Agents"). Read from the abstract and summaries, not the full text.
+
+- Argues that file-and-shell agents lack what iterative computational work
+  needs: a long tail of operations, persistent in-memory values, and
+  coherent iteration over partial state. Proposes letting the agent act
+  inside a live runtime through a single code action.
+- The runtime, not the agent, keeps the program consistent, through three
+  rules: reactive recompute, scrub-on-delete, and transactional mutation.
+  Durable changes are queued and validated as a batch (syntax, names defined
+  in more than one cell, dependency cycles, deleting names still in use); a
+  failing batch leaves the notebook unchanged and returns an error naming
+  the violated invariant and the cells involved.
+- Accepted cells become the saved program; scratchpad work is not persisted.
+- Taken: the server derives and enforces what it can instead of trusting the
+  agent's bookkeeping; errors name the section and the next step. Declined:
+  rejecting failed work. A failed section is stored with state `failed` so
+  the intention is kept (see *Decisions*).
+
+### MCP servers for Jupyter
+
+**R7. datalayer/jupyter-mcp-server**
+(<https://github.com/datalayer/jupyter-mcp-server>, tool reference at
+<https://jupyter-mcp-server.datalayer.tech/mcp/>)
+
+- A fine-grained tool surface over a live kernel: notebook tools
+  (`use_notebook`, `read_notebook`, `restart_notebook`, ...), cell tools
+  (`insert_cell`, `edit_cell_source`, `overwrite_cell_source`, `move_cell`,
+  `delete_cell`, `clear_cell_output`, ...), and execution tools
+  (`execute_cell`, `insert_execute_code_cell`, and `execute_code`, which
+  runs code that is not saved to the notebook).
+- Cells are addressed by index against a currently "activated" notebook.
+- Taken: `insert_execute_code_cell` is the model for `exec` with a
+  `section`; `execute_code` is the scratch path. Declined: index addressing
+  and server-side "active notebook" state (the MCP endpoint here is
+  stateless), and the number of tools.
+
+**R8. Try3D/JupyterMCP** (<https://github.com/Try3D/JupyterMCP>)
+
+- 19 tools in five groups (notebooks, cells, kernels, workspace, remote).
+  Cells have stable `cell_id`s. `cell_update` clears outputs and execution
+  count. `notebook_as_script` returns the whole notebook as one Python string
+  with `# %%` markers so an agent can read it as a program;
+  `notebook_execute_all` runs it.
+- Taken: stable identity instead of position (names here), and a whole-
+  notebook read view. The outline is that view without code, because the
+  full script costs tokens the agent often does not need.
+
+**R9. block/mcp-jupyter, architecture notes**
+(<https://github.com/block/mcp-jupyter/blob/main/docs/docs/architecture.md>)
+
+- Tool design: four consolidated tools, reduced from eleven
+  (`query_notebook`, `modify_notebook_cells`, `execute_notebook_code`,
+  `setup_notebook`), each taking an operation parameter.
+- The agent writes through Jupyter's REST API with explicit saves; the human
+  sees the changes live through Jupyter's real-time collaboration channel.
+- A state tracker hashes notebook content and validates it before
+  operations, so an agent does not act on a stale view; all errors are meant
+  to be actionable.
+- Taken: a small surface (`run` takes a name, a list, `"all"` or `"stale"`
+  instead of four tools), the notebook revision for optimistic concurrency
+  between agent and console, and actionable errors.
+
+### What the sources do not cover
+
+None of them addresses the two constraints that drive the restoration
+design here: a process that can disappear with all its state while the
+notebook outlives it, and sections whose re-execution has effects outside
+the sandbox. The rule that restoration executes nothing, and the `once`
+marker, are this proposal's own.
