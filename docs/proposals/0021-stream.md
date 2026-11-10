@@ -1,6 +1,6 @@
 # EP-0021: Pull-based streams for Starlark
 
-- **Status:** Implemented (v1: core streams, SSE, net.stream, ext.llm.stream)
+- **Status:** Implemented (core streams, lazy combinators, and application SSE output)
 - **Created:** 2026-11-05
 - **Area:** Starlark engine, capability gate, net capability, extensions (LLM), resource limits, audit
 - **Related:** [EP-0013](0013-llm-providers.md) (LLM providers; supersedes its historical no-streaming non-goal), [EP-0015](0015-copy-isolated-map.md) (copy-isolated `map`), [EP-0016](0016-application-interrupts.md) (interrupts), [docs/extensions.md](../extensions.md)
@@ -21,10 +21,7 @@ of it:
   provider-protocol addition that surfaces normalized
   `text_delta`/`done` events.
 
-Streams are scoped to a single execution inside the existing worker child
-process. Nothing here streams exec output, run events or HTTP responses to
-the API, SDK or console; delivery to outside callers is a separate future
-protocol. The v1 core streams, SSE framing, net.stream, and ext.llm.stream described here are implemented; the design discussion below also notes deferred areas.
+Streams are scoped to one execution inside the existing worker child. The core streams, SSE decoder, net.stream and ext.llm.stream are implemented. Lazy stream.from_list, map, reduce and flatmap extend this model. When main returns a stream, the application invoke/test response delivers validated items over SSE to the caller and console; ordinary JSON returns are unchanged. The API tier never executes Starlark or serializes live stream handles.
 
 ## Motivation
 
@@ -252,12 +249,7 @@ protocol, no resumed stream across `interrupt.wait`, and no globals
 snapshot of handles; no worker-protocol change is needed to consume a
 stream internally.
 
-This proposal alone does **not** stream exec stdout/results or
-application run events to the API, SDK or UI, and adds no SSE endpoint or
-web UI surface — that needs a separate delivery protocol with its own
-disconnect, redaction and backpressure semantics. It also supersedes
-EP-0013's historical no-streaming note without treating that proposal's
-native-provider design as shipped.
+Application main results now have an SSE delivery protocol with disconnect, per-item redaction, validation and backpressure semantics. Exec stdout/results streaming, SDK streaming, persisted/replayable streams and reconnection to later interrupt handlers remain out of scope. Later handler streams are consumed and validated for statistics only; their items are not retained. This supersedes EP-0013's historical no-streaming note without treating its native-provider design as shipped.
 
 Non-goals: persisted or replayable streams, generators/`yield`, unbounded
 event subscriptions, and generic async.

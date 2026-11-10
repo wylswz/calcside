@@ -300,3 +300,158 @@ export async function getInterrupt(id: string): Promise<{ interrupt?: Interrupt 
 export async function resumeInterrupt(id: string, eventJson: string): Promise<{ status?: string }> {
 	return api.postRawJson(`/api/v1/interrupts/${encodeURIComponent(id)}/resume`, eventJson)
 }
+
+export interface PostApplicationOptions {
+  signal?: AbortSignal
+  onStart?: () => void
+  onItem?: (raw: string) => void
+}
+
+export class StreamProtocolError extends Error {}
+
+const SSE_FRAME_LIMIT = 2 << 20
+
+async function streamErrorBody(response: Response): Promise<never> {
+  let message = response.statusText
+  let code: ApiErrorCode | '' = ''
+  try {
+    const data = JSON.parse(await response.text())
+    code = (data?.error?.code ?? '') as ApiErrorCode | ''
+    if (data?.error?.message) message = data.error.message
+  } catch { /* non-JSON error body */ }
+  throw new ApiError(response.status, code, message)
+}
+
+export async function postApplication(path: string, raw: string, opts: PostApplicationOptions = {}): Promise<ApplicationRun> {
+  const response = await fetch(wsPath(path), {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'calcside', 'Accept': 'application/json, text/event-stream' },
+    body: raw,
+    signal: opts.signal ?? null,
+  })
+  if (response.status === 401 && !devMode && window.location.pathname !== '/login') {
+    window.location.assign('/login')
+    throw new ApiError(401, 'unauthorized' as ApiErrorCode, 'Unauthorized')
+  }
+  const type = (response.headers.get('Content-Type') || '').split(';')[0].trim()
+  if (type !== 'text/event-stream') {
+    if (!response.ok) return streamErrorBody(response)
+    const text = await response.text()
+    try { return JSON.parse(text) as ApplicationRun }
+    catch { throw new ApiError(response.status, '', 'Unexpected response') }
+  }
+  if (!response.ok) return streamErrorBody(response)
+  if (!response.body) throw new ApiError(response.status, '', 'Missing stream body')
+  return readApplicationStream(response.body, opts)
+}
+
+async function readApplicationStream(body: ReadableStream<Uint8Array>, opts: PostApplicationOptions): Promise<ApplicationRun> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder('utf-8', { fatal: true })
+  const encoder = new TextEncoder()
+  let buf = ''
+  let bomChecked = false
+  let event = ''
+  let dataLines: string[] | null = null
+  let terminal: { event: string; data: string } | null = null
+  const fail = (m: string): never => { throw new StreamProtocolError(m) }
+  const dispatch = () => {
+    const lines = dataLines
+    const ev = event
+    event = ''
+    dataLines = null
+    if (lines === null) return
+    const payload = lines.join('\n')
+    if (ev === 'item') {
+      if (terminal) fail('item after terminal event')
+      opts.onItem?.(payload)
+      return
+    }
+    if (ev === 'done' || ev === 'error') {
+      if (terminal) fail('duplicate terminal event')
+      terminal = { event: ev, data: payload }
+      return
+    }
+    fail(`unknown event ${ev}`)
+  }
+  const frames = () => {
+    for (;;) {
+      let end = -1, skip = 0
+      for (const [sep, len] of [['\r\n\r\n', 4], ['\n\n', 2], ['\r\r', 2]] as const) {
+        const i = buf.indexOf(sep)
+        if (i >= 0 && (end < 0 || i < end)) { end = i; skip = len }
+      }
+      if (end < 0) return
+      const raw = buf.slice(0, end)
+      buf = buf.slice(end + skip)
+      if (encoder.encode(raw).length > SSE_FRAME_LIMIT) fail('stream frame too large')
+      for (const line of raw.split(/\r\n|\r|\n/)) {
+        if (line === '') continue
+        const c = line.indexOf(':')
+        if (c === 0) continue
+        const name = c < 0 ? line : line.slice(0, c)
+        let value = c < 0 ? '' : line.slice(c + 1)
+        if (value.startsWith(' ')) value = value.slice(1)
+        if (name === 'event') event = value
+        else if (name === 'data') (dataLines ??= []).push(value)
+      }
+      dispatch()
+    }
+  }
+  const onAbort = () => { void reader.cancel().catch(() => { /* already closed */ }) }
+  opts.signal?.addEventListener('abort', onAbort, { once: true })
+  try {
+    opts.onStart?.()
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (opts.signal?.aborted) fail('aborted')
+      if (value) {
+        let chunk: string
+        try { chunk = decoder.decode(value, { stream: true }) }
+        catch { throw new StreamProtocolError('invalid stream encoding') }
+        if (!bomChecked) { bomChecked = true; buf += chunk.replace(/^\uFEFF/, '') }
+        else buf += chunk
+        frames()
+        if (encoder.encode(buf).length > SSE_FRAME_LIMIT) fail('stream frame too large')
+      }
+      if (done) {
+        try { decoder.decode() } catch { throw new StreamProtocolError('invalid stream encoding') }
+        if (buf !== '' && buf !== '\n' && buf !== '\r\n' && buf !== '\r') fail('stream closed mid-frame')
+        break
+      }
+    }
+  } catch (e) {
+    try { await reader.cancel() } catch { /* already closed */ }
+    throw e
+  } finally {
+    opts.signal?.removeEventListener('abort', onAbort)
+    reader.releaseLock()
+  }
+  const term = terminal as { event: string; data: string } | null
+  if (term === null) throw new StreamProtocolError('stream ended without a terminal event')
+  let out: unknown
+  try { out = JSON.parse(term.data) }
+  catch { fail('invalid terminal payload') }
+  const res = out && typeof out === 'object' ? (out as Record<string, unknown>).result : null
+  const r = res && typeof res === 'object' ? res as Record<string, unknown> : null
+  if (!r || typeof r.id !== 'string' || r.streaming !== true) {
+    throw new StreamProtocolError('invalid terminal payload')
+  }
+  if (term.event === 'done' && r.id === '') {
+    throw new StreamProtocolError('invalid terminal payload')
+  }
+  for (const k of ['stream_items', 'stream_bytes']) {
+    const v = r[k]
+    if (v !== undefined && (!Number.isInteger(v) || (v as number) < 0)) fail('invalid terminal payload')
+  }
+  if (term.event === 'done') {
+    if (r.error != null || r.waiting != null) fail('invalid terminal payload')
+  } else {
+    const e = r.error as Record<string, unknown> | null
+    if (!e || typeof e !== 'object' || typeof e.code !== 'string' || e.code === '' || typeof e.message !== 'string' || e.message === '') {
+      fail('invalid terminal payload')
+    }
+  }
+  return out as ApplicationRun
+}

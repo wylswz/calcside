@@ -77,6 +77,9 @@ type Run struct {
 	InterruptID string     `json:"interrupt_id,omitempty"`
 	ErrorCode   string     `json:"error_code,omitempty"`
 	Output      []byte     `json:"-"`
+	Streaming   bool       `json:"streaming,omitempty"`
+	StreamItems int64      `json:"stream_items,omitempty"`
+	StreamBytes int64      `json:"stream_bytes,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 	EndedAt     *time.Time `json:"ended_at,omitempty"`
@@ -95,6 +98,9 @@ type RunStep struct {
 	Status      string     `json:"status"`
 	ErrorCode   string     `json:"error_code,omitempty"`
 	DurationMs  int64      `json:"duration_ms"`
+	Streaming   bool       `json:"streaming,omitempty"`
+	StreamItems int64      `json:"stream_items,omitempty"`
+	StreamBytes int64      `json:"stream_bytes,omitempty"`
 	StartedAt   time.Time  `json:"started_at"`
 	EndedAt     *time.Time `json:"ended_at,omitempty"`
 }
@@ -165,12 +171,15 @@ type WaitCommit struct {
 // StepOutcome is the atomic end-of-step transition written by
 // FinishStep.
 type StepOutcome struct {
-	RunID      string
-	Seq        int
-	Attempt    int
-	Status     string // succeeded|failed|waiting|unknown
-	ErrorCode  string
-	DurationMs int64
+	RunID       string
+	Seq         int
+	Attempt     int
+	Status      string // succeeded|failed|waiting|unknown
+	ErrorCode   string
+	DurationMs  int64
+	Streaming   bool
+	StreamItems int64
+	StreamBytes int64
 	// Output is the run output ciphertext when Status == succeeded.
 	Output []byte
 	// Wait is required iff Status == waiting.

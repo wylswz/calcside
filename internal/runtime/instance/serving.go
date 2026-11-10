@@ -318,7 +318,7 @@ func (m *Manager) Invoke(ctx context.Context, req *runtime.InvokeRequest) (*runt
 			Token:     s.Token,
 		}
 	}
-	res := m.eng.InvokeProgram(callCtx, prog, req.Input, deps, r.creation, engine.ProgramCall{
+	call := engine.ProgramCall{
 		ID:         req.InvokeID,
 		ActorID:    actor.UserID,
 		ActorEmail: actor.Email,
@@ -327,7 +327,12 @@ func (m *Manager) Invoke(ctx context.Context, req *runtime.InvokeRequest) (*runt
 		RunID:      req.RunID,
 		Step:       req.Step,
 		Interrupts: slots,
-	})
+	}
+	if ss := runtime.InvokeStreamFromContext(ctx); ss != nil {
+		call.StreamStart = ss.Start
+		call.StreamItem = ss.Item
+	}
+	res := m.eng.InvokeProgram(callCtx, prog, req.Input, deps, r.creation, call)
 	resp := &runtime.InvokeResponse{Result: programResultOf(res)}
 	// The run token is released after draining so no next call's ops
 	// can interleave into this call's audit batch.
@@ -509,11 +514,14 @@ func (r *programReplica) callContext(ctx context.Context, dur time.Duration) (co
 // programResultOf converts the engine result to the wire contract.
 func programResultOf(res engine.ProgramResult) runtime.ProgramResult {
 	out := runtime.ProgramResult{
-		ID:         res.ID,
-		Output:     res.Output,
-		Stdout:     res.Stdout,
-		DurationMs: res.DurationMs,
-		Steps:      res.Steps,
+		ID:          res.ID,
+		Output:      res.Output,
+		Stdout:      res.Stdout,
+		DurationMs:  res.DurationMs,
+		Steps:       res.Steps,
+		Streaming:   res.Streaming,
+		StreamItems: res.StreamItems,
+		StreamBytes: res.StreamBytes,
 	}
 	if res.Error != nil {
 		out.Error = &runtime.ProgramError{Code: res.Error.Code, Message: res.Error.Message}

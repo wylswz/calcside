@@ -15,6 +15,7 @@ import (
 
 	"calcside/internal/capability"
 	capio "calcside/internal/capability/io"
+	"calcside/internal/secrets"
 	"calcside/internal/serving"
 	"calcside/internal/stdlib"
 	"calcside/internal/stream"
@@ -593,4 +594,435 @@ for x in s:
 	result, starErr := e.Exec(t, code)
 	assert.Nil(t, starErr)
 	assert.Equal(t, "2\n4\n6\n8\n10\n", result)
+}
+
+func TestStreamFromListCombinators(t *testing.T) {
+	s, buf := streamSession(t, nil, nil)
+	e := New(4)
+	res := e.Exec(context.Background(), s, "x", `
+calls = [0]
+def seen(x):
+    calls[0] += 1
+    return x * 10
+s = stream.from_list([1, 2, 3])
+m = s.map(seen)
+print("built", calls[0])
+r = m.reduce(lambda a, b: a + b, 0)
+print(r.next())
+print(r.next())
+f = stream.from_list([(1, 2), [3], ()]).flatmap(lambda x: x)
+for v in f:
+    print(v)
+`, 0, 1<<20, buf.String)
+	if res.Error != nil {
+		t.Fatalf("exec: %+v", res.Error)
+	}
+	for _, want := range []string{"built 0", "(True, 60)", "(False, None)", "1", "2", "3"} {
+		if !strings.Contains(res.Output, want) {
+			t.Fatalf("output %q missing %q", res.Output, want)
+		}
+	}
+}
+
+func TestStreamFromListRejectsBadArgs(t *testing.T) {
+	s, buf := streamSession(t, nil, nil)
+	e := New(4)
+	for _, code := range []string{
+		`stream.from_list("ab")`,
+		`stream.from_list({"a": 1})`,
+		`stream.from_list()`,
+		`stream.from_list([1], [2])`,
+		`stream.from_list(values="ab")`,
+		`stream.from_list([1]).map()`,
+		`stream.from_list([1]).map(1)`,
+		`stream.from_list([1]).reduce(lambda a, b: a)`,
+		`stream.from_list([1]).flatmap(lambda x: 1).next()`,
+	} {
+		res := e.Exec(context.Background(), s, "x", code, 0, 1<<20, buf.String)
+		if res.Error == nil {
+			t.Fatalf("accepted %s", code)
+		}
+	}
+}
+
+func TestStreamCombinatorConstructionLazy(t *testing.T) {
+	s, buf := streamSession(t, nil, nil)
+	e := New(4)
+	res := e.Exec(context.Background(), s, "x", `
+calls = [0]
+def spy(x):
+    calls[0] += 1
+    return x
+s = stream.from_list([1, 2])
+m = s.map(spy)
+f = stream.from_list([[1]]).flatmap(spy)
+red = stream.from_list([1]).reduce(spy, 0)
+print("calls", calls[0])
+`, 0, 1<<20, buf.String)
+	if res.Error != nil {
+		t.Fatal(res.Error)
+	}
+	if !strings.Contains(res.Output, "calls 0") {
+		t.Fatalf("not lazy: %q", res.Output)
+	}
+}
+
+func TestProgramReturnedStreamConsumed(t *testing.T) {
+	e := New(4)
+	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
+	cfg := ProgramConfig{
+		Sources: map[string][]byte{"main.star": []byte(`def main(input):
+    return stream.from_list([{"n": 1}, {"n": 2}, {"n": 3}])
+`)},
+		InputSchema:  json.RawMessage(`{"type":"object"}`),
+		OutputSchema: json.RawMessage(`{"type":"object"}`),
+	}
+	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-s1"})
+	var items []json.RawMessage
+	started := 0
+	res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{}`), deps, creation, ProgramCall{
+		ID:          "inv-s1",
+		StreamStart: func() error { started++; return nil },
+		StreamItem: func(b json.RawMessage) error {
+			items = append(items, append(json.RawMessage(nil), b...))
+			return nil
+		},
+	})
+	if res.Error != nil {
+		t.Fatalf("invoke: %+v", res.Error)
+	}
+	if !res.Streaming || res.StreamItems != 3 {
+		t.Fatalf("streaming=%v items=%d", res.Streaming, res.StreamItems)
+	}
+	if started != 1 || len(items) != 3 || string(items[2]) != `{"n":3}` {
+		t.Fatalf("started=%d items=%v", started, items)
+	}
+	if res.Output != nil {
+		t.Fatalf("streamed result must not set Output: %s", res.Output)
+	}
+	if res.StreamBytes != int64(3*len(`{"n":1}`)) {
+		t.Fatalf("bytes %d", res.StreamBytes)
+	}
+}
+
+func TestProgramReturnedStreamEmptyAndNoSink(t *testing.T) {
+	e := New(4)
+	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
+	cfg := progStreamConfig(`def main(input):
+    return stream.from_list([])
+`)
+	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-s2"})
+	res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{}`), deps, creation, ProgramCall{ID: "inv-s2"})
+	if res.Error != nil || !res.Streaming || res.StreamItems != 0 {
+		t.Fatalf("res %+v", res)
+	}
+}
+
+func TestProgramReturnedStreamSchemaViolation(t *testing.T) {
+	e := New(4)
+	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
+	cfg := progStreamConfig(`def main(input):
+    return stream.from_list([{"ok": True}, 7])
+`)
+	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-s3"})
+	var items []string
+	res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{}`), deps, creation, ProgramCall{
+		ID: "inv-s3", StreamItem: func(b json.RawMessage) error {
+			items = append(items, string(b))
+			return nil
+		},
+	})
+	if res.Error == nil || res.Error.Code != "invalid_output" {
+		t.Fatalf("expected invalid_output, got %+v", res.Error)
+	}
+	if len(items) != 1 || res.StreamItems != 1 {
+		t.Fatalf("prefix items %v", items)
+	}
+}
+
+func TestProgramReturnedStreamNestedStreamInvalid(t *testing.T) {
+	e := New(4)
+	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
+	cfg := progStreamConfig(`def main(input):
+    inner = stream.from_list([1])
+    return stream.from_list([inner])
+`)
+	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-s4"})
+	res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{}`), deps, creation, ProgramCall{ID: "inv-s4"})
+	if res.Error == nil || res.Error.Code != "invalid_output" {
+		t.Fatalf("expected invalid_output, got %+v", res.Error)
+	}
+}
+
+func TestProgramReturnedStreamCallbackError(t *testing.T) {
+	e := New(4)
+	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
+	cfg := progStreamConfig(`def main(input):
+    calls = [0]
+    def nxt():
+        calls[0] += 1
+        if calls[0] > 1:
+            fail("producer exploded")
+        return (True, {"n": 1})
+    return stream.new(nxt)
+`)
+	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-s5"})
+	var items int
+	res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{}`), deps, creation, ProgramCall{
+		ID: "inv-s5", StreamItem: func(json.RawMessage) error { items++; return nil },
+	})
+	if res.Error == nil || res.Error.Code == "" {
+		t.Fatalf("expected failure, got %+v", res)
+	}
+	if items != 1 || res.StreamItems != 1 {
+		t.Fatalf("prefix items %d", items)
+	}
+}
+
+func TestProgramReturnedStreamInterruptWaitFails(t *testing.T) {
+	e := New(4)
+	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
+	cfg := progStreamConfig(`def main(input):
+    def nxt():
+        interrupt.wait(interrupt.new()["id"], handler="h")
+        return (True, 1)
+    return stream.new(nxt)
+
+def h(ctx):
+    return {}
+`)
+	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-s6"})
+	res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{}`), deps, creation, ProgramCall{
+		ID: "inv-s6", RunID: "run_1", Step: 0,
+		Interrupts: []InterruptSlot{{ID: "int_1"}},
+	})
+	if res.Error == nil || res.Error.Code != "runtime" {
+		t.Fatalf("expected runtime failure, got %+v", res.Error)
+	}
+	if res.Waiting != nil {
+		t.Fatal("streamed wait must not produce a waiting run")
+	}
+}
+
+func TestProgramReturnedStreamStartOnEmpty(t *testing.T) {
+	e := New(4)
+	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
+	cfg := progStreamConfig(`def main(input):
+    return stream.from_list([])
+`)
+	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-se"})
+	started := 0
+	items := 0
+	res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{}`), deps, creation, ProgramCall{
+		ID:          "inv-se",
+		StreamStart: func() error { started++; return nil },
+		StreamItem:  func(json.RawMessage) error { items++; return nil },
+	})
+	if res.Error != nil || started != 1 || items != 0 || !res.Streaming {
+		t.Fatalf("started=%d items=%d res=%+v", started, items, res)
+	}
+}
+
+func TestProgramReturnedStreamCombinators(t *testing.T) {
+	e := New(4)
+	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
+	cfg := progStreamConfig(`def main(input):
+    return stream.from_list([[1, 2], [3]]).flatmap(lambda x: x).map(lambda n: {"n": n})
+`)
+	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-sc"})
+	var items []string
+	res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{}`), deps, creation, ProgramCall{
+		ID: "inv-sc", StreamItem: func(b json.RawMessage) error { items = append(items, string(b)); return nil },
+	})
+	if res.Error != nil || res.StreamItems != 3 {
+		t.Fatalf("%+v %v", res, items)
+	}
+	if got := strings.Join(items, ","); got != `{"n":1},{"n":2},{"n":3}` {
+		t.Fatal(got)
+	}
+}
+
+func TestProgramReturnedStreamReduceResult(t *testing.T) {
+	e := New(4)
+	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
+	cfg := progStreamConfig(`def main(input):
+    total = stream.from_list([1, 2, 3]).reduce(lambda a, b: a + b, 0)
+    return stream.from_list([{"n": 0}]).map(lambda _: {"sum": 0}).flatmap(lambda _: total.map(lambda s: {"sum": s}))
+`)
+	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-sr"})
+	var items []string
+	res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{}`), deps, creation, ProgramCall{
+		ID: "inv-sr", StreamItem: func(b json.RawMessage) error { items = append(items, string(b)); return nil },
+	})
+	if res.Error != nil || len(items) != 1 || items[0] != `{"sum":6}` {
+		t.Fatalf("%+v %v", res, items)
+	}
+}
+
+func TestProgramReturnedStreamSinkError(t *testing.T) {
+	e := New(4)
+	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
+	cfg := progStreamConfig(`def main(input):
+    calls = [0]
+    def nxt():
+        calls[0] += 1
+        if calls[0] > 3:
+            return (False, None)
+        return (True, {"n": calls[0]})
+    return stream.new(nxt)
+`)
+	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-sk"})
+	delivered := 0
+	res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{}`), deps, creation, ProgramCall{
+		ID: "inv-sk",
+		StreamItem: func(json.RawMessage) error {
+			delivered++
+			if delivered == 2 {
+				return context.DeadlineExceeded
+			}
+			return nil
+		},
+	})
+	if res.Error == nil || res.Error.Code != "runtime" {
+		t.Fatalf("want safe runtime error, got %+v", res.Error)
+	}
+	if res.StreamItems != 1 || delivered != 2 {
+		t.Fatalf("delivered=%d items=%d", delivered, res.StreamItems)
+	}
+}
+
+func TestProgramReturnedStreamCancel(t *testing.T) {
+	e := New(4)
+	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
+	cfg := progStreamConfig(`def main(input):
+    return stream.from_list([{"n": n} for n in range(5)])
+`)
+	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-sx"})
+	ctx, cancel := context.WithCancel(context.Background())
+	delivered := 0
+	res := e.InvokeProgram(ctx, p, json.RawMessage(`{}`), deps, creation, ProgramCall{
+		ID: "inv-sx",
+		StreamItem: func(json.RawMessage) error {
+			delivered++
+			if delivered == 2 {
+				cancel()
+			}
+			return nil
+		},
+	})
+	if res.Error == nil || res.Error.Code != "timeout" {
+		t.Fatalf("want timeout, got %+v", res.Error)
+	}
+	if res.StreamItems != 2 {
+		t.Fatalf("items %d", res.StreamItems)
+	}
+}
+
+func TestProgramReturnedStreamTotalBytesCap(t *testing.T) {
+	e := New(4)
+	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
+	cfg := progStreamConfig(`def main(input):
+    return stream.from_list(["x" * 900000 for _ in range(19)])
+`)
+	cfg.OutputSchema = json.RawMessage(`{"type":"string"}`)
+	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-sb"})
+	var items int
+	res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{}`), deps, creation, ProgramCall{
+		ID: "inv-sb", StreamItem: func(json.RawMessage) error { items++; return nil },
+	})
+	if res.Error == nil || res.Error.Code != "invalid_output" {
+		t.Fatalf("want invalid_output cap error, got %+v", res.Error)
+	}
+	if items != 18 || res.StreamItems != 18 {
+		t.Fatalf("offending item must not be delivered: %d", items)
+	}
+}
+
+func TestProgramReturnedStreamHighPrecision(t *testing.T) {
+	e := New(4)
+	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
+	cfg := progStreamConfig(`def main(input):
+    return stream.from_list([{"n": 9007199254740993}])
+`)
+	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-sp"})
+	var raw string
+	res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{}`), deps, creation, ProgramCall{
+		ID: "inv-sp", StreamItem: func(b json.RawMessage) error { raw = string(b); return nil },
+	})
+	if res.Error != nil || raw != `{"n":9007199254740993}` {
+		t.Fatalf("%+v %s", res, raw)
+	}
+}
+
+func TestProgramReturnedStreamRedactBeforeSchema(t *testing.T) {
+	e := New(4)
+	secs := secrets.NewSet()
+	secs.Add("apikey", []byte("s3kr3t-value"), nil)
+	deps, creation := progEnv(t, &spyFactory{}, nil, secs, nil)
+	cfg := progStreamConfig(`def main(input):
+    return stream.from_list(["token=s3kr3t-value padded", "s3kr3t-value"])
+`)
+	cfg.OutputSchema = json.RawMessage(`{"type":"string","minLength":30}`)
+	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-ssec"})
+	var items []string
+	res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{}`), deps, creation, ProgramCall{
+		ID: "inv-ssec", StreamItem: func(b json.RawMessage) error { items = append(items, string(b)); return nil },
+	})
+	if res.Error == nil || res.Error.Code != "invalid_output" {
+		t.Fatalf("second item must fail schema post-redaction: %+v", res)
+	}
+	if len(items) != 1 || !strings.Contains(items[0], "REDACTED") || strings.Contains(items[0], "s3kr3t") {
+		t.Fatalf("%v", items)
+	}
+}
+
+func TestProgramReturnedStreamItemCountCap(t *testing.T) {
+	e := New(4)
+	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
+	cfg := progStreamConfig(`def main(input):
+    calls = [0]
+    def nxt():
+        calls[0] += 1
+        return (calls[0] <= 100001, {"n": 1})
+    return stream.new(nxt)
+`)
+	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-10k"})
+	res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{}`), deps, creation, ProgramCall{ID: "inv-10k"})
+	if res.Error == nil || res.Error.Code != "invalid_output" {
+		t.Fatalf("want invalid_output at cap, got %+v", res.Error)
+	}
+	if res.StreamItems != 100000 {
+		t.Fatalf("items %d", res.StreamItems)
+	}
+}
+
+func TestProgramReturnedStreamNoSinkCounts(t *testing.T) {
+	e := New(4)
+	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
+	cfg := progStreamConfig(`def main(input):
+    return stream.from_list([{"n": 1}, {"n": 2}])
+`)
+	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-sn"})
+	res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{}`), deps, creation, ProgramCall{ID: "inv-sn"})
+	if res.Error != nil || !res.Streaming || res.StreamItems != 2 || res.StreamBytes != int64(2*len(`{"n":1}`)) || res.Output != nil {
+		t.Fatalf("%+v", res)
+	}
+}
+
+func TestProgramHandlerReturnedStreamNoSink(t *testing.T) {
+	e := New(4)
+	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
+	cfg := progStreamConfig(`def main(input):
+    return {}
+
+def handler(input):
+    return stream.from_list([{"n": 1}, {"n": 2}])
+`)
+	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "prep-handler-stream"})
+	res := e.InvokeProgram(context.Background(), p, json.RawMessage(`{"context":{}}`), deps, creation,
+		ProgramCall{ID: "inv-handler-stream", Entry: "handler"})
+	if res.Error != nil || res.Waiting != nil || !res.Streaming || res.StreamItems != 2 ||
+		res.StreamBytes != int64(2*len(`{"n":1}`)) || res.Output != nil {
+		t.Fatalf("%+v", res)
+	}
 }

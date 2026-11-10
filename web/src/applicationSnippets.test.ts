@@ -50,7 +50,11 @@ captured = {}
 def fake_open(req):
     captured.update(body=req.data.decode("utf-8"), method=req.method,
                     headers=dict(req.header_items()), url=req.full_url)
-    return io.BytesIO(json.dumps({"result": {}, "output_json": '{"n":9007199254740993}'}).encode())
+    class FakeResp(io.BytesIO):
+        class H:
+            def get_content_type(self): return "application/json"
+        headers = H()
+    return FakeResp(json.dumps({"result": {}, "output_json": '{"n":9007199254740993}'}).encode())
 urllib.request.urlopen = fake_open
 output = io.StringIO()
 with contextlib.redirect_stdout(output):
@@ -80,7 +84,7 @@ test('JavaScript sends an object body, not a double-encoded JSON string', async 
     await run(async (url: string, options: RequestInit) => {
       assert.equal(url, `${ORIGIN}/api/v1/applications/${ID}/invoke`)
       captured.request = options
-      return { ok: true, json: async () => ({ result: {}, output_json: '{"n":9007199254740993}' }) }
+      return { ok: true, headers: { get: () => 'application/json' }, json: async () => ({ result: {}, output_json: '{"n":9007199254740993}' }) }
     }, { env: { CALCSIDE_API_KEY: TOKEN } }, { log: (value: unknown) => { captured.printed = value } })
     assert.equal(captured.request?.body, input)
     assert.equal(captured.request?.method, 'POST')
@@ -96,4 +100,48 @@ test('JavaScript checks credentials before making an HTTP request', async () => 
     applicationSnippets(ORIGIN, ID, '{}').javascript)
   await assert.rejects(run(() => { assert.fail('fetch must not run without a key') },
     { env: {} }, { log() {} }), /Set CALCSIDE_API_KEY/)
+})
+
+test('Python streams text/event-stream lines verbatim', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'snip-sse-'))
+  try {
+    const file = join(dir, 'snippet.py')
+    writeFileSync(file, applicationSnippets(ORIGIN, ID, '{}').python)
+    const harness = `
+import contextlib, io, runpy, sys, urllib.request
+class FakeResp(io.BytesIO):
+    class H:
+        def get_content_type(self): return "text/event-stream"
+    headers = H()
+urllib.request.urlopen = lambda req: FakeResp(
+    b'event: item\\ndata: {"n":9007199254740993}\\n\\nevent: done\\ndata: {"result":{"id":"r"}}\\n\\n')
+output = io.StringIO()
+with contextlib.redirect_stdout(output):
+    runpy.run_path(sys.argv[1])
+print(output.getvalue())
+`
+    const printed = execFileSync('python3', ['-c', harness, file], {
+      env: { PATH: process.env.PATH, CALCSIDE_API_KEY: TOKEN },
+    }).toString()
+    assert.ok(printed.includes('{"n":9007199254740993}'))
+    assert.ok(printed.includes('event: done'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('JavaScript streams text/event-stream body chunks verbatim', async () => {
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+  const full = 'event: item\ndata: "中 文 x"\n\nevent: done\ndata: {"result":{"id":"r"}}\n\n'
+  const enc = new TextEncoder().encode(full)
+  const chunks = [enc.slice(0, 22), enc.slice(22, 30), enc.slice(30)]
+  const written: string[] = []
+  const run = new AsyncFunction('fetch', 'process', 'console',
+    applicationSnippets(ORIGIN, ID, '{}').javascript)
+  await run(async () => ({
+    ok: true,
+    headers: { get: () => 'text/event-stream' },
+    body: (async function* () { for (const c of chunks) yield c })(),
+  }), { env: { CALCSIDE_API_KEY: TOKEN }, stdout: { write: (s: string) => { written.push(s) } } }, { log() {} })
+  assert.equal(written.join(''), full)
 })

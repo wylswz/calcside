@@ -419,3 +419,44 @@ func TestResolveWakesDispatchLoop(t *testing.T) {
 		t.Fatal("resolve did not wake the dispatch loop")
 	}
 }
+
+func TestCompleteStreamStats(t *testing.T) {
+	e := newEnv(t, testCipher(t), 0)
+	ctx := context.Background()
+	st := startRun(t, e)
+	oc, err := e.svc.Complete(ctx, st, 0, 1, "main", "",
+		&runtime.InvokeResponse{Result: runtime.ProgramResult{
+			ID: "inv_s", Streaming: true, StreamItems: 3, StreamBytes: 42, DurationMs: 9,
+		}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oc.Status != store.RunSucceeded {
+		t.Fatalf("outcome: %+v", oc)
+	}
+	run, _ := e.st.GetRun(ctx, st.Run.ID)
+	if !run.Streaming || run.StreamItems != 3 || run.StreamBytes != 42 || len(run.Output) != 0 {
+		t.Fatalf("run: %+v", run)
+	}
+	steps, _ := e.st.ListRunSteps(ctx, st.Run.ID)
+	if len(steps) != 1 || !steps[0].Streaming || steps[0].StreamItems != 3 {
+		t.Fatalf("steps: %+v", steps)
+	}
+
+	st2 := startRun(t, e)
+	oc2, err := e.svc.Complete(ctx, st2, 0, 1, "main", "",
+		&runtime.InvokeResponse{Result: runtime.ProgramResult{
+			ID: "inv_s2", Streaming: true, StreamItems: 1, StreamBytes: 7,
+			Error: &runtime.ProgramError{Code: "invalid_output", Message: "x"},
+		}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oc2.Status != store.RunFailed {
+		t.Fatalf("failed outcome: %+v", oc2)
+	}
+	run2, _ := e.st.GetRun(ctx, st2.Run.ID)
+	if !run2.Streaming || len(run2.Output) != 0 {
+		t.Fatalf("run2: %+v", run2)
+	}
+}

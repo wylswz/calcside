@@ -61,9 +61,11 @@ type ProgramCall struct {
 	Entry string
 	// RunID, Step and Interrupts carry the run identity and the
 	// pre-reserved interrupt slots the constructor ops may claim.
-	RunID      string
-	Step       int
-	Interrupts []InterruptSlot
+	RunID       string
+	Step        int
+	Interrupts  []InterruptSlot
+	StreamStart func() error
+	StreamItem  func(json.RawMessage) error
 }
 
 // ProgramError is a classified program failure. Messages are generic:
@@ -83,9 +85,12 @@ type ProgramResult struct {
 	// Waiting is set when the step ended on interrupt.wait: the
 	// reserved interrupt id, the handler to dispatch and the stored
 	// context. Waiting and Error are mutually exclusive.
-	Waiting    *capinterrupt.Waiting
-	DurationMs int64
-	Steps      uint64
+	Waiting     *capinterrupt.Waiting
+	DurationMs  int64
+	Steps       uint64
+	Streaming   bool
+	StreamItems int64
+	StreamBytes int64
 }
 
 // Program is the immutable result of PrepareProgram: compiled sources,
@@ -463,14 +468,38 @@ func (e *Engine) InvokeProgram(ctx context.Context, program *Program, input json
 		s.Gate.Disarm()
 	}()
 	out, callErr := starlark.Call(scope.thread, globals[entry], starlark.Tuple{arg}, nil)
+	var retStream *stream.Stream
+	if callErr == nil {
+		retStream, _ = out.(*stream.Stream)
+	}
+	var streamErr *ProgramError
+	if retStream != nil {
+		res.Streaming = true
+		streamErr = e.consumeStreamOutput(scope, deps.Interrupt, program, retStream, call, &res)
+	}
 	_ = sscope.Close()
 	s.streamScope = nil
 	// Sticky stream errors outrank success and interrupt.wait alike,
 	// but never real cancellation (context cause).
 	if serr := sscope.Err(); serr != nil && context.Cause(scope.ctx) == nil {
-		callErr = serr
+		if retStream != nil {
+			if streamErr == nil {
+				streamErr = runtimeProgErr(classify(scope.ctx, serr, scope.maxSteps, scope.thread.ExecutionSteps()).Type)
+			}
+		} else {
+			callErr = serr
+		}
 	}
 	s.Gate.Disarm()
+
+	if retStream != nil {
+		if perr := cancelledProgramErr(scope.ctx); perr != nil {
+			res.Error = perr
+		} else {
+			res.Error = streamErr
+		}
+		return res
+	}
 
 	if callErr != nil {
 		// A successful interrupt.wait unwinds with ErrWait after its
@@ -532,6 +561,66 @@ func (e *Engine) InvokeProgram(ctx context.Context, program *Program, input json
 	}
 	res.Output = json.RawMessage(red)
 	return res
+}
+
+const (
+	streamMaxItems = 100000
+	streamMaxBytes = 16 << 20
+)
+
+func (e *Engine) consumeStreamOutput(scope *callScope, host *capinterrupt.Host, p *Program, st *stream.Stream, call ProgramCall, res *ProgramResult) *ProgramError {
+	if call.StreamStart != nil {
+		if err := call.StreamStart(); err != nil {
+			return progErr("runtime", "stream output could not be delivered")
+		}
+	}
+	for {
+		v, ok, err := st.Pull(scope.thread)
+		if err != nil {
+			if perr := cancelledProgramErr(scope.ctx); perr != nil {
+				return perr
+			}
+			if errors.Is(err, capinterrupt.ErrWait) {
+				if host != nil {
+					host.Waiting = nil
+				}
+				return progErr("runtime", "interrupt.wait cannot suspend a streaming step")
+			}
+			ce := classify(scope.ctx, err, scope.maxSteps, scope.thread.ExecutionSteps())
+			var usage *capinterrupt.UsageError
+			if ce.Type == types.ErrRuntime && errors.As(err, &usage) {
+				return progErr("runtime", usage.Msg)
+			}
+			return runtimeProgErr(ce.Type)
+		}
+		if !ok {
+			return nil
+		}
+		raw, err := MarshalJSONValue(v, p.limits)
+		if err != nil {
+			return progErr("invalid_output", "output is not a bounded JSON value")
+		}
+		red, err := scope.secrets.RedactBounded(scope.ctx, string(raw), p.limits.MaxBytes)
+		if err != nil {
+			return progErr("invalid_output", "output could not be safely redacted")
+		}
+		if _, err := serving.DecodeJSON([]byte(red), p.limits); err != nil {
+			return progErr("invalid_output", "redacted output is not valid JSON")
+		}
+		if err := p.outputSchema.Validate([]byte(red)); err != nil {
+			return progErr("invalid_output", "redacted output does not match the contract")
+		}
+		if res.StreamItems+1 > streamMaxItems || res.StreamBytes+int64(len(red)) > streamMaxBytes {
+			return progErr("invalid_output", "stream output exceeds the result limit")
+		}
+		if call.StreamItem != nil {
+			if err := call.StreamItem(json.RawMessage(red)); err != nil {
+				return progErr("runtime", "stream output could not be delivered")
+			}
+		}
+		res.StreamItems++
+		res.StreamBytes += int64(len(red))
+	}
 }
 
 // programTimeoutContext applies the call deadline at the public entry

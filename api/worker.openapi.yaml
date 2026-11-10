@@ -121,11 +121,23 @@ paths:
               $ref: '#/components/schemas/InvokeRequest'
       responses:
         '200':
-          description: Invoke outcome; audit always carried.
+          description: >
+            Invoke outcome; audit always carried. When the request Accept
+            header advertises application/x-ndjson and the program returns a
+            stream, the response is a bounded NDJSON frame sequence instead:
+            {"type":"start"}; then {"type":"item","item":<exact redacted item
+            JSON>} per validated item; then exactly one terminal frame —
+            {"type":"result","response":<InvokeResponse>} or
+            {"type":"error","error":<ErrorEnvelope>}. Pre-stream failures use
+            the ordinary JSON/default responses unchanged.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/InvokeResponse'
+            application/x-ndjson:
+              schema:
+                type: string
+                description: newline-delimited stream frames as described above
         default:
           $ref: '#/components/responses/Error'
   /runtime/v1/keepalive:

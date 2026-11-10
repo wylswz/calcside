@@ -60,13 +60,16 @@ type ProgramError struct {
 // ProgramResult is one program call outcome. Output is set only on
 // success; Stdout is bounded and secret-redacted.
 type ProgramResult struct {
-	ID         string          `json:"id"`
-	Output     json.RawMessage `json:"output,omitempty"`
-	Stdout     string          `json:"stdout,omitempty"`
-	Error      *ProgramError   `json:"error,omitempty"`
-	Waiting    *ProgramWaiting `json:"waiting,omitempty"`
-	DurationMs int64           `json:"duration_ms"`
-	Steps      uint64          `json:"steps"`
+	ID          string          `json:"id"`
+	Output      json.RawMessage `json:"output,omitempty"`
+	Stdout      string          `json:"stdout,omitempty"`
+	Error       *ProgramError   `json:"error,omitempty"`
+	Waiting     *ProgramWaiting `json:"waiting,omitempty"`
+	DurationMs  int64           `json:"duration_ms"`
+	Steps       uint64          `json:"steps"`
+	Streaming   bool            `json:"streaming,omitempty"`
+	StreamItems int64           `json:"stream_items,omitempty"`
+	StreamBytes int64           `json:"stream_bytes,omitempty"`
 }
 
 // ProgramWaiting reports that a step ended on interrupt.wait: the

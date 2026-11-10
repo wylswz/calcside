@@ -1,12 +1,21 @@
 # Pull-based streams (EP-0021)
 
 `stream` is an engine module (not a capability): pull-based, ordered,
-one-shot iterables scoped to a single execution. Nothing here streams
-exec output or HTTP responses to the API, SDK, or console.
+one-shot iterables scoped to a single execution. When an application's
+`main` returns a stream on a live `invoke`/`test` call, the API serves
+that response as `text/event-stream` (`item` events carrying raw
+per-item JSON, then exactly one `done` or `error` terminal event). A
+stream returned by a later interrupt handler has no original HTTP
+connection: it is still consumed, validated and counted — statistics
+land in run history, payloads are never retained or replayed.
 
 ```python
 s = stream.new(next_fn)                    # callback () -> (has_value, value)
+s = stream.from_list(list_or_tuple)        # lazy cursor over the value
 events = stream.sse(bytes_stream)          # -> {event, data, id}
+mapped = s.map(fn)                          # lazy, claims the source cursor
+total = s.reduce(fn, initial)               # one result after full fold
+flat = s.flatmap(fn)                        # fn -> stream | list | tuple
 r = net.stream("POST", url, body=..., headers=...)
 body = r["body"]                            # Stream[bytes]
 for chunk in body:
@@ -96,3 +105,62 @@ The same `debug_errors` opt-in applies to non-2xx HTTP responses: the
 adapter reads at most 16 KiB of the JSON error body and selects only
 `error.message`; anything malformed/oversized stays a bare status
 error, and the option is never sent upstream.
+
+
+## Application output streaming
+
+`POST /api/v1/applications/{id}/test` and `/invoke` answer
+`text/event-stream` automatically when `main` returns a stream — no
+Accept negotiation. Frames: `event: item` + `data: <exact redacted item
+JSON>` per validated item, then one terminal `event: done` or
+`event: error` carrying `data: <ApplicationRunResponse>` with
+`result.streaming`, `stream_items` and `stream_bytes`. Per-item
+redaction and output-schema validation happen before delivery; a
+failing item ends the stream with the prefix already sent. When the
+application has no configured output schema the output contract
+defaults to `{}` (any bounded JSON value), so mixed-type and scalar
+streams are valid — an explicit schema still constrains every item
+independently, and applications published before this default changed
+keep their pinned contract until republished. Hard caps:
+1 MiB per item (existing JSON limits), 16 MiB and 100,000 items total.
+Between nodes the same pull flows over the signed worker protocol as
+bounded NDJSON frames (`{"type":"start"|"item"|"result"|"error"}`).
+`interrupt.wait` inside a streamed result is a runtime failure, never a
+waiting run. Run history stores the counters only — streamed payloads
+are not retained.
+
+If the caller disconnects mid-stream the invocation is cancelled and
+the run finalizes as `unknown` — delivery counters captured at the API
+still persist, but a terminal audit frame lost with the transport is
+not recoverable.
+
+```python
+def main(input):
+    rows = stream.from_list([[1, 2], [3]])
+    return rows.flatmap(lambda row: row).map(lambda n: {"n": n})
+
+def total(input):
+    return stream.from_list([1, 2, 3]).reduce(lambda a, b: a + b, 0)
+    # reduce yields one item — 6 — or the initial value when the source is
+    # empty; no output schema is needed for scalar streams.
+```
+
+```console
+$ curl -N -X POST .../api/v1/applications/app_x/invoke -d '{}'
+event: item
+data: {"n":1}
+
+event: item
+data: {"n":2}
+
+event: item
+data: {"n":3}
+
+event: done
+data: {"result":{"id":"inv_...","streaming":true,"stream_items":3,"stream_bytes":21},"run_id":"run_...","run_status":"succeeded"}
+```
+
+Item redaction and schema validation apply to each item as an
+independent JSON value — a secret spanning two items is never
+reassembled. `net.stream` byte-level cumulative redaction is unchanged
+and unrelated to this framing.

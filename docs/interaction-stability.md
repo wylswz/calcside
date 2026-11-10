@@ -306,6 +306,17 @@ dedicated field rather than a user label row.
 
 ### Interrupts (EP-0016)
 
+- **S3/S4**: the application Develop/Invoke output region gains streaming
+  affordances inside fixed geometry: the output pre is a fixed 180px box,
+  the status slot is a reserved constrained-width tabular-nums flex slot, and the `Confirm`-gated
+  Stop button occupies a constant slot (hidden via visibility, never
+  unmounted). e2e `applicationStream.spec.ts` measures head/pre/Stop/meta
+  bounding boxes across initial, prefix and completed phases. Develop's
+  input and output live inside the editor frame, with an icon-only Run
+  pinned to the editor toolbar's right edge. The resource column shares
+  the frame's top and bottom in initial, running and terminal states.
+  The same e2e checks aligned fields, square Run hit targets, stacked
+  resources at 820px and mobile overflow.
 - **S3/S4**: the nav inbox badge is a reserved-width tabular-figures slot that renders empty at zero (`InboxBadge`); the Develop/Invoke progress area (`RunProgress`/`useRunProgress`: waiting → running → terminal, `runPhase`) occupies the same output region as the result and the run page keeps its Waiting card box through the running phase; a row resumed since the last reveal keeps its box as an inert "Resolved by … · View run" placeholder (`keepGone` in `useHeldOrder`/`reconcile`, single-interrupt fetch fills the resolver label, "No longer waiting · View run" while it lands) until the reveal affordance — which appears whenever placeholders exist even with zero arrivals — clears it. e2e `interrupts.spec.ts` measures the waiting box through a resume and a resumed row's box across polling.
 - **S5/C3**: inbox and application Runs tables use `useHeldOrder` + `RevealNew`; selections live in `?interrupt=` so polling can't drop them (C4 deep links fetch by id outside the page).
 - **C2**: ResumeForm drafts (event text) are keyed by user+workspace+interrupt (`resumeDraftKey`) and survive polling/refetch/navigation; confirms never discard input.

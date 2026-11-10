@@ -3,8 +3,11 @@ package remote
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"time"
 
@@ -85,11 +88,48 @@ func (d *Direct) Invoke(ctx context.Context, req *runtime.InvokeRequest) (*runti
 	if d.hook != nil {
 		d.hook.Invoke(ctx, req)
 	}
-	resp, err := d.cl.RuntimeInvokeWithResponse(ctx, *req)
+	sink := runtime.InvokeStreamFromContext(ctx)
+	if sink == nil {
+		resp, err := d.cl.RuntimeInvokeWithResponse(ctx, *req)
+		if err != nil {
+			return nil, err
+		}
+		return UnwrapResponse(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
+	}
+	resp, err := d.cl.RuntimeInvoke(ctx, *req, func(_ context.Context, r *http.Request) error {
+		r.Header.Set("Accept", "application/x-ndjson")
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	return UnwrapResponse(resp.JSON200, resp.JSONDefault, resp.HTTPResponse)
+	defer resp.Body.Close()
+	mt, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if mt == "application/x-ndjson" {
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("remote: worker returned %s", resp.Status)
+		}
+		return decodeInvokeStream(resp.Body, sink)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, streamMaxFrame+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > streamMaxFrame {
+		return nil, errors.New("remote: invoke response too large")
+	}
+	if resp.StatusCode == http.StatusOK {
+		var out runtime.InvokeResponse
+		if err := json.Unmarshal(body, &out); err != nil {
+			return nil, fmt.Errorf("remote: invalid invoke response")
+		}
+		return &out, nil
+	}
+	var env gen.ErrorEnvelope
+	if err := json.Unmarshal(body, &env); err == nil && env.Error.Message != "" {
+		return nil, errorOf(string(env.Error.Kind), env.Error.Message)
+	}
+	return nil, fmt.Errorf("remote: worker returned %s", resp.Status)
 }
 
 func (d *Direct) Keepalive(ctx context.Context, req *runtime.KeepaliveRequest) (*runtime.KeepaliveResponse, error) {

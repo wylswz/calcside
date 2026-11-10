@@ -18,7 +18,7 @@ export function applicationSnippets(origin: string, id: string, inputJSON: strin
   --url ${shellQuote(url)} \\
   --header 'Content-Type: application/json' \\
   --header "Authorization: Bearer \${CALCSIDE_API_KEY:?Set CALCSIDE_API_KEY}" \\
-  --fail-with-body \\
+  --fail-with-body --no-buffer \\
   --data-raw ${shellQuote(body)}`,
     python: `import json
 import os
@@ -34,11 +34,15 @@ req = urllib.request.Request(
     method='POST',
 )
 with urllib.request.urlopen(req) as resp:
-    body = json.load(resp)
-if body.get('result', {}).get('error'):
-    raise RuntimeError(body['result']['error'])
-# output_json is verbatim text — precision stays intact
-print(body.get('output_json', body))
+    if resp.headers.get_content_type() == 'text/event-stream':
+        for line in resp:
+            print(line.decode('utf-8'), end='', flush=True)
+    else:
+        body = json.load(resp)
+        if body.get('result', {}).get('error'):
+            raise RuntimeError(body['result']['error'])
+        # output_json is verbatim text — precision stays intact
+        print(body.get('output_json', body))
 `,
     javascript: `// Node 18+ — built-in fetch, no dependencies
 const apiKey = process.env.CALCSIDE_API_KEY
@@ -52,10 +56,17 @@ const res = await fetch(${JSON.stringify(url)}, {
   body: ${JSON.stringify(body)},
 })
 if (!res.ok) throw new Error('invoke failed: ' + res.status)
-const body = await res.json()
-if (body.result && body.result.error) throw new Error(JSON.stringify(body.result.error))
-// output_json is verbatim text — precision stays intact
-console.log(body.output_json ?? body)
+const contentType = (res.headers.get('content-type') || '').split(';')[0]
+if (contentType === 'text/event-stream' && res.body) {
+  const decoder = new TextDecoder()
+  for await (const chunk of res.body) process.stdout.write(decoder.decode(chunk, { stream: true }))
+  process.stdout.write(decoder.decode())
+} else {
+  const body = await res.json()
+  if (body.result && body.result.error) throw new Error(JSON.stringify(body.result.error))
+  // output_json is verbatim text — precision stays intact
+  console.log(body.output_json ?? body)
+}
 `,
   }
 }

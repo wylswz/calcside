@@ -170,6 +170,9 @@ func (s strict) RuntimePrepare(ctx context.Context, req gen.RuntimePrepareReques
 }
 
 func (s strict) RuntimeInvoke(ctx context.Context, req gen.RuntimeInvokeRequestObject) (gen.RuntimeInvokeResponseObject, error) {
+	if acceptsNDJSON(ctx) {
+		return &invokeStreamResponse{rt: s.rt, ctx: requestContext(ctx), req: req.Body}, nil
+	}
 	resp, err := s.rt.Invoke(requestContext(ctx), req.Body)
 	if err != nil {
 		return gen.RuntimeInvokedefaultJSONResponse{Body: envelope(err), StatusCode: statusOf(err)}, nil

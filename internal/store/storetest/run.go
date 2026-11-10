@@ -116,6 +116,62 @@ func RunRuns(t *testing.T, s store.Store) {
 		}
 	})
 
+	t.Run("finish_stream_stats", func(t *testing.T) {
+		r, st, sl := mkRun("run_ss", "ws_1", rNow, 0)
+		start(t, s, r, st, sl)
+		out := store.StepOutcome{
+			RunID: r.ID, Seq: 0, Attempt: 1, Status: store.StepUnknown,
+			DurationMs: 12, Streaming: true, StreamItems: 3, StreamBytes: 42, Now: rNow,
+		}
+		if err := s.FinishStep(ctx, out, nil); err != nil {
+			t.Fatal(err)
+		}
+		run, _ := s.GetRun(ctx, r.ID)
+		if run.Status != store.RunUnknown || !run.Streaming || run.StreamItems != 3 || run.StreamBytes != 42 {
+			t.Fatalf("run: %+v", run)
+		}
+		if len(run.Output) != 0 {
+			t.Fatal("streamed run must not retain output")
+		}
+		steps, _ := s.ListRunSteps(ctx, r.ID)
+		if len(steps) != 1 || !steps[0].Streaming || steps[0].StreamItems != 3 || steps[0].StreamBytes != 42 || steps[0].DurationMs != 12 {
+			t.Fatalf("step: %+v", steps)
+		}
+		r2, st2, sl2 := mkRun("run_ss2", "ws_1", rNow, 0)
+		start(t, s, r2, st2, sl2)
+		out2 := store.StepOutcome{
+			RunID: r2.ID, Seq: 0, Attempt: 1, Status: store.StepSucceeded,
+			Streaming: true, StreamItems: 1, StreamBytes: 9, Now: rNow,
+		}
+		if err := s.FinishStep(ctx, out2, nil); err != nil {
+			t.Fatal(err)
+		}
+		run2, _ := s.GetRun(ctx, r2.ID)
+		if !run2.Streaming || run2.StreamItems != 1 || len(run2.Output) != 0 {
+			t.Fatalf("run2: %+v", run2)
+		}
+		r3, st3, sl3 := mkRun("run_ss3", "ws_1", rNow, 0)
+		start(t, s, r3, st3, sl3)
+		out3 := store.StepOutcome{
+			RunID: r3.ID, Seq: 0, Attempt: 1, Status: store.StepFailed,
+			ErrorCode: "runtime", DurationMs: 7,
+			Streaming: true, StreamItems: 2, StreamBytes: 11, Now: rNow,
+		}
+		if err := s.FinishStep(ctx, out3, nil); err != nil {
+			t.Fatal(err)
+		}
+		run3, _ := s.GetRun(ctx, r3.ID)
+		if run3.Status != store.RunFailed || !run3.Streaming || run3.StreamItems != 2 ||
+			run3.StreamBytes != 11 || len(run3.Output) != 0 {
+			t.Fatalf("run3: %+v", run3)
+		}
+		steps3, _ := s.ListRunSteps(ctx, r3.ID)
+		if len(steps3) != 1 || steps3[0].Status != store.StepFailed || !steps3[0].Streaming ||
+			steps3[0].StreamItems != 2 || steps3[0].StreamBytes != 11 || steps3[0].ErrorCode != "runtime" {
+			t.Fatalf("step3: %+v", steps3)
+		}
+	})
+
 	t.Run("finish_waiting", func(t *testing.T) {
 		r, st, slots := mkRun("run_w", "ws_1", rNow, 2)
 		start(t, s, r, st, slots)

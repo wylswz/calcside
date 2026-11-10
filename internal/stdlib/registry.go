@@ -105,6 +105,7 @@ var functions = []function{
 	{"linalg.inv", []string{"a"}, "Inverse of a square matrix; singular or ill-conditioned matrices fail.", linalgCall},
 	{"linalg.det", []string{"a"}, "Determinant of a square matrix.", linalgCall},
 	{"stream.new", []string{"next_fn"}, "Build a stream from a callback returning (has_value, value); close it explicitly to stop early.", streamNewCall},
+	{"stream.from_list", []string{"values"}, "Lazy stream over a list or tuple; items are produced on pull without copying the source.", streamFromListCall},
 	{"stream.sse", []string{"source"}, "Parse bounded SSE events from a byte stream; returns {event,data,id} values.", streamSSECall},
 }
 

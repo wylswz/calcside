@@ -634,11 +634,15 @@ func (s *Stream) Attr(name string) (starlark.Value, error) {
 		return starlark.NewBuiltin("stream.close", s.builtinClose), nil
 	case "map":
 		return starMap(s), nil
+	case "reduce":
+		return starReduce(s), nil
+	case "flatmap":
+		return starFlatMap(s), nil
 	}
 	return nil, nil
 }
 
-func (s *Stream) AttrNames() []string { return []string{"close", "next", "map"} }
+func (s *Stream) AttrNames() []string { return []string{"close", "flatmap", "map", "next", "reduce"} }
 
 func (s *Stream) builtinNext(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	if len(args) != 0 || len(kwargs) != 0 {
@@ -705,32 +709,132 @@ func (s *Stream) Iterate() starlark.Iterator {
 }
 
 func (s *Stream) Map(fn starlark.Callable) (*Stream, error) {
+	if fn == nil {
+		return nil, errors.New("stream.map: fn must be callable")
+	}
 	return New(
 		s.scope,
 		func(t *starlark.Thread) (starlark.Value, bool, error) {
-			nxt, ok, err := s.pull(t)
-			if err != nil {
-				return nil, false, err
+			nxt, ok, err := s.Pull(t)
+			if err != nil || !ok {
+				return nxt, ok, err
 			}
-			if !ok {
-				return nil, false, nil
-			}
-			result, err := starlark.Call(
-				s.scope.thread,
-				fn,
-				starlark.Tuple{nxt},
-				nil,
-			)
+			result, err := starlark.Call(t, fn, starlark.Tuple{nxt}, nil)
 			if err != nil {
 				return nil, false, err
 			}
 			return result, true, nil
 		},
+		nil,
+		s,
+	)
+}
+
+func (s *Stream) Reduce(fn starlark.Callable, initial starlark.Value) (*Stream, error) {
+	if fn == nil {
+		return nil, errors.New("stream.reduce: fn must be callable")
+	}
+	done := false
+	return New(
+		s.scope,
+		func(t *starlark.Thread) (starlark.Value, bool, error) {
+			if done {
+				return starlark.None, false, nil
+			}
+			done = true
+			acc := initial
+			for {
+				item, ok, err := s.Pull(t)
+				if err != nil {
+					return nil, false, err
+				}
+				if !ok {
+					return acc, true, nil
+				}
+				acc, err = starlark.Call(t, fn, starlark.Tuple{acc, item}, nil)
+				if err != nil {
+					return nil, false, err
+				}
+			}
+		},
+		nil,
+		s,
+	)
+}
+
+func (s *Stream) FlatMap(fn starlark.Callable) (*Stream, error) {
+	if fn == nil {
+		return nil, errors.New("stream.flatmap: fn must be callable")
+	}
+	var self, inner *Stream
+	flat, err := New(
+		s.scope,
+		func(t *starlark.Thread) (starlark.Value, bool, error) {
+			for {
+				if inner != nil {
+					v, ok, err := inner.Pull(t)
+					if err != nil {
+						return nil, false, err
+					}
+					if ok {
+						return v, true, nil
+					}
+					inner = nil
+					continue
+				}
+				item, ok, err := s.Pull(t)
+				if err != nil || !ok {
+					return item, ok, err
+				}
+				res, err := starlark.Call(t, fn, starlark.Tuple{item}, nil)
+				if err != nil {
+					return nil, false, err
+				}
+				in, err := s.adoptInner(res)
+				if err != nil {
+					return nil, false, err
+				}
+				if in == s || in == self {
+					return nil, false, errors.New("stream.flatmap: fn returned the stream being flattened")
+				}
+				inner = in
+			}
+		},
 		func() error {
-			return nil
+			if inner == nil {
+				return nil
+			}
+			err := inner.Close()
+			inner = nil
+			return err
 		},
 		s,
 	)
+	if err != nil {
+		return nil, err
+	}
+	self = flat
+	return flat, nil
+}
+
+func (s *Stream) adoptInner(v starlark.Value) (*Stream, error) {
+	if x, ok := v.(*Stream); ok {
+		if x.scope != s.scope {
+			return nil, ErrOutOfScope
+		}
+		x.mu.Lock()
+		defer x.mu.Unlock()
+		if x.owned || x.iterating || x.pulling {
+			return nil, errors.New("stream.flatmap: inner stream is already claimed or being consumed")
+		}
+		x.owned = true
+		return x, nil
+	}
+	switch v.(type) {
+	case *starlark.List, starlark.Tuple:
+		return NewList(s.scope, v)
+	}
+	return nil, errors.New("stream.flatmap: fn must return a stream, list, or tuple")
 }
 
 type iterator struct {
@@ -834,6 +938,34 @@ func NewCallback(scope *Scope, next starlark.Value) (*Stream, error) {
 		return tup[1], true, nil
 	}
 	return New(scope, pull, nil, nil)
+}
+
+func NewList(scope *Scope, values starlark.Value) (*Stream, error) {
+	var iterable starlark.Iterable
+	switch v := values.(type) {
+	case *starlark.List:
+		iterable = v
+	case starlark.Tuple:
+		iterable = v
+	default:
+		return nil, errors.New("stream: values must be a list or tuple")
+	}
+	it := iterable.Iterate()
+	st, err := New(scope, func(_ *starlark.Thread) (starlark.Value, bool, error) {
+		var v starlark.Value
+		if it.Next(&v) {
+			return v, true, nil
+		}
+		return starlark.None, false, nil
+	}, func() error {
+		it.Done()
+		return nil
+	}, nil)
+	if err != nil {
+		it.Done()
+		return nil, err
+	}
+	return st, nil
 }
 
 func byteLen(v starlark.Value) int64 {

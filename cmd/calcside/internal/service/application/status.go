@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"calcside/cmd/calcside/internal/service"
-	"calcside/internal/runtime"
 	"calcside/internal/store"
 	"calcside/internal/types"
 )
@@ -117,19 +116,7 @@ func (s *Service) dirty(ctx context.Context, app *store.Application) bool {
 	if err != nil {
 		return true
 	}
-	in, out := app.InputSchema, app.OutputSchema
-	if in == nil {
-		in = store.DefaultApplicationSchema()
-	}
-	if out == nil {
-		out = store.DefaultApplicationSchema()
-	}
-	rel, err := store.NewServingReleaseWithModules(app.WorkspaceID, app.UserID, b.Spec, b.Policies,
-		runtime.ProgramBundle{
-			Sources:      map[string][]byte{"main.star": []byte(app.Code)},
-			InputSchema:  in,
-			OutputSchema: out,
-		}, b.Modules, s.o.Now())
+	rel, err := newRelease(app, b, s.o.Now())
 	if err != nil {
 		return true
 	}

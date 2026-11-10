@@ -207,6 +207,10 @@ func (s *Service) Complete(ctx context.Context, st *Started, seq, attempt int, e
 	var res *runtime.ProgramResult
 	if resp != nil {
 		res = &resp.Result
+		out.DurationMs = res.DurationMs
+		out.Streaming = res.Streaming
+		out.StreamItems = res.StreamItems
+		out.StreamBytes = res.StreamBytes
 	}
 	switch {
 	case invokeErr != nil || res == nil:

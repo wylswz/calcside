@@ -26,6 +26,18 @@ func streamNewCall(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple,
 	return st, nil
 }
 
+func streamFromListCall(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	var values starlark.Value
+	if err := unpack(b, args, kwargs, "values", &values); err != nil {
+		return nil, err
+	}
+	scope := stream.FromThread(t)
+	if scope == nil || !scope.Active() {
+		return nil, errors.New("stream.from_list: no active execution scope")
+	}
+	return stream.NewList(scope, values)
+}
+
 // streamSSECall implements stream.sse(source).
 func streamSSECall(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var src starlark.Value

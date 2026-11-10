@@ -30,6 +30,11 @@ func runModel(r *store.Run) gen.Run {
 	if r.EndedAt != nil {
 		m.EndedAt = r.EndedAt
 	}
+	if r.Streaming {
+		m.Streaming = &r.Streaming
+		m.StreamItems = &r.StreamItems
+		m.StreamBytes = &r.StreamBytes
+	}
 	return m
 }
 
@@ -37,6 +42,11 @@ func stepModel(st *store.RunStep) gen.RunStep {
 	m := gen.RunStep{
 		Seq: st.Seq, Attempt: st.Attempt, Entry: st.Entry,
 		Status: st.Status, DurationMs: st.DurationMs, StartedAt: st.StartedAt,
+	}
+	if st.Streaming {
+		m.Streaming = &st.Streaming
+		m.StreamItems = &st.StreamItems
+		m.StreamBytes = &st.StreamBytes
 	}
 	if st.InterruptID != "" {
 		m.InterruptId = &st.InterruptID
@@ -170,6 +180,11 @@ func (s *strictImpl) GetRun(ctx context.Context, req gen.GetRunRequestObject) (g
 	}
 	if d.Run.EndedAt != nil {
 		rd.EndedAt = d.Run.EndedAt
+	}
+	if d.Run.Streaming {
+		rd.Streaming = &d.Run.Streaming
+		rd.StreamItems = &d.Run.StreamItems
+		rd.StreamBytes = &d.Run.StreamBytes
 	}
 	if d.OutputJSON != "" {
 		rd.OutputJson = &d.OutputJSON
