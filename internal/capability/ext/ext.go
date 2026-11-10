@@ -41,7 +41,7 @@ func (factory) Ops() []capability.OpInfo { return nil }
 
 func (factory) ConfigFields() []capability.FieldDoc {
 	return []capability.FieldDoc{
-		{Name: "source", Type: types.FieldString, Doc: "extension identifier: {domain}/{group}/{name}@{version} or {root-name}/{extension} (e.g. contrib/tavily)"},
+		{Name: "source", Type: types.FieldString, Doc: "extension identifier: {domain}/{group}/{name}@{version} or {root-name}/{extension}@{version} (e.g. contrib/tavily@0.1.0)"},
 		{Name: "sum", Type: types.FieldString, Doc: "h1: integrity sum; required for remote sources"},
 		{Name: "config", Type: types.FieldStringMap, Doc: "per-extension config keys declared in its capability.yaml"},
 	}

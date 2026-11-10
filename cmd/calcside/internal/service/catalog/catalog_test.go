@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -11,7 +12,7 @@ import (
 
 type fakeCatalog struct{ c ext.Catalog }
 
-func (f *fakeCatalog) Available() ext.Catalog { return f.c }
+func (f *fakeCatalog) Available(context.Context) ext.Catalog { return f.c }
 
 // The icon snapshot covers every unique icon in the current catalog — no
 // FIFO cap, no partial map, no mutation of the provider's own Info values.
@@ -25,7 +26,7 @@ func TestExtensionsIconSnapshot(t *testing.T) {
 	}
 	s := New(nil, prov)
 
-	out := s.Extensions()
+	out := s.Extensions(context.Background())
 	if len(out.Extensions) != 1000 {
 		t.Fatalf("%d entries", len(out.Extensions))
 	}
@@ -50,7 +51,7 @@ func TestExtensionsIconSnapshot(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			out := s.Extensions()
+			out := s.Extensions(context.Background())
 			for _, e := range out.Extensions {
 				if got := s.Icon(strings.TrimPrefix(e.IconURL, "/api/v1/extensions/icons/")); len(got) == 0 {
 					t.Errorf("concurrent catalog omitted icon for %s", e.Source)
@@ -62,7 +63,7 @@ func TestExtensionsIconSnapshot(t *testing.T) {
 
 	// catalog change replaces the whole map — stale ids retire
 	prov.c.Extensions = prov.c.Extensions[:2]
-	_ = s.Extensions()
+	_ = s.Extensions(context.Background())
 	if got := s.Icon(strings.TrimPrefix(out.Extensions[999].IconURL, "/api/v1/extensions/icons/")); got != nil {
 		t.Fatal("retired catalog icon is still cached")
 	}

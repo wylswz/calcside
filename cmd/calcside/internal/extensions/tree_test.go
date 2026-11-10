@@ -35,22 +35,22 @@ ops:
 
 func TestLocalSourceResolution(t *testing.T) {
 	root := writeExt(t, map[string]string{
-		"contrib/tavily/capability.yaml": goodManifest,
-		"contrib/tavily/main.star":       "def search(query):\n    return []\n",
+		"contrib/tavily/0.1.0/capability.yaml": goodManifest,
+		"contrib/tavily/0.1.0/main.star":       "def search(query):\n    return []\n",
 	})
 	contrib := filepath.Join(root, "contrib")
 	loader := &capext.CapabilityLoader{
-		Identifier: "contrib/tavily",
+		Identifier: "contrib/tavily@0.1.0",
 		Options:    &capext.Options{LocalRoots: []string{filepath.Join(t.TempDir(), "contrib"), contrib}},
 	}
 	mod, err := loader.Load(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mod.ID != "contrib/tavily" || mod.Manifest.Identifier != "contrib/tavily" {
+	if mod.ID != "contrib/tavily@0.1.0" || mod.Manifest.Identifier != "contrib/tavily@0.1.0" {
 		t.Fatalf("source was rewritten: %q, %q", mod.ID, mod.Manifest.Identifier)
 	}
-	files, sum, err := ReadLocalTree(loader.Options.LocalRoots, "contrib/tavily")
+	files, sum, err := ReadLocalTree(loader.Options.LocalRoots, "contrib/tavily@0.1.0")
 	if err != nil || len(files) != 2 || !strings.HasPrefix(sum, "h1:") {
 		t.Fatalf("read tree: files=%v sum=%q err=%v", files, sum, err)
 	}
@@ -62,58 +62,79 @@ func TestLocalSourceResolution(t *testing.T) {
 	if _, err := loader.Load(context.Background()); err == nil || !strings.Contains(err.Error(), "mismatch") {
 		t.Fatalf("sum mismatch: %v", err)
 	}
-	for _, source := range []string{"contrib/missing", "other/tavily", "contrib/../contrib/tavily", filepath.Join(contrib, "tavily")} {
+	for _, source := range []string{"contrib/missing@0.1.0", "other/tavily@0.1.0", "contrib/../contrib/tavily@0.1.0", filepath.Join(contrib, "tavily", "0.1.0")} {
 		if _, _, err := ReadLocalTree(loader.Options.LocalRoots, source); err == nil {
 			t.Errorf("accepted source %q", source)
 		} else if strings.Contains(err.Error(), root) && !strings.Contains(source, root) {
 			t.Errorf("error exposes root: %v", err)
 		}
 	}
-	if _, _, err := ReadLocalTree(nil, "contrib/tavily"); err == nil {
+	// Unversioned local sources are not resolvable from the filesystem.
+	if _, _, err := ReadLocalTree(loader.Options.LocalRoots, "contrib/tavily"); err == nil || !strings.Contains(err.Error(), "version") {
+		t.Fatalf("unversioned source resolved: %v", err)
+	}
+	if _, _, err := ReadLocalTree(nil, "contrib/tavily@0.1.0"); err == nil {
 		t.Fatal("local sources enabled without roots")
 	}
 	t.Chdir(root)
-	if _, _, err := ReadLocalTree([]string{"contrib"}, "contrib/tavily"); err != nil {
+	if _, _, err := ReadLocalTree([]string{"contrib"}, "contrib/tavily@0.1.0"); err != nil {
 		t.Fatalf("relative root: %v", err)
 	}
 	if err := os.Symlink(contrib, filepath.Join(root, "linked")); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := ReadLocalTree([]string{filepath.Join(root, "linked")}, "linked/tavily"); err != nil {
+	if _, _, err := ReadLocalTree([]string{filepath.Join(root, "linked")}, "linked/tavily@0.1.0"); err != nil {
 		t.Fatalf("symlinked root: %v", err)
 	}
-	outside := writeExt(t, map[string]string{"capability.yaml": goodManifest, "main.star": "def search(query):\n    return []\n"})
+	outside := writeExt(t, map[string]string{
+		"0.1.0/capability.yaml": goodManifest,
+		"0.1.0/main.star":       "def search(query):\n    return []\n",
+	})
 	if err := os.Symlink(outside, filepath.Join(contrib, "escape")); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := ReadLocalTree([]string{contrib}, "contrib/escape"); err == nil || !strings.Contains(err.Error(), "outside") {
+	if _, _, err := ReadLocalTree([]string{contrib}, "contrib/escape@0.1.0"); err == nil || !strings.Contains(err.Error(), "outside") {
 		t.Fatalf("symlink escape: %v", err)
 	}
 }
 
 func TestLocalCatalogSources(t *testing.T) {
 	root := writeExt(t, map[string]string{
-		"contrib/tavily/capability.yaml": goodManifest,
-		"contrib/tavily/main.star":       "def search(query):\n    return []\n",
+		"contrib/tavily/0.1.0/capability.yaml": goodManifest,
+		"contrib/tavily/0.1.0/main.star":       "def search(query):\n    return []\n",
 	})
 	contrib := filepath.Join(root, "contrib")
-	f := NewCatalog(capext.Options{LocalRoots: []string{contrib, contrib}})
-	catalog := f.Available()
-	if len(catalog.Extensions) != 1 || catalog.Extensions[0].Source != "contrib/tavily" {
+	repo := mustRepo(t, &artifactStore{}, capext.Options{CacheDir: t.TempDir(), LocalRoots: []string{contrib, contrib}})
+	f := NewCatalog(repo)
+	catalog := f.Available(context.Background())
+	if len(catalog.Extensions) != 1 || catalog.Extensions[0].Source != "contrib/tavily@0.1.0" {
 		t.Fatalf("catalog sources: %+v", catalog)
 	}
-	if _, err := (&capext.CapabilityLoader{Identifier: capext.CapabilityIdentifier(catalog.Extensions[0].Source), Options: f.opts}).Load(context.Background()); err != nil {
+	if catalog.Extensions[0].Family != "contrib/tavily" || catalog.Extensions[0].Version != "0.1.0" || !strings.HasPrefix(catalog.Extensions[0].Sum, "h1:") {
+		t.Fatalf("catalog entry identity: %+v", catalog.Extensions[0])
+	}
+	if _, err := (&capext.CapabilityLoader{Identifier: capext.CapabilityIdentifier(catalog.Extensions[0].Source), Options: &capext.Options{LocalRoots: []string{contrib}}}).Load(context.Background()); err != nil {
 		t.Fatalf("catalog source cannot load: %v", err)
 	}
 	other := writeExt(t, map[string]string{
-		"contrib/tavily/capability.yaml": goodManifest,
-		"contrib/tavily/main.star":       "def search(query):\n    return [1]\n",
+		"contrib/tavily/0.1.0/capability.yaml": goodManifest,
+		"contrib/tavily/0.1.0/main.star":       "def search(query):\n    return [1]\n",
 	})
-	f.opts.LocalRoots = append(f.opts.LocalRoots, filepath.Join(other, "contrib"))
-	if _, _, err := ReadLocalTree(f.opts.LocalRoots, "contrib/tavily"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+	repo2 := mustRepo(t, &artifactStore{}, capext.Options{CacheDir: t.TempDir(),
+		LocalRoots: []string{contrib, filepath.Join(other, "contrib")}})
+	if _, _, err := ReadLocalTree(repo2.opts.LocalRoots, "contrib/tavily@0.1.0"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("ambiguous source: %v", err)
 	}
-	if catalog := f.Available(); len(catalog.Extensions) != 0 {
+	if catalog := NewCatalog(repo2).Available(context.Background()); len(catalog.Extensions) != 0 {
 		t.Fatalf("ambiguous catalog entries: %+v", catalog)
 	}
+}
+
+func mustRepo(t *testing.T, st *artifactStore, opts capext.Options) *Repository {
+	t.Helper()
+	repo, err := NewRepository(st, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return repo
 }

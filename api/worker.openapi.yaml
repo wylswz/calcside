@@ -380,7 +380,7 @@ paths:
         - name: path
           in: query
           required: true
-          description: Extension source identifier (local root-name/extension or remote source).
+          description: Extension source identifier (canonical family@version; legacy unversioned local pairs resolve by exact artifact match).
           schema:
             type: string
         - name: sum

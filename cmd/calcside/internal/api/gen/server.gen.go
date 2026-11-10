@@ -887,9 +887,22 @@ type ExtConfigField struct {
 
 // ExtensionCatalog defines model for ExtensionCatalog.
 type ExtensionCatalog struct {
-	Extensions    []ExtensionInfo `json:"extensions"`
-	LocalEnabled  bool            `json:"local_enabled"`
-	RemoteEnabled bool            `json:"remote_enabled"`
+	// Diagnostics Filesystem candidates rejected during catalog admission.
+	Diagnostics   []ExtensionDiagnostic `json:"diagnostics"`
+	Extensions    []ExtensionInfo       `json:"extensions"`
+	LocalEnabled  bool                  `json:"local_enabled"`
+	RemoteEnabled bool                  `json:"remote_enabled"`
+}
+
+// ExtensionDiagnostic defines model for ExtensionDiagnostic.
+type ExtensionDiagnostic struct {
+	// Message Why the candidate was rejected; never a host filesystem path.
+	Message string `json:"message"`
+
+	// Source Candidate identifier that failed admission.
+	//
+	// Example: contrib/tavily@0.2.0
+	Source string `json:"source"`
 }
 
 // ExtensionInfo defines model for ExtensionInfo.
@@ -897,6 +910,11 @@ type ExtensionInfo struct {
 	Config       []ExtConfigField `json:"config"`
 	Dependencies []CapabilityName `json:"dependencies"`
 	Description  *string          `json:"description,omitempty"`
+
+	// Family Unversioned extension family (root-name/extension or domain/group/name).
+	//
+	// Example: contrib/tavily
+	Family string `json:"family"`
 
 	// IconUrl Authenticated same-origin packaged PNG endpoint
 	IconUrl *string `json:"icon_url,omitempty"`
@@ -909,11 +927,18 @@ type ExtensionInfo struct {
 	Name   string    `json:"name"`
 	Ops    []OpDoc   `json:"ops"`
 
-	// Source Server-local root-name/extension identifier; never a host filesystem path.
+	// Source Canonical family@version extension identifier; never a host filesystem path.
 	//
-	// Example: contrib/tavily
-	Source  string  `json:"source"`
-	Version *string `json:"version,omitempty"`
+	// Example: contrib/tavily@0.1.0
+	Source string `json:"source"`
+
+	// Sum Immutable h1 tree hash this version is bound to.
+	Sum string `json:"sum"`
+
+	// Version Identifier version bound to this entry (the ref for remote sources).
+	//
+	// Example: 0.1.0
+	Version string `json:"version"`
 }
 
 // FieldDoc defines model for FieldDoc.
@@ -1085,10 +1110,10 @@ type LLMProvider struct {
 	// Name Unique per user; the builtin. prefix is reserved for read-only built-in policies.
 	Name PolicyName `json:"name"`
 
-	// Source provider extension source, e.g. contrib/llm-openai
+	// Source provider extension source, e.g. contrib/llm-openai@0.1.0
 	Source string `json:"source"`
 
-	// Sum h1: integrity sum (remote sources only)
+	// Sum h1: integrity sum pinned for this provider extension
 	Sum       *string    `json:"sum,omitempty"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 	UserId    *string    `json:"user_id,omitempty"`

@@ -1,3 +1,4 @@
+import { findExtension } from '../builderCatalog.ts' 
 import { useEffect, useRef, useState } from 'react'
 import type { ExtensionInfo } from '../api'
 import type { ExtDraft, JsonValue } from '../instanceDraft'
@@ -20,7 +21,7 @@ export function InstanceExtensionEditor({ value, catalog, secretNames, vaultName
   onChange: (value: ExtDraft) => void
   onValidityChange: (error: string) => void
 }) {
-  const entry = catalog.find((e) => e.source === value.source)
+  const entry = findExtension(catalog, value.source)
   const [customJSON, setCustomJSON] = useState(JSON.stringify(value.config, null, 2))
   const [jsonError, setJsonError] = useState('')
   const fieldErrors = useRef(new Map<string, string>())
@@ -48,7 +49,9 @@ export function InstanceExtensionEditor({ value, catalog, secretNames, vaultName
   const sourceFields = (
     <>
       <Field label="Extension">
-        <code className="rounded bg-hover px-1 py-0.5 text-xs">{entry?.name || value.source || 'unresolved'}</code>
+        <code className="rounded bg-hover px-1 py-0.5 text-xs">
+          {entry?.name || value.source || 'unresolved'}{entry?.version ? ` · ${entry.version}` : value.source.includes('@') ? ` · ${value.source.split('@')[1]}` : ''}
+        </code>
       </Field>
       <Field label="Call-site alias">
         <code className="rounded bg-hover px-1 py-0.5 font-mono text-xs">{value.alias || 'unset'}</code>

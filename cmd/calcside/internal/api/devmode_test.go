@@ -23,7 +23,6 @@ import (
 	workspacesvc "calcside/cmd/calcside/internal/service/workspace"
 	"calcside/cmd/calcside/internal/vaultcipher"
 	"calcside/internal/capability"
-	capext "calcside/internal/capability/ext"
 	capfs "calcside/internal/capability/fs"
 	capio "calcside/internal/capability/io"
 	"calcside/internal/engine"
@@ -72,7 +71,7 @@ func newDevEnv(t *testing.T, cipher *vaultcipher.Cipher) *env {
 	}
 	h := Handler(Deps{
 		IAM: iam.New(st, ac, e.sbx, 10, nil), Vault: vaultSvc,
-		Policy: policysvc.New(st, ac), LLMProvider: llmprovidersvc.New(st, ac, &capext.Options{}),
+		Policy: policysvc.New(st, ac), LLMProvider: llmprovidersvc.New(st, ac, mustExtRepo(t, st)),
 		Audit:   auditsvc.New(st, ac),
 		Catalog: catalog.New(reg, nil), Sandbox: e.sbx, Access: ac, Workspace: workspacesvc.New(st, ac),
 		Auth: svc, Dev: true, Anonymous: anon,

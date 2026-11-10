@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -90,17 +91,18 @@ func (o *Options) allowSource(p ParsedIdentifier) bool {
 	return false
 }
 
-// localRoot resolves a local identifier and checks LocalRoots containment
-// after EvalSymlinks so symlinks cannot escape the permitted roots.
+// localRoot resolves a versioned local identifier to its
+// <root>/<extension>/<version>/ directory and checks LocalRoots
+// containment after EvalSymlinks so symlinks cannot escape the
+// permitted roots.
 func (o *Options) localRoot(p ParsedIdentifier) (string, error) {
-	parsed, err := ParseIdentifier(p.Local)
-	if err != nil {
-		return "", err
+	if p.Local == "" {
+		return "", fmt.Errorf("ext: invalid local identifier %q", p.Family)
 	}
-	if parsed.Local == "" {
-		return "", fmt.Errorf("ext: invalid local identifier %q", p.Local)
+	if p.Version == "" {
+		return "", fmt.Errorf("ext: local source %q requires an explicit @version", p.Local)
 	}
-	namespace, name, _ := strings.Cut(parsed.Local, "/")
+	namespace, name, _ := strings.Cut(p.Local, "/")
 	var found string
 	for _, r := range o.LocalRoots {
 		ar, err := filepath.Abs(r)
@@ -111,29 +113,64 @@ func (o *Options) localRoot(p ParsedIdentifier) (string, error) {
 		if err != nil {
 			continue
 		}
-		root, err := filepath.EvalSymlinks(filepath.Join(rr, name))
+		root, err := filepath.EvalSymlinks(filepath.Join(rr, name, p.Version))
 		if os.IsNotExist(err) {
 			continue
 		}
 		if err != nil {
-			return "", fmt.Errorf("ext: cannot resolve local source %q", p.Local)
+			return "", fmt.Errorf("ext: cannot resolve local source %q", p.Family)
 		}
 		rel, err := filepath.Rel(rr, root)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return "", fmt.Errorf("ext: local source %q is outside ext local roots", p.Local)
+			return "", fmt.Errorf("ext: local source %q is outside ext local roots", p.Family)
 		}
 		if st, err := os.Stat(root); err != nil || !st.IsDir() {
-			return "", fmt.Errorf("ext: local source %q is not a directory", p.Local)
+			return "", fmt.Errorf("ext: local source %q is not a directory", p.Family)
 		}
 		if found != "" && found != root {
-			return "", fmt.Errorf("ext: local source %q is ambiguous across ext local roots", p.Local)
+			return "", fmt.Errorf("ext: local source %q is ambiguous across ext local roots", p.Family)
 		}
 		found = root
 	}
 	if found == "" {
-		return "", fmt.Errorf("ext: local source %q not found in ext local roots", p.Local)
+		return "", fmt.Errorf("ext: local source %q not found in ext local roots", p.Family)
 	}
 	return found, nil
+}
+
+// LocalVersions lists the valid version directories (containing
+// capability.yaml) for a local family under its configured roots. The
+// scan is not recursive: <root>/<name>/<version>/ only.
+func (o *Options) LocalVersions(family string) ([]string, error) {
+	p, err := ParseIdentifier(family)
+	if err != nil || p.Local == "" {
+		return nil, fmt.Errorf("ext: invalid local family %q", family)
+	}
+	namespace, name, _ := strings.Cut(p.Local, "/")
+	seen := map[string]bool{}
+	var versions []string
+	for _, r := range o.LocalRoots {
+		ar, err := filepath.Abs(r)
+		if err != nil || filepath.Base(ar) != namespace {
+			continue
+		}
+		dir := filepath.Join(ar, name)
+		ents, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range ents {
+			if !e.IsDir() || !ValidVersion(e.Name()) || seen[e.Name()] {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(dir, e.Name(), manifestFN)); err == nil {
+				seen[e.Name()] = true
+				versions = append(versions, e.Name())
+			}
+		}
+	}
+	sort.Strings(versions)
+	return versions, nil
 }
 
 // cacheDir is where the fetched tree lands.

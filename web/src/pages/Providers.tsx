@@ -1,3 +1,4 @@
+import { findExtension, groupExtensions } from '../builderCatalog.ts' 
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ExtensionInfo, LLMProvider, Secret, wsPath } from '../api'
@@ -29,17 +30,17 @@ function ProviderForm({ provider, entries, secrets, onClose }: {
   onClose: () => void
 }) {
   const qc = useQueryClient()
-  const initialSource = provider?.source ?? entries[0]?.source ?? ''
-  const initialEntry = entries.find((e) => e.source === initialSource)
+  const initialSource = provider?.source ?? groupExtensions(entries)[0]?.latest.source ?? ''
+  const initialEntry = findExtension(entries, initialSource)
   const [name, setName] = useState(provider?.name ?? '')
   const [source, setSource] = useState(initialSource)
   const [models, setModels] = useState((provider?.models ?? initialEntry?.models ?? []).join('\n'))
   const [config, setConfig] = useState<Record<string, unknown>>(() => provider ? { ...(provider.config ?? {}) } : defaults(initialEntry))
   const [err, setErr] = useState('')
-  const entry = entries.find((e) => e.source === source)
+  const entry = findExtension(entries, source)
   const save = useMutation({
     mutationFn: () => {
-      const body = { name, source, models: models.split(/[\n,]/).map((m) => m.trim()).filter(Boolean), config }
+      const body = { name, source, sum: entry?.sum, models: models.split(/[\n,]/).map((m) => m.trim()).filter(Boolean), config }
       return provider
         ? api.put<{ provider: LLMProvider }>(`/api/v1/llm-providers/${provider.id}`, body)
         : api.post<{ provider: LLMProvider }>(wsPath('/api/v1/llm-providers'), body)
@@ -48,7 +49,7 @@ function ProviderForm({ provider, entries, secrets, onClose }: {
     onError: (e: Error) => setErr(e.message),
   })
   const pickSource = (next: string) => {
-    const e = entries.find((x) => x.source === next)
+    const e = findExtension(entries, next)
     setSource(next)
     setModels((e?.models ?? []).join('\n'))
     setConfig(defaults(e))
@@ -94,7 +95,15 @@ function ProviderForm({ provider, entries, secrets, onClose }: {
           <Field label="Provider extension">
             <select className={inputCls} value={source} onChange={(e) => pickSource(e.target.value)}>
               <option value="">Choose a provider</option>
-              {entries.map((e) => <option key={e.source} value={e.source}>{e.name} · {e.source}</option>)}
+              {groupExtensions(entries).map((f) => (
+                <optgroup key={f.family} label={f.name}>
+                  {f.versions.map((v) => (
+                    <option key={v.source} value={v.source}>
+                      {v.source}{v === f.latest ? ' (latest)' : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
             </select>
           </Field>
         </div>

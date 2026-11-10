@@ -18,14 +18,22 @@ import (
 	"calcside/internal/types"
 )
 
+// ExtPinner canonicalizes provider (source, sum) pairs and exposes the
+// artifact-backed options validation must load through (satisfied by
+// *extensions.Repository).
+type ExtPinner interface {
+	Pin(ctx context.Context, source, sum string) (canonicalSource, pinnedSum string, err error)
+	Options() capext.Options
+}
+
 type Service struct {
 	st     store.Store
 	access *access.Checker
-	ext    *capext.Options
+	pinner ExtPinner
 }
 
-func New(st store.Store, ac *access.Checker, opts *capext.Options) *Service {
-	return &Service{st: st, access: ac, ext: opts}
+func New(st store.Store, ac *access.Checker, pinner ExtPinner) *Service {
+	return &Service{st: st, access: ac, pinner: pinner}
 }
 
 func (s *Service) List(ctx context.Context, a service.Actor) ([]*store.LLMProvider, error) {
@@ -46,48 +54,58 @@ func writeErr(err error) error {
 	return service.Internal(err)
 }
 
-// validateSpec loads the provider extension, validates its config and
-// resolves the model catalogue (request override else manifest default).
-func (s *Service) validateSpec(ctx context.Context, wsID, name, source, sum string, models []string, config json.RawMessage) (json.RawMessage, []string, error) {
+// validateSpec canonicalizes the provider pin, loads the extension,
+// validates its config and resolves the model catalogue (request
+// override else manifest default). It returns the canonical source
+// and sum to persist.
+func (s *Service) validateSpec(ctx context.Context, wsID, name, source, sum string, models []string, config json.RawMessage) (json.RawMessage, []string, string, string, error) {
 	if !runtime.ValidPolicyName(name) {
-		return nil, nil, service.BadRequest("provider name must match [A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
+		return nil, nil, "", "", service.BadRequest("provider name must match [A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
 	}
 	if source == "" {
-		return nil, nil, service.BadRequest("provider source is required")
+		return nil, nil, "", "", service.BadRequest("provider source is required")
 	}
 	cfg := map[string]any{}
 	if len(config) > 0 && string(config) != "null" {
 		if err := json.Unmarshal(config, &cfg); err != nil {
-			return nil, nil, service.BadRequest("config must be a JSON object")
+			return nil, nil, "", "", service.BadRequest("config must be a JSON object")
 		}
 	}
-	info, err := capext.ValidateProvider(s.ext, source, sum, cfg)
+	canonical, pinned, err := s.pinner.Pin(ctx, source, sum)
 	if err != nil {
-		return nil, nil, service.Errf(types.ErrCodeBadSpec, "%s", err.Error())
+		if errors.Is(err, store.ErrConflict) {
+			return nil, nil, "", "", service.Errf(types.ErrCodeConflict, "%s", err.Error())
+		}
+		return nil, nil, "", "", service.Errf(types.ErrCodeBadSpec, "%s", err.Error())
+	}
+	opts := s.pinner.Options()
+	info, err := capext.ValidateProvider(&opts, canonical, pinned, cfg)
+	if err != nil {
+		return nil, nil, "", "", service.Errf(types.ErrCodeBadSpec, "%s", err.Error())
 	}
 	if len(models) == 0 {
 		models = info.Models
 	}
 	models, err = llm.NormalizeModels(models)
 	if err != nil {
-		return nil, nil, service.Errf(types.ErrCodeBadSpec, "%s", err.Error())
+		return nil, nil, "", "", service.Errf(types.ErrCodeBadSpec, "%s", err.Error())
 	}
 	if len(models) == 0 {
-		return nil, nil, service.BadRequest("provider requires at least one model")
+		return nil, nil, "", "", service.BadRequest("provider requires at least one model")
 	}
 	for _, secretName := range info.SecretNames {
 		if _, err := s.st.GetSecretByName(ctx, wsID, secretName); err != nil {
 			if errors.Is(err, store.ErrNotFound) {
-				return nil, nil, service.BadRequest("provider references unknown workspace secret %q", secretName)
+				return nil, nil, "", "", service.BadRequest("provider references unknown workspace secret %q", secretName)
 			}
-			return nil, nil, service.Internal(err)
+			return nil, nil, "", "", service.Internal(err)
 		}
 	}
 	b, err := json.Marshal(info.Config)
 	if err != nil {
-		return nil, nil, service.Internal(err)
+		return nil, nil, "", "", service.Internal(err)
 	}
-	return b, models, nil
+	return b, models, canonical, pinned, nil
 }
 
 func (s *Service) Create(ctx context.Context, a service.Actor, name, source, sum string, models []string, config json.RawMessage) (*store.LLMProvider, error) {
@@ -97,12 +115,12 @@ func (s *Service) Create(ctx context.Context, a service.Actor, name, source, sum
 	if name == "" || source == "" {
 		return nil, service.BadRequest("name and source required")
 	}
-	eff, models, err := s.validateSpec(ctx, a.WorkspaceID, name, source, sum, models, config)
+	eff, models, canonical, pinned, err := s.validateSpec(ctx, a.WorkspaceID, name, source, sum, models, config)
 	if err != nil {
 		return nil, err
 	}
 	p := &store.LLMProvider{UserID: a.UserID, WorkspaceID: a.WorkspaceID,
-		Name: name, Source: source, Sum: sum, Models: models, Config: eff}
+		Name: name, Source: canonical, Sum: pinned, Models: models, Config: eff}
 	if err := s.st.CreateLLMProvider(ctx, p); err != nil {
 		return nil, writeErr(err)
 	}
@@ -136,10 +154,12 @@ func (s *Service) Update(ctx context.Context, a service.Actor, id string, name, 
 	if len(config) > 0 {
 		p.Config = config
 	}
-	eff, normModels, err := s.validateSpec(ctx, p.WorkspaceID, p.Name, p.Source, p.Sum, p.Models, p.Config)
+	eff, normModels, canonical, pinned, err := s.validateSpec(ctx, p.WorkspaceID, p.Name, p.Source, p.Sum, p.Models, p.Config)
 	if err != nil {
 		return nil, err
 	}
+	p.Source = canonical
+	p.Sum = pinned
 	p.Config = eff
 	p.Models = normModels
 	if err := s.st.UpdateLLMProvider(ctx, p); err != nil {

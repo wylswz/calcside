@@ -281,12 +281,12 @@ func TestArtifactExportThroughChild(t *testing.T) {
 
 func TestLocalExtensionSourceThroughChild(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "contrib")
-	dir := filepath.Join(root, "myext")
+	dir := filepath.Join(root, "myext", "0.1.0")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	for name, data := range map[string]string{
-		"capability.yaml": "name: myext\nops: [{name: hello}]\n",
+		"capability.yaml": "name: myext\nversion: 0.1.0\nops: [{name: hello}]\n",
 		"main.star":       "def hello():\n    return 42\n",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o644); err != nil {
@@ -296,7 +296,7 @@ func TestLocalExtensionSourceThroughChild(t *testing.T) {
 	s := newSupervisor(t, func(o *Options) { o.Child.Node.ExtLocalRoots = []string{root} })
 	_, err := s.Create(context.Background(), &runtime.CreateRequest{
 		InstanceID: "ins_ext", Owner: owner,
-		Spec:      []byte(`{"capabilities":{"ext":{"myext":{"source":"contrib/myext"}}}}`),
+		Spec:      []byte(`{"capabilities":{"ext":{"myext":{"source":"contrib/myext@0.1.0"}}}}`),
 		ExpiresAt: time.Now().Add(time.Hour),
 	})
 	if err != nil {

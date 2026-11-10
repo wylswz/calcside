@@ -3,6 +3,7 @@
 // into a draft; buildInstanceSpec validates and serializes without
 // dropping unknown fields anywhere in the tree.
 import type { components } from './api/schema'
+import { findExtension } from './builderCatalog.ts'
 
 export type InstanceSpec = components['schemas']['InstanceSpec']
 export type SecretSpec = components['schemas']['SecretSpec']
@@ -185,7 +186,7 @@ export function buildInstanceSpec(draft: InstanceDraft, opts: { keyMode?: boolea
   }
 
   const seen = new Set<string>()
-  const manifestOf = (src: string) => opts.catalog?.find((x) => x.source === src)
+  const manifestOf = (src: string) => findExtension(opts.catalog, src)
   for (const ex of draft.exts) {
     if (!ex.alias) { errors.push({ section: 'Extensions', message: 'extension alias is required' }); continue }
     if (!identRe.test(ex.alias)) errors.push({ section: 'Extensions', message: `${ex.alias}: invalid alias` })
@@ -196,14 +197,15 @@ export function buildInstanceSpec(draft: InstanceDraft, opts: { keyMode?: boolea
     const ent: Record<string, any> = { source: ex.source, ...ex.extra }
     if (ex.version) ent.version = ex.version
     if (ex.sum) ent.sum = ex.sum
-    const remote = ex.source.includes('@') || ex.source.split('/').length >= 3
+    const family = ex.source.split('@')[0]
+    const remote = family.split('/').length >= 3
     if (remote) {
       if (!/^[A-Za-z0-9][A-Za-z0-9.-]*\/[A-Za-z0-9_][A-Za-z0-9._-]*\/[A-Za-z0-9_][A-Za-z0-9._-]*@[A-Za-z0-9_][A-Za-z0-9._+-]*$/.test(ex.source) || ex.source.includes('..')) {
         errors.push({ section: 'Extensions', message: `${ex.alias}: use domain/group/name@version for a remote source` })
       }
       if (!ex.sum || !/^h1:[A-Za-z0-9+/]{43}=$/.test(ex.sum)) errors.push({ section: 'Extensions', message: `${ex.alias}: remote sources require an h1: SHA-256 sum` })
-    } else if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]*\/[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(ex.source)) {
-      errors.push({ section: 'Extensions', message: `${ex.alias}: use root-name/extension for a local source` })
+    } else if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]*\/[A-Za-z0-9_-][A-Za-z0-9._-]*(@[A-Za-z0-9][A-Za-z0-9._+-]{0,127})?$/.test(ex.source) || ex.source.includes('..')) {
+      errors.push({ section: 'Extensions', message: `${ex.alias}: use root-name/extension@version for a local source` })
     }
     const cfg: Record<string, JsonValue> = Object.create(null)
     for (const [k, v] of Object.entries(ex.config)) {
@@ -336,4 +338,20 @@ export function uniqueExtensionAlias(name: string, existing: ReadonlySet<string>
   let candidate = base
   for (let i = 2; existing.has(candidate) || RESERVED.has(candidate); i++) candidate = base + '_' + i
   return candidate
+}
+
+// switchExtSource replaces source+sum on the existing row of a family,
+// keeping alias, config and extras untouched (EP-0020 console: one
+// version per family through the picker). `from` is the previously added
+// catalog entry, undefined for a legacy/unavailable pin.
+export function switchExtSource(exts: ExtDraft[], from: { source?: string; family?: string } | undefined, to: { source: string; family: string; sum?: string }): ExtDraft[] | undefined {
+  const fam = (src?: string) => (src ?? '').split('@')[0]
+  const i = exts.findIndex((e) =>
+    e.source === from?.source || e.source === from?.family ||
+    (from === undefined && e.source === to.family) ||
+    (e.source !== to.source && fam(e.source) === to.family))
+  if (i < 0) return undefined
+  const out = [...exts]
+  out[i] = { ...exts[i], source: to.source, sum: to.sum }
+  return out
 }

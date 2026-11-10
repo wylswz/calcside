@@ -145,7 +145,19 @@ function ModuleEditor({ id }: { id: string }) {
   const addDep = (entry: ExtensionInfo) => {
     const ext = { ...(reqsRef.current?.ext ?? {}) }
     const alias = uniqueExtensionAlias(entry.name, new Set(Object.keys(ext)))
-    const next: ModuleRequirements = { ...reqsRef.current, ext: { ...ext, [alias]: { source: entry.source } } }
+    const next: ModuleRequirements = { ...reqsRef.current, ext: { ...ext, [alias]: { source: entry.source, sum: entry.sum } } }
+    reqsRef.current = next
+    setReqs(next)
+    pushModule(filesRef.current, next)
+  }
+  const switchDep = (from: ExtensionInfo | undefined, to: ExtensionInfo) => {
+    const ext = { ...(reqsRef.current?.ext ?? {}) }
+    const fam = (src: string) => src.split('@')[0]
+    const alias = Object.keys(ext).find((a) =>
+      ext[a].source === from?.source || ext[a].source === from?.family ||
+      (from === undefined && ext[a].source === to.family) || fam(ext[a].source) === to.family)
+    if (!alias) return
+    const next: ModuleRequirements = { ...reqsRef.current, ext: { ...ext, [alias]: { source: to.source, sum: to.sum } } }
     reqsRef.current = next
     setReqs(next)
     pushModule(filesRef.current, next)
@@ -307,7 +319,7 @@ function ModuleEditor({ id }: { id: string }) {
       <DebugRuntime key={`dr-${debugEpoch}`} id={id} workspaceId={m.workspace_id} debug={dq.data?.debug}
         canEdit={canEdit && !debugBusy && !pubBusy && !reviewOpen} specRef={runtimeRef} fixedExtensions={reqs?.ext ?? EMPTY_DEPS}
         depsDisabled={!canEdit || modConflict || pubBusy || reviewOpen || debugBusy || !!recoveredModule}
-        onAddDep={addDep} onRemoveDep={(alias) => setDepRemove(alias)}
+        onAddDep={addDep} onSwitchDep={switchDep} onRemoveDep={(alias) => setDepRemove(alias)}
         onSpecText={setSpecText} onValidationChange={setConfigError} onConfigChange={() => setConfigRevision((r) => r + 1)} />
       {reviewOpen && m && reviewVer !== null && (
         <PublishReviewDialog resource="modules" id={id} version={reviewVer} onClose={() => setReviewOpen(false)}
@@ -540,13 +552,14 @@ function DebugWorkspace({ id, draftVersion, workspaceId, debug, modDirty, modCon
 // It also owns the static dependency picker: adds/removes go through
 // onAddDep/onRemoveDep (module requirements CAS), while the selected
 // summary's Configure rows edit the debug-only environment.
-function DebugRuntime({ id, workspaceId, debug, canEdit, specRef, fixedExtensions, depsDisabled, onAddDep, onRemoveDep, onSpecText, onValidationChange, onConfigChange }: {
+function DebugRuntime({ id, workspaceId, debug, canEdit, specRef, fixedExtensions, depsDisabled, onAddDep, onSwitchDep, onRemoveDep, onSpecText, onValidationChange, onConfigChange }: {
   id: string; workspaceId: string; debug?: DebugView; canEdit: boolean
   specRef: React.MutableRefObject<SpecFormHandle | null>
   fixedExtensions?: Record<string, { source: string; sum?: string }>
   /** locks dep add/remove only — runtime config stays editable (e.g. while a source save conflicts) */
   depsDisabled?: boolean
   onAddDep: (entry: ExtensionInfo) => void
+  onSwitchDep: (from: ExtensionInfo | undefined, to: ExtensionInfo) => void
   onRemoveDep: (alias: string) => void
   onSpecText: (text: string) => void
   onValidationChange: (error: string) => void
@@ -580,7 +593,7 @@ function DebugRuntime({ id, workspaceId, debug, canEdit, specRef, fixedExtension
       {incomplete && <Notice tone="neutral">Debug configuration incomplete. Fix the indicated fields before running; module publishing is unaffected.</Notice>}
       <fieldset disabled={!canEdit} className="m-0 min-w-0 border-0 p-0">
         <SpecForm ref={specRef} debug hideBasics workspaceId={workspaceId} fixedExtensions={fixedExtensions}
-          onAddFixedExtension={onAddDep} onRemoveFixedExtension={onRemoveDep} fixedDepsDisabled={depsDisabled}
+          onAddFixedExtension={onAddDep} onSwitchFixedExtension={onSwitchDep} onRemoveFixedExtension={onRemoveDep} fixedDepsDisabled={depsDisabled}
           initial={seed.spec}
           onSpecChange={(draft, errors, built) => {
             const invalid = (errors?.length ?? 0) > 0 || !built?.spec

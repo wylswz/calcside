@@ -233,12 +233,12 @@ const SRC_SPEC = {
   secrets: { TOKEN: { ref: 'different-vault-name' }, INL: { source: 'inline' } },
   capabilities: {
     net: { allow_hosts: ['a.com'], methods: ['GET'] },
-    ext: { fetcher: { source: 'contrib/fetcher', config: { retries: 3, tags: ['a', 'b'] } } },
+    ext: { fetcher: { source: 'contrib/fetcher@0.1.0', config: { retries: 3, tags: ['a', 'b'] } } },
   },
   limits: { max_steps: 50 },
 }
 const EXT_CAT = {
-  extensions: [{ source: 'contrib/fetcher', name: 'fetcher', description: 'fixture', dependencies: [], ops: [], config: [] }],
+  extensions: [{ source: 'contrib/fetcher@0.1.0', family: 'contrib/fetcher', version: '0.1.0', sum: 'h1:f', name: 'fetcher', description: 'fixture', dependencies: [], ops: [], config: [] }],
   local_enabled: true, remote_enabled: false,
 }
 
@@ -273,10 +273,10 @@ test('clone prefill: exact TTL, vault ref ≠ name, typed ext config, limits pre
 
 test('extension with unmet dependency blocks submit (no auto-grant)', async ({ page }) => {
   await page.route('**/api/v1/extensions**', (r) => r.fulfill({ json: {
-    extensions: [{ source: 'contrib/tav', name: 'tav', description: 'needs net', dependencies: ['net'], ops: [], config: [] }],
+    extensions: [{ source: 'contrib/tav@0.1.0', family: 'contrib/tav', version: '0.1.0', sum: 'h1:t', name: 'tav', description: 'needs net', dependencies: ['net'], ops: [], config: [] }],
     local_enabled: true, remote_enabled: false,
   } }))
-  await page.route('**/api/v1/instances/ins_src2**', (r) => r.fulfill({ json: { instance: { id: 'ins_src2', status: 'running', workspace_id: '', spec: { ttl_seconds: 60, capabilities: { ext: { tav: { source: 'contrib/tav' } } } } } } }))
+  await page.route('**/api/v1/instances/ins_src2**', (r) => r.fulfill({ json: { instance: { id: 'ins_src2', status: 'running', workspace_id: '', spec: { ttl_seconds: 60, capabilities: { ext: { tav: { source: 'contrib/tav@0.1.0' } } } } } } }))
   await page.goto(`${consoleURL}/instances/new?step=config&from=ins_src2`)
   await expect(page.getByRole('button', { name: 'Create similar' })).toBeDisabled()
   // the dep error is attached (may be inside a collapsed panel)
@@ -554,7 +554,8 @@ test('instance detail: state follows executions without auto-refresh', async ({ 
 test('new instance: extension library stays bounded at 1000 entries', async ({ page }) => {
   const hex = (n: number) => n.toString(16).padStart(64, '0')
   const entries = Array.from({ length: 1000 }, (_, i) => ({
-    source: `contrib/ext${i}`, name: `ext-${String(i).padStart(4, '0')}`,
+    source: `contrib/ext${i}@0.1.0`, family: `contrib/ext${i}`, version: '0.1.0', sum: `h1:${hex(i)}`,
+    name: `ext-${String(i).padStart(4, '0')}`,
     description: `Fixture extension ${i}`, dependencies: [] as string[], ops: [], config: [],
     icon_url: i === 0 ? `/api/v1/extensions/icons/${hex(0)}` : undefined,
   }))
@@ -610,7 +611,7 @@ test('new instance: extension library stays bounded at 1000 entries', async ({ p
   await expect(page.getByRole('heading', { name: 'ext_0999' })).toBeVisible()
   await page.getByRole('button', { name: 'Create instance' }).click()
   await expect.poll(() => captured).not.toBeNull()
-  expect(captured.capabilities.ext.ext_0999.source).toBe('contrib/ext999')
+  expect(captured.capabilities.ext.ext_0999.source).toBe('contrib/ext999@0.1.0')
   expect(captured.capabilities.net).toBeDefined()
   expect(Object.keys(captured.capabilities.ext)).toEqual(['ext_0999'])
 })
@@ -623,7 +624,7 @@ test('new instance: extension editor keeps invalid JSON through view switches an
   const card = (alias: string) => page.locator('.settings-card').filter({ has: page.getByRole('heading', { name: alias }) })
   // catalog entries carry a string_map field — the JSON editor is the
   // same code path custom extensions used.
-  const mk = (n: string) => ({ source: `contrib/${n}`, name: n, description: n, config: [{ name: 'labels', type: 'string_map', doc: 'k=v map' }] })
+  const mk = (n: string) => ({ source: `contrib/${n}@0.1.0`, family: `contrib/${n}`, version: '0.1.0', sum: 'h1:x', name: n, description: n, config: [{ name: 'labels', type: 'string_map', doc: 'k=v map' }] })
   await page.route('**/api/v1/extensions**', (r) => r.fulfill({ json: { extensions: [mk('alpha'), mk('beta')], local_enabled: true, remote_enabled: false } }))
   await page.goto(`${consoleURL}/instances/new?step=config`)
   await page.getByRole('button', { name: 'Add alpha' }).click()
@@ -665,7 +666,8 @@ test('new instance: catalog failure does not hide Files or Network', async ({ pa
 // controls keep their position, and removal leaves an undo row in place.
 test('new instance: palette controls stay put while adding and removing', async ({ page }) => {
   const entries = Array.from({ length: 30 }, (_, i) => ({
-    source: `contrib/stable${i}`, name: `stable-${String(i).padStart(2, '0')}`,
+    source: `contrib/stable${i}@0.1.0`, family: `contrib/stable${i}`, version: '0.1.0', sum: 'h1:s',
+    name: `stable-${String(i).padStart(2, '0')}`,
     description: `Stable fixture ${i}`, dependencies: i === 2 ? ['net'] : [], ops: [], config: [],
   }))
   await page.route('**/api/v1/extensions**', (r) => r.fulfill({ json: { extensions: entries, local_enabled: true, remote_enabled: false } }))
@@ -812,7 +814,7 @@ test('instance detail: the More menu stays where it opened', async ({ page }) =>
 // while the pointer rests on it and while it is held down.
 test('console controls keep their box under hover and press', async ({ page }) => {
   await page.route('**/api/v1/extensions**', (r) => r.fulfill({ json: {
-    extensions: [{ source: 'contrib/steady', name: 'steady', description: 'fixture', dependencies: [], ops: [], config: [] }],
+    extensions: [{ source: 'contrib/steady@0.1.0', family: 'contrib/steady', version: '0.1.0', sum: 'h1:s', name: 'steady', description: 'fixture', dependencies: [], ops: [], config: [] }],
     local_enabled: true, remote_enabled: false,
   } }))
   await page.goto(`${consoleURL}/instances/new?step=config`)
@@ -1084,4 +1086,62 @@ test('console material: raised controls, inset wells, pressed state', async ({ p
   await page.mouse.down()
   await expect.poll(() => files.evaluate((el) => getComputedStyle(el).backgroundImage)).not.toBe(hover)
   await page.mouse.up()
+})
+
+// EP-0020: choosing another version from the picker menu switches the
+// added entry silently — the settings pane must NOT open (context, C),
+// and the split-pill geometry never moves (S1/S4).
+test('new instance: picker version switch is silent', async ({ page }) => {
+  const fam = (v: string) => ({ source: `contrib/sw@${v}`, family: 'contrib/sw', version: v, sum: `h1:${v}`, name: 'sw', description: 'fixture', dependencies: [], ops: [], config: [] })
+  const solo = { source: 'contrib/solo@0.1.0', family: 'contrib/solo', version: '0.1.0', sum: 'h1:s', name: 'solo', description: 'fixture', dependencies: [], ops: [], config: [] }
+  const lv = (v: string) => ({ source: `contrib/lvx@${v}`, family: 'contrib/lvx', version: v, sum: `h1:${v}`, name: 'lvx', description: 'fixture', dependencies: [], ops: [], config: [] })
+  await page.route('**/api/v1/extensions**', (r) => r.fulfill({ json: { extensions: [fam('0.1.0'), fam('0.2.0'), solo, lv('0.1.0'), lv('2024.11.10-beta.3-longref')], local_enabled: true, remote_enabled: false } }))
+  const card = page.locator('.extensions-block .ext-card').first()
+  const singleCard = page.locator('.extensions-block .ext-card').nth(1)
+  const assertSplitGeometry = async () => {
+    // S1: the caret lives fully inside the shared pill, the pill width is
+    // identical across cards, the label never overflows its segment, and
+    // the card keeps its 76px height.
+    const split = await card.locator('.ext-split').boundingBox()
+    const caret = await card.locator('.ext-card-caret').boundingBox()
+    expect(caret!.x).toBeGreaterThanOrEqual(split!.x)
+    expect(caret!.x + caret!.width).toBeLessThanOrEqual(split!.x + split!.width)
+    const singleSplit = await singleCard.locator('.ext-split').boundingBox()
+    expect(singleSplit!.width).toEqual(split!.width)
+    const fits = await card.locator('.ext-card-action').evaluate((el) => el.scrollWidth <= el.clientWidth + 1)
+    expect(fits).toBe(true)
+    expect((await card.boundingBox())!.height).toEqual(76)
+    expect((await singleCard.boundingBox())!.height).toEqual(76)
+  }
+  for (const width of [1440, 375]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(`${consoleURL}/instances/new?step=config`)
+    await assertSplitGeometry()
+    await page.getByRole('button', { name: 'Add sw 0.2.0' }).click()
+    const before = await card.boundingBox()
+    await assertSplitGeometry()
+    await page.getByRole('button', { name: 'Choose version of sw' }).click()
+    await page.getByRole('menuitem', { name: '0.1.0' }).click()
+    // Silent switch (C): still on Add capabilities, not the settings pane.
+    await expect(page.getByRole('tab', { name: 'Add capabilities' })).toHaveAttribute('aria-selected', 'true')
+    // In-place feedback: chip shows the new version, the main segment
+    // briefly shows the version then returns to Added, and the card and
+    // pill never move (S1/S4).
+    await expect(card.locator('.ext-card-version')).toHaveText('0.1.0')
+    const splitBefore = await card.locator('.ext-split').boundingBox()
+    await expect(card.locator('.ext-split-version')).toHaveText('0.1.0')
+    await assertSplitGeometry()
+    await expect(card.locator('.ext-card-action .swap-label > span[data-on="true"]')).toHaveText('Added', { timeout: 4000 })
+    const splitAfter = await card.locator('.ext-split').boundingBox()
+    const after = await card.boundingBox()
+    expect(after).toEqual(before)
+    expect(splitAfter).toEqual(splitBefore)
+    // Long versions ellipsize inside the fixed segment (S1).
+    const lvCard = page.locator('.extensions-block .ext-card').nth(2)
+    await lvCard.locator('.ext-card-caret').click()
+    await page.getByRole('menuitem', { name: /2024\.11\.10/ }).click()
+    await expect(lvCard.locator('.ext-split-version')).toHaveText('2024.11.10-beta.3-longref')
+    const fitsLong = await lvCard.locator('.ext-split-version').evaluate((el) => el.scrollWidth <= el.clientWidth + 1)
+    expect(fitsLong).toBe(true)
+  }
 })

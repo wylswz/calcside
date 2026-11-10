@@ -11,7 +11,11 @@ import (
 // h1 sum all match what ResolveLocal enforces.
 func ReadLocalTree(roots []string, path string) (files map[string][]byte, sum string, err error) {
 	o := capext.Options{LocalRoots: roots}
-	root, err := o.ResolveLocal(capext.ParsedIdentifier{Local: path}, "")
+	p, err := capext.ParseIdentifier(path)
+	if err != nil {
+		return nil, "", err
+	}
+	root, err := o.ResolveLocal(p, "")
 	if err != nil {
 		return nil, "", err
 	}

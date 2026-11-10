@@ -366,7 +366,7 @@ func (s *strictImpl) ListExtensions(ctx context.Context, _ gen.ListExtensionsReq
 	if _, e := needAuth(ctx); e != nil {
 		return listExtensionsResp{*e}, nil
 	}
-	return listExtensionsResp{rawJSON{http.StatusOK, dto.ExtensionsEnvelope(s.d.Catalog.Extensions())}}, nil
+	return listExtensionsResp{rawJSON{http.StatusOK, dto.ExtensionsEnvelope(s.d.Catalog.Extensions(ctx))}}, nil
 }
 
 // --- workspaces ---

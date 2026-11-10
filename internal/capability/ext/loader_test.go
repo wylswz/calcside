@@ -10,10 +10,11 @@ import (
 	"go.starlark.net/starlark"
 )
 
-// writeExt builds a local extension tree.
+// writeExt builds a local extension version tree at
+// <tmp>/fixtures/t/0.1.0/ and returns the version dir.
 func writeExt(t *testing.T, files map[string]string) string {
 	t.Helper()
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "fixtures", "t", "0.1.0")
 	for rel, src := range files {
 		p := filepath.Join(dir, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -26,17 +27,20 @@ func writeExt(t *testing.T, files map[string]string) string {
 	return dir
 }
 
+// localRoot returns the namespace root of a version dir.
+func localRoot(dir string) string { return filepath.Dir(filepath.Dir(dir)) }
+
 func localID(dir string) string {
-	return filepath.Base(filepath.Dir(dir)) + "/" + filepath.Base(dir)
+	return filepath.Base(localRoot(dir)) + "/" + filepath.Base(filepath.Dir(dir)) + "@" + filepath.Base(dir)
 }
 
-// loadLocal loads dir as a local extension under LocalRoots=parent.
+// loadLocal loads dir as a local extension under its namespace root.
 func loadLocal(t *testing.T, dir, sum string) (*Module, error) {
 	t.Helper()
 	l := &CapabilityLoader{
 		Identifier: CapabilityIdentifier(localID(dir)),
 		Sum:        sum,
-		Options:    &Options{LocalRoots: []string{filepath.Dir(dir)}},
+		Options:    &Options{LocalRoots: []string{localRoot(dir)}},
 	}
 	return l.Load(context.Background())
 }
@@ -77,15 +81,15 @@ func TestLoadErrors(t *testing.T) {
 			"main.star":       "search = 3\n",
 		}, "not a function"},
 		{"unknown dep", map[string]string{
-			"capability.yaml": "name: t\nops: [{name: a}]\ndependencies: [bogus]\n",
+			"capability.yaml": "name: t\nversion: 0.1.0\nops: [{name: a}]\ndependencies: [bogus]\n",
 			"main.star":       "def a():\n    return 1\n",
 		}, "invalid base dependency"},
 		{"ext dep", map[string]string{
-			"capability.yaml": "name: t\nops: [{name: a}]\ndependencies: [ext]\n",
+			"capability.yaml": "name: t\nversion: 0.1.0\nops: [{name: a}]\ndependencies: [ext]\n",
 			"main.star":       "def a():\n    return 1\n",
 		}, "invalid base dependency"},
 		{"source dep obj", map[string]string{
-			"capability.yaml": "name: t\nops: [{name: a}]\ndependencies:\n  - {source: github.com/x/y@v1, sum: h1:x}\n",
+			"capability.yaml": "name: t\nversion: 0.1.0\nops: [{name: a}]\ndependencies:\n  - {source: github.com/x/y@v1, sum: h1:x}\n",
 			"main.star":       "def a():\n    return 1\n",
 		}, "unmarshal"},
 		{"syntax error", map[string]string{
@@ -144,7 +148,7 @@ func TestLocalOutsideRoots(t *testing.T) {
 
 func TestLoadEscape(t *testing.T) {
 	dir := writeExt(t, map[string]string{
-		"capability.yaml": "name: t\nops: [{name: a}]\n",
+		"capability.yaml": "name: t\nversion: 0.1.0\nops: [{name: a}]\n",
 		"main.star":       "load(\"../escape.star\", \"x\")\ndef a():\n    return x\n",
 	})
 	m, err := loadLocal(t, dir, "")
@@ -159,7 +163,7 @@ func TestLoadEscape(t *testing.T) {
 	}
 	// Absolute path load also rejected.
 	dir2 := writeExt(t, map[string]string{
-		"capability.yaml": "name: t\nops: [{name: a}]\n",
+		"capability.yaml": "name: t\nversion: 0.1.0\nops: [{name: a}]\n",
 		"main.star":       "load(\"/etc/x.star\", \"x\")\ndef a():\n    return x\n",
 	})
 	m2, err := loadLocal(t, dir2, "")
@@ -174,6 +178,7 @@ func TestLoadEscape(t *testing.T) {
 func TestInitCallsAndConfig(t *testing.T) {
 	dir := writeExt(t, map[string]string{
 		"capability.yaml": `name: t
+version: 0.1.0
 ops: [{name: get, params: []}]
 config:
   - {name: n, type: int, default: 7}
@@ -201,7 +206,7 @@ config:
 
 func TestExtensionUtilities(t *testing.T) {
 	dir := writeExt(t, map[string]string{
-		"capability.yaml": "name: utility\nops: [{name: run}]\n",
+		"capability.yaml": "name: utility\nversion: 0.1.0\nops: [{name: run}]\n",
 		"main.star": `query = url.query_encode({"q": "a b"})
 rows = csv.parse_dicts("id,value\nA,001\n")
 def run():
@@ -238,7 +243,7 @@ func TestLocalDiagnosticsUseSourceIdentifier(t *testing.T) {
 		"init":   "missing()\ndef search(query):\n    return []\n",
 	} {
 		t.Run(name, func(t *testing.T) {
-			dir := writeExt(t, map[string]string{"capability.yaml": "name: t\nops: [{name: search}]\n", "main.star": source})
+			dir := writeExt(t, map[string]string{"capability.yaml": "name: t\nversion: 0.1.0\nops: [{name: search}]\n", "main.star": source})
 			mod, err := loadLocal(t, dir, "")
 			if err == nil {
 				_, err = mod.init(context.Background(), nil, nil, 0, nil)

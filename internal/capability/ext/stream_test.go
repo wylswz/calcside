@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"testing"
 
 	"go.starlark.net/starlark"
@@ -20,6 +19,7 @@ func scopedCall(t *testing.T, hooks []capability.Hook, obs capability.Observer, 
 	t.Helper()
 	dir := writeExt(t, map[string]string{
 		"capability.yaml": `name: s
+version: 0.1.0
 ops: [{name: make_stream}]
 `,
 		"main.star": `def make_stream():
@@ -31,7 +31,7 @@ ops: [{name: make_stream}]
     return stream.new(nxt)
 `,
 	})
-	f := Factory(Options{LocalRoots: []string{filepath.Dir(dir)}})
+	f := Factory(Options{LocalRoots: []string{localRoot(dir)}})
 	spec, _ := json.Marshal(map[string]any{
 		alias: map[string]any{"source": localID(dir)},
 	})

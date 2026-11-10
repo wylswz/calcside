@@ -43,7 +43,7 @@ Set `delete_on_finish=True` to restore automatic cleanup after each run.
 
 `CalcsideMiddleware` creates a sandbox instance per run with `fs`, `net`
 (allow_hosts `api.tavily.com`), and the `tavily` extension loaded from
-`contrib/tavily`, resolved by the server from its configured extension roots
+`contrib/tavily@0.1.0`, resolved by the server from its configured extension roots
 (the client does not need a local checkout or a server filesystem path).
 The instance spec references vault secret
 `TAVILY_API_KEY`; the extension's `api_key` config is the

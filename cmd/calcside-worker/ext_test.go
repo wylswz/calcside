@@ -73,6 +73,13 @@ func TestCacheResolverMissNoFetch(t *testing.T) {
 	if got, err := resolve(context.Background(), "contrib/x", sum); err != nil || got == "" {
 		t.Fatalf("installed: %v %q", err, got)
 	}
+	// Versioned identifiers resolve the same way (EP-0020).
+	if _, err := extartifact.Install(dir, "contrib/x@0.1.0", sum, files); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := resolve(context.Background(), "contrib/x@0.1.0", sum); err != nil || got == "" {
+		t.Fatalf("versioned installed: %v %q", err, got)
+	}
 	if _, err := resolve(context.Background(), "../x", sum); !errors.Is(err, runtime.ErrBadSpec) {
 		t.Fatalf("bad source: %v", err)
 	}

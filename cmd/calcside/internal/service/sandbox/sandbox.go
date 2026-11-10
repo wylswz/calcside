@@ -172,6 +172,8 @@ func fail(err error) error {
 		return service.Errf(types.ErrCodeConflict, "%s", err.Error())
 	case errors.Is(err, runtime.ErrDenied):
 		return service.Errf(types.ErrCodeForbidden, "%s", err.Error())
+	case errors.Is(err, store.ErrConflict):
+		return service.Errf(types.ErrCodeConflict, "%s", err.Error())
 	case errors.Is(err, runtime.ErrBadSpec):
 		return service.Errf(types.ErrCodeBadSpec, "%s", err.Error())
 	default:

@@ -802,6 +802,9 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 	t.Run("extension_artifacts", func(t *testing.T) {
 		RunExtensionArtifacts(t, newStore(t))
 	})
+	t.Run("extension_versions", func(t *testing.T) {
+		RunExtensionVersions(t, newStore(t))
+	})
 	t.Run("workspace_write_lock", func(t *testing.T) {
 		workspaceWriteLockSuite(t, newStore(t))
 	})

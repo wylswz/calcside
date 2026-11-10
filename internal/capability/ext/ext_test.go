@@ -3,6 +3,7 @@ package ext
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,6 +21,7 @@ func secretExtValidate(t *testing.T, cfg map[string]any) error {
 	t.Helper()
 	dir := writeExt(t, map[string]string{
 		"capability.yaml": `name: t
+version: 0.1.0
 ops: [{name: a}]
 config:
   - {name: key, type: secret, default: "{{secrets.DEF_KEY}}"}
@@ -27,7 +29,7 @@ config:
 `,
 		"main.star": "def a():\n    return 1\n",
 	})
-	f := Factory(Options{LocalRoots: []string{dir, filepath.Dir(dir)}})
+	f := Factory(Options{LocalRoots: []string{localRoot(dir), filepath.Dir(localRoot(dir))}})
 	spec, _ := json.Marshal(map[string]any{
 		"t": map[string]any{"source": localID(dir), "config": cfg},
 	})
@@ -52,10 +54,10 @@ func TestSecretConfigValidate(t *testing.T) {
 	}
 	// Normalization: whitespace variant becomes {{secrets.NAME}}.
 	dir := writeExt(t, map[string]string{
-		"capability.yaml": "name: t\nops: [{name: a}]\nconfig:\n  - {name: key, type: secret}\n",
+		"capability.yaml": "name: t\nversion: 0.1.0\nops: [{name: a}]\nconfig:\n  - {name: key, type: secret}\n",
 		"main.star":       "def a():\n    return 1\n",
 	})
-	f := Factory(Options{LocalRoots: []string{filepath.Dir(dir)}})
+	f := Factory(Options{LocalRoots: []string{localRoot(dir)}})
 	spec, _ := json.Marshal(map[string]any{
 		"t": map[string]any{"source": localID(dir), "config": map[string]any{"key": "{{  secrets.MY_KEY }}"}},
 	})
@@ -69,16 +71,19 @@ func TestSecretConfigValidate(t *testing.T) {
 }
 
 func TestLLMProviderSnapshot(t *testing.T) {
-	dir := writeExt(t, map[string]string{
-		"llm/capability.yaml": `name: llm
+	dir := t.TempDir()
+	for rel, src := range map[string]string{
+		"llm/0.1.0/capability.yaml": `name: llm
+version: 0.1.0
 capability: llm
 ops: [{name: respond, params: [messages]}]
 config:
   - {name: provider, type: string, default: ""}
   - {name: model, type: string, default: ""}
 `,
-		"llm/main.star": "def respond(messages):\n    return provider.list_models()\n",
-		"prov/capability.yaml": `name: p
+		"llm/0.1.0/main.star": "def respond(messages):\n    return provider.list_models()\n",
+		"prov/0.1.0/capability.yaml": `name: p
+version: 0.1.0
 interface: llm
 models: [m1, m2]
 ops:
@@ -87,11 +92,19 @@ ops:
 config:
   - {name: api_key, type: secret, default: "{{secrets.KEY}}"}
 `,
-		"prov/main.star": "def respond(messages, model, options):\n    return model\n\ndef structured(messages, schema, model):\n    return {}\n",
-	})
+		"prov/0.1.0/main.star": "def respond(messages, model, options):\n    return model\n\ndef structured(messages, schema, model):\n    return {}\n",
+	} {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	base := filepath.Base(dir)
-	llmSource := base + "/llm"
-	provSource := base + "/prov"
+	llmSource := base + "/llm@0.1.0"
+	provSource := base + "/prov@0.1.0"
 	f := Factory(Options{LocalRoots: []string{dir}})
 	snapshot := map[string]any{
 		"name":   "main",
@@ -114,7 +127,7 @@ config:
 	if err := validate(nil); err != nil {
 		t.Fatalf("missing snapshot: %v", err)
 	}
-	bad := map[string]any{"name": "main", "source": base + "/missing", "models": []string{"m"}, "config": map[string]any{}}
+	bad := map[string]any{"name": "main", "source": base + "/missing@0.1.0", "models": []string{"m"}, "config": map[string]any{}}
 	if err := validate(bad); err == nil {
 		t.Fatal("expected missing provider ext error")
 	}
@@ -124,11 +137,11 @@ func TestLLMExtInit(t *testing.T) {
 	f := Factory(Options{LocalRoots: []string{filepath.Join("..", "..", "..", "contrib")}})
 	spec, _ := json.Marshal(map[string]any{
 		"llm": map[string]any{
-			"source": "contrib/llm",
+			"source": "contrib/llm@0.1.0",
 			"llm": []any{
 				map[string]any{
 					"name":   "local",
-					"source": "contrib/llm-openai-compat",
+					"source": "contrib/llm-openai-compat@0.1.0",
 					"models": []string{"llama-3"},
 					"config": map[string]any{
 						"base_url": "http://127.0.0.1:11434/v1",
@@ -137,7 +150,7 @@ func TestLLMExtInit(t *testing.T) {
 				},
 				map[string]any{
 					"name":   "openai",
-					"source": "contrib/llm-openai",
+					"source": "contrib/llm-openai@0.1.0",
 					"config": map[string]any{"api_key": ""},
 				},
 			},

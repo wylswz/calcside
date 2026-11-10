@@ -116,7 +116,7 @@ type Error = ErrorEnvelope
 
 // ExtTreeParams defines parameters for ExtTree.
 type ExtTreeParams struct {
-	// Path Extension source identifier (local root-name/extension or remote source).
+	// Path Extension source identifier (canonical family@version; legacy unversioned local pairs resolve by exact artifact match).
 	Path string `form:"path" json:"path"`
 
 	// Sum Required h1 integrity sum the artifact must match.

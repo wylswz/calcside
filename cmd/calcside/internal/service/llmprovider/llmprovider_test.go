@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"calcside/cmd/calcside/internal/extensions"
 	_ "calcside/cmd/calcside/internal/gormstore"
 	"calcside/cmd/calcside/internal/service"
 	"calcside/cmd/calcside/internal/service/access"
@@ -29,7 +30,14 @@ func TestCreateRequiresWorkspaceSecret(t *testing.T) {
 	if err := st.CreateSecret(ctx, &store.Secret{UserID: u.ID, WorkspaceID: ws, Name: "OPENAI_API_KEY", Ciphertext: []byte("x")}); err != nil {
 		t.Fatal(err)
 	}
-	s := New(st, access.New(st), &capext.Options{LocalRoots: []string{filepath.Join("..", "..", "..", "..", "..", "contrib")}})
+	repo, err := extensions.NewRepository(st, capext.Options{
+		LocalRoots: []string{filepath.Join("..", "..", "..", "..", "..", "contrib")},
+		CacheDir:   t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(st, access.New(st), repo)
 	a := service.Actor{UserID: u.ID, WorkspaceID: ws}
 	cfg := json.RawMessage(`{"api_key":"{{secrets.MISSING}}"}`)
 	if _, err := s.Create(ctx, a, "main", "contrib/llm-openai", "", []string{"gpt-5-mini"}, cfg); err == nil {

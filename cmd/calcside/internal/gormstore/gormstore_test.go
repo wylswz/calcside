@@ -192,3 +192,25 @@ func TestStore(t *testing.T) {
 		})
 	}
 }
+
+// TestExtensionVersionConcurrency races two store handles on one
+// database binding different sums to a single (family, version) —
+// the store must produce exactly one winner (EP-0020).
+func TestExtensionVersionConcurrency(t *testing.T) {
+	for _, b := range backends(t) {
+		t.Run(string(b.driver), func(t *testing.T) {
+			dsn := b.newDSN(t)
+			s1, err := open(context.Background(), b.driver, dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = s1.Close() })
+			s2, err := open(context.Background(), b.driver, dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = s2.Close() })
+			storetest.RunExtensionVersionConcurrency(t, s1, s2)
+		})
+	}
+}
