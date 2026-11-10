@@ -8,9 +8,9 @@ test.setTimeout(120_000)
 let rt: ApplicationRuntime
 test.beforeAll(async () => {
   rt = await startApplicationRuntime()
-  const dir = join(rt.extensionDir, '..', 'needkey')
-  await mkdir(dir)
-  await writeFile(join(dir, 'capability.yaml'), 'name: needkey\nops: [{name: check, params: []}]\nconfig:\n  - {name: api_key, type: secret}\n')
+  const dir = join(rt.extensionDir, '..', '..', 'needkey', '0.1.0')
+  await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, 'capability.yaml'), 'name: needkey\nversion: "0.1.0"\nops: [{name: check, params: []}]\nconfig:\n  - {name: api_key, type: secret}\n')
   await writeFile(join(dir, 'main.star'), 'def check():\n    return config["api_key"] != ""\n')
 })
 test.afterAll(async () => { await rt?.close() })
@@ -143,7 +143,7 @@ test('autosave: dep remove publishes the deletion', async ({ page }) => {
   }, { timeout: 15_000 }).toBe(2)
   const v1 = (await (await rt.client.get(`/api/v1/modules/${id}/versions/1`)).json()).version
   const v2 = (await (await rt.client.get(`/api/v1/modules/${id}/versions/2`)).json()).version
-  expect(v1.requirements.ext.probe.source).toBe('fixture/probe')
+  expect(v1.requirements.ext.probe.source).toBe('fixture/probe@0.1.0')
   expect(v2.requirements?.ext?.probe).toBeUndefined()
 })
 

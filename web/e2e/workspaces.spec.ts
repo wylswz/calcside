@@ -705,10 +705,11 @@ test('new instance: palette controls stay put while adding and removing', async 
     await expect(page.locator('[data-row="net"]')).toBeVisible()
     expect(await snapshot()).toEqual(before)
     await targets.ext2.click()
-    await expect(targets.ext2).toHaveText('Added')
+    await expect(targets.ext2.locator('.swap-label > span[data-on="true"]')).toHaveText('Added')
     expect(await snapshot()).toEqual(before)
     await targets.ext3.click()
     expect(await snapshot()).toEqual(before)
+    await expect(targets.ext3.locator('.swap-label > span[data-on="true"]')).toHaveText('Added')
     // a second click on an added card neither removes it nor navigates
     await targets.files.click()
     await expect(page.locator('[data-row="fs"]')).toHaveCount(1)
@@ -1095,7 +1096,7 @@ test('new instance: picker version switch is silent', async ({ page }) => {
   const fam = (v: string) => ({ source: `contrib/sw@${v}`, family: 'contrib/sw', version: v, sum: `h1:${v}`, name: 'sw', description: 'fixture', dependencies: [], ops: [], config: [] })
   const solo = { source: 'contrib/solo@0.1.0', family: 'contrib/solo', version: '0.1.0', sum: 'h1:s', name: 'solo', description: 'fixture', dependencies: [], ops: [], config: [] }
   const lv = (v: string) => ({ source: `contrib/lvx@${v}`, family: 'contrib/lvx', version: v, sum: `h1:${v}`, name: 'lvx', description: 'fixture', dependencies: [], ops: [], config: [] })
-  await page.route('**/api/v1/extensions**', (r) => r.fulfill({ json: { extensions: [fam('0.1.0'), fam('0.2.0'), solo, lv('0.1.0'), lv('2024.11.10-beta.3-longref')], local_enabled: true, remote_enabled: false } }))
+  await page.route('**/api/v1/extensions**', (r) => r.fulfill({ json: { extensions: [fam('0.1.0'), fam('0.2.0'), solo, lv('0.2.0'), lv('0.1.1-beta.3-averyverylongversionref')], local_enabled: true, remote_enabled: false } }))
   const card = page.locator('.extensions-block .ext-card').first()
   const singleCard = page.locator('.extensions-block .ext-card').nth(1)
   const assertSplitGeometry = async () => {
@@ -1117,7 +1118,7 @@ test('new instance: picker version switch is silent', async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await page.goto(`${consoleURL}/instances/new?step=config`)
     await assertSplitGeometry()
-    await page.getByRole('button', { name: 'Add sw 0.2.0' }).click()
+    await page.getByRole('button', { name: 'Add sw' }).click()
     const before = await card.boundingBox()
     await assertSplitGeometry()
     await page.getByRole('button', { name: 'Choose version of sw' }).click()
@@ -1138,10 +1139,13 @@ test('new instance: picker version switch is silent', async ({ page }) => {
     expect(splitAfter).toEqual(splitBefore)
     // Long versions ellipsize inside the fixed segment (S1).
     const lvCard = page.locator('.extensions-block .ext-card').nth(2)
+    await lvCard.getByRole('button', { name: 'Add lvx' }).click()
     await lvCard.locator('.ext-card-caret').click()
-    await page.getByRole('menuitem', { name: /2024\.11\.10/ }).click()
-    await expect(lvCard.locator('.ext-split-version')).toHaveText('2024.11.10-beta.3-longref')
-    const fitsLong = await lvCard.locator('.ext-split-version').evaluate((el) => el.scrollWidth <= el.clientWidth + 1)
-    expect(fitsLong).toBe(true)
+    await page.getByRole('menuitem', { name: /0.1.1-beta/ }).click()
+    await expect(lvCard.locator('.ext-split-version')).toHaveText('0.1.1-beta.3-averyverylongversionref')
+    // the layer is ellipsized to the segment, never wider (S1)
+    const vBox = await lvCard.locator('.ext-split-version').boundingBox()
+    const aBox = await lvCard.locator('.ext-card-action').boundingBox()
+    expect(vBox!.width).toBeLessThanOrEqual(aBox!.width)
   }
 })

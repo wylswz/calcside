@@ -40,10 +40,10 @@ test('module debug executes ext with vault-injected credentials', async ({ page 
 
   const { writeFile, mkdir } = await import('node:fs/promises')
   const { join } = await import('node:path')
-  const ext = join(rt.extensionDir, '..', 'credentials')
+  const ext = join(rt.extensionDir, '..', '..', 'credentials', '0.1.0')
   await mkdir(ext, { recursive: true })
   await writeFile(join(ext, 'capability.yaml'),
-    `name: credentials\nops: [{name: check, params: []}]\ndependencies: [net]\nconfig:\n  - {name: endpoint, type: string}\n  - {name: api_key, type: secret}\n  - {name: client_secret, type: secret}\n`)
+    `name: credentials\nversion: "0.1.0"\nops: [{name: check, params: []}]\ndependencies: [net]\nconfig:\n  - {name: endpoint, type: string}\n  - {name: api_key, type: secret}\n  - {name: client_secret, type: secret}\n`)
   await writeFile(join(ext, 'main.star'),
     `def check():
     r = net.get(config['endpoint'], headers={"Authorization": "Bearer " + config['api_key'], "X-Client-Secret": config['client_secret']})

@@ -279,7 +279,7 @@
 .ext-split [data-ui='button'][aria-expanded='true'] {
   box-shadow: none; background-image: none; background-color: rgb(var(--ink) / 0.09);
 }
-.ext-split .ext-card-action { flex: 1 1 0; min-width: 0; padding: 0 10px; }
+.ext-split .ext-card-action { flex: 1 1 0; min-width: 0; padding: 0 10px; grid-template-columns: minmax(0, 1fr); }
 .ext-split .ext-card-caret { width: 28px; flex: none; padding: 0; color: rgb(var(--mute)); }
 .ext-split-sep {
   width: 1px; flex-shrink: 0; margin: 6px 0;

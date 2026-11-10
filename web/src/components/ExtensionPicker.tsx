@@ -89,7 +89,7 @@ export function ExtensionPicker({ entries, selectedSources, loading, error, onRe
                   <span className="ext-split">
                     <Button className="ext-card-action" data-flash={flash?.family === fam.family ? 'true' : 'false'}
                       onClick={() => added ? onShow(displayed) : onAdd(fam.latest)}
-                      aria-label={added ? `Added ${displayed.name}, show settings` : `Add ${displayed.name} ${fam.latest.version}`}>
+                      aria-label={added ? `Added ${displayed.name}, show settings` : `Add ${displayed.name}`}>
                       <SwapLabel show={added ? 'Added' : 'Add'} options={['Add', 'Added']} />
                       {flash?.family === fam.family && <span className="ext-split-version" aria-hidden="true">{flash.version}</span>}
                     </Button>
