@@ -6,7 +6,7 @@ Extensions run *inside* the instance's Gate: every op call is a gated `ext` op, 
 
 ## Layout
 
-Community extensions live under `contrib/`; Tavily is bundled in `contrib/tavily`.
+Community extensions live under `contrib/`; Tavily is bundled in `contrib/tavily/0.1.0`.
 Development uses this root by default. Container images include it at
 `/opt/calcside/contrib`, alongside operator-managed `/data/ext`; Compose mounts
 `contrib` read-only on the API, while workers resolve local trees through the API.
@@ -18,12 +18,23 @@ content-addressed endpoints; missing or invalid image bytes use the UI fallback.
 The bundled Tavily icon is Tavily's official app icon (from tavily.com). Existing custom manifests
 without icons remain valid; saved specs using absolute source paths need updating to `root-name/extension`.
 
+Each published revision lives in its own version directory under the
+extension directory — `<root>/<extension>/<version>/`:
+
 ```
-myext/
-├── capability.yaml    # manifest (required)
-├── main.star          # entry point (required)
-└── helpers.star       # optional; load("helpers.star")
+contrib/tavily/           # family contrib/tavily
+└── 0.1.0/                # canonical source contrib/tavily@0.1.0
+    ├── capability.yaml   # manifest (required); version: must equal 0.1.0
+    ├── main.star         # entry point (required)
+    └── helpers.star      # optional; load("helpers.star")
 ```
+
+The directory name, the identifier suffix, and `manifest.version` must
+all agree. The server binds `(family, version)` to one immutable `h1`
+tree sum forever: recapturing identical content is idempotent,
+different content under an already-bound version is a conflict, and the
+archived tree keeps resolving even if the version directory is edited
+or deleted (while the family stays permitted).
 
 Tree limits: at most 256 files and 1 MiB total, regular files only — symlinks, sockets, and other special files are rejected.
 
@@ -109,7 +120,7 @@ def search(query, max_results=None):
     "net": {"allow_hosts": ["api.tavily.com"]},
     "ext": {
       "tavily": {
-        "source": "contrib/tavily",
+        "source": "contrib/tavily@0.1.0",
         "config": {"api_key": "{{secrets.TAVILY_API_KEY}}"}
       }
     }
@@ -127,7 +138,7 @@ Send this spec to `POST /api/v1/instances`, or pass it to the Python SDK's `Clie
 
 ## Sources and integrity
 
-**Local** — `{root-name}/{extension}`, e.g. `contrib/tavily`. The server searches its `--ext-local-roots` for a directory whose basename matches `root-name`, then loads the named immediate subdirectory. With roots `/opt/calcside/contrib,/data/ext`, `contrib/tavily` resolves under the first root and `ext/myext` under the second. Development and containers use the same identifiers; clients never send host paths. The catalog returns these identifiers unchanged for use in specs.
+**Local** — `{root-name}/{extension}@{version}`, e.g. `contrib/tavily@0.1.0`. The server searches its `--ext-local-roots` for a directory whose basename matches `root-name`, then loads `<root>/<extension>/<version>/`. With roots `/opt/calcside/contrib,/data/ext`, `contrib/tavily@0.1.0` resolves under the first root and `ext/myext@1.0` under the second. Development and containers use the same identifiers; clients never send host paths. The catalog returns one entry per bound version with `family`, `version`, and `sum`, plus a `diagnostics` array listing filesystem candidates rejected during admission. Previously pinned unversioned `source` + `sum` pairs keep resolving by exact artifact match and are canonicalized to `family@version` when a spec is pinned.
 
 Absolute paths, traversal, backslashes, and sources that escape their root after symlink evaluation are rejected. If multiple roots contain different trees for the same identifier, resolution fails as ambiguous rather than picking one silently. Repeated roots pointing at the same tree are harmless. Empty roots disable local sources entirely. `sum` is optional for local sources; remote version and sum requirements are unchanged.
 
@@ -152,7 +163,7 @@ Extension ops produce gate records with `capability: "ext"` and `op: "<alias>.<o
 
 ## Development loop
 
-From the repository root, run `make build` once for the embedded console. Save the spec above as `spec.json`, keeping `source: contrib/tavily` and supplying your own secret locally. Start the dev server, then run the API requests in another terminal. These examples use anonymous dev-mode auth; outside dev mode, include an `Authorization: Bearer` API key header.
+From the repository root, run `make build` once for the embedded console. Save the spec above as `spec.json`, keeping `source: contrib/tavily@0.1.0` and supplying your own secret locally. Start the dev server, then run the API requests in another terminal. These examples use anonymous dev-mode auth; outside dev mode, include an `Authorization: Bearer` API key header.
 
 ```bash
 # serve with local sources enabled
@@ -277,7 +288,7 @@ provider extension and validated on every provider-registry write.
 ```json
 {
   "name": "my-openai",
-  "source": "contrib/llm-openai",
+  "source": "contrib/llm-openai@0.1.0",
   "models": ["gpt-6.1-sol", "gpt-6-luna"],
   "config": {"api_key": "{{secrets.OPENAI_API_KEY}}"}
 }
@@ -301,7 +312,7 @@ scripts select a provider and model per call:
 {
   "capabilities": {
     "ext": {
-      "llm": {"source": "contrib/llm"}
+      "llm": {"source": "contrib/llm@0.1.0"}
     }
   }
 }

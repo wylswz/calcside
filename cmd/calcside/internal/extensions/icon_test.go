@@ -28,12 +28,13 @@ func TestPackagedIcon(t *testing.T) {
 		{"too big", valid + strings.Repeat("x", 32<<10), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := writeExt(t, map[string]string{"capability.yaml": goodManifest + "icon: icon.png\n", "main.star": "def search(query):\n    return []\n", "icon.png": tc.data})
-			m, err := (&capext.CapabilityLoader{Identifier: capext.CapabilityIdentifier(filepath.Base(filepath.Dir(dir)) + "/" + filepath.Base(dir)), Options: &capext.Options{LocalRoots: []string{filepath.Dir(dir)}}}).Load(t.Context())
+			root := writeExt(t, map[string]string{"t/0.1.0/capability.yaml": goodManifest + "icon: icon.png\n", "t/0.1.0/main.star": "def search(query):\n    return []\n", "t/0.1.0/icon.png": tc.data})
+			source := filepath.Base(root) + "/t@0.1.0"
+			m, err := (&capext.CapabilityLoader{Identifier: capext.CapabilityIdentifier(source), Options: &capext.Options{LocalRoots: []string{root}}}).Load(t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}
-			icon := packagedIcon(m)
+			icon := packagedIcon(m.Manifest, m.Sources)
 			if (len(icon) > 0) != tc.want {
 				t.Fatalf("icon availability: %t", len(icon) > 0)
 			}
@@ -52,7 +53,7 @@ func TestPackagedIcon(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := &capext.Module{Manifest: &capext.CapabilityManifest{Icon: "icon.png"}, Sources: map[string][]byte{"icon.png": buf.Bytes()}}
-	if len(packagedIcon(m)) > 0 {
+	if len(packagedIcon(m.Manifest, m.Sources)) > 0 {
 		t.Fatal("oversized dimensions accepted")
 	}
 }

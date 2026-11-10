@@ -57,7 +57,7 @@ func TestResolveLLMProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Service{st: st, ext: capext.NewInspector(&capext.Options{LocalRoots: []string{filepath.Join("..", "..", "..", "..", "..", "contrib")}})}
-	raw := []byte(`{"capabilities":{"ext":{"ai":{"source":"contrib/llm"}}}}`)
+	raw := []byte(`{"capabilities":{"ext":{"ai":{"source":"contrib/llm@0.1.0"}}}}`)
 	out, err := s.resolveLLMProviders(ctx, ws, raw)
 	if err != nil {
 		t.Fatal(err)

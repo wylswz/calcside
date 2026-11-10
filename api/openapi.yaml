@@ -2091,14 +2091,24 @@ components:
         sanitized: { type: boolean }
     ExtensionInfo:
       type: object
-      required: [source, name, dependencies, ops, config]
+      required: [source, family, version, sum, name, dependencies, ops, config]
       properties:
         source:
           type: string
-          description: Server-local root-name/extension identifier; never a host filesystem path.
+          description: Canonical family@version extension identifier; never a host filesystem path.
+          example: contrib/tavily@0.1.0
+        family:
+          type: string
+          description: Unversioned extension family (root-name/extension or domain/group/name).
           example: contrib/tavily
+        version:
+          type: string
+          description: Identifier version bound to this entry (the ref for remote sources).
+          example: 0.1.0
+        sum:
+          type: string
+          description: Immutable h1 tree hash this version is bound to.
         name: { type: string }
-        version: { type: string }
         description: { type: string }
         icon_url: { type: string, description: Authenticated same-origin packaged PNG endpoint }
         interface:
@@ -2117,15 +2127,30 @@ components:
         config:
           type: array
           items: { $ref: '#/components/schemas/ExtConfigField' }
+    ExtensionDiagnostic:
+      type: object
+      required: [source, message]
+      properties:
+        source:
+          type: string
+          description: Candidate identifier that failed admission.
+          example: contrib/tavily@0.2.0
+        message:
+          type: string
+          description: Why the candidate was rejected; never a host filesystem path.
     ExtensionCatalog:
       type: object
-      required: [extensions, remote_enabled, local_enabled]
+      required: [extensions, remote_enabled, local_enabled, diagnostics]
       properties:
         extensions:
           type: array
           items: { $ref: '#/components/schemas/ExtensionInfo' }
         remote_enabled: { type: boolean }
         local_enabled: { type: boolean }
+        diagnostics:
+          type: array
+          items: { $ref: '#/components/schemas/ExtensionDiagnostic' }
+          description: Filesystem candidates rejected during catalog admission.
     APIKey:
       type: object
       required: [id, user_id, name, prefix, created_at]
@@ -2570,10 +2595,10 @@ components:
         name: { $ref: '#/components/schemas/PolicyName' }
         source:
           type: string
-          description: 'provider extension source, e.g. contrib/llm-openai'
+          description: 'provider extension source, e.g. contrib/llm-openai@0.1.0'
         sum:
           type: string
-          description: 'h1: integrity sum (remote sources only)'
+          description: 'h1: integrity sum pinned for this provider extension'
         models:
           type: array
           minItems: 1

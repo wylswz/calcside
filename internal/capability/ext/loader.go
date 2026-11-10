@@ -47,6 +47,7 @@ func (l *CapabilityLoader) Load(ctx context.Context) (*Module, error) {
 		return nil, err
 	}
 	var root, commit string
+	directLocal := false
 	if l.Options.SourceResolver != nil {
 		root, err = l.Options.SourceResolver(ctx, string(l.Identifier), l.Sum)
 		if err == nil {
@@ -63,6 +64,7 @@ func (l *CapabilityLoader) Load(ctx context.Context) (*Module, error) {
 			err = verifySum(root, l.Sum)
 		}
 	} else {
+		directLocal = true
 		root, err = l.Options.ResolveLocal(p, l.Sum)
 	}
 	if err != nil {
@@ -83,6 +85,9 @@ func (l *CapabilityLoader) Load(ctx context.Context) (*Module, error) {
 	manifest, err := parseManifest(sources[manifestFN])
 	if err != nil {
 		return nil, fmt.Errorf("ext %s: %w", l.Identifier, err)
+	}
+	if directLocal && (!ValidVersion(manifest.Version) || manifest.Version != p.Version) {
+		return nil, fmt.Errorf("ext %s: manifest.version %q does not match the identifier version %q", l.Identifier, manifest.Version, p.Version)
 	}
 	manifest.Identifier = l.Identifier
 	if _, ok := sources["main.star"]; !ok {

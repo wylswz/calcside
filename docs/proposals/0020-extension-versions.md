@@ -23,8 +23,11 @@ first-class:
    immutably, installation-wide.
 3. The catalog lists one record per captured version, so consumers pick a
    version explicitly.
-4. The console selects among versions, shows the exact `source` + `sum`
-   being added, and requires an explicit change-version action with
+4. The console shows one card per family; *Add* adds the latest version
+   as the recommended default, and an adjacent version menu adds a
+   specific version (natural version ordering computed in the console,
+   display/recommendation only). The console shows the exact `source` +
+   `sum` being added and requires an explicit change-version action with
    review for existing consumers.
 5. Local roots use a required per-version layout
    `<root>/<extension>/<version>/` (e.g. `contrib/tavily/0.1.0/`); each
@@ -60,14 +63,17 @@ names.
 - Immutable `(family, version) -> sum` bindings, enforced transactionally.
 - All captured versions remain resolvable while their family stays
   permitted, regardless of later edits to local roots.
-- Catalog and console expose versions distinctly; multi-version selection
-  is explicit, never "latest".
+- Catalog and console expose versions distinctly; the picker recommends
+  the latest version for display only, while the server never resolves
+  "latest" and persisted pins are always explicit `source` + `sum`.
 - Backward compatibility for already-pinned `source + sum` pairs.
 
 ## Non-goals
 
-- Semver ranges, `latest`, upgrade suggestions, or any ordering semantics
-  derived from version strings.
+- Semver ranges, upgrade suggestions, or any server-side ordering
+  semantics derived from version strings: the server never resolves
+  "latest" and existing selections are never auto-upgraded. Console-side
+  ordering is display/recommendation only.
 - Remote tag discovery or a marketplace; remote versions are admitted only
   by explicit reference.
 - Runtime hot swap of extensions inside a live instance.
@@ -227,17 +233,26 @@ names.
 
 ### Console
 
-- One card per family with an explicit version picker built on the shared
-  `ui.tsx` primitives. Versions are shown distinctly alongside the
-  selected `source` + `sum`.
-- A single-version family may preselect it; a multi-version family
-  requires an explicit choice -- no latest/default auto-selection.
-- *Add* writes the selected `source` and `sum` together. Different
-  versions of one family may be added under different aliases;
-  `selectedSources` is keyed by the full canonical source, not the family,
-  and exact duplicates keep the current Added/show-settings behavior.
-- Two versions of one family can coexist under distinct aliases in
-  `capabilities.ext` (sums shown here are illustrative placeholders, not
+- One card per family. The *Add* action adds the latest version as the
+  recommended default; an adjacent version menu on the shared `Menu`
+  primitives lists versions newest first with `latest`/`added` markers,
+  alongside the exact `source` + `sum`. The console adds at most one
+  version per family: choosing a different version from the menu
+  switches the existing entry in place -- alias, config and extras are
+  preserved, only `source` + `sum` are replaced and the entry is
+  revalidated against the new version's manifest. Hand-edited specs may
+  still bind distinct aliases to different versions; the server accepts
+  them.
+- Version ordering is a natural-order compare computed in the console for
+  display/recommendation only; the server never resolves "latest" and
+  existing spec pins are never auto-upgraded.
+- *Add* writes the selected `source` and `sum` together;
+  `selectedSources` is keyed by the full canonical source, not the
+  family, and a family with an added version keeps the current
+  Added/show-settings behavior while the menu switches it in place.
+- The spec format still permits two versions of one family under
+  distinct aliases in `capabilities.ext` -- the console never creates
+  this itself (sums shown here are illustrative placeholders, not
   valid sums):
 
   ```json

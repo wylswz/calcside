@@ -34,6 +34,27 @@ func (f fakeArtifactStore) GetExtensionArtifact(_ context.Context, source, sum s
 	return nil, store.ErrNotFound
 }
 
+func (f fakeArtifactStore) BindExtensionVersion(_ context.Context, v *store.ExtensionVersion, artifact *store.ExtensionArtifact) error {
+	if artifact != nil {
+		f[artifact.Source+"\x00"+artifact.Sum] = artifact
+	}
+	f["version\x00"+v.Family+"\x00"+v.Version] = &store.ExtensionArtifact{
+		Source: v.ArtifactSource, Sum: v.Sum, Files: map[string][]byte{"v": []byte(v.Version)}}
+	return nil
+}
+
+func (f fakeArtifactStore) GetExtensionVersion(_ context.Context, family, version string) (*store.ExtensionVersion, error) {
+	if a, ok := f["version\x00"+family+"\x00"+version]; ok {
+		return &store.ExtensionVersion{Family: family, Version: version,
+			Sum: a.Sum, ArtifactSource: a.Source}, nil
+	}
+	return nil, store.ErrNotFound
+}
+
+func (f fakeArtifactStore) ListExtensionVersions(_ context.Context) ([]store.ExtensionVersion, error) {
+	return nil, nil
+}
+
 func seedArtifact(t *testing.T, st fakeArtifactStore, source string, files map[string][]byte) string {
 	t.Helper()
 	sum, err := extartifact.TreeHash(files)

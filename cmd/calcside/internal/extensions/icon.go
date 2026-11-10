@@ -7,11 +7,13 @@ import (
 	capext "calcside/internal/capability/ext"
 )
 
-func packagedIcon(m *capext.Module) []byte {
-	if m.Manifest.Icon == "" || !capext.ValidIconPath(m.Manifest.Icon) {
+// packagedIcon extracts and re-encodes the manifest's packaged PNG
+// from an extension file tree.
+func packagedIcon(m *capext.CapabilityManifest, sources map[string][]byte) []byte {
+	if m.Icon == "" || !capext.ValidIconPath(m.Icon) {
 		return nil
 	}
-	data := m.Sources[m.Manifest.Icon]
+	data := sources[m.Icon]
 	if len(data) == 0 || len(data) > 32<<10 {
 		return nil
 	}

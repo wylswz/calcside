@@ -51,7 +51,7 @@ type providerFixture struct {
 func providerFixtures() []providerFixture {
 	return []providerFixture{
 		{
-			name: "openai", source: "contrib/llm-openai", model: "m1",
+			name: "openai", source: "contrib/llm-openai@0.1.0", model: "m1",
 			cfg:      func(srv *httptest.Server) map[string]any { return map[string]any{"base_url": srv.URL, "api_key": ""} },
 			wantPath: "/responses", wantStream: true,
 			frames: "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hé\"}\n\n" +
@@ -61,7 +61,7 @@ func providerFixtures() []providerFixture {
 			usage: map[string]int64{"input_tokens": 7, "output_tokens": 3},
 		},
 		{
-			name: "compat", source: "contrib/llm-openai-compat", model: "m1",
+			name: "compat", source: "contrib/llm-openai-compat@0.1.0", model: "m1",
 			cfg:      func(srv *httptest.Server) map[string]any { return map[string]any{"base_url": srv.URL, "api_key": ""} },
 			wantPath: "/chat/completions", wantStream: true,
 			frames: "data: {\"choices\":[{\"delta\":{\"content\":\"wörld\"},\"finish_reason\":null}]}\n\n" +
@@ -72,7 +72,7 @@ func providerFixtures() []providerFixture {
 			usage: map[string]int64{"input_tokens": 11, "output_tokens": 5},
 		},
 		{
-			name: "anth", source: "contrib/llm-anthropic", model: "m1",
+			name: "anth", source: "contrib/llm-anthropic@0.1.0", model: "m1",
 			cfg: func(srv *httptest.Server) map[string]any {
 				return map[string]any{"base_url": srv.URL, "api_key": "{{secrets.KEY}}"}
 			},
@@ -86,7 +86,7 @@ func providerFixtures() []providerFixture {
 			usage: map[string]int64{"input_tokens": 9, "output_tokens": 4},
 		},
 		{
-			name: "gemini", source: "contrib/llm-gemini", model: "m1",
+			name: "gemini", source: "contrib/llm-gemini@0.1.0", model: "m1",
 			cfg: func(srv *httptest.Server) map[string]any {
 				return map[string]any{"base_url": srv.URL, "api_key": "{{secrets.KEY}}"}
 			},
@@ -129,7 +129,7 @@ func llmSession(t *testing.T, hooks []capability.Hook, ob capability.Observer, p
 			"config": pf.cfg(srvFor[pf.name]),
 		})
 	}
-	spec, _ := json.Marshal(map[string]any{"llm": map[string]any{"source": "contrib/llm", "llm": llmSpecs}})
+	spec, _ := json.Marshal(map[string]any{"llm": map[string]any{"source": "contrib/llm@0.1.0", "llm": llmSpecs}})
 	extCfg, err := ef.Validate(spec, limits)
 	if err != nil {
 		t.Fatal(err)
@@ -158,7 +158,7 @@ func sseServer(t *testing.T, f providerFixture, checks func(t *testing.T, body s
 		if r.Method != http.MethodPost {
 			t.Errorf("%s: method %s", f.name, r.Method)
 		}
-		if f.source == "contrib/llm-gemini" {
+		if f.source == "contrib/llm-gemini@0.1.0" {
 			if r.URL.Path != f.wantPath || r.URL.Query().Get("alt") != "sse" {
 				t.Errorf("gemini path %s?%s", r.URL.Path, r.URL.RawQuery)
 			}
@@ -172,7 +172,7 @@ func sseServer(t *testing.T, f providerFixture, checks func(t *testing.T, body s
 		if f.wantStream && !strings.Contains(string(body), `"stream":true`) {
 			t.Errorf("%s body missing stream flag: %s", f.name, body)
 		}
-		if f.source == "contrib/llm-gemini" && strings.Contains(string(body), `"stream"`) {
+		if f.source == "contrib/llm-gemini@0.1.0" && strings.Contains(string(body), `"stream"`) {
 			t.Errorf("gemini body carries stream key: %s", body)
 		}
 		if checks != nil {
@@ -449,7 +449,7 @@ func TestProviderStreamOptionCannotDisable(t *testing.T) {
 				if f.wantStream && !strings.Contains(body, `"stream":true`) {
 					t.Errorf("stream disabled by options: %s", body)
 				}
-				if f.source == "contrib/llm-gemini" && strings.Contains(body, `"stream"`) {
+				if f.source == "contrib/llm-gemini@0.1.0" && strings.Contains(body, `"stream"`) {
 					t.Errorf("gemini generationConfig.stream leaked: %s", body)
 				}
 			})
@@ -538,14 +538,15 @@ print(json.encode(evts))
 // A provider without a stream export fails before any network call.
 func TestProviderStreamUnsupportedNoNetwork(t *testing.T) {
 	dir := t.TempDir()
-	writeTree(t, dir, "minip/capability.yaml", `name: minip
+	writeTree(t, dir, "minip/0.1.0/capability.yaml", `name: minip
+version: 0.1.0
 interface: llm
 models: [m1]
 ops:
   - {name: respond, params: [messages, model, options]}
   - {name: structured, params: [messages, schema, model]}
 `)
-	writeTree(t, dir, "minip/main.star", "def respond(messages, model, options):\n    return {}\n\ndef structured(messages, schema, model):\n    return {}\n")
+	writeTree(t, dir, "minip/0.1.0/main.star", "def respond(messages, model, options):\n    return {}\n\ndef structured(messages, schema, model):\n    return {}\n")
 
 	reg := capability.NewRegistry()
 	limits := capability.ServerLimits{SecretsAllowHTTP: true}
@@ -560,8 +561,8 @@ ops:
 		t.Fatal(err)
 	}
 	base := dir[strings.LastIndex(dir, "/")+1:]
-	spec, _ := json.Marshal(map[string]any{"llm": map[string]any{"source": "contrib/llm",
-		"llm": []any{map[string]any{"name": "minip", "source": base + "/minip", "models": []any{"m1"}, "config": map[string]any{}}}}})
+	spec, _ := json.Marshal(map[string]any{"llm": map[string]any{"source": "contrib/llm@0.1.0",
+		"llm": []any{map[string]any{"name": "minip", "source": base + "/minip@0.1.0", "models": []any{"m1"}, "config": map[string]any{}}}}})
 	extCfg, err := ef.Validate(spec, limits)
 	if err != nil {
 		t.Fatal(err)
@@ -621,14 +622,15 @@ func TestProviderStreamValidator(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
-			writeTree(t, dir, "minip/capability.yaml", `name: minip
+			writeTree(t, dir, "minip/0.1.0/capability.yaml", `name: minip
+version: 0.1.0
 interface: llm
 models: [m1]
 ops:
   - {name: respond, params: [messages, model, options]}
   - {name: structured, params: [messages, schema, model]}
 `)
-			writeTree(t, dir, "minip/main.star",
+			writeTree(t, dir, "minip/0.1.0/main.star",
 				"def respond(messages, model, options):\n    return {}\n\ndef structured(messages, schema, model):\n    return {}\n\n"+tc.body)
 			reg := capability.NewRegistry()
 			limits := capability.ServerLimits{}
@@ -641,8 +643,8 @@ ops:
 			ef := ext.Factory(ext.Options{LocalRoots: []string{dir, contribRoot}})
 			reg.Register(ef)
 			base := dir[strings.LastIndex(dir, "/")+1:]
-			spec, _ := json.Marshal(map[string]any{"llm": map[string]any{"source": "contrib/llm",
-				"llm": []any{map[string]any{"name": "minip", "source": base + "/minip", "models": []any{"m1"}, "config": map[string]any{}}}}})
+			spec, _ := json.Marshal(map[string]any{"llm": map[string]any{"source": "contrib/llm@0.1.0",
+				"llm": []any{map[string]any{"name": "minip", "source": base + "/minip@0.1.0", "models": []any{"m1"}, "config": map[string]any{}}}}})
 			extCfg, err := ef.Validate(spec, limits)
 			if err != nil {
 				t.Fatal(err)

@@ -3,6 +3,7 @@
 package catalog
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"sync"
@@ -53,23 +54,25 @@ func (s *Service) Capabilities() []CapabilityDoc {
 // sources are enabled on this server. This is the public wire shape
 // (contract-bound); api/dto aliases it — see the dto package doc.
 type ExtensionsView struct {
-	Extensions    []ext.Info `json:"extensions"`
-	RemoteEnabled bool       `json:"remote_enabled"`
-	LocalEnabled  bool       `json:"local_enabled"`
+	Extensions    []ext.Info              `json:"extensions"`
+	RemoteEnabled bool                    `json:"remote_enabled"`
+	LocalEnabled  bool                    `json:"local_enabled"`
+	Diagnostics   []ext.CatalogDiagnostic `json:"diagnostics"`
 }
 
 // Extensions reports the extension catalog for this server.
-func (s *Service) Extensions() ExtensionsView {
-	out := ExtensionsView{Extensions: []ext.Info{}}
+func (s *Service) Extensions(ctx context.Context) ExtensionsView {
+	out := ExtensionsView{Extensions: []ext.Info{}, Diagnostics: []ext.CatalogDiagnostic{}}
 	if s.extCatalog == nil {
 		return out
 	}
-	c := s.extCatalog.Available()
+	c := s.extCatalog.Available(ctx)
 	// Copy the provider's slice: fill IconURL and nil Icon only on our
 	// DTO copies — the provider-owned Info values are never mutated.
 	out.Extensions = append(out.Extensions, c.Extensions...)
 	out.RemoteEnabled = c.RemoteEnabled
 	out.LocalEnabled = c.LocalEnabled
+	out.Diagnostics = append(out.Diagnostics, c.Diagnostics...)
 	// Build one complete snapshot for every icon in this catalog, then
 	// swap the whole map under the lock — concurrent readers always see
 	// a coherent full map, and retiring the map replaces any stale

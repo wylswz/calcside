@@ -14,6 +14,7 @@ import (
 	"calcside/cmd/calcside/internal/artifact"
 	"calcside/cmd/calcside/internal/audit"
 	"calcside/cmd/calcside/internal/auth"
+	"calcside/cmd/calcside/internal/extensions"
 	_ "calcside/cmd/calcside/internal/gormstore"
 	"calcside/cmd/calcside/internal/service/access"
 	appsvc "calcside/cmd/calcside/internal/service/application"
@@ -71,6 +72,16 @@ func (e *env) expire(id string) {
 }
 
 func newEnv(t *testing.T) *env { return newEnvWith(t, nil) }
+
+// mustExtRepo builds an empty artifact repository for tests.
+func mustExtRepo(t *testing.T, st store.Store) *extensions.Repository {
+	t.Helper()
+	repo, err := extensions.NewRepository(st, capext.Options{CacheDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return repo
+}
 
 // newEnvWith builds the test server; with cipher non-nil the secrets
 // vault and net capability (private + http, for httptest) are enabled.
@@ -151,7 +162,7 @@ func newArtifactEnv(t *testing.T, cipher *vaultcipher.Cipher, global map[string]
 		IAM: iam.New(st, ac, e.sbx, 10, nil), Vault: vaultSvc,
 		Application: appSvc,
 		Module:      mustModule(st, ac, reg, e.sbx),
-		Policy:      policysvc.New(st, ac), LLMProvider: llmprovidersvc.New(st, ac, &capext.Options{}),
+		Policy:      policysvc.New(st, ac), LLMProvider: llmprovidersvc.New(st, ac, mustExtRepo(t, st)),
 		Audit:   auditsvc.New(st, ac),
 		Catalog: catalog.New(reg, nil), Sandbox: e.sbx, Access: ac, Workspace: workspacesvc.New(st, ac),
 		Auth: svc, Previews: previews, Run: runSvc,

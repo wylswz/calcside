@@ -20,7 +20,7 @@ from langchain.agents import create_agent
 
 os.environ.setdefault("CALCSIDE_SERVER", "http://127.0.0.1:8080")
 
-TAVILY_SOURCE = "contrib/tavily"
+TAVILY_SOURCE = "contrib/tavily@0.1.0"
 TAVILY_HOSTS = ["api.tavily.com"]
 
 

@@ -28,7 +28,7 @@ func contribDir(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(d, "tavily", "capability.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(d, "tavily", "0.1.0", "capability.yaml")); err != nil {
 		t.Fatalf("contrib dir: %v", err)
 	}
 	return d
@@ -72,7 +72,7 @@ func TestExtEndToEnd(t *testing.T) {
 		"net": {"allow_hosts": [%q]},
 		"ext": {"tavily": {"source": %q, "config": {"base_url": %q}}}
 	}, "secrets": {"TAVILY_API_KEY": {"value": "s3cr3t-key", "allowed_domains": [%q]}}}`,
-		host, "contrib/tavily", srv.URL, host)
+		host, "contrib/tavily@0.1.0", srv.URL, host)
 	id, err := n.create(spec)
 	if err != nil {
 		t.Fatal(err)
@@ -190,7 +190,7 @@ func TestExtSecretOverride(t *testing.T) {
 		"net": {"allow_hosts": [%q]},
 		"ext": {"tavily": {"source": %q, "config": {"base_url": %q, "api_key": "{{secrets.MY_TAVILY}}"}}}
 	}, "secrets": {"MY_TAVILY": {"value": "other-key-9", "allowed_domains": [%q]}}}`,
-		host, "contrib/tavily", srv.URL, host)
+		host, "contrib/tavily@0.1.0", srv.URL, host)
 	id, err := n.create(spec)
 	if err != nil {
 		t.Fatal(err)
@@ -219,7 +219,7 @@ func TestExtMissingSecretRef(t *testing.T) {
 	spec := fmt.Sprintf(`{"policies":[],"capabilities":{
 		"net": {"allow_hosts": ["x.example"]},
 		"ext": {"tavily": {"source": %q}}}}`,
-		"contrib/tavily")
+		"contrib/tavily@0.1.0")
 	_, err := n.create(spec)
 	if err == nil || !strings.Contains(err.Error(), `references secret "TAVILY_API_KEY"`) {
 		t.Fatalf("want missing-secret error, got %v", err)
@@ -230,7 +230,7 @@ func TestExtMissingBaseDep(t *testing.T) {
 	extDir := contribDir(t)
 	n := extNode(t, []string{extDir})
 	spec := fmt.Sprintf(`{"policies":[],"capabilities":{"ext":{"tavily":{"source":%q}}}}`,
-		"contrib/tavily")
+		"contrib/tavily@0.1.0")
 	_, err := n.create(spec)
 	if err == nil || !strings.Contains(err.Error(), `requires capability "net"`) {
 		t.Fatalf("want requires-capability error, got %v", err)
@@ -244,7 +244,7 @@ func TestExtNetAllowlistEnforced(t *testing.T) {
 		"net": {"allow_hosts": ["nowhere.example"]},
 		"ext": {"tavily": {"source": %q, "config": {"base_url": "http://127.0.0.1:1"}}}},
 		"secrets": {"TAVILY_API_KEY": {"value": "x", "allowed_domains": ["127.0.0.1:1"]}}}`,
-		"contrib/tavily")
+		"contrib/tavily@0.1.0")
 	id, err := n.create(spec)
 	if err != nil {
 		t.Fatal(err)
@@ -258,10 +258,10 @@ func TestExtNetAllowlistEnforced(t *testing.T) {
 	}
 }
 
-// writeTmpExt writes an extension into a dir under root.
+// writeTmpExt writes an extension version dir under root.
 func writeTmpExt(t *testing.T, root, name string, files map[string]string) string {
 	t.Helper()
-	dir := filepath.Join(root, name)
+	dir := filepath.Join(root, name, "0.1.0")
 	for rel, src := range files {
 		p := filepath.Join(dir, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -276,12 +276,12 @@ func writeTmpExt(t *testing.T, root, name string, files map[string]string) strin
 
 func TestExtInitOutOfScope(t *testing.T) {
 	root := t.TempDir()
-	dir := writeTmpExt(t, root, "bad", map[string]string{
-		"capability.yaml": "name: bad\nops: [{name: go}]\ndependencies: [net]\n",
+	writeTmpExt(t, root, "bad", map[string]string{
+		"capability.yaml": "name: bad\nversion: 0.1.0\nops: [{name: go}]\ndependencies: [net]\n",
 		"main.star":       "net.get(url=\"http://x.example\")\ndef go():\n    return 1\n",
 	})
 	n := extNode(t, []string{root})
-	spec := fmt.Sprintf(`{"policies":[],"capabilities":{"net":{"allow_hosts":["x.example"]},"ext":{"bad":{"source":%q}}}}`, filepath.Base(root)+"/"+filepath.Base(dir))
+	spec := fmt.Sprintf(`{"policies":[],"capabilities":{"net":{"allow_hosts":["x.example"]},"ext":{"bad":{"source":%q}}}}`, filepath.Base(root)+"/bad@0.1.0")
 	_, err := n.create(spec)
 	if err == nil || !strings.Contains(err.Error(), "outside its scope") {
 		t.Fatalf("want out-of-scope error, got %v", err)

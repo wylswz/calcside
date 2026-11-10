@@ -1,5 +1,6 @@
 import type { Completion, CompletionContext, CompletionResult, CompletionSource } from '@codemirror/autocomplete'
 import type { CompletionContext as InstanceContext, CompletionSymbol, EditorMetadata, ExtensionInfo, FileEntry } from '../api.ts'
+import { findExtension } from '../builderCatalog.ts'
 
 const starKeywords = 'and break continue def elif else for if in lambda load not or pass return while True False None'.split(' ')
 const regoKeywords = 'package import as default else if contains in some every not with true false null'.split(' ')
@@ -222,7 +223,7 @@ export function applicationSymbols(spec: unknown, metadata?: EditorMetadata, cat
     for (const alias of Object.keys(ext)) {
       symbols.push({ name: `ext.${alias}`, kind: 'namespace' })
       const source = typeof ext[alias] === 'object' && ext[alias] !== null && typeof ext[alias].source === 'string' ? ext[alias].source : ''
-      const entry = catalog?.find((e) => e.source === source)
+      const entry = findExtension(catalog, source)
       if (entry) for (const op of entry.ops ?? []) {
         if (!op.name) continue
         const params = norm(op.params)

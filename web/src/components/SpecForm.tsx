@@ -1,3 +1,5 @@
+import { switchExtSource } from '../instanceDraft.ts'
+import { findExtension } from '../builderCatalog.ts' 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import * as Tabs from '@radix-ui/react-tabs'
@@ -43,6 +45,7 @@ interface Props {
   /** Module mode: catalog Add — the parent pins the dep and pushes a new
       fixedExtensions; there is no transient local add. */
   onAddFixedExtension?: (entry: ExtensionInfo) => void
+  onSwitchFixedExtension?: (from: ExtensionInfo | undefined, to: ExtensionInfo) => void
   /** Module mode: summary Remove — routed to the parent's named Confirm
       rather than the local remove/undo path (F2). */
   onRemoveFixedExtension?: (alias: string) => void
@@ -80,7 +83,7 @@ const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)'
 // (one fixed-height row per capability), so nothing needs its own scroll.
 export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
   keyMode = false, application = false, debug = false, initial, workspaceId, onSpecChange, onRawDirtyChange, footer, hideBasics = false, fixedExtensions,
-  onAddFixedExtension, onRemoveFixedExtension, fixedDepsDisabled = false,
+  onAddFixedExtension, onSwitchFixedExtension, onRemoveFixedExtension, fixedDepsDisabled = false,
 }, ref) {
   // Application mode: vault-ref secrets only (same ceiling as key
   // specs) — never inline values in a durable spec.
@@ -314,17 +317,35 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
     set({ net: { allowHosts: [], methods: ['GET', 'POST'], extra: {} } })
     append('net')
   }
-  const addExtension = (entry: { name: string; source: string }) => {
+  const extFamily = (src: string) => src.split('@')[0]
+  const addExtension = (entry: { name: string; source: string; sum?: string; family?: string }) => {
+    // One version per family through the picker: a second add switches
+    // (or simply shows) the existing row instead of creating an alias.
+    const fam = entry.family ?? extFamily(entry.source)
+    const existing = draft.exts.findIndex((e) => e.source === fam || extFamily(e.source) === fam)
+    if (entry.source && existing >= 0) { switchExtension({ ...entry, family: fam } as ExtensionInfo, entry as ExtensionInfo); return }
     const id = extNext.current++
     extIds.current = [...extIds.current, id]
     const alias = entry.source ? uniqueExtensionAlias(entry.name, new Set(draft.exts.map((e) => e.alias))) : ''
-    set({ exts: [...draft.exts, { alias, source: entry.source, config: {}, extra: {} }] })
+    set({ exts: [...draft.exts, { alias, source: entry.source, sum: entry.sum, config: {}, extra: {} }] })
     append(`ext:${id}`)
     // A custom extension has nothing usable until it has a source.
     if (!entry.source) openSettings(`ext:${id}`)
   }
+  // switchExtension swaps source+sum on the existing family row, keeping
+  // alias, config and extras; nothing is remapped or dropped silently.
+  const switchExtension = (from: ExtensionInfo | undefined, to: ExtensionInfo) => {
+    const index = draft.exts.findIndex((e) =>
+      e.source === from?.source || e.source === from?.family ||
+      (from === undefined && e.source === to.family) ||
+      (e.source !== to.source && extFamily(e.source) === to.family))
+    const exts = index >= 0 ? switchExtSource(draft.exts, from, to) : undefined
+    if (index < 0 || !exts) return addExtension(to)
+    // Silent in-place switch: no flash, no panel, no focus move (C).
+    set({ exts })
+  }
   const pointAtExtension = (entry: ExtensionInfo) => {
-    const index = draft.exts.findIndex((e) => e.source === entry.source)
+    const index = draft.exts.findIndex((e) => e.source === entry.source || e.source === entry.family)
     if (index >= 0) setFlash(`ext:${extIds.current[index]}`)
   }
 
@@ -451,12 +472,13 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
     const index = extIds.current.indexOf(id)
     const ext = draft.exts[index]
     if (!ext) return null
-    const entry = extensions.find((e) => e.source === ext.source)
+    const entry = findExtension(extensions, ext.source)
+    const extVersion = entry?.version ?? ext.source.split('@')[1]
     const own = (m: string) => ext.alias ? m.startsWith(`${ext.alias}:`) || m === `duplicate alias ${ext.alias}` : m === 'extension alias is required'
     return {
       key, title: ext.alias || 'extension',
       icon: <ExtensionIcon iconUrl={entry?.icon_url} name={entry?.name ?? ext.alias} />,
-      summary: entry?.description || ext.source || 'Choose a source and an alias.',
+      summary: `${entry?.description || ext.source || 'Choose a source and an alias.'}${extVersion ? ` · ${extVersion}` : ''}`,
       brief: Object.keys(ext.config).length ? 'Configured' : 'Default settings',
       missing: (entry?.dependencies ?? []).filter((d) => !has(d)),
       issues: [...errors.filter((e) => e.section === 'Extensions' && own(e.message) && !e.message.includes('— add it explicitly')).map((e) => e.message), ...(extErrors.has(id) ? [extErrors.get(id)!] : [])],
@@ -580,7 +602,8 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
                 <ExtensionPicker entries={extensions} selectedSources={selectedSources} loading={catalog.isPending} error={catalog.isError}
                   onRetry={() => catalog.refetch()}
                   onAdd={fixedExtensions !== undefined ? (entry) => onAddFixedExtension?.(entry) : addExtension}
-                  onShow={pointAtExtension} />
+                  onShow={pointAtExtension}
+                  onSwitch={fixedExtensions !== undefined ? (f, t) => onSwitchFixedExtension?.(f, t) : switchExtension} />
               </fieldset>
             </div>
             {application && (

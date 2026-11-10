@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { draftFromSpec, buildInstanceSpec, validateRawSpec, uniqueExtensionAlias } from './instanceDraft.ts'
+import { draftFromSpec, buildInstanceSpec, switchExtSource, validateRawSpec, uniqueExtensionAlias } from './instanceDraft.ts'
 import type { ExtensionInfo } from './api'
 
 const errs = (r: any): string[] => r.ok ? [] : r.errors.map((e: any) => `${e.section}: ${e.message}`)
@@ -107,7 +107,7 @@ test('keyMode rejects inline secrets', () => {
 })
 
 const manifest: ExtensionInfo = {
-  source: 'contrib/search', name: 'search', dependencies: ['net'], ops: [],
+  source: 'contrib/search@0.1.0', family: 'contrib/search', version: '0.1.0', sum: 'h1:x', name: 'search', dependencies: ['net'], ops: [],
   config: [
     { name: 'token', type: 'secret', default: '{{secrets.TOKEN}}' },
     { name: 'retries', type: 'int', default: 3 },
@@ -134,7 +134,7 @@ test('complete round-trip preserves typed extension values, inner extras and sec
     capabilities: {
       fs: { quota_bytes: 2000, future: true },
       net: { allow_hosts: ['api.example.com'], methods: ['POST'], timeout_ms: 1000 },
-      ext: { search: { source: 'contrib/search', sum: 'h1:test', future: 'keep', config: { token: '{{secrets.TOKEN}}', retries: 3, flags: ['a', 'b'], map: { x: 'y' }, enabled: false } } },
+      ext: { search: { source: 'contrib/search@0.1.0', sum: 'h1:test', future: 'keep', config: { token: '{{secrets.TOKEN}}', retries: 3, flags: ['a', 'b'], map: { x: 'y' }, enabled: false } } },
       io: { future: 'keep' },
     },
     limits: { max_steps: 999, exec_timeout_ms: 777, max_output_bytes: 555 },
@@ -215,4 +215,35 @@ test('uniqueExtensionAlias generates safe unique aliases', () => {
   assert.equal(uniqueExtensionAlias('', taken), 'extension')
   assert.equal(uniqueExtensionAlias('name', new Set(['name', 'name_2'])), 'name_3')
   assert.equal(uniqueExtensionAlias('net', new Set(['extension_net'])), 'extension_net_2')
+})
+
+test('EP-0020: emitted spec carries source and sum together for a chosen version', () => {
+  const d = draftFromSpec({ capabilities: {} })
+  d.exts = [{ alias: 'search', source: 'contrib/search@0.1.0', sum: 'h1:abc', config: {}, extra: {} }]
+  const out = buildInstanceSpec(d)
+  assert.ok(out.ok)
+  const ext = (out.spec.capabilities as any).ext
+  assert.equal(ext.search.source, 'contrib/search@0.1.0')
+  assert.equal(ext.search.sum, 'h1:abc')
+})
+
+test('EP-0020: switchExtSource keeps alias/config, replaces source+sum, emits one entry', () => {
+  const d = draftFromSpec({ capabilities: { ext: { a: { source: 'contrib/t@0.1.0', sum: 'h1:a', config: { k: 'v' } } } } })
+  const next = switchExtSource(d.exts, { source: 'contrib/t@0.1.0', family: 'contrib/t' }, { source: 'contrib/t@0.2.0', family: 'contrib/t', sum: 'h1:b' })
+  assert.ok(next)
+  assert.equal(next!.length, 1)
+  assert.equal(next![0].alias, 'a')
+  assert.equal(next![0].source, 'contrib/t@0.2.0')
+  assert.equal(next![0].sum, 'h1:b')
+  assert.deepEqual(next![0].config, { k: 'v' })
+  const out = buildInstanceSpec({ ...d, exts: next! })
+  assert.ok(out.ok)
+  const ext = (out.spec.capabilities as any).ext
+  assert.deepEqual(Object.keys(ext), ['a'])
+  assert.equal(ext.a.source, 'contrib/t@0.2.0')
+  assert.equal(ext.a.sum, 'h1:b')
+  // Legacy bare-family row resolves as the from-undefined case.
+  const legacy = switchExtSource([{ alias: 'a', source: 'contrib/t', config: {}, extra: {} }], undefined,
+    { source: 'contrib/t@0.2.0', family: 'contrib/t', sum: 'h1:b' })
+  assert.equal(legacy?.[0].source, 'contrib/t@0.2.0')
 })

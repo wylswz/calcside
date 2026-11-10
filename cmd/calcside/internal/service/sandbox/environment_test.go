@@ -338,14 +338,14 @@ func TestRebindTxBoundaryExt(t *testing.T) {
 
 	// Local extension fixture, captured into the artifact store.
 	root := filepath.Join(t.TempDir(), "fixtures")
-	if err := os.MkdirAll(filepath.Join(root, "echo"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "echo", "0.1.0"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	for name, text := range map[string]string{
-		"capability.yaml": "name: echo\nops: [{name: echo, params: [value]}]\n",
+		"capability.yaml": "name: echo\nversion: 0.1.0\nops: [{name: echo, params: [value]}]\n",
 		"main.star":       "def echo(value): return value\n",
 	} {
-		if err := os.WriteFile(filepath.Join(root, "echo", name), []byte(text), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "echo", "0.1.0", name), []byte(text), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}

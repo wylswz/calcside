@@ -157,14 +157,14 @@ const appMetadata: EditorMetadata = {
   ],
 }
 const appCatalog: ExtensionInfo[] = [
-  { source: 'contrib/tavily', name: 'tavily', dependencies: [], config: [], ops: [{ name: 'search', params: ['q'], doc: 'Web search' }] },
+  { source: 'contrib/tavily@0.1.0', family: 'contrib/tavily', version: '0.1.0', sum: 'h1:x', name: 'tavily', dependencies: [], config: [], ops: [{ name: 'search', params: ['q'], doc: 'Web search' }] },
 ]
 
 const map = (symbols: CompletionSymbol[]) => Object.fromEntries(symbols.map((s) => [s.name, s]))
 
 test('application spec derives the same symbol surface as a live instance', () => {
   const ctx = applicationSymbols({
-    capabilities: { fs: {}, ext: { tav: { source: 'contrib/tavily' }, ghost: { source: 'missing/x' } } },
+    capabilities: { fs: {}, ext: { tav: { source: 'contrib/tavily@0.1.0' }, ghost: { source: 'missing/x' } } },
     env: { REGION: 'us', ZONE: 'a' },
   }, appMetadata, appCatalog, 'answer = 42\ndef helper(path, suffix = "x"):\n    return path + suffix\n')
   const s = map(ctx.symbols)

@@ -1,3 +1,4 @@
+import { findExtension } from '../builderCatalog.ts' 
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, type ExtensionCatalog } from '../api'
@@ -65,7 +66,7 @@ export function ApplicationResources({ specText, workspaceId, onConfigure, onOpe
         {catalog.isError && <p role="alert">Extension documentation unavailable. <button type="button" className="link" onClick={() => void catalog.refetch()}>Retry</button></p>}
         {Object.entries(extensions ?? {}).map(([alias, raw]) => {
           const source = record(raw)?.source
-          const entry = catalog.data?.extensions.find((e) => e.source === source)
+          const entry = findExtension(catalog.data?.extensions, typeof source === 'string' ? source : '')
           return (
             <details key={alias} className="app-resource-node">
               <summary><Icon name="code" /><span>ext.{alias}</span></summary>

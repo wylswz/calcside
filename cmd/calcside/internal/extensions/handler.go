@@ -68,17 +68,27 @@ func (s extTrees) ExtTree(ctx context.Context, req intgen.ExtTreeRequestObject) 
 		!runtime.ValidExtensionSum(req.Params.Sum) {
 		return fail("bad_spec", "source and a valid h1 sum are required", http.StatusBadRequest)
 	}
-	if _, err := capext.ParseIdentifier(req.Params.Path); err != nil {
+	p, err := capext.ParseIdentifier(req.Params.Path)
+	if err != nil {
 		return fail("bad_spec", "invalid extension source", http.StatusBadRequest)
 	}
+	wantSource := req.Params.Path
 	a, err := s.store.GetExtensionArtifact(ctx, req.Params.Path, req.Params.Sum)
+	if errors.Is(err, store.ErrNotFound) && p.Version != "" {
+		// A versioned path may be bound to an artifact stored under a
+		// different (legacy or canonical) source string.
+		if binding, berr := s.store.GetExtensionVersion(ctx, p.Family, p.Version); berr == nil && binding.Sum == req.Params.Sum {
+			wantSource = binding.ArtifactSource
+			a, err = s.store.GetExtensionArtifact(ctx, binding.ArtifactSource, binding.Sum)
+		}
+	}
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return fail("not_found", "extension artifact not found", http.StatusNotFound)
 		}
 		return fail("internal", "extension artifact lookup failed", http.StatusInternalServerError)
 	}
-	if a == nil || a.Source != req.Params.Path || a.Sum != req.Params.Sum {
+	if a == nil || a.Source != wantSource || a.Sum != req.Params.Sum {
 		return fail("internal", "extension artifact invalid", http.StatusInternalServerError)
 	}
 	if err := extartifact.Bounds(a.Files); err != nil {

@@ -89,7 +89,7 @@ failure errors (first 512 Unicode chars, then `... [truncated]`).
 
 It is an adapter-local option (removed before the request body is sent,
 never an OpenAI parameter), **defaults off**, and applies only to
-`contrib/llm-openai` streaming — `respond`/`structured` and other
+`contrib/llm-openai@0.1.0` streaming — `respond`/`structured` and other
 providers are unaffected. Only the `message` field is opted in;
 whitelisted code/reason suppression is unchanged. The SSE body is still
 secret-redacted incrementally before decoding, so known secrets are

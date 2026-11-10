@@ -1279,12 +1279,23 @@ export interface components {
         };
         ExtensionInfo: {
             /**
-             * @description Server-local root-name/extension identifier; never a host filesystem path.
-             * @example contrib/tavily
+             * @description Canonical family@version extension identifier; never a host filesystem path.
+             * @example contrib/tavily@0.1.0
              */
             source: string;
+            /**
+             * @description Unversioned extension family (root-name/extension or domain/group/name).
+             * @example contrib/tavily
+             */
+            family: string;
+            /**
+             * @description Identifier version bound to this entry (the ref for remote sources).
+             * @example 0.1.0
+             */
+            version: string;
+            /** @description Immutable h1 tree hash this version is bound to. */
+            sum: string;
             name: string;
-            version?: string;
             description?: string;
             /** @description Authenticated same-origin packaged PNG endpoint */
             icon_url?: string;
@@ -1296,10 +1307,21 @@ export interface components {
             ops: components["schemas"]["OpDoc"][];
             config: components["schemas"]["ExtConfigField"][];
         };
+        ExtensionDiagnostic: {
+            /**
+             * @description Candidate identifier that failed admission.
+             * @example contrib/tavily@0.2.0
+             */
+            source: string;
+            /** @description Why the candidate was rejected; never a host filesystem path. */
+            message: string;
+        };
         ExtensionCatalog: {
             extensions: components["schemas"]["ExtensionInfo"][];
             remote_enabled: boolean;
             local_enabled: boolean;
+            /** @description Filesystem candidates rejected during catalog admission. */
+            diagnostics: components["schemas"]["ExtensionDiagnostic"][];
         };
         APIKey: {
             id: string;
@@ -1664,9 +1686,9 @@ export interface components {
             id: string;
             user_id?: string;
             name: components["schemas"]["PolicyName"];
-            /** @description provider extension source, e.g. contrib/llm-openai */
+            /** @description provider extension source, e.g. contrib/llm-openai@0.1.0 */
             source: string;
-            /** @description h1: integrity sum (remote sources only) */
+            /** @description h1: integrity sum pinned for this provider extension */
             sum?: string;
             /** @description Model ids this provider makes available to the llm extension. */
             models: string[];

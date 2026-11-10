@@ -47,6 +47,10 @@ func TestListExtensions(t *testing.T) {
 		CacheDir:   t.TempDir(),
 	}
 	reg.Register(capext.Factory(extOptions))
+	extRepo, err := extensions.NewRepository(st, extOptions)
+	if err != nil {
+		t.Fatal(err)
+	}
 	limits := capability.ServerLimits{
 		DefaultTTL: 15 * time.Minute,
 		MaxTTL:     24 * time.Hour, MaxExecTimeout: 5 * time.Minute,
@@ -64,9 +68,9 @@ func TestListExtensions(t *testing.T) {
 	})
 	h := Handler(Deps{
 		IAM: iam.New(st, ac, sbx, 10, nil), Vault: vaultSvc,
-		Policy: policysvc.New(st, ac), LLMProvider: llmprovidersvc.New(st, ac, &extOptions),
+		Policy: policysvc.New(st, ac), LLMProvider: llmprovidersvc.New(st, ac, extRepo),
 		Audit:   auditsvc.New(st, ac),
-		Catalog: catalog.New(reg, extensions.NewCatalog(extOptions)), Sandbox: sbx, Access: ac, Workspace: workspacesvc.New(st, ac),
+		Catalog: catalog.New(reg, extensions.NewCatalog(extRepo)), Sandbox: sbx, Access: ac, Workspace: workspacesvc.New(st, ac),
 		Auth: svc,
 	})
 	srv := httptest.NewServer(h)
@@ -88,14 +92,14 @@ func TestListExtensions(t *testing.T) {
 	exts, _ := m["extensions"].([]any)
 	var ex map[string]any
 	for _, e := range exts {
-		if m, ok := e.(map[string]any); ok && m["source"] == "contrib/tavily" {
+		if m, ok := e.(map[string]any); ok && m["source"] == "contrib/tavily@0.1.0" {
 			ex = m
 		}
 	}
 	if ex == nil {
-		t.Fatalf("contrib/tavily not in catalog: %v", m["extensions"])
+		t.Fatalf("contrib/tavily@0.1.0 not in catalog: %v", m["extensions"])
 	}
-	if ex["source"] != "contrib/tavily" || ex["name"] != "tavily" || ex["version"] != "0.1.0" {
+	if ex["source"] != "contrib/tavily@0.1.0" || ex["name"] != "tavily" || ex["version"] != "0.1.0" {
 		t.Fatalf("entry: %v", ex)
 	}
 	icon, _ := ex["icon_url"].(string)
