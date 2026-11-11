@@ -99,6 +99,32 @@ func TestGlobalsPersistAcrossExecs(t *testing.T) {
 	}
 }
 
+// TestSourceNameThroughChild proves the section source name survives
+// the per-instance subprocess boundary: a failing sectioned exec's
+// error addresses "<name>.star" inside the child, not the exec id —
+// remote/subprocess backtraces name the notebook section (EP-0022).
+func TestSourceNameThroughChild(t *testing.T) {
+	s := newSupervisor(t, nil)
+	create(t, s, "ins_src")
+	resp, err := s.Exec(context.Background(), &runtime.ExecRequest{
+		InstanceID: "ins_src", Owner: owner, ExecID: "exe_s1",
+		SourceName: "load_data", Code: "print(undefined_thing)",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Result.Error == nil {
+		t.Fatalf("expected script error, got %+v", resp.Result)
+	}
+	blob := resp.Result.Error.Message + "\n" + resp.Result.Error.Backtrace
+	if !strings.Contains(blob, "load_data.star") {
+		t.Fatalf("child error does not name the section source: %q", blob)
+	}
+	if strings.Contains(blob, "exe_s1.star") {
+		t.Fatalf("child error used the anonymous exec id: %q", blob)
+	}
+}
+
 func TestCompletionContextThroughChild(t *testing.T) {
 	s := newSupervisor(t, nil)
 	create(t, s, "ins_completion")

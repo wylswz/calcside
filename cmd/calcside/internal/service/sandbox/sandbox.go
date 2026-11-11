@@ -13,8 +13,6 @@ package sandbox
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -619,12 +617,20 @@ func (s *Service) markAuditWs(in *store.Instance, events []store.AuditEvent) {
 	}
 }
 
-// settle records a terminal status for an instance.
+// settle records a terminal status for an instance. Terminal rows hold
+// no operation lease: clearing it fences any in-flight exec's
+// token-predicated writes (touch/bump/stamp) so expiry or deletion
+// always wins over a late result.
 func (s *Service) settle(ctx context.Context, in *store.Instance, status types.InstanceStatus) error {
 	now := s.now().UTC()
 	in.Status = status
 	in.EndedAt = &now
-	if err := s.st.UpdateInstance(ctx, in); err != nil {
+	in.OpToken = ""
+	in.OpExpiresAt = nil
+	// UpdateInstance does not persist op-lease fields; the terminal
+	// transition must clear them atomically or the row stays claimed
+	// until op_expires_at lapses.
+	if err := s.st.SettleInstance(ctx, in.ID, status, now); err != nil {
 		return service.Internal(err)
 	}
 	// Keys bound to this instance die with it.
@@ -654,68 +660,15 @@ func (s *Service) Keepalive(ctx context.Context, a service.Actor, id string) (*s
 	return in, nil
 }
 
-// Exec runs code on a live, owned instance and persists the execution
-// record, the audit batch, and the renewed TTL.
+// Exec runs a scratch exec on a live instance. Section-aware execs go
+// through ExecSection; this compatibility wrapper keeps the original
+// signature for callers that predate notebooks.
 func (s *Service) Exec(ctx context.Context, a service.Actor, id, code string, timeout time.Duration) (*ExecView, error) {
-	in, err := s.running(ctx, a, id, access.Run)
+	out, err := s.ExecSection(ctx, a, id, code, timeout, nil)
 	if err != nil {
 		return nil, err
 	}
-	if len(code) > MaxCodeBytes {
-		return nil, service.Errf(types.ErrCodeTooLarge, "code exceeds 256KB")
-	}
-	now := s.now().UTC()
-	deadline := renewal(in, now)
-	resp, err := s.rt.Exec(ctx, &runtime.ExecRequest{
-		InstanceID:       in.ID,
-		Owner:            runtime.Owner{UserID: in.UserID},
-		Actor:            actorOwner(a),
-		ExecID:           store.NewID(store.PrefixExecution),
-		Code:             code,
-		TimeoutMs:        timeout.Milliseconds(),
-		RenewedExpiresAt: deadline,
-		Epoch:            in.LeaseEpoch,
-	})
-	// Audit first and unconditionally: a denied or failed call is
-	// exactly what the audit log is for, and the batch is only ever
-	// reported once.
-	if resp != nil {
-		s.audit.Record(resp.Audit)
-	}
-	if err != nil {
-		return nil, fail(err)
-	}
-	s.recordExecution(ctx, in, a, code, &resp.Result)
-	in.LastActiveAt = now
-	in.ExpiresAt = deadline
-	_ = s.st.UpdateInstance(ctx, in)
-	return &resp.Result, nil
-}
-
-func (s *Service) recordExecution(ctx context.Context, in *store.Instance, a service.Actor, code string, res *runtime.ExecResult) {
-	sum := sha256.Sum256([]byte(code))
-	snippet := code
-	if len(snippet) > snippetBytes {
-		snippet = snippet[:snippetBytes]
-	}
-	status := types.ExecOK
-	var errType types.ExecErrorType
-	var errMsg, errTrace string
-	if res.Error != nil {
-		status = types.ExecError
-		errType = res.Error.Type
-		errMsg, _ = capStored(res.Error.Message)
-		errTrace, _ = capStored(res.Error.Backtrace)
-	}
-	output, outputTruncated := capStored(res.Output)
-	_ = s.st.CreateExecution(ctx, &store.Execution{
-		ID: res.ExecID, InstanceID: in.ID, UserID: a.UserID,
-		CodeSHA256: hex.EncodeToString(sum[:]), CodeSnippet: snippet, Code: code,
-		Status: status, ErrorType: errType, DurationMs: res.DurationMs,
-		Steps: res.Steps, OutputBytes: int64(len(res.Output)),
-		Via: a.Kind, Output: output, OutputTruncated: outputTruncated,
-		ErrorMessage: errMsg, ErrorBacktrace: errTrace,
-	})
+	return out.View, nil
 }
 
 // capStored bounds stored detail text at storedOutputBytes, cutting at a
@@ -763,14 +716,17 @@ func (s *Service) ExpireDue(ctx context.Context, limit int) (int, error) {
 	}
 	n := 0
 	for _, in := range due {
-		_, err := s.rt.Delete(ctx, &runtime.DeleteRequest{
+		// Ask the node to release the process, but never let an
+		// unreachable node block expiry: the status transition is the
+		// API tier's job and the node reclaims memory on its own grace
+		// period. Bound the call so a hung node cannot stall the reaper.
+		dctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		_, _ = s.rt.Delete(dctx, &runtime.DeleteRequest{
 			InstanceID: in.ID,
 			Owner:      runtime.Owner{UserID: in.UserID},
 			Epoch:      in.LeaseEpoch,
 		})
-		if err != nil && !errors.Is(err, runtime.ErrNotFound) {
-			continue
-		}
+		cancel()
 		if err := s.settle(ctx, in, types.InstanceExpired); err != nil {
 			continue
 		}

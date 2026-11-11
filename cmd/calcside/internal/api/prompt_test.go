@@ -106,12 +106,12 @@ func TestPromptNonRunning(t *testing.T) {
 		t.Fatalf("prompt after delete: expected 409 not_running, got %d %v", code, m)
 	}
 
-	// expired but still known → 409 not_running
+	// expired but still known → 410 instance_expired (EP-0022)
 	_, m, _ = e.req("POST", "/api/v1/instances", `{"capabilities":{"io":{}}}`, bearer, nil)
 	instID2 := m["instance"].(map[string]any)["id"].(string)
 	e.expire(instID2)
 	code, m, _ = e.req("GET", "/api/v1/instances/"+instID2+"/prompt", "", bearer, nil)
-	if code != http.StatusConflict || m["error"].(map[string]any)["code"] != "not_running" {
-		t.Fatalf("expired prompt: expected 409 not_running, got %d %v", code, m)
+	if code != http.StatusGone || m["error"].(map[string]any)["code"] != "instance_expired" {
+		t.Fatalf("expired prompt: expected 410 instance_expired, got %d %v", code, m)
 	}
 }

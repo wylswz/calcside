@@ -6,9 +6,10 @@ import os
 from dataclasses import dataclass, field
 from email.message import Message
 from typing import Any, Literal
+from urllib.parse import quote
 
 import httpx
-from typing_extensions import Self
+from typing_extensions import Self, TypedDict
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8080"
 
@@ -30,6 +31,25 @@ class CalcsideError(Exception):
         self.message = message
 
 
+class InstanceRestored(CalcsideError):
+    """The instance's process was lost and restored EMPTY (HTTP 409,
+    code ``instance_restored``).
+
+    The triggering call did NOT execute and nothing was re-run. The
+    durable notebook is preserved — inspect it with ``notebook()`` /
+    ``read_section()`` and rebuild state explicitly with
+    ``run_sections()`` before retrying. Never retried automatically.
+    """
+
+
+class InstanceExpired(CalcsideError):
+    """The instance expired (HTTP 410, code ``instance_expired``).
+
+    Expired instances are never restored; reads stay available but
+    writes and executions are refused.
+    """
+
+
 @dataclass
 class ExecError:
     """Script error reported by an exec call."""
@@ -41,7 +61,12 @@ class ExecError:
 
 @dataclass
 class ExecResult:
-    """Result of running Starlark code in an instance."""
+    """Result of running Starlark code in an instance.
+
+    ``notebook_revision``/``drift`` are additive notebook facts (0 on
+    older servers); ``section``/``section_state`` are set only for
+    sectioned execs.
+    """
 
     exec_id: str
     output: str
@@ -49,6 +74,112 @@ class ExecResult:
     duration_ms: int
     steps: int
     raw: dict[str, Any] = field(default_factory=dict)
+    notebook_revision: int = 0
+    drift: int = 0
+    section: str = ""
+    section_state: str = ""
+
+
+class ExecSection(TypedDict, total=False):
+    """Section metadata for ``exec(section=...)``: the named section is
+    saved/replaced BEFORE running — failed code is preserved as a
+    failed section. ``description`` is required when creating a new
+    section (omit to keep an existing one); ``revision`` is the notebook
+    CAS and optional."""
+
+    name: str
+    description: str
+    rerun: Literal["safe", "once"]
+    after: str
+    revision: int
+
+
+class NotebookSectionMeta(TypedDict, total=False):
+    """One outline row: metadata only, no code or output.
+    ``last_incarnation`` identifies which process generation produced
+    the last run — it differs from the notebook's ``incarnation`` after
+    a restore, marking that output as previous-runtime history."""
+
+    name: str
+    position: int
+    description: str
+    state: str  # not_run | fresh | stale | failed
+    rerun: str  # safe | once
+    defines: list[str]
+    uses: list[str]
+    effects: list[str]
+    depends_on: list[str]
+    last_exec_id: str
+    last_incarnation: int
+    last_status: str
+    last_run_at: str
+    once_ran: bool
+
+
+class NotebookSection(TypedDict, total=False):
+    """One section with code; output/error only with include_output."""
+
+    section: NotebookSectionMeta
+    code: str
+    output: str
+    error: str
+    output_truncated: bool
+
+
+class Notebook(TypedDict, total=False):
+    """The notebook outline: instance facts, per-section metadata, the
+    rendered text outline, and next-step guidance. ``restored_empty``
+    is true only while a restored process is verifiably untouched."""
+
+    instance_id: str
+    status: str
+    incarnation: int
+    restored_at: str
+    restored_empty: bool
+    revision: int
+    drift: int
+    sections: list[NotebookSectionMeta]
+    outline: str
+    next: list[str]
+
+
+class SaveSectionResult(TypedDict, total=False):
+    """PUT /sections response: saved section metadata + new revision."""
+
+    section: NotebookSectionMeta
+    revision: int
+
+
+class DeleteSectionResult(TypedDict, total=False):
+    affected: list[str]
+    revision: int
+
+
+class RunSectionResult(TypedDict, total=False):
+    name: str
+    status: str  # ok | error | skipped | not_run
+    exec_id: str
+    error: str
+    skipped_reason: str
+    duration_ms: int
+
+
+class RunReport(TypedDict, total=False):
+    """POST /notebook/run report: per-section outcomes in notebook order.
+
+    ``restored``/``stopped_reason`` appear when the runtime was lost
+    mid-run: earlier results executed in the previous incarnation and
+    the rest are ``not_run`` — do not blindly retry side effects.
+    """
+
+    instance_id: str
+    incarnation: int
+    revision: int
+    drift: int
+    results: list[RunSectionResult]
+    restored: bool
+    stopped_reason: str
+    warnings: list[str]
 
 
 @dataclass(frozen=True)
@@ -81,6 +212,10 @@ def _exec_result(data: dict[str, Any]) -> ExecResult:
         duration_ms=data.get("duration_ms", 0),
         steps=data.get("steps", 0),
         raw=data,
+        notebook_revision=data.get("notebook_revision", 0),
+        drift=data.get("drift", 0),
+        section=data.get("section", ""),
+        section_state=data.get("section_state", ""),
     )
 
 
@@ -103,6 +238,12 @@ def _file_bytes(content: bytes | bytearray | str | Any) -> bytes:
     return bytes(data)
 
 
+_ERROR_TYPES: dict[str, type[CalcsideError]] = {
+    "instance_restored": InstanceRestored,
+    "instance_expired": InstanceExpired,
+}
+
+
 def _raise_for_status(resp: httpx.Response) -> None:
     if resp.status_code < 400:
         return
@@ -113,7 +254,7 @@ def _raise_for_status(resp: httpx.Response) -> None:
         env = {}
     code = env.get("code", "")
     message = env.get("message", message)
-    raise CalcsideError(resp.status_code, code, message)
+    raise _ERROR_TYPES.get(code, CalcsideError)(resp.status_code, code, message)
 
 
 def _default_headers(api_key: str | None) -> dict[str, str]:
@@ -141,6 +282,7 @@ class Client:
         base_url: str | None = None,
         api_key: str | None = None,
         timeout: float = 30.0,
+        transport: httpx.BaseTransport | None = None,
     ) -> None:
         url, key, timeout = _resolve(base_url, api_key, timeout)
         self.base_url = url.rstrip("/")
@@ -148,6 +290,7 @@ class Client:
             base_url=self.base_url,
             headers=_default_headers(key),
             timeout=timeout,
+            transport=transport,
         )
 
     def close(self) -> None:
@@ -188,13 +331,110 @@ class Client:
         instance_id: str,
         code: str,
         timeout_ms: int | None = None,
+        section: ExecSection | None = None,
     ) -> ExecResult:
+        """Run Starlark code; returns printed output or the error.
+
+        ``section`` saves/replaces the named notebook section BEFORE
+        running it — failed code is preserved too. Omit for a scratch
+        exec, which never becomes a section.
+        """
         body: dict[str, Any] = {"code": code}
         if timeout_ms is not None:
             body["timeout_ms"] = timeout_ms
+        if section is not None:
+            body["section"] = dict(section)
         return _exec_result(
             self._req("POST", f"/api/v1/instances/{instance_id}/exec", json=body).json()
         )
+
+    # -- notebook ------------------------------------------------------------
+
+    def notebook(self, instance_id: str) -> Notebook:
+        """Notebook outline: per-section state/defines/uses/effects plus
+        guidance. Read-only — never restores a lost instance."""
+        return self._req("GET", f"/api/v1/instances/{instance_id}/notebook").json()[
+            "notebook"
+        ]
+
+    def read_section(
+        self, instance_id: str, name: str, include_output: bool = False
+    ) -> NotebookSection:
+        """One section: metadata plus its code; ``include_output`` adds
+        the last run's output/error."""
+        params = {"include_output": "true"} if include_output else None
+        return self._req(
+            "GET",
+            f"/api/v1/instances/{instance_id}/sections/{quote(name, safe='')}",
+            params=params,
+        ).json()["section"]
+
+    def save_section(
+        self,
+        instance_id: str,
+        name: str,
+        *,
+        revision: int,
+        code: str | None = None,
+        description: str | None = None,
+        rerun: str | None = None,
+        after: str | None = None,
+        from_exec: str | None = None,
+        create_only: bool = False,
+    ) -> SaveSectionResult:
+        """Edit a section WITHOUT running it. ``revision`` is the
+        notebook CAS from ``notebook()``/``read_section()`` — required.
+        ``from_exec`` promotes a successful scratch exec's code.
+        ``create_only=True`` rejects an existing name with a conflict —
+        the agent-facing add semantics."""
+        body: dict[str, Any] = {"revision": revision}
+        if code is not None:
+            body["code"] = code
+        if description is not None:
+            body["description"] = description
+        if rerun is not None:
+            body["rerun"] = rerun
+        if after is not None:
+            body["after"] = after
+        if from_exec is not None:
+            body["from_exec"] = from_exec
+        if create_only:
+            body["create_only"] = True
+        return self._req(
+            "PUT",
+            f"/api/v1/instances/{instance_id}/sections/{quote(name, safe='')}",
+            json=body,
+        ).json()
+
+    def delete_section(
+        self, instance_id: str, name: str, revision: int
+    ) -> DeleteSectionResult:
+        """Delete a section under notebook CAS; returns
+        ``{affected, revision}`` (affected = sections still reading its
+        defines)."""
+        return self._req(
+            "DELETE",
+            f"/api/v1/instances/{instance_id}/sections/{quote(name, safe='')}",
+            params={"revision": revision},
+        ).json()
+
+    def run_sections(
+        self,
+        instance_id: str,
+        sections: str | list[str],
+        revision: int | None = None,
+    ) -> RunReport:
+        """Run notebook sections in order: ``"all"``, ``"stale"``, one
+        name, or a list of names. Bulk runs skip once-sections that
+        already succeeded; execution stops at the first failure. On a
+        lost instance the first run restores an EMPTY process and raises
+        ``InstanceRestored`` without executing — call again afterwards."""
+        body: dict[str, Any] = {"sections": sections}
+        if revision is not None:
+            body["revision"] = revision
+        return self._req(
+            "POST", f"/api/v1/instances/{instance_id}/notebook/run", json=body
+        ).json()["report"]
 
     def files(self, instance_id: str, path: str = "/work") -> dict[str, Any]:
         """Directory listing (``entries``) or file ``content``."""
@@ -310,6 +550,7 @@ class AsyncClient:
         base_url: str | None = None,
         api_key: str | None = None,
         timeout: float = 30.0,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         url, key, timeout = _resolve(base_url, api_key, timeout)
         self.base_url = url.rstrip("/")
@@ -317,6 +558,7 @@ class AsyncClient:
             base_url=self.base_url,
             headers=_default_headers(key),
             timeout=timeout,
+            transport=transport,
         )
 
     async def aclose(self) -> None:
@@ -361,10 +603,14 @@ class AsyncClient:
         instance_id: str,
         code: str,
         timeout_ms: int | None = None,
+        section: ExecSection | None = None,
     ) -> ExecResult:
+        """Async counterpart of :meth:`Client.exec`."""
         body: dict[str, Any] = {"code": code}
         if timeout_ms is not None:
             body["timeout_ms"] = timeout_ms
+        if section is not None:
+            body["section"] = dict(section)
         return _exec_result(
             (
                 await self._req(
@@ -372,6 +618,90 @@ class AsyncClient:
                 )
             ).json()
         )
+
+    # -- notebook ------------------------------------------------------------
+
+    async def notebook(self, instance_id: str) -> Notebook:
+        """Async counterpart of :meth:`Client.notebook`."""
+        return (
+            await self._req("GET", f"/api/v1/instances/{instance_id}/notebook")
+        ).json()["notebook"]
+
+    async def read_section(
+        self, instance_id: str, name: str, include_output: bool = False
+    ) -> NotebookSection:
+        """Async counterpart of :meth:`Client.read_section`."""
+        params = {"include_output": "true"} if include_output else None
+        return (
+            await self._req(
+                "GET",
+                f"/api/v1/instances/{instance_id}/sections/{quote(name, safe='')}",
+                params=params,
+            )
+        ).json()["section"]
+
+    async def save_section(
+        self,
+        instance_id: str,
+        name: str,
+        *,
+        revision: int,
+        code: str | None = None,
+        description: str | None = None,
+        rerun: str | None = None,
+        after: str | None = None,
+        from_exec: str | None = None,
+        create_only: bool = False,
+    ) -> SaveSectionResult:
+        """Async counterpart of :meth:`Client.save_section`."""
+        body: dict[str, Any] = {"revision": revision}
+        if code is not None:
+            body["code"] = code
+        if description is not None:
+            body["description"] = description
+        if rerun is not None:
+            body["rerun"] = rerun
+        if after is not None:
+            body["after"] = after
+        if from_exec is not None:
+            body["from_exec"] = from_exec
+        if create_only:
+            body["create_only"] = True
+        return (
+            await self._req(
+                "PUT",
+                f"/api/v1/instances/{instance_id}/sections/{quote(name, safe='')}",
+                json=body,
+            )
+        ).json()
+
+    async def delete_section(
+        self, instance_id: str, name: str, revision: int
+    ) -> DeleteSectionResult:
+        """Async counterpart of :meth:`Client.delete_section`."""
+        return (
+            await self._req(
+                "DELETE",
+                f"/api/v1/instances/{instance_id}/sections/{quote(name, safe='')}",
+                params={"revision": revision},
+            )
+        ).json()
+
+    async def run_sections(
+        self,
+        instance_id: str,
+        sections: str | list[str],
+        revision: int | None = None,
+    ) -> RunReport:
+        """Async counterpart of :meth:`Client.run_sections`."""
+        body: dict[str, Any] = {"sections": sections}
+        if revision is not None:
+            body["revision"] = revision
+        return (
+            await self._req(
+                "POST", f"/api/v1/instances/{instance_id}/notebook/run", json=body
+            )
+        ).json()["report"]
 
     async def files(self, instance_id: str, path: str = "/work") -> dict[str, Any]:
         return (

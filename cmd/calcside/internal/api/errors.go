@@ -16,17 +16,19 @@ func errEnv(code types.APIErrorCode, msg string) any {
 // statusByCode maps wire error codes to HTTP status; codes absent from
 // the table are 400.
 var statusByCode = map[types.APIErrorCode]int{
-	types.ErrCodeUnauthorized:    http.StatusUnauthorized,
-	types.ErrCodeForbidden:       http.StatusForbidden,
-	types.ErrCodeCSRF:            http.StatusForbidden,
-	types.ErrCodeNotFound:        http.StatusNotFound,
-	types.ErrCodeConflict:        http.StatusConflict,
-	types.ErrCodeAlreadyResolved: http.StatusConflict,
-	types.ErrCodeNotRunning:      http.StatusConflict,
-	types.ErrCodeTooLarge:        http.StatusRequestEntityTooLarge,
-	types.ErrCodeTooMany:         http.StatusTooManyRequests,
-	types.ErrCodeInternal:        http.StatusInternalServerError,
-	types.ErrCodeSecretsDisabled: http.StatusServiceUnavailable,
+	types.ErrCodeUnauthorized:     http.StatusUnauthorized,
+	types.ErrCodeForbidden:        http.StatusForbidden,
+	types.ErrCodeCSRF:             http.StatusForbidden,
+	types.ErrCodeNotFound:         http.StatusNotFound,
+	types.ErrCodeConflict:         http.StatusConflict,
+	types.ErrCodeAlreadyResolved:  http.StatusConflict,
+	types.ErrCodeNotRunning:       http.StatusConflict,
+	types.ErrCodeInstanceExpired:  http.StatusGone,
+	types.ErrCodeInstanceRestored: http.StatusConflict,
+	types.ErrCodeTooLarge:         http.StatusRequestEntityTooLarge,
+	types.ErrCodeTooMany:          http.StatusTooManyRequests,
+	types.ErrCodeInternal:         http.StatusInternalServerError,
+	types.ErrCodeSecretsDisabled:  http.StatusServiceUnavailable,
 }
 
 func httpStatus(code types.APIErrorCode) int {

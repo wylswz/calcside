@@ -1,6 +1,8 @@
 ## calcside sandbox
 
-You have a persistent Starlark sandbox (instance {{.InstanceID}}). Every `{{.Prefix}}exec` call runs code in the SAME instance: top-level variables and functions you define persist across calls{{- if .Persistent}} and across agent runs while the instance lives{{- end}}.
+You have a persistent Starlark sandbox (instance {{.InstanceID}}) organized as a NOTEBOOK: durable, named, ordered code sections plus scratch execs. The notebook is intended replayable source — running its sections top to bottom in a fresh process is meant to rebuild the same in-memory state (external side effects like network calls or files written outside the sandbox are not replayed). If the runtime is ever lost, the notebook is the only memory that survives — sections keep their code even when a run fails.
+
+Every `{{.Prefix}}exec` call runs code in the SAME live instance: top-level variables and functions you define persist across calls{{- if .Persistent}} and across agent runs while the instance lives{{- end}} — until the runtime is lost or restored, which clears ALL memory and files.
 
 Large values (API responses, file contents, intermediate results) stay in instance memory as a variable. Assign them to a top-level variable once (`resp = net.get(...)`), then reuse the variable in later `{{.Prefix}}exec` calls — NEVER re-send a big literal you already stored. Redefining a variable or function replaces the old binding.
 
@@ -17,6 +19,19 @@ These modules are available without capability grants, including inside extensio
 - `{{.Name}}` — {{.Doc}}
 {{- end}}{{end}}
 Call `print(help("module"))` for signatures before first use; `print(help("module.function"))` for details.
+
+### Notebook tools
+- `{{.Prefix}}notebook()` — the outline: every section's state (`not_run`/`fresh`/`stale`/`failed`), `defines`/`uses`, observed effects, and next-step guidance. Read it before running or editing code you did not write this session.
+- `{{.Prefix}}exec(code, section={name, description?, rerun?, after?})` — saves/replaces the named section with this code BEFORE running it; failed code is preserved as a failed section. Omit `section` for a scratch exec: it runs but never becomes a section and counts as drift when it binds globals.
+- `{{.Prefix}}run_sections(sections)` — run `"all"`, `"stale"`, one name, or a list of names, in notebook order. Stops at the first failure; bulk runs skip `once` sections that already succeeded. If the runtime is lost mid-run the report comes back with `restored: true` — earlier sections executed in the previous runtime, the rest are `not_run`, and the process is now EMPTY: do not blindly retry side effects.
+- `{{.Prefix}}read_section(name)` — one section's code + metadata (`include_output` adds the last run's output/error).
+- `{{.Prefix}}add_section(name, code, description?, rerun?, after_section?)` — write a section WITHOUT running it.
+
+### Notebook rules
+- Prefer sections over scratch for anything worth keeping: scratch state dies with the process and is not recorded in the notebook.
+- A section's state is derived: `fresh` ran ok on current code with trustworthy inputs; `stale` changed or an upstream section re-ran; `failed` its current code errored; `not_run` never ran this incarnation.
+- Editing a section makes it (and sections reading its `defines`) stale. `rerun: "once"` marks sections bulk runs should skip after one success.
+- If the instance was restored after a loss, memory and files are EMPTY and nothing re-ran: your first exec/run returns `instance_restored` WITHOUT executing. Afterwards, run the sections you need — do not assume anything from before the loss exists.
 
 ### Tools
 - `{{.Prefix}}exec(code)` — run Starlark code; returns printed output (or an error).

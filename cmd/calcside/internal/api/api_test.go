@@ -315,7 +315,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 }
 
-func TestExecOnEndedInstance409(t *testing.T) {
+func TestExecOnExpiredInstance410(t *testing.T) {
 	e := newEnv(t)
 	cookies := login(e, "a@x.com")
 	csrf := map[string]string{"X-Requested-With": "calcside"}
@@ -324,9 +324,9 @@ func TestExecOnEndedInstance409(t *testing.T) {
 	_, m, _ = e.req("POST", "/api/v1/instances", `{"capabilities":{"io":{}}}`, bearer, nil)
 	instID := m["instance"].(map[string]any)["id"].(string)
 	e.expire(instID)
-	code, _, _ := e.req("POST", "/api/v1/instances/"+instID+"/exec", `{"code":"print(1)"}`, bearer, nil)
-	if code != 409 {
-		t.Fatalf("expected 409, got %d", code)
+	code, m, _ := e.req("POST", "/api/v1/instances/"+instID+"/exec", `{"code":"print(1)"}`, bearer, nil)
+	if code != 410 || m["error"].(map[string]any)["code"] != "instance_expired" {
+		t.Fatalf("expected 410 instance_expired, got %d %v", code, m)
 	}
 }
 

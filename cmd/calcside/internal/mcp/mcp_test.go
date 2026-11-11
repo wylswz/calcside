@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -252,6 +254,149 @@ func TestMCPTools(t *testing.T) {
 	}
 	if len(evs) == 0 {
 		t.Fatal("no audit events recorded")
+	}
+}
+
+// TestMCPNotebookTools covers the reduced agent surface: tools/list
+// schemas, exec-with-section persistence (including failures), the
+// absence of fine-grained authoring tools, and add_section placement.
+func TestMCPNotebookTools(t *testing.T) {
+	srv, st, _, secret, _, _, _, _ := newEnv(t)
+	cs := connect(t, srv.URL, secret)
+
+	tools, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]json.RawMessage{}
+	var names []string
+	for _, tl := range tools.Tools {
+		names = append(names, tl.Name)
+		b, _ := json.Marshal(tl)
+		byName[tl.Name] = b
+	}
+	// The reduced surface, exactly: outline/section reads, batch run
+	// (canonical run_sections only — no alias), exec with inline
+	// section metadata, add_section. No save/move/delete tools and no
+	// run alias.
+	wantTools := []string{"add_section", "create_instance", "delete_instance", "exec", "list_files", "notebook", "read_file", "read_section", "run_sections"}
+	sort.Strings(names)
+	if !slices.Equal(names, wantTools) {
+		t.Fatalf("tool set = %v, want %v", names, wantTools)
+	}
+	for _, w := range wantTools {
+		if byName[w] == nil {
+			t.Fatalf("missing tool %s", w)
+		}
+	}
+	// notebook's schema requires only instance_id — no dummy name.
+	var nbTool struct {
+		InputSchema struct {
+			Required   []string                   `json:"required"`
+			Properties map[string]json.RawMessage `json:"properties"`
+		} `json:"inputSchema"`
+	}
+	if err := json.Unmarshal(byName["notebook"], &nbTool); err != nil {
+		t.Fatal(err)
+	}
+	if len(nbTool.InputSchema.Required) != 1 || nbTool.InputSchema.Required[0] != "instance_id" {
+		t.Fatalf("notebook schema required: %v", nbTool.InputSchema.Required)
+	}
+	if nbTool.InputSchema.Properties["name"] != nil {
+		t.Fatal("notebook schema still exposes name")
+	}
+	// add_section schema exposes after_section, not revision.
+	var addTool struct {
+		InputSchema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		} `json:"inputSchema"`
+	}
+	if err := json.Unmarshal(byName["add_section"], &addTool); err != nil {
+		t.Fatal(err)
+	}
+	if addTool.InputSchema.Properties["after_section"] == nil {
+		t.Fatal("add_section lacks after_section")
+	}
+
+	// create an instance through the tool.
+	res, err := cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "create_instance", Arguments: map[string]any{}})
+	if err != nil || res.IsError {
+		t.Fatalf("create_instance: %v %+v", err, res)
+	}
+	var created struct {
+		InstanceID string `json:"instance_id"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, res)), &created); err != nil {
+		t.Fatal(err)
+	}
+	id := created.InstanceID
+
+	// exec with section metadata persists the section even when the
+	// code fails — the failed intention is kept.
+	res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "exec", Arguments: map[string]any{
+		"instance_id": id, "code": "def broken(:\n",
+		"section": map[string]any{"name": "bad", "description": "broken on purpose"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatal("expected exec error result")
+	}
+	sec, err := st.GetNotebookSection(context.Background(), id, "bad")
+	if err != nil {
+		t.Fatalf("failed section not persisted: %v", err)
+	}
+	if sec.Code != "def broken(:\n" || sec.Description != "broken on purpose" {
+		t.Fatalf("persisted section: %+v", sec)
+	}
+
+	// add_section creates without running; after_section places it.
+	res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "add_section", Arguments: map[string]any{
+		"instance_id": id, "name": "first", "description": "runs first", "code": "a = 1",
+	}})
+	if err != nil || res.IsError {
+		t.Fatalf("add_section first: %v %+v", err, res)
+	}
+	res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "add_section", Arguments: map[string]any{
+		"instance_id": id, "name": "second", "description": "runs second", "code": "b = a + 1",
+		"after_section": "first",
+	}})
+	if err != nil || res.IsError {
+		t.Fatalf("add_section second: %v %+v", err, res)
+	}
+	// duplicate name → conflict, not silent overwrite.
+	res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "add_section", Arguments: map[string]any{
+		"instance_id": id, "name": "first", "description": "dup", "code": "c = 9",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res == nil || !res.IsError || !strings.Contains(toolText(t, res), "already exists") {
+		t.Fatalf("duplicate add_section should conflict: %+v", res)
+	}
+	// order: bad was created first by exec, then first, then second
+	// after first → bad, first, second.
+	secs, err := st.ListNotebookSections(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, s := range secs {
+		order = append(order, s.Name)
+	}
+	want := []string{"bad", "first", "second"}
+	if strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Fatalf("section order: %v want %v", order, want)
+	}
+
+	// notebook outline works with instance_id only.
+	res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "notebook", Arguments: map[string]any{"instance_id": id}})
+	if err != nil || res.IsError {
+		t.Fatalf("notebook: %v %+v", err, res)
+	}
+	if out := toolText(t, res); !strings.Contains(out, "bad") || !strings.Contains(out, "first") {
+		t.Fatalf("notebook outline: %q", out)
 	}
 }
 

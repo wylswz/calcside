@@ -121,6 +121,10 @@ type ExecRequest struct {
 	// single request hit a third-party API twice.
 	ExecID string `json:"exec_id"`
 	Code   string `json:"code"`
+	// SourceName optionally names the parsed chunk (a notebook section
+	// name); backtraces and syntax errors then read "<name>:<line>".
+	// Empty keeps the exec id as the filename.
+	SourceName string `json:"source_name,omitempty"`
 	// TimeoutMs overrides the instance default when > 0.
 	TimeoutMs int64 `json:"timeout_ms,omitempty"`
 	// RenewedExpiresAt is the sliding TTL deadline the API tier has

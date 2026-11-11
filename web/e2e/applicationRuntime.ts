@@ -115,6 +115,7 @@ export async function startApplicationRuntime(opts: { secretKey?: string; secret
 
   const apiArgs = ['serve', '--dev', '--store', 'sqlite', '--dsn', db,
     '--addr', `127.0.0.1:${apiPort}`, '--console-origin', viteURL,
+    '--max-instances-per-user', '100',
     '--workers', `w1=${workerAddr}`, '--worker-key', key,
     '--ext-local-roots', extRoot, '--ext-cache-dir', join(dir, 'apicache')]
   if (opts.secretKey) apiArgs.push('--secret-key', opts.secretKey)

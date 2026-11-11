@@ -1,0 +1,170 @@
+/* notebook.css — durable-section working document inside instance-detail.
+   Reuses the detail material tokens; paint-only states (S1). */
+
+.nb { display: grid; gap: 20px; }
+/* grid items default to min-width:auto — a wide CodeMirror line or
+   unbreakable fact string would stretch the track past the viewport.
+   Let every card/section shrink; inner scrollers clip horizontally. */
+.nb > *, .nb-cards > * { min-width: 0; }
+
+/* state banners stack above the toolbar */
+.nb > [data-ui='notice'],
+.nb .nb-batch { margin-bottom: 0; }
+
+/* toolbar: title left, held-order reveal + run actions right (S3/S4) */
+.nb-toolbar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.nb-toolbar [data-ui='section-title'] { margin-bottom: 0; }
+
+/* next-step guidance from the notebook view itself */
+.nb-next {
+  margin: 0; padding: 8px 12px 8px 28px;
+  border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-control);
+  background: var(--detail-work);
+  font-size: 13px; line-height: 20px; color: rgb(var(--sec));
+}
+.nb-next li { margin: 2px 0; }
+.nb-next li::marker { color: rgb(var(--mute)); }
+
+/* batch run report — per-section outcome list */
+.nb-batch {
+  border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-control);
+  background: var(--detail-work); padding: 12px 16px;
+}
+.nb-batch-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.nb-batch-row { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.nb-batch-name { font-family: var(--font-mono); font-size: 12px; color: rgb(var(--ink)); }
+.nb-batch-status { font-size: 12px; font-weight: 500; white-space: nowrap; }
+.nb-batch-ok { color: rgb(var(--sec)); }
+.nb-batch-skipped { color: rgb(var(--sec)); }
+.nb-batch-error, .nb-batch-not_run { color: rgb(var(--warn-text)); }
+
+/* section cards — one bordered block per section (P6) */
+.nb-cards { display: grid; gap: 16px; }
+
+/* compact section directory above the cards — held shown order (S5),
+   click deep-links via ?section= and scrolls (C4) */
+.nb-directory {
+  display: flex; flex-wrap: wrap; gap: 4px 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-control);
+  background: var(--detail-work);
+}
+.nb-dir-row {
+  display: inline-flex; align-items: baseline; gap: 6px;
+  border: 0; background: transparent; cursor: pointer;
+  padding: 3px 8px; border-radius: var(--detail-radius-inset);
+  font-size: 12px; color: rgb(var(--body)); max-width: 100%;
+}
+.nb-dir-row:hover { background: rgb(var(--ink) / 0.05); }
+.nb-dir-row:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.nb-dir-ord {
+  font-family: var(--font-mono); font-size: 11px; color: rgb(var(--mute));
+  font-variant-numeric: tabular-nums;
+}
+.nb-dir-name { font-family: var(--font-mono); font-weight: 600; color: rgb(var(--ink)); }
+.nb-dir-desc {
+  color: rgb(var(--sec)); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; max-width: 22ch;
+}
+.nb-dir-row [class*='text-'] { font-size: 11px; }
+
+.nb-card {
+  border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-surface);
+  background: var(--detail-work); box-shadow: var(--detail-shadow-surface);
+  padding: 16px 20px;
+  scroll-margin-top: 16px;
+}
+.nb-card-head { display: flex; align-items: flex-start; gap: 12px; }
+.nb-ordinal {
+  font-family: var(--font-mono); font-size: 13px; color: rgb(var(--mute));
+  min-width: 2ch; padding-top: 2px; font-variant-numeric: tabular-nums;
+}
+.nb-card-title { min-width: 0; }
+.nb-name { font-family: var(--font-mono); font-size: 14px; font-weight: 600; color: rgb(var(--ink)); }
+.nb-desc { font-size: 13px; color: rgb(var(--body)); margin: 2px 0 0; }
+.nb-facts {
+  font-size: 12px; line-height: 18px; color: rgb(var(--sec)); margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+.nb-facts code { font-family: var(--font-mono); font-size: 11px; }
+.nb-card-actions {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end;
+}
+
+/* conflict banner — draft preserved, explicit recovery (C2/F2) */
+.nb-conflict {
+  margin-top: 12px; padding: 10px 14px;
+  border: 1px solid rgb(var(--warn) / 0.5); border-left: 4px solid rgb(var(--warn));
+  border-radius: var(--detail-radius-inset); background: rgb(var(--warn) / 0.06);
+}
+.nb-err { margin-top: 8px; font-size: 12px; color: rgb(var(--warn-text)); }
+
+/* editor block */
+.nb-editor { margin-top: 12px; display: grid; gap: 8px; }
+.nb-collapse { white-space: nowrap; }
+.nb-desc-input {
+  border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-inset);
+  background: var(--detail-work); padding: 6px 10px;
+  font-size: 13px; color: rgb(var(--ink)); width: 100%;
+  box-shadow: var(--detail-shadow-inset);
+}
+.nb-desc-input:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.nb-once {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: rgb(var(--sec)); cursor: pointer; user-select: none;
+}
+.nb-code-readonly {
+  font-family: var(--font-mono); font-size: 13px; line-height: 20px;
+  color: rgb(var(--body)); white-space: pre-wrap; overflow-wrap: anywhere;
+  background: rgb(var(--code)); border: 1px solid var(--detail-edge);
+  border-radius: var(--detail-radius-inset); padding: 12px; margin: 0;
+  max-height: 320px; overflow: auto;
+}
+.nb-readonly-note { font-size: 12px; color: rgb(var(--sec)); margin: 4px 0 0; }
+
+/* card footer: last run + output/error disclosure */
+.nb-card-foot {
+  margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid var(--detail-edge);
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px;
+}
+.nb-output { flex-basis: 100%; }
+/* Native <details> marker: the browser owns the disclosure glyph, so no
+   CSS state style touches content/size/transform (S1). */
+.nb-output summary { cursor: pointer; }
+.nb-output .pre {
+  background: rgb(var(--code)); border: 1px solid var(--detail-edge);
+  border-radius: var(--detail-radius-inset); color: rgb(var(--body));
+}
+
+/* empty notebook — intentional, not an error */
+.nb-empty {
+  border: 1px dashed var(--detail-edge); border-radius: var(--detail-radius-surface);
+  padding: 32px; text-align: center;
+}
+
+/* scratch + promote row */
+.nb-scratch { margin-top: 8px; }
+.nb-promote { margin-top: 8px; }
+
+/* view tabs — underline style, addressable via ?view= (C4) */
+.view-tabs {
+  border-bottom: 1px solid var(--detail-edge);
+}
+.view-tab {
+  border: 0; background: transparent; cursor: pointer;
+  padding: 8px 14px; font-size: 14px; font-weight: 500;
+  color: rgb(var(--sec)); border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.view-tab[data-on='true'] { color: rgb(var(--ink)); border-bottom-color: rgb(var(--accent)); }
+.view-tab:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }
+
+@media (max-width: 900px) {
+  .nb-card { padding: 14px 16px; }
+  .nb-card-head { flex-wrap: wrap; }
+  .nb-card-actions { width: 100%; justify-content: flex-start; }
+  .nb-toolbar { gap: 8px; }
+}

@@ -21,6 +21,10 @@ type Instance struct {
 	Spec         json.RawMessage      `json:"spec"`
 	Labels       map[string]string    `json:"labels"`
 	Status       types.InstanceStatus `json:"status"`
+	Incarnation  int64                `json:"incarnation"`
+	RestoredAt   *time.Time           `json:"restored_at,omitempty"`
+	NotebookRev  int64                `json:"notebook_revision"`
+	Drift        int64                `json:"drift"`
 	CreatedAt    time.Time            `json:"created_at"`
 	LastActiveAt time.Time            `json:"last_active_at"`
 	ExpiresAt    time.Time            `json:"expires_at"`
@@ -30,7 +34,9 @@ type Instance struct {
 func NewInstance(in *store.Instance) Instance {
 	return Instance{
 		ID: in.ID, UserID: in.UserID, WorkspaceID: in.WorkspaceID, Spec: in.Spec, Labels: in.Labels,
-		Status: in.Status, CreatedAt: in.CreatedAt, LastActiveAt: in.LastActiveAt,
+		Status: in.Status, Incarnation: in.Incarnation, RestoredAt: in.RestoredAt,
+		NotebookRev: in.NotebookRev, Drift: in.Drift,
+		CreatedAt: in.CreatedAt, LastActiveAt: in.LastActiveAt,
 		ExpiresAt: in.ExpiresAt, EndedAt: in.EndedAt,
 	}
 }
@@ -135,13 +141,19 @@ func NewExecutionDetail(e *store.Execution) ExecutionDetail {
 }
 
 // ExecResult is the exec response body; Error is a pointer without
-// omitempty so success renders "error": null.
+// omitempty so success renders "error": null. The notebook fields are
+// additive (EP-0022): revision/drift always present on new servers,
+// section fields only for sectioned execs.
 type ExecResult struct {
-	ExecID     string     `json:"exec_id"`
-	Output     string     `json:"output"`
-	Error      *ExecError `json:"error"`
-	DurationMs int64      `json:"duration_ms"`
-	Steps      uint64     `json:"steps"`
+	ExecID           string     `json:"exec_id"`
+	Output           string     `json:"output"`
+	Error            *ExecError `json:"error"`
+	DurationMs       int64      `json:"duration_ms"`
+	Steps            uint64     `json:"steps"`
+	NotebookRevision int64      `json:"notebook_revision,omitempty"`
+	Drift            int64      `json:"drift,omitempty"`
+	Section          string     `json:"section,omitempty"`
+	SectionState     string     `json:"section_state,omitempty"`
 }
 
 type ExecError struct {
@@ -150,12 +162,14 @@ type ExecError struct {
 	Backtrace string              `json:"backtrace,omitempty"`
 }
 
-func NewExecResult(r *sandbox.ExecView) ExecResult {
+func NewExecResult(r *sandbox.ExecOutcome) ExecResult {
 	res := ExecResult{
-		ExecID: r.ExecID, Output: r.Output, DurationMs: r.DurationMs, Steps: r.Steps,
+		ExecID: r.View.ExecID, Output: r.View.Output, DurationMs: r.View.DurationMs,
+		Steps: r.View.Steps, NotebookRevision: r.Revision, Drift: r.Drift,
+		Section: r.Section, SectionState: r.State,
 	}
-	if r.Error != nil {
-		res.Error = &ExecError{Type: r.Error.Type, Message: r.Error.Message, Backtrace: r.Error.Backtrace}
+	if r.View.Error != nil {
+		res.Error = &ExecError{Type: r.View.Error.Type, Message: r.View.Error.Message, Backtrace: r.View.Error.Backtrace}
 	}
 	return res
 }
@@ -169,18 +183,26 @@ type InstancePrompt struct {
 }
 
 type PromptTools struct {
-	Exec      string `json:"exec"`
-	ListFiles string `json:"list_files"`
-	ReadFile  string `json:"read_file"`
+	Exec        string `json:"exec"`
+	Notebook    string `json:"notebook,omitempty"`
+	ReadSection string `json:"read_section,omitempty"`
+	RunSections string `json:"run_sections,omitempty"`
+	AddSection  string `json:"add_section,omitempty"`
+	ListFiles   string `json:"list_files,omitempty"`
+	ReadFile    string `json:"read_file,omitempty"`
 }
 
 func NewInstancePrompt(v *sandbox.PromptView) InstancePrompt {
 	return InstancePrompt{
 		InstanceID: v.InstanceID, Prompt: v.Prompt, Capabilities: v.Capabilities,
 		Tools: PromptTools{
-			Exec:      v.Tools["exec"],
-			ListFiles: v.Tools["list_files"],
-			ReadFile:  v.Tools["read_file"],
+			Exec:        v.Tools["exec"],
+			Notebook:    v.Tools["notebook"],
+			ReadSection: v.Tools["read_section"],
+			RunSections: v.Tools["run_sections"],
+			AddSection:  v.Tools["add_section"],
+			ListFiles:   v.Tools["list_files"],
+			ReadFile:    v.Tools["read_file"],
 		},
 	}
 }

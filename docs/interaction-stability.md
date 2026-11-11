@@ -129,20 +129,20 @@ Every invariant has an owner mechanism, in order of preference:
 | S2 | shared `Menu` (Radix); S1; e2e "the More menu stays where it opened" | enforced |
 | S3 | fixed reveal slot (`RevealNew`); e2e "palette controls stay put", run editor placement test | partial — builder and detail only |
 | S4 | `SwapLabel` and `RevealNew`; static label check; e2e "Show latest" and "Show N new" | enforced for state/request-driven labels and counters; module workbench autosave status, Publish preparation and Run use `SwapLabel` |
-| S5 | `useHeldOrder` + "Show N new"/"Show latest"; `stableList` unit tests; e2e activity and instance list | enforced for polled lists |
+| S5 | `useHeldOrder` + "Show N new"/"Show latest"; `stableList` unit tests; e2e activity, instance list and notebook sections | enforced for polled lists |
 | S6 | scroll-locked `Modal`; e2e "opening a dialog does not shift the page" | enforced for dialogs |
 | C1 | `Modal`/`Menu` return focus, removal falls back to a neighbour; e2e primitives and removal tests | enforced for overlays and removals |
-| C2 | `Modal` asks before Escape, the close control or an outside click discards input; create flow keeps configuration mounted behind Back; application view panels stay mounted; `applicationWorkbench.spec.ts` preserves code, inputs and invalid Settings JSON | enforced for dialogs, create flow and application view switching |
-| C3 | `useHeldOrder` keeps shown order across refetches; application view panels retain editor DOM and resource expansion (`applicationWorkbench.spec.ts`) | partial — polling and application view continuity covered; other scroll/selection by review |
+| C2 | `Modal` asks before Escape, the close control or an outside click discards input; create flow keeps configuration mounted behind Back; application and instance notebook/activity view panels stay mounted; section drafts autosave through a serial CAS queue with tab-local pending backup and a beforeunload guard, and a 409 conflict keeps the draft behind an explicit reload/keep-draft choice; `applicationWorkbench.spec.ts` and `notebook.spec.ts` preserve code, inputs and invalid JSON/drafts | enforced for dialogs, create flow, view switching and notebook drafts |
+| C3 | `useHeldOrder` keeps shown order across refetches; application and notebook view panels retain editor DOM; `notebook.spec.ts` holds a dirty draft across polls and Notebook↔Activity switches | partial — polling, view continuity and notebook drafts covered; other scroll/selection by review |
 | C4 | create steps are addressable as `?step=config`; application views use `?view=invoke` / `?view=activity`, with browser history coverage | partial — create steps and application views are addressable |
 | P1 | pending guards; static `mutate` check; e2e removal test | partial — async forms by review |
 | P2 | `ui.tsx` primitives; static browser-dialog check; e2e primitives test | enforced for buttons, menus, dialogs and labels |
-| P3, F3 | application autosave indicator | review |
+| P3, F3 | application autosave indicator; notebook SaveStatus (Saved/Saving…/Unsaved/Couldn't save/Conflict) never claims Saved for an unlanded write, Run awaits pending saves and is blocked by an unresolved conflict; `notebook.spec.ts` autosave/conflict cases | partial — application indicator and notebook save/run honesty covered |
 | P6 | app-card blocks on the application editor; danger Button variant; review | review — application editor and lists follow it |
 | P5 | policy editor footer reports validation and save failures; e2e "policy editor reports…" | partial — policy editor only |
 | P4 | `material.css` motion block; static duration/reduced-motion check | enforced in CSS, not measured |
 | F1 | S1, S2, `Confirm`; e2e menu and removal tests | enforced for menus and removals |
-| F2 | `Confirm`; static destructive-control check | enforced for destructive controls; module/extension removal, conflict reload and recovery discard use `Confirm`; review-dialog discard has a dirty-note guard |
+| F2 | `Confirm`; static destructive-control check | enforced for destructive controls; module/extension removal, section delete, once-section rerun, conflict reload and recovery discard use `Confirm`; review-dialog discard has a dirty-note guard |
 
 ## Known gaps
 
@@ -150,11 +150,12 @@ Every invariant has an owner mechanism, in order of preference:
   other pages are covered by review.
 - **S5/C3:** only the instance list and activity hold their order while
   polling. Expansion, selection, filters and scroll position are review-only.
-- **P3/F3:** no automated check that an action matches its label or that
-  stale states are honest.
+- **P3/F3:** notebook save/run honesty is covered by `notebook.spec.ts`;
+  other actions are review-only.
 - **P5:** the policy editor reports outcomes at its footer; other forms and
   actions are review-only.
-- **C4:** view state is not yet consistently addressable in the URL.
+- **C4:** notebook sections are addressable as `?view=notebook&section=name`;
+  other view state is not yet consistently addressable in the URL.
 - **S6:** measured for dialogs only, not for menus or popovers.
 - **P6:** no static check; followed by review.
 - **Module workbench coverage:** module editor + caller script + stdout
@@ -325,6 +326,82 @@ dedicated field rather than a user label row.
 - **F2**: Resume, Cancel run and Retry step all pass named Confirms that show the exact event JSON (and the handler it calls) or consequence text.
 - **P3**: resolving never navigates; lists and run pages refetch in place.
 - **P6**: interrupts carry no presentation fields — rows label as `→ handler`; the application Settings card has no handler declarations.
+
+### Instance notebook (EP-0022)
+
+`/instances/:id` defaults to the Notebook view — an ordered directory of
+durable section cards — with Activity as a separate tab; both panels
+stay mounted so editors, drafts and scroll survive switches and polls
+(C2/C3). `e2e/notebook.spec.ts` runs against a live Vite dev server
+proxying a scratch dev API + worker.
+
+- **S5**: polled section arrivals and reorders wait behind "Show N new"
+  (`useHeldOrder` + `RevealNew`); a user-caused create/move/delete adopts
+  the refetched order once it lands instead of hiding behind the reveal.
+  The held-order e2e adds a section server-side and asserts the card
+  stays hidden until the explicit reveal, then checks server order.
+- **C2/F3**: each card autosaves code/description/rerun through a serial
+  revision-CAS queue (800 ms debounce, latest-wins). The 409 retry
+  captures the notebook revision BEFORE re-reading the section, so an
+  agent write landing in that gap conflicts instead of overwriting
+  unseen code (`save CAS gap` e2e: remote code and the local draft both
+  survive). Run flushes pending saves, captures the notebook revision,
+  re-checks `once` against FRESH meta (a stale outline cannot skip the
+  confirmation — the Notebook-level Confirm covers the discovered case),
+  then verifies EVERY selected section: a registered autosave queue must
+  exist (sections held behind "Show N new" or still loading block the
+  run), the queue must be clean, and a per-section detail read must
+  fingerprint-match BOTH the displayed draft and the last saved value —
+  an agent edit landing before the revision capture is caught here, not
+  executed (`run validation` e2e: zero run POSTs, draft preserved). The
+  POST carries only the originally captured revision, queue state is
+  re-checked after the awaited reads, and a forced 409 surfaces a
+  persistent Conflict state that resolves only through explicit Reload
+  server copy / Keep my draft (the conflict read is also
+  revision-first). Dirty drafts are backed up to tab-local storage
+  (`pendingDraft`) with a beforeunload guard; the polling e2e holds a
+  PUT in flight across polls and a Notebook↔Activity switch and
+  verifies the draft survives.
+- **P3**: runs execute saved code only — an unresolved save blocks the
+  run with a named notice rather than silently running stale code. One
+  shared run lock serializes every run control in the same tick:
+  section/batch runs set it before their first await, scratch acquires
+  it through the parent's guarded setter (a refused start aborts before
+  posting), and the server op lease remains the authoritative backstop.
+  The scratch ⌘/Ctrl+Enter shortcut only fires for key events targeting
+  its own visible region — section editors and the Activity-hidden
+  notebook cannot trigger it (`scratch shortcut` e2e).
+- **F2**: section delete and explicit rerun of a succeeded `once`
+  section ("Skip in bulk runs after success") go through `Confirm`; the
+  once e2e asserts the dialog before the second run.
+- **Lifecycle honesty**: a lost instance shows "Runtime lost · code is
+  retained"; the first run restores an EMPTY process, returns a typed
+  `instance_restored` error, shows a persistent "Runtime restored …
+  Your request did not run" notice, and never auto-retries (the e2e
+  counts exactly one run POST). A mid-batch loss returns an honest
+  partial report (`restored: true`, `stopped_reason: instance_restored`)
+  with earlier results retained and the rest `not_run` — the UI shows a
+  distinct persistent notice stating earlier sections DID execute and
+  the report must be reviewed before repeating side effects; it survives
+  dismissing the batch report (`partial restore` e2e, mocked report).
+  Outputs from a previous incarnation are marked "previous runtime",
+  and outputs whose code changed since the run are marked "code changed
+  since run". Expired instances are read-only history: no run/edit
+  affordances, the expiry is shown, and there is no fake restore action.
+- **C4**: `?section=name` deep-links scroll the addressed card into
+  view; a compact section directory above the cards lists ordinal,
+  name, description and state in held order and deep-links on click.
+- **S4**: save status, run buttons, the once label and the code-collapse
+  toggle use `SwapLabel` / fixed-width slots; per-card collapse hides
+  the editor while header/footer stay visible; mobile stacks to a
+  single column. Screenshots `notebook-{desktop,mobile}-{light,dark}.png`
+  plus `-section`/`-scratch` mobile detail shots under
+  `.devin-artifacts/screenshots/`.
+
+Known gaps: the scratch runner keeps its existing exec behavior (no
+section coupling beyond promote-from-exec); in-app navigation away from
+a dirty draft is unguarded like the rest of the console — recovery is
+the pending-draft offer on return plus the beforeunload guard.
 
 ## Console shell navigation (consoleShell.spec.ts)
 

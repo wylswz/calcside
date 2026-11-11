@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -350,6 +351,204 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		}
 		if _, ok, err := s.BindInstance(ctx, in3.ID, "node-b"); err != nil || ok {
 			t.Fatalf("BindInstance conflict: %v ok=%v", err, ok)
+		}
+	})
+
+	t.Run("notebook", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+		u, _ := s.UpsertUserByEmail(ctx, "nb@x.com", "", "")
+		now := time.Now().UTC()
+		in := &store.Instance{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID),
+			Spec: []byte(`{}`), Status: types.InstanceRunning,
+			CreatedAt: now, LastActiveAt: now, ExpiresAt: now.Add(time.Hour)}
+		if err := s.CreateInstance(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+		gi, _ := s.GetInstance(ctx, in.ID)
+		if gi.Incarnation != 1 || gi.NotebookRev != 0 {
+			t.Fatalf("defaults: %+v", gi)
+		}
+		// Op lease: claim, conflict, refresh, release.
+		claimed, err := s.ClaimInstanceOp(ctx, in.ID, "tok1", time.Minute, types.InstanceRunning)
+		if err != nil || claimed.OpToken != "tok1" {
+			t.Fatalf("claim: %v %+v", err, claimed)
+		}
+		if _, err = s.ClaimInstanceOp(ctx, in.ID, "tok2", time.Minute, types.InstanceRunning); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("double claim: %v", err)
+		}
+		if ok, err := s.RefreshInstanceOp(ctx, in.ID, "tok1", time.Minute); err != nil || !ok {
+			t.Fatalf("refresh: %v ok=%v", err, ok)
+		}
+		if ok, err := s.TouchInstanceLive(ctx, in.ID, "tok1", now, now.Add(2*time.Hour), 1); err != nil || !ok {
+			t.Fatalf("touch: %v ok=%v", err, ok)
+		}
+		gi, _ = s.GetInstance(ctx, in.ID)
+		if gi.Drift != 1 || !gi.ExpiresAt.Equal(now.Add(2*time.Hour)) {
+			t.Fatalf("touch fields: %+v", gi)
+		}
+		if seq, err := s.BumpRunSeq(ctx, in.ID, "tok1"); err != nil || seq != 1 {
+			t.Fatalf("bump: %v seq=%d", err, seq)
+		}
+		// Section saves under revision CAS.
+		sec := func(name, code string) *store.NotebookSection {
+			return &store.NotebookSection{InstanceID: in.ID, Name: name, Code: code,
+				CodeSHA256: "sum-" + name, Rerun: store.RerunSafe,
+				Defines: []string{"x"}, Uses: []string{}, Effects: []string{},
+				DependsOn: []string{},
+				CreatedBy: u.ID, UpdatedBy: u.ID, EditedAt: now}
+		}
+		sa, rev1, err := s.SaveNotebookSection(ctx, in.ID, 0, sec("alpha", "x=1"), "")
+		if err != nil || rev1 != 1 || sa.Position != 0 {
+			t.Fatalf("save a: %v rev=%d pos=%d", err, rev1, sa.Position)
+		}
+		_, rev2, err := s.SaveNotebookSection(ctx, in.ID, rev1, sec("beta", "y=2"), "")
+		if err != nil || rev2 != 2 {
+			t.Fatalf("save b: %v rev=%d", err, rev2)
+		}
+		// Stale revision conflicts.
+		if _, _, err = s.SaveNotebookSection(ctx, in.ID, rev1, sec("gamma", "z=3"), ""); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("stale rev: %v", err)
+		}
+		// Insert gamma after alpha → order alpha, gamma, beta.
+		sc, rev3, err := s.SaveNotebookSection(ctx, in.ID, rev2, sec("gamma", "z=3"), "alpha")
+		if err != nil || rev3 != 3 {
+			t.Fatalf("save c: %v rev=%d", err, rev3)
+		}
+		_ = sc
+		lst, _ := s.ListNotebookSections(ctx, in.ID)
+		var order []string
+		for _, x := range lst {
+			order = append(order, x.Name)
+		}
+		if strings.Join(order, ",") != "alpha,gamma,beta" {
+			t.Fatalf("order: %v", order)
+		}
+		// Move beta after alpha → alpha, beta, gamma.
+		mv := sec("beta", "y=2")
+		mv.Position = -2 // sentinel ignored: store keeps stored position unless after set
+		if _, _, err = s.SaveNotebookSection(ctx, in.ID, rev3, mv, "alpha"); err != nil {
+			t.Fatalf("move: %v", err)
+		}
+		lst, _ = s.ListNotebookSections(ctx, in.ID)
+		order = order[:0]
+		for _, x := range lst {
+			order = append(order, x.Name)
+		}
+		if strings.Join(order, ",") != "alpha,beta,gamma" {
+			t.Fatalf("order after move: %v", order)
+		}
+		// Update preserves created_at.
+		ga, _ := s.GetNotebookSection(ctx, in.ID, "alpha")
+		ua := sec("alpha", "x=1\nx=2")
+		if _, _, err = s.SaveNotebookSection(ctx, in.ID, 4, ua, ""); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		ga2, _ := s.GetNotebookSection(ctx, in.ID, "alpha")
+		if !ga2.CreatedAt.Equal(ga.CreatedAt) || ga2.Code != "x=1\nx=2" {
+			t.Fatalf("update fields: %+v", ga2)
+		}
+		// Delete under CAS reports dependents.
+		dep := sec("delta", "w=z")
+		dep.Uses = []string{"x"}
+		dep.DependsOn = []string{"alpha"}
+		if _, _, err = s.SaveNotebookSection(ctx, in.ID, 5, dep, ""); err != nil {
+			t.Fatalf("save dep: %v", err)
+		}
+		if gd, _ := s.GetNotebookSection(ctx, in.ID, "delta"); len(gd.DependsOn) != 1 || gd.DependsOn[0] != "alpha" {
+			t.Fatalf("depends_on round-trip: %+v", gd.DependsOn)
+		}
+		affected, revD, err := s.DeleteNotebookSection(ctx, in.ID, "alpha", 6)
+		if err != nil {
+			t.Fatalf("delete: %v", err)
+		}
+		found := false
+		for _, a := range affected {
+			if a == "delta" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("affected: %v", affected)
+		}
+		if _, _, err = s.DeleteNotebookSection(ctx, in.ID, "alpha", revD); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("re-delete: %v", err)
+		}
+		// Stamp a run.
+		if nrev, err := s.StampSectionRun(ctx, in.ID, "beta", "exe_1", "ok", 1, 7, now, []string{"fs.write"}, true, "sum-beta", "tok1"); err != nil || nrev == 0 {
+			t.Fatalf("stamp: %v rev=%d", err, nrev)
+		}
+		gb, _ := s.GetNotebookSection(ctx, in.ID, "beta")
+		if gb.LastExecID != "exe_1" || gb.LastStatus != "ok" || !gb.SucceededBefore || len(gb.Effects) != 1 {
+			t.Fatalf("stamp fields: %+v", gb)
+		}
+		// A stamp under the wrong token writes nothing.
+		if _, err := s.StampSectionRun(ctx, in.ID, "beta", "exe_x", "ok", 1, 8, now, nil, true, "sum-beta", "tok2"); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("stamp wrong token: %v", err)
+		}
+		if gb2, _ := s.GetNotebookSection(ctx, in.ID, "beta"); gb2.LastExecID != "exe_1" {
+			t.Fatalf("conflict stamp mutated section: %+v", gb2)
+		}
+		// Lost → restore lifecycle.
+		if ok, err := s.MarkInstanceLost(ctx, in.ID, "tok1", now); err != nil || !ok {
+			t.Fatalf("mark lost: %v ok=%v", err, ok)
+		}
+		gi, _ = s.GetInstance(ctx, in.ID)
+		if gi.Status != types.InstanceLost || gi.EndedAt == nil {
+			t.Fatalf("lost: %+v", gi)
+		}
+		// Restore commit: wrong token rejected, right token binds.
+		if ok, err := s.CommitRestore(ctx, in.ID, "bad", "node-a", 2, 2, now); err != nil || ok {
+			t.Fatalf("commit bad token: %v ok=%v", err, ok)
+		}
+		if ok, err := s.CommitRestore(ctx, in.ID, "tok1", "node-a", 2, 2, now); err != nil || !ok {
+			t.Fatalf("commit: %v ok=%v", err, ok)
+		}
+		gi, _ = s.GetInstance(ctx, in.ID)
+		if gi.Status != types.InstanceRunning || gi.Incarnation != 2 || gi.RestoredAt == nil || gi.Drift != 0 || gi.OpToken != "" {
+			t.Fatalf("restored: %+v", gi)
+		}
+		// ClearRestoreBinding only fires while still lost.
+		if err := s.ClearRestoreBinding(ctx, in.ID, "tok1"); err != nil {
+			t.Fatal(err)
+		}
+		// A late stamp from the dead incarnation cannot write onto the
+		// restored row — token and incarnation predicates both fail.
+		if _, err := s.StampSectionRun(ctx, in.ID, "beta", "exe_late", "ok", 1, 9, now, nil, true, "sum-beta", "tok1"); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("late stamp old incarnation: %v", err)
+		}
+		// SettleInstance lands the terminal status and clears the op
+		// lease in one write — no stale claim can outlive it.
+		in3 := &store.Instance{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID),
+			Spec: []byte(`{}`), Status: types.InstanceRunning,
+			CreatedAt: now, LastActiveAt: now, ExpiresAt: now.Add(time.Hour)}
+		if err := s.CreateInstance(ctx, in3); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.ClaimInstanceOp(ctx, in3.ID, "tok3", time.Minute, types.InstanceRunning); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SettleInstance(ctx, in3.ID, types.InstanceExpired, now); err != nil {
+			t.Fatal(err)
+		}
+		g3, _ := s.GetInstance(ctx, in3.ID)
+		if g3.Status != types.InstanceExpired || g3.OpToken != "" || g3.OpExpiresAt != nil {
+			t.Fatalf("settled row keeps lease: %+v", g3)
+		}
+		if _, err := s.ClaimInstanceOp(ctx, in3.ID, "tok4", time.Minute, types.InstanceRunning); !errors.Is(err, store.ErrNotClaimable) {
+			t.Fatalf("claim settled row: %v", err)
+		}
+		// An elapsed TTL can never be claimed — no op may renew an
+		// expired row back to life.
+		past := now.Add(-time.Minute)
+		in2 := &store.Instance{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID),
+			Spec: []byte(`{}`), Status: types.InstanceRunning,
+			CreatedAt: now, LastActiveAt: now, ExpiresAt: past}
+		if err := s.CreateInstance(ctx, in2); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.ClaimInstanceOp(ctx, in2.ID, "tokx", time.Minute, types.InstanceRunning); !errors.Is(err, store.ErrNotClaimable) {
+			t.Fatalf("expired claim: %v", err)
 		}
 	})
 

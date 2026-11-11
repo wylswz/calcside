@@ -269,6 +269,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instances/{id}/notebook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getNotebook"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instances/{id}/notebook/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["runNotebookSections"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instances/{id}/sections/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["readNotebookSection"];
+        put: operations["saveNotebookSection"];
+        post?: never;
+        delete: operations["deleteNotebookSection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instances/{id}/files": {
         parameters: {
             query?: never;
@@ -1145,7 +1193,7 @@ export interface components {
         /** @enum {string} */
         SecretSource: "vault" | "inline";
         /** @enum {string} */
-        APIErrorCode: "already_resolved" | "auth_failed" | "bad_capability" | "bad_policy" | "bad_request" | "bad_secret" | "bad_spec" | "conflict" | "csrf" | "forbidden" | "fs_error" | "internal" | "method_not_allowed" | "no_fs" | "not_found" | "not_running" | "secrets_disabled" | "too_large" | "too_many" | "unauthorized";
+        APIErrorCode: "already_resolved" | "auth_failed" | "bad_capability" | "bad_policy" | "bad_request" | "bad_secret" | "bad_spec" | "conflict" | "csrf" | "forbidden" | "fs_error" | "instance_expired" | "instance_restored" | "internal" | "method_not_allowed" | "no_fs" | "not_found" | "not_running" | "secrets_disabled" | "too_large" | "too_many" | "unauthorized";
         /** @enum {string} */
         FieldType: "int" | "bool" | "string" | "string_list" | "string_map";
         /** @enum {string} */
@@ -1500,6 +1548,26 @@ export interface components {
                 [key: string]: string;
             };
             status: components["schemas"]["InstanceStatus"];
+            /**
+             * Format: int64
+             * @description process generation; increments on each restore
+             */
+            incarnation?: number;
+            /**
+             * Format: date-time
+             * @description when the current empty process was restored (absent otherwise)
+             */
+            restored_at?: string;
+            /**
+             * Format: int64
+             * @description notebook CAS counter
+             */
+            notebook_revision?: number;
+            /**
+             * Format: int64
+             * @description scratch execs that changed globals outside the notebook
+             */
+            drift?: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -1519,6 +1587,24 @@ export interface components {
             code: string;
             /** Format: int64 */
             timeout_ms?: number;
+            /** @description when set, the section is created or replaced with this code BEFORE it runs — failed code is preserved too. Omit for a scratch exec, which never becomes a section. */
+            section?: components["schemas"]["ExecSection"];
+        };
+        ExecSection: {
+            name: string;
+            description?: string;
+            /**
+             * @description once sections are skipped by bulk runs after a prior success
+             * @enum {string}
+             */
+            rerun?: "safe" | "once";
+            /** @description insert after this section; empty appends */
+            after?: string;
+            /**
+             * Format: int64
+             * @description notebook CAS; omit to skip the check
+             */
+            revision?: number;
         };
         ExecError: {
             type: components["schemas"]["ExecErrorType"];
@@ -1533,6 +1619,23 @@ export interface components {
             duration_ms: number;
             /** Format: int64 */
             steps: number;
+            /**
+             * Format: int64
+             * @description notebook CAS after this exec (absent pre-notebooks)
+             */
+            notebook_revision?: number;
+            /**
+             * Format: int64
+             * @description scratch execs that changed globals outside the notebook
+             */
+            drift?: number;
+            /** @description section name when this exec ran one */
+            section?: string;
+            /**
+             * @description the section's state after this run
+             * @enum {string}
+             */
+            section_state?: "not_run" | "fresh" | "stale" | "failed";
         };
         FileEntry: {
             name: string;
@@ -1551,6 +1654,10 @@ export interface components {
             /** @description tool names the prompt references (prefix applied) */
             tools: {
                 exec?: string;
+                notebook?: string;
+                read_section?: string;
+                run_sections?: string;
+                add_section?: string;
                 list_files?: string;
                 read_file?: string;
             };
@@ -1627,6 +1734,132 @@ export interface components {
             output_truncated: boolean;
             /** @description structured failure; null when the run completed without error */
             error: components["schemas"]["ExecError"];
+        };
+        NotebookSectionMeta: {
+            name: string;
+            /** Format: int64 */
+            position: number;
+            description: string;
+            /** @enum {string} */
+            state: "not_run" | "fresh" | "stale" | "failed";
+            /** @enum {string} */
+            rerun: "safe" | "once";
+            defines: string[];
+            uses: string[];
+            /** @description distinct capability.op names observed in its last run */
+            effects: string[];
+            last_exec_id?: string;
+            /**
+             * Format: int64
+             * @description incarnation that produced the last run; differs from the notebook's current incarnation after a restore, marking the output as previous-runtime history
+             */
+            last_incarnation: number;
+            last_status?: string;
+            /** Format: date-time */
+            last_run_at?: string;
+            /** @description a once section already succeeded once */
+            once_ran: boolean;
+            /** @description sections whose defines this section reads — providers edited, moved, or deleted leave it stale */
+            depends_on: string[];
+        };
+        Notebook: {
+            instance_id: string;
+            status: components["schemas"]["InstanceStatus"];
+            /** Format: int64 */
+            incarnation: number;
+            /** Format: date-time */
+            restored_at?: string;
+            /** @description true only while a restored process is verifiably untouched — restored_at set and nothing has run in the current incarnation */
+            restored_empty: boolean;
+            /** Format: int64 */
+            revision: number;
+            /** Format: int64 */
+            drift: number;
+            sections: components["schemas"]["NotebookSectionMeta"][];
+            /** @description rendered text outline for agents */
+            outline: string;
+            /** @description computed guidance (stale/not_run/unbound/drift) */
+            next: string[];
+        };
+        NotebookResponse: {
+            notebook?: components["schemas"]["Notebook"];
+        };
+        NotebookSection: {
+            section: components["schemas"]["NotebookSectionMeta"];
+            code: string;
+            /** @description last run's secret-scrubbed output (include_output only) */
+            output?: string;
+            /** @description last run's error + backtrace (include_output only) */
+            error?: string;
+            output_truncated?: boolean;
+        };
+        NotebookSectionResponse: {
+            section?: components["schemas"]["NotebookSection"];
+        };
+        SaveNotebookSectionResponse: {
+            section: components["schemas"]["NotebookSectionMeta"];
+            /** Format: int64 */
+            revision: number;
+        };
+        SaveNotebookSectionRequest: {
+            /** @description omit to keep stored code */
+            code?: string;
+            description?: string;
+            /** @enum {string} */
+            rerun?: "safe" | "once";
+            /** @description move/insert after this section; omit to keep position (new sections append) */
+            after?: string;
+            /** @description promote a successful scratch execution's code into this section */
+            from_exec?: string;
+            /** @description reject with 409 when the section already exists — never silently overwrite (agent add_section semantics) */
+            create_only?: boolean;
+            /**
+             * Format: int64
+             * @description notebook CAS; required
+             */
+            revision?: number;
+        };
+        DeleteNotebookSectionResponse: {
+            /** @description sections still reading this section's defines */
+            affected: string[];
+            /** Format: int64 */
+            revision: number;
+        };
+        RunSectionsRequest: {
+            /** @description "all", "stale", one name, or a list of names */
+            sections: ("all" | "stale") | string | string[];
+            /**
+             * Format: int64
+             * @description notebook CAS; omit to skip the check
+             */
+            revision?: number;
+        };
+        RunSectionResult: {
+            name: string;
+            /** @enum {string} */
+            status: "ok" | "error" | "skipped" | "not_run";
+            exec_id?: string;
+            error?: string;
+            skipped_reason?: string;
+            /** Format: int64 */
+            duration_ms?: number;
+        };
+        RunSectionsResponse: {
+            report?: {
+                instance_id: string;
+                /** Format: int64 */
+                incarnation: number;
+                /** Format: int64 */
+                revision: number;
+                /** Format: int64 */
+                drift: number;
+                results: components["schemas"]["RunSectionResult"][];
+                /** @description the runtime was lost mid-run and restored empty; earlier results ran in the previous incarnation */
+                restored?: boolean;
+                /** @description why the run stopped early (e.g. instance_restored) */
+                stopped_reason?: string;
+                warnings?: string[];
+            };
         };
         AuditEvent: {
             id: string;
@@ -2648,7 +2881,152 @@ export interface operations {
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+            410: components["responses"]["Error"];
             413: components["responses"]["Error"];
+        };
+    };
+    getNotebook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description notebook outline — sections metadata only, never code or output */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotebookResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    runNotebookSections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunSectionsRequest"];
+            };
+        };
+        responses: {
+            /** @description per-section run report; stops at the first script failure */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSectionsResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            410: components["responses"]["Error"];
+        };
+    };
+    readNotebookSection: {
+        parameters: {
+            query?: {
+                include_output?: boolean;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description one section with code and, on request, last output/error */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotebookSectionResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    saveNotebookSection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveNotebookSectionRequest"];
+            };
+        };
+        responses: {
+            /** @description saved section metadata and the new notebook revision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaveNotebookSectionResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            410: components["responses"]["Error"];
+        };
+    };
+    deleteNotebookSection: {
+        parameters: {
+            query: {
+                revision: number;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description deleted; affected lists sections still reading its defines */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteNotebookSectionResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            410: components["responses"]["Error"];
         };
     };
     files: {
@@ -4694,11 +5072,18 @@ export const phaseValues: ReadonlyArray<FlattenedDeepRequired<components>["schem
 export const capabilityNameValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CapabilityName"]> = ["fs", "net", "io", "ext", "interrupt"];
 export const hTTPMethodValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HTTPMethod"]> = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
 export const secretSourceValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SecretSource"]> = ["vault", "inline"];
-export const aPIErrorCodeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["APIErrorCode"]> = ["already_resolved", "auth_failed", "bad_capability", "bad_policy", "bad_request", "bad_secret", "bad_spec", "conflict", "csrf", "forbidden", "fs_error", "internal", "method_not_allowed", "no_fs", "not_found", "not_running", "secrets_disabled", "too_large", "too_many", "unauthorized"];
+export const aPIErrorCodeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["APIErrorCode"]> = ["already_resolved", "auth_failed", "bad_capability", "bad_policy", "bad_request", "bad_secret", "bad_spec", "conflict", "csrf", "forbidden", "fs_error", "instance_expired", "instance_restored", "internal", "method_not_allowed", "no_fs", "not_found", "not_running", "secrets_disabled", "too_large", "too_many", "unauthorized"];
 export const fieldTypeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["FieldType"]> = ["int", "bool", "string", "string_list", "string_map"];
 export const authKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AuthKind"]> = ["session", "api_key", "anonymous"];
 export const artifactPreviewKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ArtifactPreview"]["kind"]> = ["text", "csv", "json", "html"];
 export const memberRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MemberRole"]> = ["viewer", "editor", "owner"];
+export const execSectionRerunValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExecSection"]["rerun"]> = ["safe", "once"];
+export const execResultSection_stateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExecResult"]["section_state"]> = ["not_run", "fresh", "stale", "failed"];
+export const notebookSectionMetaStateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["NotebookSectionMeta"]["state"]> = ["not_run", "fresh", "stale", "failed"];
+export const notebookSectionMetaRerunValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["NotebookSectionMeta"]["rerun"]> = ["safe", "once"];
+export const saveNotebookSectionRequestRerunValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SaveNotebookSectionRequest"]["rerun"]> = ["safe", "once"];
+export const runSectionsRequestSectionsOneOf0Values: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["RunSectionsRequest"]["sections"]> = ["all", "stale"];
+export const runSectionResultStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["RunSectionResult"]["status"]> = ["ok", "error", "skipped", "not_run"];
 export const policyKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Policy"]["kind"]> = ["builtin", "rego"];
 export const applicationStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ApplicationStatus"]> = ["draft", "preparing", "ready", "degraded", "disabled"];
 export const reviewChangeCategoryValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ReviewChange"]["category"]> = ["sources", "contract", "grants", "rules", "inputs", "requirements"];

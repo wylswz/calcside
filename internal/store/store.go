@@ -19,6 +19,11 @@ var ErrNotFound = errors.New("store: not found")
 // ErrConflict is returned when a uniqueness constraint is violated.
 var ErrConflict = errors.New("store: conflict")
 
+// ErrNotClaimable is returned by ClaimInstanceOp when the row exists
+// and no live lease blocks it, but its status is not claimable or its
+// TTL has already elapsed — the caller re-reads the row to classify.
+var ErrNotClaimable = errors.New("store: instance not claimable")
+
 // ErrApplicationDraftConflict is a stale draft CAS on the reviewed
 // application publish path.
 var ErrApplicationDraftConflict = errors.New("store: application draft changed")
@@ -199,6 +204,72 @@ type Instance struct {
 	KeyID string `json:"-"`
 	// WorkspaceID owns the instance; user_id stays "created by".
 	WorkspaceID string `json:"-"`
+
+	// Notebook state (EP-0022). Incarnation counts runtime processes
+	// under this instance id: 1 at creation, +1 per restoration.
+	// RestoredAt marks the last lost→running restoration. NotebookRev
+	// is the CAS revision clients save sections against. RunSeq numbers
+	// section runs within an incarnation. Drift counts scratch execs
+	// that changed globals outside the notebook. OpToken/OpExpiresAt
+	// are the per-instance operation lease serializing execs, runs,
+	// saves and restoration.
+	Incarnation int64      `json:"-"`
+	RestoredAt  *time.Time `json:"-"`
+	NotebookRev int64      `json:"-"`
+	RunSeq      int64      `json:"-"`
+	Drift       int64      `json:"-"`
+	OpToken     string     `json:"-"`
+	OpExpiresAt *time.Time `json:"-"`
+}
+
+// Rerun policies for notebook sections.
+const (
+	RerunSafe = "safe" // re-run whenever stale in bulk runs
+	RerunOnce = "once" // skipped by bulk runs after a success
+)
+
+// NotebookSection is one durable named section of an instance's
+// notebook: ordered code plus its static analysis and last run facts.
+type NotebookSection struct {
+	InstanceID string `json:"-"`
+	Name       string `json:"name"`
+	Position   int64  `json:"position"`
+
+	Description string `json:"description"`
+	Code        string `json:"code"`
+	CodeSHA256  string `json:"-"`
+	Rerun       string `json:"rerun"`
+
+	// Static analysis of Code: top-level names it defines and reads,
+	// plus observed capability op names from audit.
+	Defines []string `json:"defines"`
+	Uses    []string `json:"uses"`
+	Effects []string `json:"effects"`
+
+	// DependsOn records which earlier sections provide the names in
+	// Uses (section names, never define names). It is provenance for
+	// staleness: when a provider is edited, moved or deleted, its
+	// dependents go stale even if the define name itself changed.
+	DependsOn []string `json:"depends_on"`
+
+	// Last run facts within the current or a previous incarnation.
+	// LastCodeSHA256 is the code hash that last ran — comparing it to
+	// CodeSHA256 detects edits that were never executed (stale).
+	LastExecID      string     `json:"last_exec_id,omitempty"`
+	LastIncarnation int64      `json:"last_incarnation"`
+	LastRunSeq      int64      `json:"last_run_seq"`
+	LastStatus      string     `json:"last_status,omitempty"`
+	LastCodeSHA256  string     `json:"-"`
+	LastRunAt       *time.Time `json:"last_run_at,omitempty"`
+	// SucceededBefore records a past success so `once` sections can be
+	// skipped by bulk runs even after edits.
+	SucceededBefore bool `json:"succeeded_before"`
+
+	CreatedBy string    `json:"created_by"`
+	UpdatedBy string    `json:"updated_by"`
+	EditedAt  time.Time `json:"edited_at"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // InstanceFilter selects instances by workspace, creating user
@@ -241,6 +312,11 @@ type Execution struct {
 	ErrorMessage    string    `json:"-"`
 	ErrorBacktrace  string    `json:"-"`
 	CreatedAt       time.Time `json:"created_at"`
+
+	// Notebook provenance (EP-0022): empty SectionName marks a scratch
+	// exec; Incarnation records which runtime process ran it.
+	SectionName string `json:"section_name,omitempty"`
+	Incarnation int64  `json:"incarnation,omitempty"`
 }
 
 type AuditEvent struct {
@@ -348,6 +424,59 @@ type Store interface {
 	// ReleaseInstance drops a binding, but only when nodeID and epoch
 	// still match — a stale holder cannot release a newer binding.
 	ReleaseInstance(ctx context.Context, id, nodeID string, epoch int64) (ok bool, err error)
+
+	// --- instance operation lease + notebook (EP-0022) ---
+	// ClaimInstanceOp takes the instance's operation lease for ttl when
+	// the row's status is one of allowed (empty = any non-terminal) and
+	// its TTL has not elapsed — an expired row can never be claimed, so
+	// no op can renew it back to life. Returns ErrConflict while
+	// another token holds a live lease, ErrNotClaimable when the status
+	// or expiry forbids the claim, ErrNotFound when missing.
+	ClaimInstanceOp(ctx context.Context, id, token string, ttl time.Duration, allowed ...types.InstanceStatus) (*Instance, error)
+	// RefreshInstanceOp extends the lease while token still matches.
+	RefreshInstanceOp(ctx context.Context, id, token string, ttl time.Duration) (bool, error)
+	// ReleaseInstanceOp clears the lease when token still matches.
+	ReleaseInstanceOp(ctx context.Context, id, token string) error
+	// MarkInstanceLost CASes running→lost under the held op token.
+	MarkInstanceLost(ctx context.Context, id, token string, endedAt time.Time) (bool, error)
+	// TouchInstanceLive renews last_active/expires under the op token
+	// and adds driftDelta to the drift counter.
+	TouchInstanceLive(ctx context.Context, id, token string, lastActive, expiresAt time.Time, driftDelta int64) (bool, error)
+	// BumpRunSeq increments and returns the instance's run sequence.
+	BumpRunSeq(ctx context.Context, id, token string) (int64, error)
+	// CommitRestore CASes lost→running for a restoration: binds
+	// nodeID/epoch, sets incarnation+1, restored_at, clears drift and
+	// the op lease fields the caller no longer needs. Fails when the
+	// row went terminal or expired.
+	CommitRestore(ctx context.Context, id, token, nodeID string, epoch, incarnation int64, restoredAt time.Time) (bool, error)
+	// ClearRestoreBinding drops a just-claimed restore binding when the
+	// runtime create failed, leaving the row lost.
+	ClearRestoreBinding(ctx context.Context, id, token string) error
+	// SettleInstance marks a terminal status and clears the op lease in
+	// one write — UpdateInstance deliberately does not persist op
+	// fields, so terminal transitions must not leave a stale lease
+	// blocking claims until op_expires_at lapses.
+	SettleInstance(ctx context.Context, id string, status types.InstanceStatus, endedAt time.Time) error
+
+	// SaveNotebookSection upserts one section under revision CAS:
+	// expectedRev must equal the instance's notebook_rev. `after`
+	// positions the section directly after the named one ("" appends).
+	// Returns the saved row and the new notebook revision.
+	SaveNotebookSection(ctx context.Context, instanceID string, expectedRev int64, row *NotebookSection, after string) (*NotebookSection, int64, error)
+	GetNotebookSection(ctx context.Context, instanceID, name string) (*NotebookSection, error)
+	ListNotebookSections(ctx context.Context, instanceID string) ([]*NotebookSection, error)
+	// DeleteNotebookSection removes a section under revision CAS and
+	// returns the names of sections still reading its defines.
+	DeleteNotebookSection(ctx context.Context, instanceID, name string, revision int64) ([]string, int64, error)
+	// StampSectionRun records a section's last-run facts and observed
+	// effects, bumps the notebook revision, and clears `once` skips —
+	// but only while the instance is still running under the caller's
+	// op token in the given incarnation. A late result after the row
+	// went terminal, was restored into a new incarnation, or lost its
+	// lease returns ErrConflict and writes nothing.
+	// codeSHA is the hash of the code that ran (the section's
+	// CodeSHA256 at run time).
+	StampSectionRun(ctx context.Context, instanceID, name, execID, status string, incarnation, runSeq int64, at time.Time, effects []string, succeeded bool, codeSHA, token string) (int64, error)
 
 	CreateExecution(ctx context.Context, e *Execution) error
 	GetExecution(ctx context.Context, id string) (*Execution, error)

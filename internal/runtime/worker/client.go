@@ -69,8 +69,11 @@ func (c *Client) Create(ctx context.Context, req *runtime.CreateRequest) (*runti
 	if err != nil {
 		return nil, err
 	}
-	// A fresh binding starts at epoch 1; a rebind would bump it.
-	req.Epoch = 1
+	// A fresh binding starts at epoch 1; a rebind (e.g. lost-instance
+	// restoration) supplies a higher epoch and it is honored.
+	if req.Epoch == 0 {
+		req.Epoch = 1
+	}
 	out, err := d.Create(ctx, req)
 	if err != nil {
 		return nil, err

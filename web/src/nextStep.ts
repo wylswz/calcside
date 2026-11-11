@@ -2,6 +2,8 @@ import type { AuditEvent, Execution } from './api'
 import { runOutcome } from './activity.ts'
 export type NextStep =
   | { kind: 'ended' }
+  | { kind: 'lost' }
+  | { kind: 'expired' }
   | { kind: 'expiring'; seconds: number }
   | { kind: 'denied'; call: string }
   | { kind: 'waiting' }
@@ -15,6 +17,10 @@ export function nextStep(
   hasBoundKey: boolean,
   now: number,
 ): NextStep {
+  // Lost is recoverable (notebook retained, restore on next run) and
+  // expired is read-only history — neither is a plain "ended".
+  if (inst.status === 'lost') return { kind: 'lost' }
+  if (inst.status === 'expired') return { kind: 'expired' }
   if (inst.status !== 'running') return { kind: 'ended' }
   if (expiringSoon(inst, now)) return { kind: 'expiring', seconds: Math.max(0, (new Date(inst.expires_at).getTime() - now) / 1000) }
   if (latest && runOutcome(latest) === 'denied') {

@@ -10,6 +10,7 @@ capability model automatically.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, cast
 
@@ -27,7 +28,13 @@ from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from typing_extensions import NotRequired, override
 
-from calcside.client import AsyncClient, CalcsideError, Client, ExecResult
+from calcside.client import (
+    AsyncClient,
+    CalcsideError,
+    Client,
+    ExecResult,
+    ExecSection,
+)
 
 if TYPE_CHECKING:
     from langgraph.runtime import Runtime
@@ -384,6 +391,20 @@ class CalcsideMiddleware(AgentMiddleware[CalcsideState, ContextT]):
         return runtime.state.get("calcside_instance_id")
 
     def _gone_or_error(self, e: CalcsideError) -> str:
+        if e.code == "instance_restored":
+            return (
+                "the sandbox process was lost and restored EMPTY under the same "
+                f"instance id ({e.message}). Your call did NOT run and nothing "
+                "was re-executed. The notebook is preserved — call "
+                f"{self._tool_prefix}notebook to see it, then "
+                f"{self._tool_prefix}run_sections to rebuild state before "
+                "retrying. Do not auto-retry blindly."
+            )
+        if e.code == "instance_expired" or e.status == 410:
+            return (
+                f"the sandbox instance expired ({e.message}) and cannot be "
+                "restored — tell the user instead of retrying."
+            )
         if e.status in (404, 409):
             return (
                 f"sandbox instance is gone ({e.message}); it may have expired or been"
@@ -391,17 +412,34 @@ class CalcsideMiddleware(AgentMiddleware[CalcsideState, ContextT]):
             )
         return f"calcside error ({e.status} {e.code}): {e.message}"
 
+    @staticmethod
+    def _bound(iid: str | None) -> str:
+        return iid or "no calcside sandbox instance is active for this run."
+
+    def _clip(self, text: str) -> str:
+        if len(text) > self._max_chars:
+            cut = len(text) - self._max_chars
+            return text[: self._max_chars] + f"\n…[truncated {cut} chars]"
+        return text
+
     def _make_tools(self) -> list[StructuredTool]:
         prefix = self._tool_prefix
         self_ref = self
 
-        def exec_fn(code: str, runtime: ToolRuntime) -> ToolMessage | str:
+        def exec_fn(
+            code: str,
+            runtime: ToolRuntime,
+            section: ExecSection | None = None,
+        ) -> ToolMessage | str:
             iid = self_ref._instance_id_of(runtime)
             if not iid:
                 return "no calcside sandbox instance is active for this run."
             try:
                 r = self_ref._client.exec(
-                    iid, code, timeout_ms=self_ref._exec_timeout_ms
+                    iid,
+                    code,
+                    timeout_ms=self_ref._exec_timeout_ms,
+                    section=section,
                 )
             except CalcsideError as e:
                 return self_ref._gone_or_error(e)
@@ -411,13 +449,20 @@ class CalcsideMiddleware(AgentMiddleware[CalcsideState, ContextT]):
                 artifact=r.raw,
             )
 
-        async def aexec_fn(code: str, runtime: ToolRuntime) -> ToolMessage | str:
+        async def aexec_fn(
+            code: str,
+            runtime: ToolRuntime,
+            section: ExecSection | None = None,
+        ) -> ToolMessage | str:
             iid = self_ref._instance_id_of(runtime)
             if not iid:
                 return "no calcside sandbox instance is active for this run."
             try:
                 r = await self_ref._aclient.exec(
-                    iid, code, timeout_ms=self_ref._exec_timeout_ms
+                    iid,
+                    code,
+                    timeout_ms=self_ref._exec_timeout_ms,
+                    section=section,
                 )
             except CalcsideError as e:
                 return self_ref._gone_or_error(e)
@@ -425,6 +470,215 @@ class CalcsideMiddleware(AgentMiddleware[CalcsideState, ContextT]):
                 content=self_ref._exec_text(r),
                 tool_call_id=runtime.tool_call_id,
                 artifact=r.raw,
+            )
+
+        def _rev(client: Any, iid: str, revision: int | None) -> int:
+            if revision is not None:
+                return revision
+            return int(client.notebook(iid)["revision"])
+
+        async def _arev(client: Any, iid: str, revision: int | None) -> int:
+            if revision is not None:
+                return revision
+            return int((await client.notebook(iid))["revision"])
+
+        def notebook_fn(runtime: ToolRuntime) -> str:
+            iid = self_ref._instance_id_of(runtime)
+            if not iid:
+                return "no calcside sandbox instance is active for this run."
+            try:
+                nb = self_ref._client.notebook(iid)
+            except CalcsideError as e:
+                return self_ref._gone_or_error(e)
+            lines = [nb.get("outline") or "(empty notebook)"]
+            lines.append(
+                f"\nrevision {nb.get('revision')} · status {nb.get('status')}"
+                f" · incarnation {nb.get('incarnation')} · drift {nb.get('drift')}"
+            )
+            if nb.get("restored_at"):
+                if nb.get("restored_empty"):
+                    lines.append(
+                        f"restored at {nb['restored_at']} — memory/files were "
+                        "emptied at restore and nothing has run yet; "
+                        "run_sections to rebuild state"
+                    )
+                else:
+                    lines.append(
+                        f"restored at {nb['restored_at']} — memory/files were "
+                        "emptied at restore; sections have run since"
+                    )
+            for n in nb.get("next") or []:
+                lines.append(f"next: {n}")
+            return self_ref._clip("\n".join(lines))
+
+        async def anotebook_fn(runtime: ToolRuntime) -> str:
+            iid = self_ref._instance_id_of(runtime)
+            if not iid:
+                return "no calcside sandbox instance is active for this run."
+            try:
+                nb = await self_ref._aclient.notebook(iid)
+            except CalcsideError as e:
+                return self_ref._gone_or_error(e)
+            lines = [nb.get("outline") or "(empty notebook)"]
+            lines.append(
+                f"\nrevision {nb.get('revision')} · status {nb.get('status')}"
+                f" · incarnation {nb.get('incarnation')} · drift {nb.get('drift')}"
+            )
+            if nb.get("restored_at"):
+                if nb.get("restored_empty"):
+                    lines.append(
+                        f"restored at {nb['restored_at']} — memory/files were "
+                        "emptied at restore and nothing has run yet; "
+                        "run_sections to rebuild state"
+                    )
+                else:
+                    lines.append(
+                        f"restored at {nb['restored_at']} — memory/files were "
+                        "emptied at restore; sections have run since"
+                    )
+            for n in nb.get("next") or []:
+                lines.append(f"next: {n}")
+            return self_ref._clip("\n".join(lines))
+
+        def read_section_fn(
+            name: str, runtime: ToolRuntime, include_output: bool = False
+        ) -> str:
+            iid = self_ref._instance_id_of(runtime)
+            if not iid:
+                return "no calcside sandbox instance is active for this run."
+            try:
+                sec = self_ref._client.read_section(iid, name, include_output)
+            except CalcsideError as e:
+                return self_ref._gone_or_error(e)
+            return self_ref._clip(json.dumps(sec, indent=2, ensure_ascii=False))
+
+        async def aread_section_fn(
+            name: str, runtime: ToolRuntime, include_output: bool = False
+        ) -> str:
+            iid = self_ref._instance_id_of(runtime)
+            if not iid:
+                return "no calcside sandbox instance is active for this run."
+            try:
+                sec = await self_ref._aclient.read_section(iid, name, include_output)
+            except CalcsideError as e:
+                return self_ref._gone_or_error(e)
+            return self_ref._clip(json.dumps(sec, indent=2, ensure_ascii=False))
+
+        def _report_text(report: dict[str, Any]) -> str:
+            lines = []
+            for r in report.get("results") or []:
+                line = f"{r.get('name')}: {r.get('status')}"
+                if r.get("skipped_reason"):
+                    line += f" ({r['skipped_reason']})"
+                if r.get("error"):
+                    line += f" — {str(r['error']).splitlines()[0]}"
+                lines.append(line)
+            lines.append(
+                f"\nrevision {report.get('revision')} · drift "
+                f"{report.get('drift')} · incarnation {report.get('incarnation')}"
+            )
+            if report.get("restored"):
+                lines.append(
+                    "restored: the runtime was lost mid-run and replaced "
+                    "with an EMPTY process — earlier results ran in the "
+                    "previous incarnation; do not blindly retry side effects"
+                )
+            for w in report.get("warnings") or []:
+                lines.append(f"warning: {w}")
+            return "\n".join(lines)
+
+        def run_sections_fn(
+            runtime: ToolRuntime,
+            sections: str | list[str] = "all",
+            revision: int | None = None,
+        ) -> str:
+            iid = self_ref._instance_id_of(runtime)
+            if not iid:
+                return "no calcside sandbox instance is active for this run."
+            try:
+                rev = _rev(self_ref._client, iid, revision)
+                report = self_ref._client.run_sections(iid, sections, rev)
+            except CalcsideError as e:
+                return self_ref._gone_or_error(e)
+            return self_ref._clip(_report_text(report))
+
+        async def arun_sections_fn(
+            runtime: ToolRuntime,
+            sections: str | list[str] = "all",
+            revision: int | None = None,
+        ) -> str:
+            iid = self_ref._instance_id_of(runtime)
+            if not iid:
+                return "no calcside sandbox instance is active for this run."
+            try:
+                rev = await _arev(self_ref._aclient, iid, revision)
+                report = await self_ref._aclient.run_sections(iid, sections, rev)
+            except CalcsideError as e:
+                return self_ref._gone_or_error(e)
+            return self_ref._clip(_report_text(report))
+
+        def add_section_fn(
+            name: str,
+            description: str,
+            runtime: ToolRuntime,
+            code: str = "",
+            rerun: str | None = None,
+            after_section: str | None = None,
+        ) -> str:
+            """Create a NEW section without running it (create-only)."""
+            iid = self_ref._instance_id_of(runtime)
+            if not iid:
+                return "no calcside sandbox instance is active for this run."
+            try:
+                res = self_ref._client.save_section(
+                    iid,
+                    name,
+                    revision=_rev(self_ref._client, iid, None),
+                    code=code,
+                    description=description,
+                    rerun=rerun,
+                    after=after_section,
+                    create_only=True,
+                )
+            except CalcsideError as e:
+                return self_ref._gone_or_error(e)
+            sec = res.get("section") or {}
+            return self_ref._clip(
+                f"added section {name} (state {sec.get('state')}, "
+                f"notebook_rev {res.get('revision')}) — not run; "
+                "run_sections to execute it"
+            )
+
+        async def aadd_section_fn(
+            name: str,
+            description: str,
+            runtime: ToolRuntime,
+            code: str = "",
+            rerun: str | None = None,
+            after_section: str | None = None,
+        ) -> str:
+            """Async counterpart of add_section_fn."""
+            iid = self_ref._instance_id_of(runtime)
+            if not iid:
+                return "no calcside sandbox instance is active for this run."
+            try:
+                res = await self_ref._aclient.save_section(
+                    iid,
+                    name,
+                    revision=await _arev(self_ref._aclient, iid, None),
+                    code=code,
+                    description=description,
+                    rerun=rerun,
+                    after=after_section,
+                    create_only=True,
+                )
+            except CalcsideError as e:
+                return self_ref._gone_or_error(e)
+            sec = res.get("section") or {}
+            return self_ref._clip(
+                f"added section {name} (state {sec.get('state')}, "
+                f"notebook_rev {res.get('revision')}) — not run; "
+                "run_sections to execute it"
             )
 
         def list_fn(runtime: ToolRuntime, path: str = "/work") -> str:
@@ -511,7 +765,58 @@ class CalcsideMiddleware(AgentMiddleware[CalcsideState, ContextT]):
                     "printed output (use print(); the last expression's value is NOT "
                     "shown). Top-level variables persist across calls. Starlark is not "
                     "Python: no import/classes/try/with/f-strings/yield; json and math "
-                    "modules exist; while/recursion/sets work."
+                    "modules exist; while/recursion/sets work. Pass `section` "
+                    "({name, description?, rerun?: safe|once, after?, revision?}) to "
+                    "save the named notebook section BEFORE running — failed code is "
+                    "kept as a failed section. Omit `section` for a scratch exec, "
+                    "which never becomes a section."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=notebook_fn,
+                coroutine=anotebook_fn,
+                name=f"{prefix}notebook",
+                description=(
+                    "Read the sandbox notebook outline: every section's state "
+                    "(not_run/fresh/stale/failed), defines/uses, effects, plus "
+                    "next-step guidance. Read-only — never restores a lost "
+                    "instance."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=read_section_fn,
+                coroutine=aread_section_fn,
+                name=f"{prefix}read_section",
+                description=(
+                    "Read one notebook section: metadata plus its code; "
+                    "include_output adds the last run's output/error."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=run_sections_fn,
+                coroutine=arun_sections_fn,
+                name=f"{prefix}run_sections",
+                description=(
+                    'Run notebook sections in order: sections is "all", '
+                    '"stale", one name, or a list of names. Bulk runs skip '
+                    "once-sections that already succeeded; execution stops at "
+                    "the first failure. On a restored (empty) instance the "
+                    "first call returns an instance_restored notice WITHOUT "
+                    "executing — call again to actually run."
+                ),
+            ),
+            StructuredTool.from_function(
+                func=add_section_fn,
+                coroutine=aadd_section_fn,
+                name=f"{prefix}add_section",
+                description=(
+                    "Create a NEW notebook section WITHOUT running it — "
+                    "fails if the name already exists (edit via exec's "
+                    "section metadata instead). Args: name "
+                    "([a-z][a-z0-9_]{0,47}), description (required, one "
+                    "line), code (may be empty), rerun (safe|once), "
+                    "after_section (insert after a named section). The "
+                    "current notebook revision is fetched automatically."
                 ),
             ),
             StructuredTool.from_function(

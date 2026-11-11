@@ -404,9 +404,15 @@ export function InstanceStatus({ inst, now }: { inst: { status: string; created_
   } else if (inst.status === 'pending') {
     dot = <span className="inline-block h-2 w-2 rounded-full bg-warn" />
     label = 'pending · extensions'
+  } else if (inst.status === 'lost') {
+    dot = <span className="inline-block h-2 w-2 rounded-full bg-warn" />
+    label = 'lost · code retained'
+  } else if (inst.status === 'expired') {
+    dot = <span className="inline-block h-2 w-2 rounded-full border border-mute bg-transparent" />
+    label = 'expired'
   } else {
     dot = <span className="inline-block h-2 w-2 rounded-full border border-mute bg-transparent" />
-    label = inst.status === 'lost' ? 'ended · lost' : 'ended'
+    label = 'ended'
   }
   return <span className="inline-flex items-center gap-1.5 text-xs text-sec">{dot}{label}</span>
 }

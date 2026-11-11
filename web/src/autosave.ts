@@ -148,6 +148,31 @@ export class AutosaveQueue<T> {
     return this.flush()
   }
 
+  // resolveConflict re-bases a 409-stuck queue on a fresh server read.
+  // 'reload' adopts the server value and drops the draft; 'draft' keeps
+  // the draft and re-bases its CAS version on the fresh revision, so the
+  // next save explicitly overwrites what arrived meanwhile.
+  resolveConflict(mode: 'reload' | 'draft', fresh: SaveResult<T>) {
+    this.epoch += 1 // in-flight acks can no longer write to state
+    const draft = this.state.latest
+    this.state = {
+      dirty: false, saving: false, conflict: false,
+      revision: this.state.revision + 1, saved: fresh, latest: fresh.value,
+    }
+    if (mode === 'draft') {
+      const fp = this.o.fingerprint
+      const stillDirty = fp(draft) !== fp(fresh.value)
+      this.state = {
+        ...this.state,
+        latest: draft,
+        dirty: stillDirty,
+        saved: { value: fresh.value, version: fresh.version },
+      }
+      if (stillDirty) this.schedule()
+    }
+    this.notify()
+  }
+
   reset(v: SaveResult<T>) {
     this.epoch += 1 // in-flight acks can no longer write to state
     this.initialDirty = false
