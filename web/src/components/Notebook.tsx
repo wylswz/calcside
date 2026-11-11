@@ -399,7 +399,7 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
   const [activeNav, setActiveNav] = useState('')
   const headRef = useRef<HTMLDivElement | null>(null)
   const dirRef = useRef<HTMLElement | null>(null)
-  const scratchNav = (canExec && (live || lost)) || expired
+  const scratchNav = canExec && (live || lost)
   const navNames = shown.map((s) => s.name)
   const navKey = JSON.stringify([...navNames, scratchNav])
   useEffect(() => {
@@ -537,6 +537,7 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
             <span className="nb-status-text">{status.text}</span>
           </span>
           <div className="nb-toolbar-side">
+            <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />
             <Button
               variant="ghost" size="xs"
               style={{ visibility: hasDetails ? 'visible' : 'hidden' }}
@@ -544,7 +545,6 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
             >
               Details
             </Button>
-            <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />
           </div>
         </div>
 

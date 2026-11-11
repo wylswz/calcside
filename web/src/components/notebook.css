@@ -3,7 +3,7 @@
    (P2 — no primary or default-size buttons inside .nb). Paint-only
    states (S1); polled arrivals stay held behind "Show N new" (S5). */
 
-.nb { display: grid; gap: 12px; --nb-bar-h: 68px; }
+.nb { display: grid; gap: 12px; --nb-bar-h: 67px; }
 /* grid items default to min-width:auto — a wide CodeMirror line or
    unbreakable fact string would stretch the track past the viewport.
    Let every card/section shrink; inner scrollers clip horizontally. */
@@ -125,6 +125,7 @@
   border: 1px solid transparent; border-radius: var(--detail-radius-inset);
   background: transparent; padding: 2px 6px; box-shadow: none;
   font-size: 13px; line-height: 20px; color: rgb(var(--ink));
+  overflow: hidden; text-overflow: ellipsis;
 }
 .nb .nb-card .nb-card-head input.nb-desc-input::placeholder { color: rgb(var(--mute)); }
 .nb .nb-card .nb-card-head input.nb-desc-input:hover { background: rgb(var(--ink) / 0.04); }
@@ -220,21 +221,21 @@
 .nb .nb-facts code { font-family: var(--font-mono); font-size: 11px; }
 .nb-readonly-note { color: rgb(var(--sec)); }
 
-/* inserter rows between cells — fixed height, paint-only reveal (S1).
-   The Button primitive supplies the ghost/xs chrome (P2); this class
-   only shrinks it into the 20px seam — mobile restores the 44px hit
-   target with the row below. */
+/* inserter rows between cells — fixed height (S3). The Button
+   primitive supplies the ghost/xs chrome (P2); this class shrinks it
+   into a quiet framed 22px control inside the 32px seam — the ghost
+   hover/focus paint still wins on specificity. Mobile restores the
+   44px hit target with the row below. */
 .nb-insert {
-  height: 20px; display: flex; align-items: center; justify-content: center;
+  height: 32px; display: flex; align-items: center; justify-content: center;
 }
 .nb [data-ui='button'].nb-insert-btn {
-  width: 20px; height: 20px; min-height: 20px; padding: 0;
+  width: 22px; height: 22px; min-height: 22px; padding: 0;
+  border-color: var(--detail-edge);
+  background-color: var(--detail-work);
+  color: rgb(var(--sec));
 }
 .nb [data-ui='button'].nb-insert-btn svg { width: 12px; height: 12px; }
-@media (hover: hover) {
-  .nb-insert { opacity: 0.35; transition: opacity 150ms var(--ease-damped); }
-  .nb-insert:hover, .nb-insert:focus-within { opacity: 1; }
-}
 
 /* empty notebook — intentional, not an error */
 .nb-empty {
@@ -243,7 +244,10 @@
 }
 .nb-empty p { margin: 0 0 10px; font-size: 13px; color: rgb(var(--sec)); }
 
-/* scratch cell — same chrome, dashed edge */
+/* scratch cell — same chrome, dashed edge. The -12px pulls it back over
+   the grid gap so the last inserter seam measures the same 32px as the
+   seams between cards. */
+.nb-cards + .nb-scratch { margin-top: -12px; }
 .nb-scratch {
   border: 1px dashed var(--detail-edge); border-radius: var(--detail-radius-inset);
   background: var(--detail-work);
@@ -318,8 +322,11 @@
     padding: 6px 0;
   }
   .nb-toolbar-actions { flex-basis: 100%; }
+  /* the status row keeps a fixed 36px box so the wrapped bar height is
+     identical for one- and two-line statuses (S4) */
+  .nb-status { height: 36px; }
   .nb-status-text {
-    height: 36px;
+    max-height: 36px;
     white-space: normal;
     display: -webkit-box;
     -webkit-box-orient: vertical;
@@ -333,7 +340,10 @@
     order: 1; flex-basis: 100%;
   }
   .nb-body { padding: 0 12px 10px; }
-  .nb-gutter { padding-top: 11px; }
+  /* the 44px run button centres on the first header row's text —
+     padding-top 0 is the measured value (the gutter column does not
+     affect the header row, so this moves only the button). */
+  .nb-gutter { padding-top: 0; }
   /* 44px hit targets: the gutter widens so run/menu buttons fit, and the
      inserter row grows to hold its button (instance-detail.css). */
   .nb-card, .nb-run-code { grid-template-columns: 48px minmax(0, 1fr); }

@@ -715,6 +715,13 @@ test('screenshots: notebook desktop/mobile × light/dark', async ({ page }) => {
     expect(headBg).not.toBe('rgba(0, 0, 0, 0)')
     const barBw = await page.locator('.nb-toolbar').evaluate((el) => getComputedStyle(el).borderBottomWidth)
     expect(barBw).toBe('1px')
+    // --nb-bar-h equals the measured two-row head so the cards'
+    // scroll-margin clears it exactly (S3).
+    const deskHead = (await page.locator('.nb-head').boundingBox())!
+    const deskBarH = await page.locator('.nb').evaluate(
+      (el) => parseFloat(getComputedStyle(el).getPropertyValue('--nb-bar-h')),
+    )
+    expect(Math.round(deskHead.height)).toBe(Math.round(deskBarH))
     // No horizontal overflow at desktop width either.
     const deskOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     expect(deskOverflow).toBeLessThanOrEqual(1)
@@ -763,11 +770,11 @@ test('screenshots: notebook desktop/mobile × light/dark', async ({ page }) => {
   }
 
   // S4: the wrapped mobile toolbar keeps one height whether the status
-  // line is short or clamped at two lines — the text box is reserved.
+  // line is short or clamped at two lines — the status box is reserved.
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.locator('.nb')).toBeVisible()
   const barShort = (await page.locator('.nb-toolbar').boundingBox())!.height
-  expect((await page.locator('.nb-status-text').boundingBox())!.height).toBe(36)
+  expect((await page.locator('.nb-status').boundingBox())!.height).toBe(36)
   // Killing the child makes the next run hit the restore path — the
   // request does not execute and the status line carries the longest
   // warning text it ever shows (a lost-status wait would not work: the
