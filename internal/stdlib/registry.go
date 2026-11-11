@@ -3,6 +3,7 @@ package stdlib
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"unicode/utf8"
 
@@ -107,10 +108,39 @@ var functions = []function{
 	{"stream.new", []string{"next_fn"}, "Build a stream from a callback returning (has_value, value); close it explicitly to stop early.", streamNewCall},
 	{"stream.from_list", []string{"values"}, "Lazy stream over a list or tuple; items are produced on pull without copying the source.", streamFromListCall},
 	{"stream.sse", []string{"source"}, "Parse bounded SSE events from a byte stream; returns {event,data,id} values.", streamSSECall},
+	{"math.log2", []string{"x"}, "Base-2 logarithm of an int or float; non-positive input yields NaN/-Inf as in math.log.", mathLogBase(2)},
+	{"math.log10", []string{"x"}, "Base-10 logarithm of an int or float; non-positive input yields NaN/-Inf as in math.log.", mathLogBase(10)},
+}
+
+// mathModule wraps go.starlark.net/lib/math in a fresh module so the
+// shared upstream module is never mutated or frozen. Fixed-base
+// logarithms (log2/log10) are registered in the functions table above,
+// which also gives them help() docs, editor completions, and the same
+// checkpoint/recovery wrapping as every other utility.
+func mathModule() *starlarkstruct.Module {
+	m := &starlarkstruct.Module{Name: "math", Members: starlark.StringDict{}}
+	for k, v := range starmath.Module.Members {
+		m.Members[k] = v
+	}
+	return m
+}
+
+func mathLogBase(base float64) builtinFunc {
+	return func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		var x starlark.Value
+		if err := starlark.UnpackPositionalArgs(b.Name(), args, kwargs, 1, &x); err != nil {
+			return nil, errors.New("invalid arguments")
+		}
+		f, ok := starlark.AsFloat(x)
+		if !ok {
+			return nil, errors.New("invalid arguments")
+		}
+		return starlark.Float(math.Log(f) / math.Log(base)), nil
+	}
 }
 
 func Modules() starlark.StringDict {
-	out := starlark.StringDict{"json": starjson.Module, "math": starmath.Module, "help": starlark.NewBuiltin("help", help(nil))}
+	out := starlark.StringDict{"json": starjson.Module, "math": mathModule(), "help": starlark.NewBuiltin("help", help(nil))}
 	for _, f := range functions {
 		module, member, _ := strings.Cut(f.name, ".")
 		if out[module] == nil {

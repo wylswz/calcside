@@ -8,9 +8,12 @@ Large values (API responses, file contents, intermediate results) stay in instan
 
 ### Starlark is NOT Python
 - No `import`, no classes, no `try/except`, no `with`, no generators/`yield`, no f-strings (use `"%s" % x` or `.format()`).
+- No `**` exponentiation and no `round` builtin — use `math.pow(a, b)` and `math.round(x)`. Precision formatting like `%.1f` is unsupported: round first (`math.round` or `math.floor(x * 10 + 0.5) / 10`) and format with `%s`.
+- An expression does NOT continue on the next line after a trailing operator — wrap multi-line expressions in parentheses (newlines inside `(...)` are fine).
+- Escapes like `\203A` are rejected as non-ASCII octal — embed the literal UTF-8 character instead.
 - Strings are NOT iterable — `for c in s` fails with "string value is not iterable". Use `for c in s.elems()` (chars) or `s.codepoints()` (ints). `in` still works for substring tests.
 - `while`, recursion, sets, dicts and list comprehensions are available; no `global` keyword is needed at top level.
-- `json.encode(...)` / `json.decode(...)` and the `math` module are available.
+- `json.encode(...)` / `json.decode(...)` and the `math` module (incl. `pow`, `round`, `log2`, `log10`) are available.
 - ALL output must go through `print(...)` — the value of the last expression is NOT returned.
 
 ### Pure utilities
