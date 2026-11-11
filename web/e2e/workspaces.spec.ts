@@ -321,9 +321,12 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   // title comes from labels.name, not 'name=…'
   await expect(page.getByRole('heading', { name: 'Research session' })).toBeVisible()
   await expect(page.getByText('The latest run was denied')).toBeVisible()
-  for (const h of ['Boundary', 'Results', 'Agent', 'State']) {
+  for (const h of ['Boundary', 'Agent']) {
     await expect(page.getByRole('heading', { name: h })).toBeVisible()
   }
+  // live state is a tabbed side panel (State | Files), not page headings
+  await expect(page.getByRole('tab', { name: 'State', exact: true })).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'Files', exact: true })).toBeVisible()
   // the notebook is the default view; the scratch region keeps the run
   // editor reachable without a toggle
   await expect(page.getByRole('tab', { name: 'Notebook' })).toHaveAttribute('aria-selected', 'true')

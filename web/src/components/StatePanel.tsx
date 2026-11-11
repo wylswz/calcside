@@ -63,7 +63,7 @@ function MemoryBlock({ resources, history }: { resources?: ResourceUsages; histo
 // StatePanel shows the instance's live state: variables (reprs) and
 // memory accounting. It never polls: the parent passes a revision that
 // changes with each execution, and only then does state refresh.
-export function StatePanel({ id, running, revision, capNames = [] }: { id: string; running: boolean; revision?: string; capNames?: string[] }) {
+export function StatePanel({ id, running, revision, capNames = [], heading = true }: { id: string; running: boolean; revision?: string; capNames?: string[]; heading?: boolean }) {
   const [filter, setFilter] = useState('')
   const [showBuiltins, setShowBuiltins] = useState(false)
   const [history, setHistory] = useState<number[]>([])
@@ -94,7 +94,7 @@ export function StatePanel({ id, running, revision, capNames = [] }: { id: strin
     .sort()
   return (
     <section aria-label="State" className="space-y-5">
-      <SectionTitle>State</SectionTitle>
+      {heading && <SectionTitle>State</SectionTitle>}
       {!running && <p className="text-xs text-mute">instance is not running — nothing to inspect</p>}
       {error && <Notice tone="warning">{(error as Error).message}</Notice>}
       {data && (

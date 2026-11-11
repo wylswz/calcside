@@ -125,15 +125,15 @@ Every invariant has an owner mechanism, in order of preference:
 
 | Invariant | Mechanism | Status |
 |---|---|---|
-| S1 | `material.css` paint-only states; static CSS/Tailwind check; e2e "controls keep their box under hover and press" | enforced |
+| S1 | `material.css` paint-only states; static CSS/Tailwind check; e2e "controls keep their box under hover and press"; notebook directory scroll-spy (`aria-current` tint + name colour only) and the State/Files tab active state reuse paint-only styles — e2e "S1: scroll-spy highlight is paint-only" | enforced |
 | S2 | shared `Menu` (Radix); S1; e2e "the More menu stays where it opened" | enforced |
-| S3 | fixed reveal slot (`RevealNew`); notebook status line + Details modal replace every banner/report above the cells and per-cell run notes sit in the alerts slot; e2e "palette controls stay put", run editor placement test, notebook "run feedback never moves the cell" | partial — builder, detail and notebook covered |
+| S3 | fixed reveal slot (`RevealNew`); notebook status line + Details modal replace every banner/report above the cells and per-cell run notes sit in the alerts slot; the notebook's sticky two-row head (toolbar + fixed-height directory) is one fixed overlay — cards scroll beneath via `scroll-margin-top`; e2e "palette controls stay put", run editor placement test, notebook "run feedback never moves the cell", "section directory stays visible while a long notebook scrolls", "jumping to a section lands the card below the sticky head" | partial — builder, detail and notebook covered |
 | S4 | `SwapLabel` and `RevealNew`; notebook Details button toggles `visibility` only and inserter rows keep a fixed height; static label check; e2e "Show latest" and "Show N new", notebook "cell controls keep their box under hover" | enforced for state/request-driven labels and counters; module workbench autosave status, Publish preparation and Run use `SwapLabel`; notebook controls are the ghost/xs scale |
-| S5 | `useHeldOrder` + "Show N new"/"Show latest"; `stableList` unit tests; e2e activity, instance list and notebook sections | enforced for polled lists |
+| S5 | `useHeldOrder` + "Show N new"/"Show latest"; `stableList` unit tests; e2e activity, instance list and notebook sections; the directory keeps held order inside the sticky head (the side-column file list is not polled — refresh is explicit — so it needs no hold) | enforced for polled lists |
 | S6 | scroll-locked `Modal`; e2e "opening a dialog does not shift the page" | enforced for dialogs |
 | C1 | `Modal`/`Menu` return focus, removal falls back to a neighbour; e2e primitives and removal tests | enforced for overlays and removals |
-| C2 | `Modal` asks before Escape, the close control or an outside click discards input; create flow keeps configuration mounted behind Back; application and instance notebook/activity view panels stay mounted; section drafts autosave through a serial CAS queue with tab-local pending backup and a beforeunload guard, and a 409 conflict keeps the draft behind an explicit reload/keep-draft choice; `applicationWorkbench.spec.ts` and `notebook.spec.ts` preserve code, inputs and invalid JSON/drafts | enforced for dialogs, create flow, view switching and notebook drafts |
-| C3 | `useHeldOrder` keeps shown order across refetches; application and notebook view panels retain editor DOM; `notebook.spec.ts` holds a dirty draft across polls and Notebook↔Activity switches | partial — polling, view continuity and notebook drafts covered; other scroll/selection by review |
+| C2 | `Modal` asks before Escape, the close control or an outside click discards input; create flow keeps configuration mounted behind Back; application and instance notebook/activity view panels stay mounted; the side column's State/Files panels stay mounted behind `hidden` (e2e "State/Files tabs keep the file browser mounted"); section drafts autosave through a serial CAS queue with tab-local pending backup and a beforeunload guard, and a 409 conflict keeps the draft behind an explicit reload/keep-draft choice; `applicationWorkbench.spec.ts` and `notebook.spec.ts` preserve code, inputs and invalid JSON/drafts | enforced for dialogs, create flow, view switching, live-state tabs and notebook drafts |
+| C3 | `useHeldOrder` keeps shown order across refetches; application and notebook view panels retain editor DOM; the mounted State/Files tabs preserve the file browser's directory and selection and the variables filter across switches; `notebook.spec.ts` holds a dirty draft across polls and Notebook↔Activity switches | partial — polling, view continuity, live-state tabs and notebook drafts covered; other scroll/selection by review |
 | C4 | create steps are addressable as `?step=config`; application views use `?view=invoke` / `?view=activity`, with browser history coverage | partial — create steps and application views are addressable |
 | P1 | pending guards; static `mutate` check; e2e removal test | partial — async forms by review |
 | P2 | `ui.tsx` primitives; static browser-dialog check; e2e primitives test | enforced for buttons, menus, dialogs and labels |
@@ -438,6 +438,25 @@ proxying a scratch dev API + worker.
   `notebook-{desktop,mobile}-{light,dark}.png` plus `-sticky`,
   `-details`, `-section`/`-scratch` detail shots under
   `.devin-artifacts/screenshots/`.
+
+The section directory is no longer a strip that scrolls away with the
+cards: `.nb-head` wraps the toolbar and the directory as one sticky
+two-row overlay of fixed height (`--nb-bar-h` reserves both rows for
+the cards' `scroll-margin-top`), so the outline and run actions stay
+reachable on a long notebook (S3 — the e2e measures the strip pinned
+under the toolbar at scroll bottom and a jumped card landing below the
+head). An IntersectionObserver whose top edge sits under the head marks
+the in-view chip `aria-current` — the first intersecting target in
+shown order, scratch last — a paint-only tint + name colour (S1,
+measured identical chip boxes); the strip then keeps that chip visible
+through its own `scrollLeft`, never `scrollIntoView` (S6). A trailing
+`scratch` chip jumps to `#run-code` and clears `?section=`; a
+single-section run pulses its chip's dot, opacity-only and disabled
+under `prefers-reduced-motion`. On the detail page's side column, an
+fs-capable instance's State panel and file browser share one "Live
+state" tablist — both panels stay mounted behind `hidden` like the
+Notebook/Activity views (C2/C3, covered by the artifacts e2e) — and
+the bottom Results block is gone, freeing the work surface.
 
 Known gaps: the scratch runner keeps its existing exec behavior (no
 section coupling beyond promote-from-exec); in-app navigation away from

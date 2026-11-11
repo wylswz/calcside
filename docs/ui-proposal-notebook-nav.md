@@ -1,12 +1,12 @@
 # UI Proposal: persistent section navigation + file browser reorganization
 
-> Status: proposal — not implemented.
+> Status: implemented (Option A + Live state tabs).
 > Targets the notebook UI delivered by EP-0022 (`feat/instance-notebooks`,
 > not yet on `main`). If the EP-0022 branch has moved since this was
 > written, re-check the component/CSS references below before
 > implementing.
 
-## Current layout (verified against `feat/instance-notebooks`)
+## Previous layout (verified against `feat/instance-notebooks`)
 
 Page: `web/src/pages/InstanceDetail.tsx` + `instance-detail.css`
 
@@ -25,11 +25,11 @@ detail-grid (grid: minmax(0, 1fr) 340px)
     ├─ Boundary / Agent / …
 ```
 
-Two facts this proposal builds on:
+Two facts this proposal built on:
 
-- `.nb-directory` (order + name + state dot chips) is **not sticky** —
-  on a long notebook it scrolls out of view together with the cards.
-- The file browser lives in the **Results block at the bottom of the
+- `.nb-directory` (order + name + state dot chips) was **not sticky** —
+  on a long notebook it scrolled out of view together with the cards.
+- The file browser lived in the **Results block at the bottom of the
   work-surface** (`ArtifactBrowser`), far from the variables inspect
   in the side column.
 
@@ -106,14 +106,17 @@ Rationale:
 - **Mobile** (`detail-grid` collapses to 1fr): the side column drops
   below the work-surface; tabs still work.
 
-### Open decisions (resolve before implementing)
+### Open decisions (resolved at implementation)
 
-1. Tabs vs stacked sections: tabs save vertical space and group
-   better — **leaning tabs**.
+1. Tabs vs stacked sections: **tabs chosen** — `State`/`Files` under one
+   "Live state" tablist, both panels mounted behind `hidden`.
 2. Memory block stays under Variables (current), not a third tab.
-3. Side column width 340px: widen to ~380px only if file rows need
-   it (affects the whole page — do not widen casually).
-4. Export flow stays a dialog triggered inside the Files tab.
+3. Side column width stays **340px** — the file rows already truncate;
+   no widening.
+4. Export flow stays a dialog/section inside the Files tab, unchanged.
+5. The file list is **not** wrapped in `useHeldOrder`: it is not a
+   polled list (refresh is the explicit button), so S5's "Show N new"
+   does not apply.
 
 ## Interaction-stability impact checklist
 
@@ -146,9 +149,9 @@ rows) when implementing.
 
 ## Acceptance criteria
 
-- [ ] Section directory always reachable while the notebook scrolls.
-- [ ] Jump-to-section never hides the card behind the sticky header.
-- [ ] Files live beside Variables under one mounted panel; notebook
+- [x] Section directory always reachable while the notebook scrolls.
+- [x] Jump-to-section never hides the card behind the sticky header.
+- [x] Files live beside Variables under one mounted panel; notebook
       work-surface is freed of the bottom Results block.
-- [ ] No interaction-stability invariant regresses (S1/S3/S5 rows
+- [x] No interaction-stability invariant regresses (S1/S3/S5 rows
       updated in `docs/interaction-stability.md`).
