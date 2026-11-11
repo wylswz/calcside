@@ -358,7 +358,11 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 		u, _ := s.UpsertUserByEmail(ctx, "nb@x.com", "", "")
-		now := time.Now().UTC()
+		// Truncate to micros: PostgreSQL timestamps are microsecond
+		// precision, so a nanosecond `now` can never round-trip through
+		// TouchInstanceLive's ExpiresAt.Equal check (see the audit
+		// subtest's convention below).
+		now := time.Now().UTC().Truncate(time.Microsecond)
 		in := &store.Instance{UserID: u.ID, WorkspaceID: store.PersonalWorkspaceID(u.ID),
 			Spec: []byte(`{}`), Status: types.InstanceRunning,
 			CreatedAt: now, LastActiveAt: now, ExpiresAt: now.Add(time.Hour)}
