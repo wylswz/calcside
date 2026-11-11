@@ -31,6 +31,8 @@ const (
 	Csrf             APIErrorCode = "csrf"
 	Forbidden        APIErrorCode = "forbidden"
 	FsError          APIErrorCode = "fs_error"
+	InstanceExpired  APIErrorCode = "instance_expired"
+	InstanceRestored APIErrorCode = "instance_restored"
 	Internal         APIErrorCode = "internal"
 	MethodNotAllowed APIErrorCode = "method_not_allowed"
 	NoFs             APIErrorCode = "no_fs"
@@ -66,6 +68,10 @@ func (e APIErrorCode) Valid() bool {
 	case Forbidden:
 		return true
 	case FsError:
+		return true
+	case InstanceExpired:
+		return true
+	case InstanceRestored:
 		return true
 	case Internal:
 		return true
@@ -240,6 +246,48 @@ func (e ExecErrorType) Valid() bool {
 	}
 }
 
+// Defines values for ExecResultSectionState.
+const (
+	ExecResultSectionStateFailed ExecResultSectionState = "failed"
+	ExecResultSectionStateFresh  ExecResultSectionState = "fresh"
+	ExecResultSectionStateNotRun ExecResultSectionState = "not_run"
+	ExecResultSectionStateStale  ExecResultSectionState = "stale"
+)
+
+// Valid indicates whether the value is a known member of the ExecResultSectionState enum.
+func (e ExecResultSectionState) Valid() bool {
+	switch e {
+	case ExecResultSectionStateFailed:
+		return true
+	case ExecResultSectionStateFresh:
+		return true
+	case ExecResultSectionStateNotRun:
+		return true
+	case ExecResultSectionStateStale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExecSectionRerun.
+const (
+	ExecSectionRerunOnce ExecSectionRerun = "once"
+	ExecSectionRerunSafe ExecSectionRerun = "safe"
+)
+
+// Valid indicates whether the value is a known member of the ExecSectionRerun enum.
+func (e ExecSectionRerun) Valid() bool {
+	switch e {
+	case ExecSectionRerunOnce:
+		return true
+	case ExecSectionRerunSafe:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ExecStatus.
 const (
 	ExecStatusError ExecStatus = "error"
@@ -324,6 +372,48 @@ func (e MemberRole) Valid() bool {
 	case Owner:
 		return true
 	case Viewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NotebookSectionMetaRerun.
+const (
+	NotebookSectionMetaRerunOnce NotebookSectionMetaRerun = "once"
+	NotebookSectionMetaRerunSafe NotebookSectionMetaRerun = "safe"
+)
+
+// Valid indicates whether the value is a known member of the NotebookSectionMetaRerun enum.
+func (e NotebookSectionMetaRerun) Valid() bool {
+	switch e {
+	case NotebookSectionMetaRerunOnce:
+		return true
+	case NotebookSectionMetaRerunSafe:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NotebookSectionMetaState.
+const (
+	NotebookSectionMetaStateFailed NotebookSectionMetaState = "failed"
+	NotebookSectionMetaStateFresh  NotebookSectionMetaState = "fresh"
+	NotebookSectionMetaStateNotRun NotebookSectionMetaState = "not_run"
+	NotebookSectionMetaStateStale  NotebookSectionMetaState = "stale"
+)
+
+// Valid indicates whether the value is a known member of the NotebookSectionMetaState enum.
+func (e NotebookSectionMetaState) Valid() bool {
+	switch e {
+	case NotebookSectionMetaStateFailed:
+		return true
+	case NotebookSectionMetaStateFresh:
+		return true
+	case NotebookSectionMetaStateNotRun:
+		return true
+	case NotebookSectionMetaStateStale:
 		return true
 	default:
 		return false
@@ -435,6 +525,66 @@ func (e ReviewChangeKind) Valid() bool {
 	case Modified:
 		return true
 	case Removed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RunSectionResultStatus.
+const (
+	RunSectionResultStatusError   RunSectionResultStatus = "error"
+	RunSectionResultStatusNotRun  RunSectionResultStatus = "not_run"
+	RunSectionResultStatusOk      RunSectionResultStatus = "ok"
+	RunSectionResultStatusSkipped RunSectionResultStatus = "skipped"
+)
+
+// Valid indicates whether the value is a known member of the RunSectionResultStatus enum.
+func (e RunSectionResultStatus) Valid() bool {
+	switch e {
+	case RunSectionResultStatusError:
+		return true
+	case RunSectionResultStatusNotRun:
+		return true
+	case RunSectionResultStatusOk:
+		return true
+	case RunSectionResultStatusSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RunSectionsRequestSections0.
+const (
+	RunSectionsRequestSections0All   RunSectionsRequestSections0 = "all"
+	RunSectionsRequestSections0Stale RunSectionsRequestSections0 = "stale"
+)
+
+// Valid indicates whether the value is a known member of the RunSectionsRequestSections0 enum.
+func (e RunSectionsRequestSections0) Valid() bool {
+	switch e {
+	case RunSectionsRequestSections0All:
+		return true
+	case RunSectionsRequestSections0Stale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SaveNotebookSectionRequestRerun.
+const (
+	SaveNotebookSectionRequestRerunOnce SaveNotebookSectionRequestRerun = "once"
+	SaveNotebookSectionRequestRerunSafe SaveNotebookSectionRequestRerun = "safe"
+)
+
+// Valid indicates whether the value is a known member of the SaveNotebookSectionRequestRerun enum.
+func (e SaveNotebookSectionRequestRerun) Valid() bool {
+	switch e {
+	case SaveNotebookSectionRequestRerunOnce:
+		return true
+	case SaveNotebookSectionRequestRerunSafe:
 		return true
 	default:
 		return false
@@ -788,6 +938,13 @@ type CreatedKey struct {
 // Decision defines model for Decision.
 type Decision string
 
+// DeleteNotebookSectionResponse defines model for DeleteNotebookSectionResponse.
+type DeleteNotebookSectionResponse struct {
+	// Affected sections still reading this section's defines
+	Affected []string `json:"affected"`
+	Revision int64    `json:"revision"`
+}
+
 // EditorMetadata defines model for EditorMetadata.
 type EditorMetadata struct {
 	Capabilities []CapabilityDoc    `json:"capabilities"`
@@ -824,18 +981,50 @@ type ExecErrorType string
 
 // ExecRequest defines model for ExecRequest.
 type ExecRequest struct {
-	Code      string `json:"code"`
-	TimeoutMs *int64 `json:"timeout_ms,omitempty"`
+	Code      string       `json:"code"`
+	Section   *ExecSection `json:"section,omitempty"`
+	TimeoutMs *int64       `json:"timeout_ms,omitempty"`
 }
 
 // ExecResult defines model for ExecResult.
 type ExecResult struct {
+	// Drift scratch execs that changed globals outside the notebook
+	Drift      *int64    `json:"drift,omitempty"`
 	DurationMs int64     `json:"duration_ms"`
 	Error      ExecError `json:"error"`
 	ExecId     string    `json:"exec_id"`
-	Output     string    `json:"output"`
-	Steps      int64     `json:"steps"`
+
+	// NotebookRevision notebook CAS after this exec (absent pre-notebooks)
+	NotebookRevision *int64 `json:"notebook_revision,omitempty"`
+	Output           string `json:"output"`
+
+	// Section section name when this exec ran one
+	Section *string `json:"section,omitempty"`
+
+	// SectionState the section's state after this run
+	SectionState *ExecResultSectionState `json:"section_state,omitempty"`
+	Steps        int64                   `json:"steps"`
 }
+
+// ExecResultSectionState the section's state after this run
+type ExecResultSectionState string
+
+// ExecSection defines model for ExecSection.
+type ExecSection struct {
+	// After insert after this section; empty appends
+	After       *string `json:"after,omitempty"`
+	Description *string `json:"description,omitempty"`
+	Name        string  `json:"name"`
+
+	// Rerun once sections are skipped by bulk runs after a prior success
+	Rerun *ExecSectionRerun `json:"rerun,omitempty"`
+
+	// Revision notebook CAS; omit to skip the check
+	Revision *int64 `json:"revision,omitempty"`
+}
+
+// ExecSectionRerun once sections are skipped by bulk runs after a prior success
+type ExecSectionRerun string
 
 // ExecStatus defines model for ExecStatus.
 type ExecStatus string
@@ -976,17 +1165,29 @@ type InferContractRequest struct {
 
 // Instance defines model for Instance.
 type Instance struct {
-	Activity     *ExecActivity     `json:"activity,omitempty"`
-	CreatedAt    time.Time         `json:"created_at"`
-	EndedAt      *time.Time        `json:"ended_at,omitempty"`
-	ExpiresAt    time.Time         `json:"expires_at"`
-	Id           string            `json:"id"`
+	Activity  *ExecActivity `json:"activity,omitempty"`
+	CreatedAt time.Time     `json:"created_at"`
+
+	// Drift scratch execs that changed globals outside the notebook
+	Drift     *int64     `json:"drift,omitempty"`
+	EndedAt   *time.Time `json:"ended_at,omitempty"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	Id        string     `json:"id"`
+
+	// Incarnation process generation; increments on each restore
+	Incarnation  *int64            `json:"incarnation,omitempty"`
 	Labels       map[string]string `json:"labels"`
 	LastActiveAt time.Time         `json:"last_active_at"`
-	Spec         InstanceSpec      `json:"spec"`
-	Status       InstanceStatus    `json:"status"`
-	UserId       string            `json:"user_id"`
-	WorkspaceId  *string           `json:"workspace_id,omitempty"`
+
+	// NotebookRevision notebook CAS counter
+	NotebookRevision *int64 `json:"notebook_revision,omitempty"`
+
+	// RestoredAt when the current empty process was restored (absent otherwise)
+	RestoredAt  *time.Time     `json:"restored_at,omitempty"`
+	Spec        InstanceSpec   `json:"spec"`
+	Status      InstanceStatus `json:"status"`
+	UserId      string         `json:"user_id"`
+	WorkspaceId *string        `json:"workspace_id,omitempty"`
 }
 
 // InstanceInspect live globals snapshot; values are reprs, secret-scrubbed
@@ -1006,9 +1207,13 @@ type InstancePrompt struct {
 
 	// Tools tool names the prompt references (prefix applied)
 	Tools struct {
-		Exec      *string `json:"exec,omitempty"`
-		ListFiles *string `json:"list_files,omitempty"`
-		ReadFile  *string `json:"read_file,omitempty"`
+		AddSection  *string `json:"add_section,omitempty"`
+		Exec        *string `json:"exec,omitempty"`
+		ListFiles   *string `json:"list_files,omitempty"`
+		Notebook    *string `json:"notebook,omitempty"`
+		ReadFile    *string `json:"read_file,omitempty"`
+		ReadSection *string `json:"read_section,omitempty"`
+		RunSections *string `json:"run_sections,omitempty"`
 	} `json:"tools"`
 }
 
@@ -1355,6 +1560,81 @@ type ModulesResponse struct {
 	Modules *[]Module `json:"modules,omitempty"`
 }
 
+// Notebook defines model for Notebook.
+type Notebook struct {
+	Drift       int64  `json:"drift"`
+	Incarnation int64  `json:"incarnation"`
+	InstanceId  string `json:"instance_id"`
+
+	// Next computed guidance (stale/not_run/unbound/drift)
+	Next []string `json:"next"`
+
+	// Outline rendered text outline for agents
+	Outline    string     `json:"outline"`
+	RestoredAt *time.Time `json:"restored_at,omitempty"`
+
+	// RestoredEmpty true only while a restored process is verifiably untouched — restored_at set and nothing has run in the current incarnation
+	RestoredEmpty bool                  `json:"restored_empty"`
+	Revision      int64                 `json:"revision"`
+	Sections      []NotebookSectionMeta `json:"sections"`
+	Status        InstanceStatus        `json:"status"`
+}
+
+// NotebookResponse defines model for NotebookResponse.
+type NotebookResponse struct {
+	Notebook *Notebook `json:"notebook,omitempty"`
+}
+
+// NotebookSection defines model for NotebookSection.
+type NotebookSection struct {
+	Code string `json:"code"`
+
+	// Error last run's error + backtrace (include_output only)
+	Error *string `json:"error,omitempty"`
+
+	// Output last run's secret-scrubbed output (include_output only)
+	Output          *string             `json:"output,omitempty"`
+	OutputTruncated *bool               `json:"output_truncated,omitempty"`
+	Section         NotebookSectionMeta `json:"section"`
+}
+
+// NotebookSectionMeta defines model for NotebookSectionMeta.
+type NotebookSectionMeta struct {
+	Defines []string `json:"defines"`
+
+	// DependsOn sections whose defines this section reads — providers edited, moved, or deleted leave it stale
+	DependsOn   []string `json:"depends_on"`
+	Description string   `json:"description"`
+
+	// Effects distinct capability.op names observed in its last run
+	Effects    []string `json:"effects"`
+	LastExecId *string  `json:"last_exec_id,omitempty"`
+
+	// LastIncarnation incarnation that produced the last run; differs from the notebook's current incarnation after a restore, marking the output as previous-runtime history
+	LastIncarnation int64      `json:"last_incarnation"`
+	LastRunAt       *time.Time `json:"last_run_at,omitempty"`
+	LastStatus      *string    `json:"last_status,omitempty"`
+	Name            string     `json:"name"`
+
+	// OnceRan a once section already succeeded once
+	OnceRan  bool                     `json:"once_ran"`
+	Position int64                    `json:"position"`
+	Rerun    NotebookSectionMetaRerun `json:"rerun"`
+	State    NotebookSectionMetaState `json:"state"`
+	Uses     []string                 `json:"uses"`
+}
+
+// NotebookSectionMetaRerun defines model for NotebookSectionMeta.Rerun.
+type NotebookSectionMetaRerun string
+
+// NotebookSectionMetaState defines model for NotebookSectionMeta.State.
+type NotebookSectionMetaState string
+
+// NotebookSectionResponse defines model for NotebookSectionResponse.
+type NotebookSectionResponse struct {
+	Section *NotebookSection `json:"section,omitempty"`
+}
+
 // OkResponse defines model for OkResponse.
 type OkResponse struct {
 	Ok *bool `json:"ok,omitempty"`
@@ -1541,6 +1821,60 @@ type RunResponse struct {
 	Steps      *[]RunStep   `json:"steps,omitempty"`
 }
 
+// RunSectionResult defines model for RunSectionResult.
+type RunSectionResult struct {
+	DurationMs    *int64                 `json:"duration_ms,omitempty"`
+	Error         *string                `json:"error,omitempty"`
+	ExecId        *string                `json:"exec_id,omitempty"`
+	Name          string                 `json:"name"`
+	SkippedReason *string                `json:"skipped_reason,omitempty"`
+	Status        RunSectionResultStatus `json:"status"`
+}
+
+// RunSectionResultStatus defines model for RunSectionResult.Status.
+type RunSectionResultStatus string
+
+// RunSectionsRequest defines model for RunSectionsRequest.
+type RunSectionsRequest struct {
+	// Revision notebook CAS; omit to skip the check
+	Revision *int64 `json:"revision,omitempty"`
+
+	// Sections "all", "stale", one name, or a list of names
+	Sections RunSectionsRequest_Sections `json:"sections"`
+}
+
+// RunSectionsRequestSections0 defines model for RunSectionsRequest.Sections.0.
+type RunSectionsRequestSections0 string
+
+// RunSectionsRequestSections1 defines model for RunSectionsRequest.Sections.1.
+type RunSectionsRequestSections1 = string
+
+// RunSectionsRequestSections2 defines model for RunSectionsRequest.Sections.2.
+type RunSectionsRequestSections2 = []string
+
+// RunSectionsRequest_Sections "all", "stale", one name, or a list of names
+type RunSectionsRequest_Sections struct {
+	union json.RawMessage
+}
+
+// RunSectionsResponse defines model for RunSectionsResponse.
+type RunSectionsResponse struct {
+	Report *struct {
+		Drift       int64  `json:"drift"`
+		Incarnation int64  `json:"incarnation"`
+		InstanceId  string `json:"instance_id"`
+
+		// Restored the runtime was lost mid-run and restored empty; earlier results ran in the previous incarnation
+		Restored *bool              `json:"restored,omitempty"`
+		Results  []RunSectionResult `json:"results"`
+		Revision int64              `json:"revision"`
+
+		// StoppedReason why the run stopped early (e.g. instance_restored)
+		StoppedReason *string   `json:"stopped_reason,omitempty"`
+		Warnings      *[]string `json:"warnings,omitempty"`
+	} `json:"report,omitempty"`
+}
+
 // RunStep defines model for RunStep.
 type RunStep struct {
 	Attempt     int        `json:"attempt"`
@@ -1560,6 +1894,35 @@ type RunStep struct {
 // RunsResponse defines model for RunsResponse.
 type RunsResponse struct {
 	Runs *[]Run `json:"runs,omitempty"`
+}
+
+// SaveNotebookSectionRequest defines model for SaveNotebookSectionRequest.
+type SaveNotebookSectionRequest struct {
+	// After move/insert after this section; omit to keep position (new sections append)
+	After *string `json:"after,omitempty"`
+
+	// Code omit to keep stored code
+	Code *string `json:"code,omitempty"`
+
+	// CreateOnly reject with 409 when the section already exists — never silently overwrite (agent add_section semantics)
+	CreateOnly  *bool   `json:"create_only,omitempty"`
+	Description *string `json:"description,omitempty"`
+
+	// FromExec promote a successful scratch execution's code into this section
+	FromExec *string                          `json:"from_exec,omitempty"`
+	Rerun    *SaveNotebookSectionRequestRerun `json:"rerun,omitempty"`
+
+	// Revision notebook CAS; required
+	Revision *int64 `json:"revision,omitempty"`
+}
+
+// SaveNotebookSectionRequestRerun defines model for SaveNotebookSectionRequest.Rerun.
+type SaveNotebookSectionRequestRerun string
+
+// SaveNotebookSectionResponse defines model for SaveNotebookSectionResponse.
+type SaveNotebookSectionResponse struct {
+	Revision int64               `json:"revision"`
+	Section  NotebookSectionMeta `json:"section"`
 }
 
 // Secret defines model for Secret.
@@ -1812,6 +2175,16 @@ type InstancePromptParams struct {
 	ToolPrefix *string `form:"tool_prefix,omitempty" json:"tool_prefix,omitempty"`
 }
 
+// DeleteNotebookSectionParams defines parameters for DeleteNotebookSection.
+type DeleteNotebookSectionParams struct {
+	Revision int64 `form:"revision" json:"revision"`
+}
+
+// ReadNotebookSectionParams defines parameters for ReadNotebookSection.
+type ReadNotebookSectionParams struct {
+	IncludeOutput *bool `form:"include_output,omitempty" json:"include_output,omitempty"`
+}
+
 // PutShareJSONBody defines parameters for PutShare.
 type PutShareJSONBody struct {
 	Email string     `json:"email"`
@@ -1957,6 +2330,12 @@ type PreviewArtifactJSONRequestBody PreviewArtifactJSONBody
 // ExecJSONRequestBody defines body for Exec for application/json ContentType.
 type ExecJSONRequestBody = ExecRequest
 
+// RunNotebookSectionsJSONRequestBody defines body for RunNotebookSections for application/json ContentType.
+type RunNotebookSectionsJSONRequestBody = RunSectionsRequest
+
+// SaveNotebookSectionJSONRequestBody defines body for SaveNotebookSection for application/json ContentType.
+type SaveNotebookSectionJSONRequestBody = SaveNotebookSectionRequest
+
 // PutShareJSONRequestBody defines body for PutShare for application/json ContentType.
 type PutShareJSONRequestBody PutShareJSONBody
 
@@ -2025,6 +2404,94 @@ type AddMemberJSONRequestBody AddMemberJSONBody
 
 // SetMemberRoleJSONRequestBody defines body for SetMemberRole for application/json ContentType.
 type SetMemberRoleJSONRequestBody SetMemberRoleJSONBody
+
+// AsRunSectionsRequestSections0 returns the union data inside the RunSectionsRequest_Sections as a RunSectionsRequestSections0
+func (t RunSectionsRequest_Sections) AsRunSectionsRequestSections0() (RunSectionsRequestSections0, error) {
+	var body RunSectionsRequestSections0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromRunSectionsRequestSections0 overwrites any union data inside the RunSectionsRequest_Sections as the provided RunSectionsRequestSections0
+func (t *RunSectionsRequest_Sections) FromRunSectionsRequestSections0(v RunSectionsRequestSections0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeRunSectionsRequestSections0 performs a merge with any union data inside the RunSectionsRequest_Sections, using the provided RunSectionsRequestSections0
+func (t *RunSectionsRequest_Sections) MergeRunSectionsRequestSections0(v RunSectionsRequestSections0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsRunSectionsRequestSections1 returns the union data inside the RunSectionsRequest_Sections as a RunSectionsRequestSections1
+func (t RunSectionsRequest_Sections) AsRunSectionsRequestSections1() (RunSectionsRequestSections1, error) {
+	var body RunSectionsRequestSections1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromRunSectionsRequestSections1 overwrites any union data inside the RunSectionsRequest_Sections as the provided RunSectionsRequestSections1
+func (t *RunSectionsRequest_Sections) FromRunSectionsRequestSections1(v RunSectionsRequestSections1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeRunSectionsRequestSections1 performs a merge with any union data inside the RunSectionsRequest_Sections, using the provided RunSectionsRequestSections1
+func (t *RunSectionsRequest_Sections) MergeRunSectionsRequestSections1(v RunSectionsRequestSections1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsRunSectionsRequestSections2 returns the union data inside the RunSectionsRequest_Sections as a RunSectionsRequestSections2
+func (t RunSectionsRequest_Sections) AsRunSectionsRequestSections2() (RunSectionsRequestSections2, error) {
+	var body RunSectionsRequestSections2
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromRunSectionsRequestSections2 overwrites any union data inside the RunSectionsRequest_Sections as the provided RunSectionsRequestSections2
+func (t *RunSectionsRequest_Sections) FromRunSectionsRequestSections2(v RunSectionsRequestSections2) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeRunSectionsRequestSections2 performs a merge with any union data inside the RunSectionsRequest_Sections, using the provided RunSectionsRequestSections2
+func (t *RunSectionsRequest_Sections) MergeRunSectionsRequestSections2(v RunSectionsRequestSections2) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t RunSectionsRequest_Sections) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *RunSectionsRequest_Sections) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -2128,8 +2595,23 @@ type ServerInterface interface {
 	// (POST /api/v1/instances/{id}/keepalive)
 	Keepalive(c *gin.Context, id IdPath)
 
+	// (GET /api/v1/instances/{id}/notebook)
+	GetNotebook(c *gin.Context, id IdPath)
+
+	// (POST /api/v1/instances/{id}/notebook/run)
+	RunNotebookSections(c *gin.Context, id IdPath)
+
 	// (GET /api/v1/instances/{id}/prompt)
 	InstancePrompt(c *gin.Context, id IdPath, params InstancePromptParams)
+
+	// (DELETE /api/v1/instances/{id}/sections/{name})
+	DeleteNotebookSection(c *gin.Context, id IdPath, name string, params DeleteNotebookSectionParams)
+
+	// (GET /api/v1/instances/{id}/sections/{name})
+	ReadNotebookSection(c *gin.Context, id IdPath, name string, params ReadNotebookSectionParams)
+
+	// (PUT /api/v1/instances/{id}/sections/{name})
+	SaveNotebookSection(c *gin.Context, id IdPath, name string)
 
 	// (GET /api/v1/instances/{id}/shares)
 	ListShares(c *gin.Context, id IdPath)
@@ -3197,6 +3679,56 @@ func (siw *ServerInterfaceWrapper) Keepalive(c *gin.Context) {
 	siw.Handler.Keepalive(c, id)
 }
 
+// GetNotebook operation middleware
+func (siw *ServerInterfaceWrapper) GetNotebook(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetNotebook(c, id)
+}
+
+// RunNotebookSections operation middleware
+func (siw *ServerInterfaceWrapper) RunNotebookSections(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RunNotebookSections(c, id)
+}
+
 // InstancePrompt operation middleware
 func (siw *ServerInterfaceWrapper) InstancePrompt(c *gin.Context) {
 
@@ -3231,6 +3763,130 @@ func (siw *ServerInterfaceWrapper) InstancePrompt(c *gin.Context) {
 	}
 
 	siw.Handler.InstancePrompt(c, id, params)
+}
+
+// DeleteNotebookSection operation middleware
+func (siw *ServerInterfaceWrapper) DeleteNotebookSection(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", c.Param("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter name: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteNotebookSectionParams
+
+	// ------------- Required query parameter "revision" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "revision", c.Request.URL.Query(), &params.Revision, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter revision: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteNotebookSection(c, id, name, params)
+}
+
+// ReadNotebookSection operation middleware
+func (siw *ServerInterfaceWrapper) ReadNotebookSection(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", c.Param("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter name: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ReadNotebookSectionParams
+
+	// ------------- Optional query parameter "include_output" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "include_output", c.Request.URL.Query(), &params.IncludeOutput, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter include_output: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ReadNotebookSection(c, id, name, params)
+}
+
+// SaveNotebookSection operation middleware
+func (siw *ServerInterfaceWrapper) SaveNotebookSection(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", c.Param("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter name: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.SaveNotebookSection(c, id, name)
 }
 
 // ListShares operation middleware
@@ -4680,6 +5336,11 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/instances/:id", wrapper.GetInstance)
 	router.POST(options.BaseURL+"/api/v1/instances/:id/keepalive", wrapper.Keepalive)
 	router.POST(options.BaseURL+"/api/v1/instances/:id/exec", wrapper.Exec)
+	router.GET(options.BaseURL+"/api/v1/instances/:id/notebook", wrapper.GetNotebook)
+	router.POST(options.BaseURL+"/api/v1/instances/:id/notebook/run", wrapper.RunNotebookSections)
+	router.DELETE(options.BaseURL+"/api/v1/instances/:id/sections/:name", wrapper.DeleteNotebookSection)
+	router.GET(options.BaseURL+"/api/v1/instances/:id/sections/:name", wrapper.ReadNotebookSection)
+	router.PUT(options.BaseURL+"/api/v1/instances/:id/sections/:name", wrapper.SaveNotebookSection)
 	router.GET(options.BaseURL+"/api/v1/instances/:id/files", wrapper.Files)
 	router.PUT(options.BaseURL+"/api/v1/instances/:id/files", wrapper.UploadFile)
 	router.GET(options.BaseURL+"/api/v1/artifacts/config", wrapper.ArtifactConfig)
@@ -6676,6 +7337,20 @@ func (response Exec409JSONResponse) VisitExecResponse(w http.ResponseWriter) err
 	return err
 }
 
+type Exec410JSONResponse ErrorEnvelope
+
+func (response Exec410JSONResponse) VisitExecResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(410)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type Exec413JSONResponse ErrorEnvelope
 
 func (response Exec413JSONResponse) VisitExecResponse(w http.ResponseWriter) error {
@@ -7056,6 +7731,149 @@ func (response Keepalive409JSONResponse) VisitKeepaliveResponse(w http.ResponseW
 	return err
 }
 
+type GetNotebookRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type GetNotebookResponseObject interface {
+	VisitGetNotebookResponse(w http.ResponseWriter) error
+}
+
+type GetNotebook200JSONResponse NotebookResponse
+
+func (response GetNotebook200JSONResponse) VisitGetNotebookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetNotebook401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetNotebook401JSONResponse) VisitGetNotebookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetNotebook404JSONResponse ErrorEnvelope
+
+func (response GetNotebook404JSONResponse) VisitGetNotebookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunNotebookSectionsRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *RunNotebookSectionsJSONRequestBody
+}
+
+type RunNotebookSectionsResponseObject interface {
+	VisitRunNotebookSectionsResponse(w http.ResponseWriter) error
+}
+
+type RunNotebookSections200JSONResponse RunSectionsResponse
+
+func (response RunNotebookSections200JSONResponse) VisitRunNotebookSectionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunNotebookSections400JSONResponse struct{ ErrorJSONResponse }
+
+func (response RunNotebookSections400JSONResponse) VisitRunNotebookSectionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunNotebookSections401JSONResponse ErrorEnvelope
+
+func (response RunNotebookSections401JSONResponse) VisitRunNotebookSectionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunNotebookSections404JSONResponse ErrorEnvelope
+
+func (response RunNotebookSections404JSONResponse) VisitRunNotebookSectionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunNotebookSections409JSONResponse ErrorEnvelope
+
+func (response RunNotebookSections409JSONResponse) VisitRunNotebookSectionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunNotebookSections410JSONResponse ErrorEnvelope
+
+func (response RunNotebookSections410JSONResponse) VisitRunNotebookSectionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(410)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type InstancePromptRequestObject struct {
 	Id     IdPath `json:"id"`
 	Params InstancePromptParams
@@ -7131,6 +7949,246 @@ func (response InstancePrompt409JSONResponse) VisitInstancePromptResponse(w http
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteNotebookSectionRequestObject struct {
+	Id     IdPath `json:"id"`
+	Name   string `json:"name"`
+	Params DeleteNotebookSectionParams
+}
+
+type DeleteNotebookSectionResponseObject interface {
+	VisitDeleteNotebookSectionResponse(w http.ResponseWriter) error
+}
+
+type DeleteNotebookSection200JSONResponse DeleteNotebookSectionResponse
+
+func (response DeleteNotebookSection200JSONResponse) VisitDeleteNotebookSectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteNotebookSection400JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteNotebookSection400JSONResponse) VisitDeleteNotebookSectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteNotebookSection401JSONResponse ErrorEnvelope
+
+func (response DeleteNotebookSection401JSONResponse) VisitDeleteNotebookSectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteNotebookSection404JSONResponse ErrorEnvelope
+
+func (response DeleteNotebookSection404JSONResponse) VisitDeleteNotebookSectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteNotebookSection409JSONResponse ErrorEnvelope
+
+func (response DeleteNotebookSection409JSONResponse) VisitDeleteNotebookSectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteNotebookSection410JSONResponse ErrorEnvelope
+
+func (response DeleteNotebookSection410JSONResponse) VisitDeleteNotebookSectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(410)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReadNotebookSectionRequestObject struct {
+	Id     IdPath `json:"id"`
+	Name   string `json:"name"`
+	Params ReadNotebookSectionParams
+}
+
+type ReadNotebookSectionResponseObject interface {
+	VisitReadNotebookSectionResponse(w http.ResponseWriter) error
+}
+
+type ReadNotebookSection200JSONResponse NotebookSectionResponse
+
+func (response ReadNotebookSection200JSONResponse) VisitReadNotebookSectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReadNotebookSection401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ReadNotebookSection401JSONResponse) VisitReadNotebookSectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReadNotebookSection404JSONResponse ErrorEnvelope
+
+func (response ReadNotebookSection404JSONResponse) VisitReadNotebookSectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveNotebookSectionRequestObject struct {
+	Id   IdPath `json:"id"`
+	Name string `json:"name"`
+	Body *SaveNotebookSectionJSONRequestBody
+}
+
+type SaveNotebookSectionResponseObject interface {
+	VisitSaveNotebookSectionResponse(w http.ResponseWriter) error
+}
+
+type SaveNotebookSection200JSONResponse SaveNotebookSectionResponse
+
+func (response SaveNotebookSection200JSONResponse) VisitSaveNotebookSectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveNotebookSection400JSONResponse struct{ ErrorJSONResponse }
+
+func (response SaveNotebookSection400JSONResponse) VisitSaveNotebookSectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveNotebookSection401JSONResponse ErrorEnvelope
+
+func (response SaveNotebookSection401JSONResponse) VisitSaveNotebookSectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveNotebookSection404JSONResponse ErrorEnvelope
+
+func (response SaveNotebookSection404JSONResponse) VisitSaveNotebookSectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveNotebookSection409JSONResponse ErrorEnvelope
+
+func (response SaveNotebookSection409JSONResponse) VisitSaveNotebookSectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SaveNotebookSection410JSONResponse ErrorEnvelope
+
+func (response SaveNotebookSection410JSONResponse) VisitSaveNotebookSectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(410)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -10959,8 +12017,23 @@ type StrictServerInterface interface {
 	// (POST /api/v1/instances/{id}/keepalive)
 	Keepalive(ctx context.Context, request KeepaliveRequestObject) (KeepaliveResponseObject, error)
 
+	// (GET /api/v1/instances/{id}/notebook)
+	GetNotebook(ctx context.Context, request GetNotebookRequestObject) (GetNotebookResponseObject, error)
+
+	// (POST /api/v1/instances/{id}/notebook/run)
+	RunNotebookSections(ctx context.Context, request RunNotebookSectionsRequestObject) (RunNotebookSectionsResponseObject, error)
+
 	// (GET /api/v1/instances/{id}/prompt)
 	InstancePrompt(ctx context.Context, request InstancePromptRequestObject) (InstancePromptResponseObject, error)
+
+	// (DELETE /api/v1/instances/{id}/sections/{name})
+	DeleteNotebookSection(ctx context.Context, request DeleteNotebookSectionRequestObject) (DeleteNotebookSectionResponseObject, error)
+
+	// (GET /api/v1/instances/{id}/sections/{name})
+	ReadNotebookSection(ctx context.Context, request ReadNotebookSectionRequestObject) (ReadNotebookSectionResponseObject, error)
+
+	// (PUT /api/v1/instances/{id}/sections/{name})
+	SaveNotebookSection(ctx context.Context, request SaveNotebookSectionRequestObject) (SaveNotebookSectionResponseObject, error)
 
 	// (GET /api/v1/instances/{id}/shares)
 	ListShares(ctx context.Context, request ListSharesRequestObject) (ListSharesResponseObject, error)
@@ -12117,6 +13190,65 @@ func (sh *strictHandler) Keepalive(ctx *gin.Context, id IdPath) {
 	}
 }
 
+// GetNotebook operation middleware
+func (sh *strictHandler) GetNotebook(ctx *gin.Context, id IdPath) {
+	var request GetNotebookRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.GetNotebook(ctx, request.(GetNotebookRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetNotebook")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(GetNotebookResponseObject); ok {
+		if err := validResponse.VisitGetNotebookResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RunNotebookSections operation middleware
+func (sh *strictHandler) RunNotebookSections(ctx *gin.Context, id IdPath) {
+	var request RunNotebookSectionsRequestObject
+
+	request.Id = id
+
+	var body RunNotebookSectionsJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.RunNotebookSections(ctx, request.(RunNotebookSectionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RunNotebookSections")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(RunNotebookSectionsResponseObject); ok {
+		if err := validResponse.VisitRunNotebookSectionsResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // InstancePrompt operation middleware
 func (sh *strictHandler) InstancePrompt(ctx *gin.Context, id IdPath, params InstancePromptParams) {
 	var request InstancePromptRequestObject
@@ -12137,6 +13269,96 @@ func (sh *strictHandler) InstancePrompt(ctx *gin.Context, id IdPath, params Inst
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(InstancePromptResponseObject); ok {
 		if err := validResponse.VisitInstancePromptResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteNotebookSection operation middleware
+func (sh *strictHandler) DeleteNotebookSection(ctx *gin.Context, id IdPath, name string, params DeleteNotebookSectionParams) {
+	var request DeleteNotebookSectionRequestObject
+
+	request.Id = id
+	request.Name = name
+	request.Params = params
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteNotebookSection(ctx, request.(DeleteNotebookSectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteNotebookSection")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(DeleteNotebookSectionResponseObject); ok {
+		if err := validResponse.VisitDeleteNotebookSectionResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReadNotebookSection operation middleware
+func (sh *strictHandler) ReadNotebookSection(ctx *gin.Context, id IdPath, name string, params ReadNotebookSectionParams) {
+	var request ReadNotebookSectionRequestObject
+
+	request.Id = id
+	request.Name = name
+	request.Params = params
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ReadNotebookSection(ctx, request.(ReadNotebookSectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReadNotebookSection")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ReadNotebookSectionResponseObject); ok {
+		if err := validResponse.VisitReadNotebookSectionResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SaveNotebookSection operation middleware
+func (sh *strictHandler) SaveNotebookSection(ctx *gin.Context, id IdPath, name string) {
+	var request SaveNotebookSectionRequestObject
+
+	request.Id = id
+	request.Name = name
+
+	var body SaveNotebookSectionJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.SaveNotebookSection(ctx, request.(SaveNotebookSectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SaveNotebookSection")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(SaveNotebookSectionResponseObject); ok {
+		if err := validResponse.VisitSaveNotebookSectionResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

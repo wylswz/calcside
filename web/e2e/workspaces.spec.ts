@@ -324,12 +324,10 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   for (const h of ['Boundary', 'Results', 'Agent', 'State']) {
     await expect(page.getByRole('heading', { name: h })).toBeVisible()
   }
-  // Work's h2 exists for a11y but is visually hidden by design
-  const workH2 = page.getByRole('heading', { name: 'Work' })
-  await expect(workH2).toBeAttached()
-  const wh = await workH2.evaluate((el) => ({ h: el.getBoundingClientRect().height, clip: getComputedStyle(el).clipPath }))
-  expect(wh.h).toBeLessThan(4)
-  expect(wh.clip).not.toBe('none')
+  // the notebook is the default view; the scratch region keeps the run
+  // editor reachable without a toggle
+  await expect(page.getByRole('tab', { name: 'Notebook' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('#run-code')).toBeAttached()
   // inspect (State) lives in the right rail and is visible by default
   const state = page.locator('[aria-label="State"]')
   await expect(state).toBeVisible()
@@ -416,7 +414,9 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   await expect(menu).toHaveCount(0)
   await expect(more).toBeFocused()
   await more.click()
-  await page.locator('body').click({ position: { x: 10, y: 10 } })
+  // outside click dismisses; click inert boundary text — a
+  // viewport-corner click lands on the fixed sidebar's brand link
+  await page.locator('.side-col .side-text').first().click()
   await expect(menu).toHaveCount(0)
   // the menu's remaining item opens a dialog; closing it returns to More
   await more.click()
@@ -438,27 +438,30 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   await expect(promptButton).toBeFocused()
   await expect(page.getByRole('button', { name: 'Share', exact: true })).toBeVisible()
 
-  // The run editor is its own region on arrival, above Activity — no
-  // toggle to reveal it. The all / needs attention filter belongs to
-  // Activity's heading and moving it never moves the editor.
+  // The scratch editor is its own region on the Notebook view — no
+  // toggle to reveal it. Activity is a separate addressable view; its
+  // heading/filter never move when the run list or filter changes.
+  await page.getByRole('tab', { name: 'Notebook' }).click()
   await expect(page.locator('#run-code .cm-editor')).toBeVisible({ timeout: 8000 })
   await expect(page.getByRole('button', { name: 'Run code', exact: true })).toHaveCount(0)
-  const editorBox = (await page.locator('#run-code').boundingBox())!
-  const activityBox = (await page.locator('[aria-label="Activity"]').boundingBox())!
-  expect(editorBox.y + editorBox.height).toBeLessThanOrEqual(activityBox.y)
-  const filtersBox = (await page.locator('.seg-filters').boundingBox())!
-  const headingBox = (await page.locator('.activity-heading').boundingBox())!
-  expect(filtersBox.y).toBeGreaterThanOrEqual(headingBox.y)
-  expect(filtersBox.y + filtersBox.height).toBeLessThanOrEqual(headingBox.y + headingBox.height)
   // the editor's action is an icon; there is no header toggle or close
   const runAction = page.getByRole('button', { name: 'Run', exact: true })
   await expect(runAction).toBeVisible()
   await expect(runAction.locator('svg')).toHaveCount(1)
   await expect(page.locator('#run-code').getByRole('button', { name: 'Close' })).toHaveCount(0)
-  // switching the filter keeps the editor and the filter in place
+  // switching views keeps the editor mounted and its draft intact (C3)
+  const codeBefore = await page.locator('#run-code .cm-content').innerText()
+  await page.getByRole('tab', { name: 'Activity' }).click()
+  await expect(page.locator('[aria-label="Activity"]')).toBeVisible()
+  const filtersBox = (await page.locator('.seg-filters').boundingBox())!
+  const headingBox = (await page.locator('.activity-heading').boundingBox())!
+  expect(filtersBox.y).toBeGreaterThanOrEqual(headingBox.y)
+  expect(filtersBox.y + filtersBox.height).toBeLessThanOrEqual(headingBox.y + headingBox.height)
+  // the all / needs attention filter belongs to Activity's heading and
+  // switching it never moves the heading or the filters
   const at = async () => ({
-    editor: await page.locator('#run-code').evaluate((el) => { const b = el.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y + scrollY), Math.round(b.width)] }),
     filter: await page.locator('.seg-filters').evaluate((el) => { const b = el.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y + scrollY), Math.round(b.width)] }),
+    heading: await page.locator('.activity-heading').evaluate((el) => { const b = el.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y + scrollY), Math.round(b.width)] }),
   })
   await page.mouse.move(1, 1)
   await page.waitForTimeout(400)
@@ -467,12 +470,15 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   await page.waitForTimeout(400)
   expect(await at()).toEqual(closedAt)
   await page.locator('.seg-filters button').first().click()
+  // back on Notebook the scratch draft survived the view switch
+  await page.getByRole('tab', { name: 'Notebook' }).click()
+  expect(await page.locator('#run-code .cm-content').innerText()).toBe(codeBefore)
 
   // mobile: Work precedes Boundary; ≥44px primary; no overflow
   await page.setViewportSize({ width: 390, height: 900 })
   await page.waitForTimeout(600)
   const mob = await page.evaluate(() => {
-    const work = document.querySelector('[aria-label="Work"]')!.getBoundingClientRect()
+    const work = document.querySelector('[aria-label="Scratch"]')!.getBoundingClientRect()
     const bound = document.querySelector('[aria-label="Boundary"]')!.getBoundingClientRect()
     return { work: work.top, bound: bound.top, sw: document.documentElement.scrollWidth, iw: window.innerWidth }
   })
@@ -984,7 +990,7 @@ test('agent runs wait behind "Show N new"; your own runs appear at once (S5)', a
   const agent = { Authorization: `Bearer ${(await key.json()).secret}` }
   const exec = (code: string, headers?: Record<string, string>) => client.post(`/api/v1/instances/${inst.id}/exec`, { data: { code }, headers })
   expect((await exec('print("first")', agent)).status()).toBe(200)
-  await page.goto(`${consoleURL}/instances/${inst.id}`)
+  await page.goto(`${consoleURL}/instances/${inst.id}?view=activity`)
   const rows = page.locator('[aria-label="Activity"] tbody tr[id^="run-"]')
   await expect(rows).toHaveCount(1)
   const first = await rows.first().evaluate((el) => { const b = el.getBoundingClientRect(); return [b.x, b.y + scrollY] })

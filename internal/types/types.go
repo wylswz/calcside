@@ -274,6 +274,8 @@ const (
 	ErrCodeCSRF             APIErrorCode = "csrf"
 	ErrCodeForbidden        APIErrorCode = "forbidden"
 	ErrCodeFSError          APIErrorCode = "fs_error"
+	ErrCodeInstanceExpired  APIErrorCode = "instance_expired"
+	ErrCodeInstanceRestored APIErrorCode = "instance_restored"
 	ErrCodeInternal         APIErrorCode = "internal"
 	ErrCodeMethodNotAllowed APIErrorCode = "method_not_allowed"
 	ErrCodeNoFS             APIErrorCode = "no_fs"
@@ -289,7 +291,7 @@ func AllAPIErrorCodes() []APIErrorCode {
 	return []APIErrorCode{
 		ErrCodeAlreadyResolved, ErrCodeAuthFailed, ErrCodeBadCapability, ErrCodeBadPolicy, ErrCodeBadRequest,
 		ErrCodeBadSecret, ErrCodeBadSpec, ErrCodeConflict, ErrCodeCSRF, ErrCodeForbidden,
-		ErrCodeFSError, ErrCodeInternal, ErrCodeMethodNotAllowed, ErrCodeNoFS,
+		ErrCodeFSError, ErrCodeInstanceExpired, ErrCodeInstanceRestored, ErrCodeInternal, ErrCodeMethodNotAllowed, ErrCodeNoFS,
 		ErrCodeNotFound, ErrCodeNotRunning, ErrCodeSecretsDisabled, ErrCodeTooLarge,
 		ErrCodeTooMany, ErrCodeUnauthorized,
 	}

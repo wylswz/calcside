@@ -84,7 +84,7 @@ export function TimeLeft({ expiresAt }: { expiresAt: string }) {
   return <span className="whitespace-nowrap text-xs text-sec">{text} left</span>
 }
 
-export function Icon({ name, className = '' }: { name: 'preview' | 'download' | 'upload' | 'refresh' | 'back' | 'folder' | 'file' | 'code' | 'play' | 'stop' | 'desktop' | 'mobile' | 'chevron'; className?: string }) {
+export function Icon({ name, className = '' }: { name: 'preview' | 'download' | 'upload' | 'refresh' | 'back' | 'folder' | 'file' | 'code' | 'play' | 'stop' | 'desktop' | 'mobile' | 'chevron' | 'plus' | 'more' | 'run-all'; className?: string }) {
   const paths = {
     preview: <><path d="M2 10s3-6 8-6 8 6 8 6-3 6-8 6-8-6-8-6Z" /><circle cx="10" cy="10" r="2.5" /></>,
     download: <><path d="M10 2v10m-4-4 4 4 4-4M3 13v4h14v-4" /></>,
@@ -99,6 +99,9 @@ export function Icon({ name, className = '' }: { name: 'preview' | 'download' | 
     desktop: <><path d="M2 3h16v11H2ZM10 14v4M6 18h8" /></>,
     mobile: <><rect x="5" y="2" width="10" height="16" /><path d="M9 15h2" /></>,
     chevron: <path d="m7 4 6 6-6 6" />,
+    plus: <path d="M10 4v12M4 10h12" />,
+    more: <><circle cx="5" cy="10" r="1.2" fill="currentColor" stroke="none" /><circle cx="10" cy="10" r="1.2" fill="currentColor" stroke="none" /><circle cx="15" cy="10" r="1.2" fill="currentColor" stroke="none" /></>,
+    'run-all': <path d="m3.5 4.5 6.3 5.5-6.3 5.5ZM10.7 4.5l6.3 5.5-6.3 5.5Z" />,
   }
   return <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" strokeLinejoin="miter" className={`h-4 w-4 shrink-0 ${className}`} aria-hidden="true">{paths[name]}</svg>
 }
@@ -131,12 +134,12 @@ export function RevealNew({ count, moved, onClick }: { count: number; moved: boo
 
 // Button forwards its ref so headless primitives (menu triggers) can
 // position against it and return focus to it.
-export const Button = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'danger'; size?: 'sm' }>(
+export const Button = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'danger' | 'ghost'; size?: 'sm' | 'xs' }>(
   function Button({ variant, size, className, ...rest }, ref) {
     // Material (fill, edge, shadow, motion) comes from material.css.
     const base = 'inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium disabled:pointer-events-none '
-    const sz = size === 'sm' ? 'h-7 px-2.5 text-xs' : 'h-8 px-3.5 text-sm'
-    return <button ref={ref} data-ui="button" data-variant={variant ?? 'default'} className={base + sz + (className ? ' ' + className : '')} {...rest} />
+    const sz = size === 'sm' ? 'h-7 px-2.5 text-xs' : size === 'xs' ? '' : 'h-8 px-3.5 text-sm'
+    return <button ref={ref} data-ui="button" data-variant={variant ?? 'default'} data-size={size ?? 'md'} className={base + sz + (className ? ' ' + className : '')} {...rest} />
   },
 )
 
@@ -404,9 +407,15 @@ export function InstanceStatus({ inst, now }: { inst: { status: string; created_
   } else if (inst.status === 'pending') {
     dot = <span className="inline-block h-2 w-2 rounded-full bg-warn" />
     label = 'pending · extensions'
+  } else if (inst.status === 'lost') {
+    dot = <span className="inline-block h-2 w-2 rounded-full bg-warn" />
+    label = 'lost · code retained'
+  } else if (inst.status === 'expired') {
+    dot = <span className="inline-block h-2 w-2 rounded-full border border-mute bg-transparent" />
+    label = 'expired'
   } else {
     dot = <span className="inline-block h-2 w-2 rounded-full border border-mute bg-transparent" />
-    label = inst.status === 'lost' ? 'ended · lost' : 'ended'
+    label = 'ended'
   }
   return <span className="inline-flex items-center gap-1.5 text-xs text-sec">{dot}{label}</span>
 }

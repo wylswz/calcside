@@ -532,6 +532,20 @@ func (e *Engine) Exec(
 	maxSteps uint64,
 	output OutputReader,
 ) Result {
+	return e.ExecNamed(ctx, s, execID, "", code, timeout, maxSteps, output)
+}
+
+// ExecNamed is Exec with an optional source name: when name is non-empty
+// the parsed file is named "<name>.star" so backtraces and syntax errors
+// address the notebook section instead of the anonymous exec id.
+func (e *Engine) ExecNamed(
+	ctx context.Context,
+	s *Session, execID, name,
+	code string,
+	timeout time.Duration,
+	maxSteps uint64,
+	output OutputReader,
+) Result {
 	start := time.Now()
 	res := Result{ExecID: execID}
 
@@ -609,7 +623,11 @@ func (e *Engine) Exec(
 	// not leak into exec N.
 	maps.Copy(s.Globals, s.Predeclared)
 
-	f, err := fileOpts.Parse(execID+".star", code, 0)
+	source := execID + ".star"
+	if name != "" {
+		source = name + ".star"
+	}
+	f, err := fileOpts.Parse(source, code, 0)
 	if err == nil {
 		err = starlark.ExecREPLChunk(f, thread, s.Globals)
 	}

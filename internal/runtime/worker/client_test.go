@@ -138,6 +138,41 @@ func TestRemoteExecRoundTrip(t *testing.T) {
 	}
 }
 
+// TestRemoteExecSourceName proves the optional source name survives the
+// worker transport: a sectioned exec's error addresses "<name>.star",
+// not the anonymous exec id — remote backtraces name the notebook
+// section (EP-0022).
+func TestRemoteExecSourceName(t *testing.T) {
+	addr := newWorker(t, testKey)
+	bindings := map[string]*placement.Binding{}
+	rt := newClient(addr, bindings)
+	ctx := context.Background()
+	owner := runtime.Owner{UserID: "usr_1", Email: "u@x.com"}
+
+	if _, err := rt.Create(ctx, createReq("ins_src")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	bindings["ins_src"] = &placement.Binding{InstanceID: "ins_src", NodeID: "w1", Epoch: 1}
+
+	resp, err := rt.Exec(ctx, &runtime.ExecRequest{
+		InstanceID: "ins_src", Owner: owner, Epoch: 1, ExecID: "exe_s1",
+		SourceName: "load_data", Code: "print(undefined_thing)",
+	})
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if resp.Result.Error == nil {
+		t.Fatalf("expected script error, got %+v", resp.Result)
+	}
+	blob := resp.Result.Error.Message + "\n" + resp.Result.Error.Backtrace
+	if !strings.Contains(blob, "load_data.star") {
+		t.Fatalf("error does not name the section source: %q", blob)
+	}
+	if strings.Contains(blob, "exe_s1.star") {
+		t.Fatalf("error used the anonymous exec id instead: %q", blob)
+	}
+}
+
 func TestRemoteCompletions(t *testing.T) {
 	addr := newWorker(t, testKey)
 	bindings := map[string]*placement.Binding{}

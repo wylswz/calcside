@@ -9,8 +9,8 @@ ops:
     doc: Chat completion; returns {text, finish_reason, usage:{input_tokens,output_tokens}}
     params: [messages, model, options]
   - name: structured
-    doc: Completion parsed as JSON; schema enforced by prompt, verified locally
-    params: [messages, schema, model]
+    doc: Completion parsed as JSON; schema enforced by prompt, verified locally. options such as max_tokens bound output length to stay inside the exec deadline
+    params: [messages, schema, model, options]
   - name: stream
     doc: Stream text_delta and done events; requires a streaming provider.
     params: [messages, model, options]

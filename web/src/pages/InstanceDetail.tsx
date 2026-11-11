@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Instance, Execution, APIKey, SharedInstance, workspaces } from '../api'
 import { instanceDescription, instanceTitle } from '../activity'
@@ -10,7 +10,7 @@ import ShareDialog from '../components/ShareDialog'
 import ConnectAgent from '../components/ConnectAgent'
 import { Allowed } from '../components/Allowed'
 import { Activity } from '../components/Activity'
-import { RunCode } from '../components/RunCode'
+import { Notebook } from '../components/Notebook'
 import { StatePanel } from '../components/StatePanel'
 import { PromptPanel } from '../components/PromptPanel'
 import { ArtifactBrowser } from '../components/Artifacts'
@@ -41,7 +41,10 @@ export default function InstanceDetail() {
   const qc = useQueryClient()
   const role = useRole() // current workspace — destination for create-similar
   const canCreate = role === 'owner' || role === 'editor'
-  const [running, setRunning] = useState(false)
+  const [params, setParams] = useSearchParams()
+  const view = params.get('view') === 'activity' ? 'activity' : 'notebook'
+  const setView = (v: 'notebook' | 'activity') =>
+    setParams((p) => { const n = new URLSearchParams(p); n.set('view', v); return n }, { replace: false })
   const [share, setShare] = useState(false)
   const [agent, setAgent] = useState(false)
   const [prompt, setPrompt] = useState(false)
@@ -140,6 +143,24 @@ export default function InstanceDetail() {
       </div>
 
       {actErr && <div className="mb-4 text-xs text-warn-text">{actErr}</div>}
+      {step.kind === 'lost' && (
+        <div className="next-action mb-8">
+          <div className="next-signal expiring" aria-hidden="true"><NextSignal kind="expiring" /></div>
+          <div className="next-body">
+            <h2 className="next-title">Runtime lost — code is retained.</h2>
+            <p className="next-text">The process died but the notebook survived. Running a section restores an empty process; nothing re-runs automatically.</p>
+          </div>
+        </div>
+      )}
+      {step.kind === 'expired' && (
+        <div className="next-action mb-8">
+          <div className="next-signal neutral" aria-hidden="true"><NextSignal kind="neutral" /></div>
+          <div className="next-body">
+            <h2 className="next-title">This instance expired.</h2>
+            <p className="next-text">The notebook and run history stay readable; nothing can run or be edited.</p>
+          </div>
+        </div>
+      )}
       {step.kind === 'ended' && (
         <div className="next-action mb-8">
           <div className="next-signal neutral" aria-hidden="true"><NextSignal kind="neutral" /></div>
@@ -166,7 +187,7 @@ export default function InstanceDetail() {
             <h2 className="next-title">The latest run was denied.</h2>
             <p className="next-text">Review the blocked call before changing the boundary.</p>
           </div>
-          <div className="next-actions"><Button variant="primary" onClick={() => setFocusId(latest?.id)}>Review run</Button></div>
+          <div className="next-actions"><Button variant="primary" onClick={() => { setFocusId(latest?.id); setView('activity') }}>Review run</Button></div>
         </div>
       )}
       {step.kind === 'waiting' && (
@@ -200,22 +221,29 @@ export default function InstanceDetail() {
 
       <div className="detail-grid">
         <div className="work-surface min-w-0">
-          <section aria-label="Work">
-            <h2 className="sr-only">Work</h2>
-            {effRun && live && (
-              <div id="run-code" className="work-run">
-                <RunCode inst={inst} running={running} setRunning={setRunning} />
-              </div>
-            )}
+          <div className="view-tabs mb-6 flex gap-1" role="tablist" aria-label="Instance views">
+            {(['notebook', 'activity'] as const).map((v) => (
+              <button key={v} role="tab" aria-selected={view === v} data-on={view === v}
+                className="view-tab" onClick={() => setView(v)}>
+                {v === 'notebook' ? 'Notebook' : 'Activity'}
+              </button>
+            ))}
+          </div>
+          {/* Both panels stay mounted so drafts, editors and scroll
+              survive view switches and polls (C2/C3). */}
+          <div hidden={view !== 'notebook'}>
+            <Notebook key={id} id={id} inst={inst} canRun={effRun} />
+          </div>
+          <div hidden={view !== 'activity'}>
             <Activity id={id} focusId={focusId} />
-          </section>
+          </div>
           {inst.spec?.capabilities?.fs != null && (
             <section aria-label="Results" className="results-block">
               <h2 className="mb-4 font-semibold text-ink">Results</h2>
               <div className="results-content">
                 <div>
                   <SectionTitle>Files</SectionTitle>
-                  <ArtifactBrowser key={id} id={id} running={live} busy={running} />
+                  <ArtifactBrowser key={id} id={id} running={live} busy={false} />
                 </div>
               </div>
             </section>

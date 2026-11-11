@@ -83,19 +83,23 @@ def respond(messages, model, options=None):
     }
 
 
-def structured(messages, schema, model):
+def structured(messages, schema, model, options=None):
+    opts = _options(options)
     if config["json_schema"]:
-        d = _chat(messages, model, {"response_format": {
+        extra = {"response_format": {
             "type": "json_schema",
             "json_schema": {"name": "output", "schema": schema},
-        }})
+        }}
+        for k in opts:
+            extra[k] = opts[k]
+        d = _chat(messages, model, extra)
         v = _decode(d["choices"][0]["message"]["content"])
     else:
         fixed = [x for x in messages]
         fixed.append({"role": "user", "content":
             "Respond with ONLY a JSON value conforming to this schema, " +
             "no prose, no code fences: " + json.encode(schema)})
-        d = _chat(fixed, model)
+        d = _chat(fixed, model, opts)
         v = _decode(d["choices"][0]["message"]["content"])
     _check_schema(v, schema)
     return v

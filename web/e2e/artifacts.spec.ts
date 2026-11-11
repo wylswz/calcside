@@ -225,7 +225,7 @@ fs.write("notes.txt", "Review the exception list before closing the reporting pe
   await expect(previewLink).toHaveAttribute('target', '_blank')
   // the editor is visible on arrival in the redesigned page
   await expect(page.locator('#run-code .cm-editor')).toBeVisible()
-  const originalCode = await page.locator('.cm-content').innerText()
+  const originalCode = await page.locator('#run-code .cm-content').innerText()
   const opened = page.waitForEvent('popup')
   await previewLink.focus()
   await page.keyboard.press('Enter')
@@ -239,7 +239,7 @@ fs.write("notes.txt", "Review the exception list before closing the reporting pe
   await expect(page).toHaveURL(`${consoleURL}/instances/${id}`)
   await expect(page.locator('iframe')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Expand preview' })).toHaveCount(0)
-  expect(await page.locator('.cm-content').innerText()).toBe(originalCode)
+  expect(await page.locator('#run-code .cm-content').innerText()).toBe(originalCode)
   const iframe = viewer.locator('iframe[title="Artifact preview"]')
   const bounds = await iframe.boundingBox()
   expect(bounds!.width).toBeGreaterThan(1000)

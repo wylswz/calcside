@@ -15,6 +15,7 @@ import (
 	"calcside/cmd/calcside/internal/service"
 	"calcside/cmd/calcside/internal/service/access"
 	auditsvc "calcside/cmd/calcside/internal/service/audit"
+	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/internal/runtime"
 	"calcside/internal/store"
 	"calcside/internal/types"
@@ -850,8 +851,21 @@ func (s *strictImpl) Exec(ctx context.Context, req gen.ExecRequestObject) (gen.E
 	if body.TimeoutMs != nil {
 		timeoutMs = *body.TimeoutMs
 	}
-	res, err := s.d.Sandbox.Exec(ctx, actorOf(p), req.Id, body.Code,
-		time.Duration(timeoutMs)*time.Millisecond)
+	var sec *sandbox.SectionInput
+	if body.Section != nil {
+		sec = &sandbox.SectionInput{Name: body.Section.Name, Revision: body.Section.Revision}
+		if body.Section.Description != nil {
+			sec.Description = *body.Section.Description
+		}
+		if body.Section.After != nil {
+			sec.After = *body.Section.After
+		}
+		if body.Section.Rerun != nil {
+			sec.Rerun = string(*body.Section.Rerun)
+		}
+	}
+	res, err := s.d.Sandbox.ExecSection(ctx, actorOf(p), req.Id, body.Code,
+		time.Duration(timeoutMs)*time.Millisecond, sec)
 	if err != nil {
 		return execResp{fail(err)}, nil
 	}

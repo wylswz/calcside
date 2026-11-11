@@ -2,12 +2,15 @@
   "body": {
     "instance": {
       "created_at": "\u003cts\u003e",
+      "drift": 0,
       "expires_at": "\u003cts\u003e",
       "id": "\u003cid:ins\u003e",
+      "incarnation": 1,
       "labels": {
         "team": "golden"
       },
       "last_active_at": "\u003cts\u003e",
+      "notebook_revision": 0,
       "spec": {
         "capabilities": {
           "fs": {},

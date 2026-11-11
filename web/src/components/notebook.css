@@ -1,0 +1,326 @@
+/* notebook.css — Jupyter-style cell notebook inside instance-detail.
+   Flat cells, a sticky one-line status toolbar, ghost/xs controls only
+   (P2 — no primary or default-size buttons inside .nb). Paint-only
+   states (S1); polled arrivals stay held behind "Show N new" (S5). */
+
+.nb { display: grid; gap: 12px; --nb-bar-h: 37px; }
+/* grid items default to min-width:auto — a wide CodeMirror line or
+   unbreakable fact string would stretch the track past the viewport.
+   Let every card/section shrink; inner scrollers clip horizontally. */
+.nb > *, .nb-cards > * { min-width: 0; }
+
+/* ---- sticky toolbar: run actions | one-line status | details/reveal ----
+   Sits under the console header (56px + 1px border) and spans the
+   work-surface's padded width via negative margins. */
+.nb-toolbar {
+  position: sticky; top: 57px; z-index: 30;
+  display: flex; align-items: center; gap: 4px 10px; flex-wrap: nowrap;
+  height: 36px; margin: 0 -24px; padding: 0 24px;
+  background: var(--detail-work);
+  border-bottom: 1px solid var(--detail-edge);
+}
+.nb-toolbar-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+.nb-status {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; line-height: 18px; color: rgb(var(--sec));
+}
+.nb-status-warn { color: rgb(var(--warn-text)); }
+.nb-status-text {
+  min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.nb-toolbar-side { display: flex; align-items: center; gap: 2px; flex: none; }
+
+/* section directory — borderless chip strip under the toolbar (S5:
+   held order, constant height, horizontal scroll instead of wrap) */
+.nb-directory {
+  display: flex; flex-wrap: nowrap; gap: 2px;
+  overflow-x: auto; padding: 2px 0;
+  scrollbar-width: none;
+}
+.nb-directory::-webkit-scrollbar { display: none; }
+.nb-dir-row {
+  /* positioned so the row's .sr-only state text is clipped by the
+     directory's overflow-x scroller instead of escaping to the page. */
+  position: relative;
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  border: 0; background: transparent; cursor: pointer;
+  padding: 3px 8px; border-radius: var(--detail-radius-inset);
+  font-size: 12px; color: rgb(var(--body)); max-width: 100%;
+}
+.nb-dir-row:hover { background: rgb(var(--ink) / 0.05); }
+.nb-dir-row:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.nb-dir-ord {
+  font-family: var(--font-mono); font-size: 11px; color: rgb(var(--mute));
+  font-variant-numeric: tabular-nums;
+}
+.nb-dir-name {
+  font-family: var(--font-mono); font-weight: 500; color: rgb(var(--ink));
+  max-width: 20ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nb-dir-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: rgb(var(--mute)); }
+.nb-dir-dot[data-state='fresh'] { background: rgb(var(--sec)); }
+.nb-dir-dot[data-state='stale'] { background: rgb(var(--warn-text)); }
+.nb-dir-dot[data-state='failed'] { background: rgb(var(--danger)); }
+
+/* ---- cells: flat bordered blocks, 40px gutter + body ---- */
+.nb-cards { display: grid; }
+.nb-card {
+  display: grid; grid-template-columns: 40px minmax(0, 1fr);
+  border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-inset);
+  background: var(--detail-work);
+  scroll-margin-top: calc(57px + var(--nb-bar-h) + 8px);
+}
+.nb-card:focus-within {
+  border-color: rgb(var(--accent) / 0.35);
+  box-shadow: 0 0 0 3px rgb(var(--accent) / 0.07);
+}
+.nb-gutter {
+  /* flex-start: the run control keeps its own height at the top of the
+     cell instead of stretching to the full cell height (S3/S4). */
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 13px 0 0; min-width: 0;
+}
+.nb-body { min-width: 0; padding: 0 14px 10px; }
+
+/* header row: ordinal · name · state · once · description · actions */
+.nb-card-head {
+  display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap;
+  min-height: 32px; padding-top: 10px;
+}
+.nb-ordinal {
+  font-family: var(--font-mono); font-size: 12px; color: rgb(var(--mute));
+  font-variant-numeric: tabular-nums;
+}
+.nb-name {
+  font-family: var(--font-mono); font-size: 13px; font-weight: 600;
+  color: rgb(var(--ink)); white-space: nowrap;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
+}
+.nb-once {
+  font-size: 11px; line-height: 16px; color: rgb(var(--sec)); white-space: nowrap;
+  border: 1px solid var(--detail-edge); border-radius: 4px; padding: 0 5px;
+}
+/* the long selector beats .instance-detail's bare-input metrics
+   (border-radius/box-shadow) regardless of stylesheet order */
+.nb .nb-card .nb-card-head input.nb-desc-input {
+  flex: 1; min-width: 60px;
+  border: 1px solid transparent; border-radius: var(--detail-radius-inset);
+  background: transparent; padding: 2px 6px; box-shadow: none;
+  font-size: 13px; line-height: 20px; color: rgb(var(--ink));
+}
+.nb .nb-card .nb-card-head input.nb-desc-input::placeholder { color: rgb(var(--mute)); }
+.nb .nb-card .nb-card-head input.nb-desc-input:hover { background: rgb(var(--ink) / 0.04); }
+.nb .nb-card .nb-card-head input.nb-desc-input:focus {
+  outline: none; background: rgb(var(--paper));
+  border-color: rgb(var(--accent));
+  box-shadow: 0 0 0 3px rgb(var(--accent) / 0.15);
+}
+.nb-desc-text {
+  flex: 1; min-width: 0; font-size: 12px; color: rgb(var(--sec));
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nb-card-actions {
+  display: flex; align-items: center; gap: 2px; flex: none; margin-left: auto;
+}
+
+/* collapse toggle: two stacked chevrons, visibility-swapped (S1/S4).
+   Unlike menu triggers it is a state indicator, so aria-expanded must
+   NOT take the ghost held-fill — it stays transparent in both states;
+   hover/active still repaint like any ghost control. */
+.nb-chevs { display: inline-grid; }
+.nb-chevs > * { grid-area: 1 / 1; }
+.nb-chev-down { transform: rotate(90deg); visibility: hidden; }
+.nb-collapse[aria-expanded='true'] .nb-chev-down { visibility: visible; }
+.nb-collapse[aria-expanded='true'] .nb-chev-right { visibility: hidden; }
+.nb [data-ui='button'].nb-collapse[aria-expanded='true'] {
+  background-color: transparent;
+  color: rgb(var(--sec));
+}
+.nb [data-ui='button'].nb-collapse[aria-expanded='true']:hover:not(:disabled) {
+  background-color: var(--fill-muted-hover);
+  color: rgb(var(--ink));
+}
+
+/* icon-only xs buttons are 26×26 squares; icons step down to 14px */
+.nb [data-ui='button'].nb-icon-btn { width: 26px; padding: 0; }
+.nb [data-ui='button'][data-size='xs'] svg { width: 14px; height: 14px; }
+
+/* editor: flush to the cell, hairline above only — the footer's own
+   top border is the single separator below (no double hairline). */
+.nb-editor {
+  margin-top: 8px;
+  border-top: 1px solid var(--detail-edge);
+}
+.nb .nb-code-readonly {
+  font-family: var(--font-mono); font-size: 13px; line-height: 20px;
+  color: rgb(var(--body)); white-space: pre-wrap; overflow-wrap: anywhere;
+  background: rgb(var(--code)); padding: 10px 12px; margin: 0;
+}
+
+/* alerts sit directly after the editor — a late conflict never moves it */
+.nb-alerts { display: grid; gap: 8px; margin-top: 8px; }
+.nb-conflict {
+  padding: 8px 10px;
+  border: 1px solid rgb(var(--warn) / 0.5); border-left: 3px solid rgb(var(--warn));
+  border-radius: var(--detail-radius-inset); background: rgb(var(--warn) / 0.06);
+}
+.nb-conflict-text { margin: 0; font-size: 12px; color: rgb(var(--ink)); }
+.nb-conflict-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.nb-err { margin: 0; font-size: 12px; color: rgb(var(--warn-text)); }
+.nb-note { margin: 0; font-size: 12px; line-height: 18px; color: rgb(var(--sec)); }
+.nb-note-warn { color: rgb(var(--warn-text)); }
+
+/* output: always visible when present, capped scroll (Jupyter-style) */
+.nb-output { margin-top: 8px; }
+.nb-output-head {
+  display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap;
+  font-size: 11px; line-height: 16px; color: rgb(var(--mute));
+}
+.nb-output-kind { font-weight: 500; color: rgb(var(--sec)); }
+.nb-output-tag { color: rgb(var(--warn-text)); }
+.nb-output-meta { color: rgb(var(--mute)); font-variant-numeric: tabular-nums; }
+.nb .nb-output-pre {
+  margin: 4px 0 0; padding: 8px 10px;
+  background: rgb(var(--code)); border: 1px solid var(--detail-edge);
+  border-radius: var(--detail-radius-inset);
+  font-family: var(--font-mono); font-size: 12px; line-height: 18px;
+  color: rgb(var(--body)); white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: 240px; overflow: auto;
+}
+.nb-output-err .nb-output-kind { color: rgb(var(--warn-text)); }
+.nb-output-err .nb-output-pre {
+  border-left: 3px solid rgb(var(--warn)); color: rgb(var(--warn-text));
+}
+
+/* footer: one quiet line — last run, facts, read-only note */
+.nb-card-foot {
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--detail-edge);
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px;
+  font-size: 11px; line-height: 16px; color: rgb(var(--mute));
+}
+.nb .nb-facts code { font-family: var(--font-mono); font-size: 11px; }
+.nb-readonly-note { color: rgb(var(--sec)); }
+
+/* inserter rows between cells — fixed height, paint-only reveal (S1).
+   The Button primitive supplies the ghost/xs chrome (P2); this class
+   only shrinks it into the 20px seam — mobile restores the 44px hit
+   target with the row below. */
+.nb-insert {
+  height: 20px; display: flex; align-items: center; justify-content: center;
+}
+.nb [data-ui='button'].nb-insert-btn {
+  width: 20px; height: 20px; min-height: 20px; padding: 0;
+}
+.nb [data-ui='button'].nb-insert-btn svg { width: 12px; height: 12px; }
+@media (hover: hover) {
+  .nb-insert { opacity: 0.35; transition: opacity 150ms var(--ease-damped); }
+  .nb-insert:hover, .nb-insert:focus-within { opacity: 1; }
+}
+
+/* empty notebook — intentional, not an error */
+.nb-empty {
+  border: 1px dashed var(--detail-edge); border-radius: var(--detail-radius-inset);
+  padding: 28px 20px; text-align: center;
+}
+.nb-empty p { margin: 0 0 10px; font-size: 13px; color: rgb(var(--sec)); }
+
+/* scratch cell — same chrome, dashed edge */
+.nb-scratch {
+  border: 1px dashed var(--detail-edge); border-radius: var(--detail-radius-inset);
+  background: var(--detail-work);
+  scroll-margin-top: calc(57px + var(--nb-bar-h) + 8px);
+}
+.nb-run-code { display: grid; grid-template-columns: 40px minmax(0, 1fr); min-width: 0; }
+.nb-scratch-name {
+  font-family: var(--font-mono); font-size: 12px; color: rgb(var(--mute));
+  white-space: nowrap;
+}
+.nb-scratch-hint { font-size: 12px; color: rgb(var(--sec)); }
+.nb-scratch-foot {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px;
+  margin-top: 4px; padding: 6px 0 4px;
+  border-top: 1px solid var(--detail-edge);
+  font-size: 11px; line-height: 16px; color: rgb(var(--mute));
+}
+.nb-scratch-note {
+  margin: 0; padding: 12px 14px;
+  font-size: 12px; line-height: 18px; color: rgb(var(--sec));
+}
+.nb-warn { color: rgb(var(--warn-text)); }
+
+/* Details modal content */
+.nb-details { display: grid; gap: 14px; }
+.nb-details-para { margin: 0; font-size: 13px; line-height: 20px; color: rgb(var(--body)); }
+.nb-details-block { display: grid; gap: 6px; }
+.nb-details-h {
+  margin: 0; font-size: 12px; font-weight: 600; color: rgb(var(--sec));
+}
+.nb-details-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 20px; color: rgb(var(--body)); }
+.nb-details-list li { margin: 2px 0; }
+.nb-batch { border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-inset); padding: 10px 12px; }
+.nb-batch-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.nb-batch-row { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.nb-batch-name { font-family: var(--font-mono); font-size: 12px; color: rgb(var(--ink)); }
+.nb-batch-status { font-size: 12px; font-weight: 500; white-space: nowrap; }
+.nb-batch-ok { color: rgb(var(--sec)); }
+.nb-batch-skipped { color: rgb(var(--sec)); }
+.nb-batch-error, .nb-batch-not_run { color: rgb(var(--warn-text)); }
+.nb-batch-skip { font-size: 12px; color: rgb(var(--sec)); white-space: nowrap; }
+.nb-batch-error-text {
+  min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px; color: rgb(var(--warn-text));
+}
+.nb-batch-warn-line { margin: 8px 0 0; font-size: 12px; color: rgb(var(--warn-text)); }
+.nb-batch-warnings { margin: 8px 0 0; padding: 0; list-style: none; font-size: 12px; color: rgb(var(--warn-text)); }
+.nb-batch-warnings li { margin: 2px 0; }
+
+/* view tabs — underline style, addressable via ?view= (C4) */
+.view-tabs {
+  border-bottom: 1px solid var(--detail-edge);
+}
+.view-tab {
+  border: 0; background: transparent; cursor: pointer;
+  padding: 8px 14px; font-size: 14px; font-weight: 500;
+  color: rgb(var(--sec)); border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.view-tab[data-on='true'] { color: rgb(var(--ink)); border-bottom-color: rgb(var(--accent)); }
+.view-tab:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }
+
+@media (max-width: 900px) {
+  /* wrapped toolbar: actions row, then status + side — the status text
+     reserves a constant two-line box so the bar height never changes
+     with content (S4); --nb-bar-h tracks the measured bar height. */
+  .nb { --nb-bar-h: 105px; }
+  .nb-toolbar {
+    height: auto; min-height: 36px; flex-wrap: wrap;
+    margin: 0 -16px; padding: 6px 16px;
+  }
+  .nb-toolbar-actions { flex-basis: 100%; }
+  .nb-status-text {
+    height: 36px;
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+  /* header wraps to two rows: name/badge/once/actions stay on row 1,
+     the description takes a full-width row 2 (no mid-word clipping). */
+  .nb .nb-card .nb-card-head input.nb-desc-input,
+  .nb .nb-card .nb-card-head .nb-desc-text {
+    order: 1; flex-basis: 100%;
+  }
+  .nb-body { padding: 0 12px 10px; }
+  .nb-gutter { padding-top: 11px; }
+  /* 44px hit targets: the gutter widens so run/menu buttons fit, and the
+     inserter row grows to hold its button (instance-detail.css). */
+  .nb-card, .nb-run-code { grid-template-columns: 48px minmax(0, 1fr); }
+  .nb-insert { height: 44px; }
+  .nb [data-ui='button'].nb-insert-btn {
+    width: 44px; height: 44px; min-height: 44px; min-width: 44px;
+  }
+  .nb [data-ui='button'].nb-insert-btn svg { width: 16px; height: 16px; }
+}

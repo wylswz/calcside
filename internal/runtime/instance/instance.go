@@ -421,7 +421,7 @@ func (m *Manager) exec(ctx context.Context, req *runtime.ExecRequest, in *inst) 
 	}
 	in.sess.SetActor(req.Actor.UserID, req.Actor.Email)
 	in.sess.Out.Reset()
-	res := m.eng.Exec(ctx, in.sess, req.ExecID, req.Code, timeout, in.spec.Limits.MaxSteps, in.sess.Out.String)
+	res := m.eng.ExecNamed(ctx, in.sess, req.ExecID, req.SourceName, req.Code, timeout, in.spec.Limits.MaxSteps, in.sess.Out.String)
 	// Defense in depth: scrub any secret value that escaped into output.
 	res.Output = in.secrets.Redact(res.Output)
 	if res.Error != nil {

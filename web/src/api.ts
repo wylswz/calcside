@@ -37,6 +37,15 @@ export type ExtensionInfo = components['schemas']['ExtensionInfo']
 export type ExtConfigField = components['schemas']['ExtConfigField']
 export type ArtifactConfig = components['schemas']['ArtifactConfig']
 export type ArtifactPreview = components['schemas']['ArtifactPreview']
+export type Notebook = components['schemas']['Notebook']
+export type NotebookSectionMeta = components['schemas']['NotebookSectionMeta']
+export type NotebookSection = components['schemas']['NotebookSection']
+export type NotebookSectionResponse = components['schemas']['NotebookSectionResponse']
+export type SaveNotebookSectionResponse = components['schemas']['SaveNotebookSectionResponse']
+export type SaveNotebookSectionRequest = components['schemas']['SaveNotebookSectionRequest']
+export type DeleteNotebookSectionResponse = components['schemas']['DeleteNotebookSectionResponse']
+export type RunSectionsResponse = components['schemas']['RunSectionsResponse']
+export type RunSectionResult = components['schemas']['RunSectionResult']
 
 export interface ArtifactDownload { blob: Blob; filename: string; redacted: boolean; fileCount: number }
 

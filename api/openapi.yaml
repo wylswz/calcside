@@ -353,7 +353,120 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
+        '410': { $ref: '#/components/responses/Error' }
         '413': { $ref: '#/components/responses/Error' }
+  /api/v1/instances/{id}/notebook:
+    get:
+      operationId: getNotebook
+      tags: [instances]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: notebook outline — sections metadata only, never code or output
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotebookResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/instances/{id}/notebook/run:
+    post:
+      operationId: runNotebookSections
+      tags: [instances]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunSectionsRequest'
+      responses:
+        '200':
+          description: per-section run report; stops at the first script failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunSectionsResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '410': { $ref: '#/components/responses/Error' }
+  /api/v1/instances/{id}/sections/{name}:
+    get:
+      operationId: readNotebookSection
+      tags: [instances]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+        - name: include_output
+          in: query
+          required: false
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: one section with code and, on request, last output/error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotebookSectionResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    put:
+      operationId: saveNotebookSection
+      tags: [instances]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveNotebookSectionRequest'
+      responses:
+        '200':
+          description: saved section metadata and the new notebook revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaveNotebookSectionResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '410': { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deleteNotebookSection
+      tags: [instances]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+        - name: revision
+          in: query
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: deleted; affected lists sections still reading its defines
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteNotebookSectionResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '410': { $ref: '#/components/responses/Error' }
   /api/v1/instances/{id}/files:
     get:
       operationId: files
@@ -1904,7 +2017,7 @@ components:
       enum: [vault, inline]
     APIErrorCode:
       type: string
-      enum: [already_resolved, auth_failed, bad_capability, bad_policy, bad_request, bad_secret, bad_spec, conflict, csrf, forbidden, fs_error, internal, method_not_allowed, no_fs, not_found, not_running, secrets_disabled, too_large, too_many, unauthorized]
+      enum: [already_resolved, auth_failed, bad_capability, bad_policy, bad_request, bad_secret, bad_spec, conflict, csrf, forbidden, fs_error, instance_expired, instance_restored, internal, method_not_allowed, no_fs, not_found, not_running, secrets_disabled, too_large, too_many, unauthorized]
     FieldType:
       type: string
       enum: [int, bool, string, string_list, string_map]
@@ -2379,6 +2492,22 @@ components:
           type: object
           additionalProperties: { type: string }
         status: { $ref: '#/components/schemas/InstanceStatus' }
+        incarnation:
+          type: integer
+          format: int64
+          description: process generation; increments on each restore
+        restored_at:
+          type: string
+          format: date-time
+          description: when the current empty process was restored (absent otherwise)
+        notebook_revision:
+          type: integer
+          format: int64
+          description: notebook CAS counter
+        drift:
+          type: integer
+          format: int64
+          description: scratch execs that changed globals outside the notebook
         created_at: { type: string, format: date-time }
         last_active_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
@@ -2399,6 +2528,31 @@ components:
       properties:
         code: { type: string }
         timeout_ms: { type: integer, format: int64 }
+        section:
+          $ref: '#/components/schemas/ExecSection'
+          description: >-
+            when set, the section is created or replaced with this code
+            BEFORE it runs — failed code is preserved too. Omit for a
+            scratch exec, which never becomes a section.
+    ExecSection:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z][a-z0-9_]{0,47}$'
+        description: { type: string, maxLength: 200 }
+        rerun:
+          type: string
+          enum: [safe, once]
+          description: once sections are skipped by bulk runs after a prior success
+        after:
+          type: string
+          description: insert after this section; empty appends
+        revision:
+          type: integer
+          format: int64
+          description: notebook CAS; omit to skip the check
     ExecError:
       type: object
       required: [type, message]
@@ -2415,6 +2569,21 @@ components:
         error: { $ref: '#/components/schemas/ExecError', nullable: true }
         duration_ms: { type: integer, format: int64 }
         steps: { type: integer, format: int64 }
+        notebook_revision:
+          type: integer
+          format: int64
+          description: notebook CAS after this exec (absent pre-notebooks)
+        drift:
+          type: integer
+          format: int64
+          description: scratch execs that changed globals outside the notebook
+        section:
+          type: string
+          description: section name when this exec ran one
+        section_state:
+          type: string
+          enum: [not_run, fresh, stale, failed]
+          description: the section's state after this run
     FileEntry:
       type: object
       required: [name, path, is_dir, size, mtime]
@@ -2438,6 +2607,10 @@ components:
           description: tool names the prompt references (prefix applied)
           properties:
             exec: { type: string }
+            notebook: { type: string }
+            read_section: { type: string }
+            run_sections: { type: string }
+            add_section: { type: string }
             list_files: { type: string }
             read_file: { type: string }
     FilesResult:
@@ -2516,6 +2689,172 @@ components:
           $ref: '#/components/schemas/ExecError'
           nullable: true
           description: structured failure; null when the run completed without error
+    NotebookSectionMeta:
+      type: object
+      required: [name, position, description, state, rerun, defines, uses, effects, last_incarnation, once_ran, depends_on]
+      properties:
+        name: { type: string }
+        position: { type: integer, format: int64 }
+        description: { type: string }
+        state:
+          type: string
+          enum: [not_run, fresh, stale, failed]
+        rerun:
+          type: string
+          enum: [safe, once]
+        defines:
+          type: array
+          items: { type: string }
+        uses:
+          type: array
+          items: { type: string }
+        effects:
+          type: array
+          items: { type: string }
+          description: distinct capability.op names observed in its last run
+        last_exec_id: { type: string }
+        last_incarnation:
+          type: integer
+          format: int64
+          description: incarnation that produced the last run; differs from the notebook's current incarnation after a restore, marking the output as previous-runtime history
+        last_status: { type: string }
+        last_run_at: { type: string, format: date-time }
+        once_ran:
+          type: boolean
+          description: a once section already succeeded once
+        depends_on:
+          type: array
+          items: { type: string }
+          description: sections whose defines this section reads — providers edited, moved, or deleted leave it stale
+    Notebook:
+      type: object
+      required: [instance_id, status, incarnation, restored_empty, revision, drift, sections, outline, next]
+      properties:
+        instance_id: { type: string }
+        status: { $ref: '#/components/schemas/InstanceStatus' }
+        incarnation: { type: integer, format: int64 }
+        restored_at: { type: string, format: date-time }
+        restored_empty:
+          type: boolean
+          description: true only while a restored process is verifiably untouched — restored_at set and nothing has run in the current incarnation
+        revision: { type: integer, format: int64 }
+        drift: { type: integer, format: int64 }
+        sections:
+          type: array
+          items: { $ref: '#/components/schemas/NotebookSectionMeta' }
+        outline:
+          type: string
+          description: rendered text outline for agents
+        next:
+          type: array
+          items: { type: string }
+          description: computed guidance (stale/not_run/unbound/drift)
+    NotebookResponse:
+      type: object
+      properties:
+        notebook: { $ref: '#/components/schemas/Notebook' }
+    NotebookSection:
+      type: object
+      required: [section, code]
+      properties:
+        section: { $ref: '#/components/schemas/NotebookSectionMeta' }
+        code: { type: string }
+        output: { type: string, description: last run's secret-scrubbed output (include_output only) }
+        error: { type: string, description: last run's error + backtrace (include_output only) }
+        output_truncated: { type: boolean }
+    NotebookSectionResponse:
+      type: object
+      properties:
+        section: { $ref: '#/components/schemas/NotebookSection' }
+    SaveNotebookSectionResponse:
+      type: object
+      required: [section, revision]
+      properties:
+        section: { $ref: '#/components/schemas/NotebookSectionMeta' }
+        revision: { type: integer, format: int64 }
+    SaveNotebookSectionRequest:
+      type: object
+      properties:
+        code:
+          type: string
+          description: omit to keep stored code
+        description: { type: string, maxLength: 200 }
+        rerun:
+          type: string
+          enum: [safe, once]
+        after:
+          type: string
+          description: move/insert after this section; omit to keep position (new sections append)
+        from_exec:
+          type: string
+          description: promote a successful scratch execution's code into this section
+        create_only:
+          type: boolean
+          description: reject with 409 when the section already exists — never silently overwrite (agent add_section semantics)
+        revision:
+          type: integer
+          format: int64
+          description: notebook CAS; required
+    DeleteNotebookSectionResponse:
+      type: object
+      required: [affected, revision]
+      properties:
+        affected:
+          type: array
+          items: { type: string }
+          description: sections still reading this section's defines
+        revision: { type: integer, format: int64 }
+    RunSectionsRequest:
+      type: object
+      required: [sections]
+      properties:
+        sections:
+          description: '"all", "stale", one name, or a list of names'
+          oneOf:
+            - type: string
+              enum: [all, stale]
+            - type: string
+            - type: array
+              items: { type: string }
+        revision:
+          type: integer
+          format: int64
+          description: notebook CAS; omit to skip the check
+    RunSectionResult:
+      type: object
+      required: [name, status]
+      properties:
+        name: { type: string }
+        status:
+          type: string
+          enum: [ok, error, skipped, not_run]
+        exec_id: { type: string }
+        error: { type: string }
+        skipped_reason: { type: string }
+        duration_ms: { type: integer, format: int64 }
+    RunSectionsResponse:
+      type: object
+      properties:
+        report:
+          type: object
+          required: [instance_id, incarnation, revision, drift, results]
+          properties:
+            instance_id: { type: string }
+            incarnation: { type: integer, format: int64 }
+            revision: { type: integer, format: int64 }
+            drift: { type: integer, format: int64 }
+            results:
+              type: array
+              items: { $ref: '#/components/schemas/RunSectionResult' }
+            restored:
+              type: boolean
+              description: the runtime was lost mid-run and restored empty; earlier results ran in the previous incarnation
+            stopped_reason:
+              type: string
+              description: why the run stopped early (e.g. instance_restored)
+            warnings:
+              type: array
+              items: { type: string }
     AuditEvent:
       type: object
       required: [id, ts, user_id, instance_id, exec_id, capability, op, args, phase, decision, reason, error, duration_ms]

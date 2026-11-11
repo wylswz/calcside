@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -234,6 +235,14 @@ type instanceRow struct {
 	LeaseEpoch   int64
 	KeyID        string `gorm:"index"`
 	WorkspaceID  string `gorm:"index"`
+
+	Incarnation int64
+	RestoredAt  *time.Time
+	NotebookRev int64
+	RunSeq      int64
+	Drift       int64
+	OpToken     string `gorm:"index"`
+	OpExpiresAt *time.Time
 }
 
 func (instanceRow) TableName() string { return "instances" }
@@ -257,6 +266,19 @@ func (r instanceRow) toStore() *store.Instance {
 		e := r.EndedAt.UTC()
 		in.EndedAt = &e
 	}
+	in.Incarnation = r.Incarnation
+	in.NotebookRev = r.NotebookRev
+	in.RunSeq = r.RunSeq
+	in.Drift = r.Drift
+	in.OpToken = r.OpToken
+	if r.RestoredAt != nil {
+		t := r.RestoredAt.UTC()
+		in.RestoredAt = &t
+	}
+	if r.OpExpiresAt != nil {
+		t := r.OpExpiresAt.UTC()
+		in.OpExpiresAt = &t
+	}
 	return in
 }
 
@@ -278,6 +300,8 @@ type execRow struct {
 	ErrorMessage    string
 	ErrorBacktrace  string
 	CreatedAt       time.Time `gorm:"index:idx_executions_instance_created"`
+	SectionName     string
+	Incarnation     int64
 }
 
 func (execRow) TableName() string { return "executions" }
@@ -297,6 +321,8 @@ func (r execRow) toStore() *store.Execution {
 		ErrorMessage:    r.ErrorMessage,
 		ErrorBacktrace:  r.ErrorBacktrace,
 		CreatedAt:       r.CreatedAt.UTC(),
+		SectionName:     r.SectionName,
+		Incarnation:     r.Incarnation,
 	}
 }
 
@@ -644,6 +670,10 @@ func (d *sqlDB) CreateInstance(ctx context.Context, in *store.Instance) error {
 	if labels == nil {
 		labels = map[string]string{}
 	}
+	incarnation := in.Incarnation
+	if incarnation == 0 {
+		incarnation = 1
+	}
 	return gorm.G[instanceRow](d.g).Create(ctx, &instanceRow{
 		ID: in.ID, UserID: in.UserID, Spec: []byte(in.Spec), Labels: labels,
 		Status:    string(in.Status),
@@ -651,6 +681,9 @@ func (d *sqlDB) CreateInstance(ctx context.Context, in *store.Instance) error {
 		ExpiresAt: in.ExpiresAt.UTC(), EndedAt: in.EndedAt,
 		NodeID: in.NodeID, LeaseEpoch: in.LeaseEpoch, KeyID: in.KeyID,
 		WorkspaceID: in.WorkspaceID,
+		Incarnation: incarnation, RestoredAt: in.RestoredAt,
+		NotebookRev: in.NotebookRev, RunSeq: in.RunSeq, Drift: in.Drift,
+		OpToken: in.OpToken, OpExpiresAt: in.OpExpiresAt,
 	})
 }
 
@@ -692,7 +725,7 @@ func (d *sqlDB) ListExpiredInstances(ctx context.Context, before time.Time, limi
 		limit = 100
 	}
 	rows, err := gorm.G[instanceRow](d.g).
-		Where("status = ?", string(types.InstanceRunning)).
+		Where("status IN ?", []string{string(types.InstanceRunning), string(types.InstanceLost)}).
 		Where("expires_at <= ?", before.UTC()).
 		Order("expires_at ASC").
 		Limit(limit).
@@ -725,6 +758,19 @@ func (d *sqlDB) UpdateInstance(ctx context.Context, in *store.Instance) error {
 		col("last_active_at", in.LastActiveAt.UTC()),
 		col("expires_at", in.ExpiresAt.UTC()),
 		col("ended_at", in.EndedAt),
+	).Update(ctx)
+	return err
+}
+
+func (d *sqlDB) SettleInstance(ctx context.Context, id string, status types.InstanceStatus, endedAt time.Time) error {
+	if !status.Valid() {
+		return fmt.Errorf("gormstore: invalid instance status %q", status)
+	}
+	_, err := gorm.G[instanceRow](d.g).Where("id = ?", id).Set(
+		col("status", string(status)),
+		col("ended_at", endedAt.UTC()),
+		col("op_token", ""),
+		col("op_expires_at", nil),
 	).Update(ctx)
 	return err
 }
@@ -766,6 +812,514 @@ func (d *sqlDB) ReleaseInstance(ctx context.Context, id, nodeID string, epoch in
 	return n > 0, nil
 }
 
+// --- instance operation lease + notebook (EP-0022) ---
+
+func (d *sqlDB) ClaimInstanceOp(ctx context.Context, id, token string, ttl time.Duration, allowed ...types.InstanceStatus) (*store.Instance, error) {
+	now := time.Now().UTC()
+	statuses := make([]string, 0, len(allowed))
+	for _, s := range allowed {
+		statuses = append(statuses, string(s))
+	}
+	q := gorm.G[instanceRow](d.g).
+		Where("id = ?", id).
+		Where("(op_expires_at IS NULL OR op_expires_at <= ?)", now).
+		// An elapsed TTL can never be claimed: no op may renew an
+		// expired row back to life before the reaper settles it.
+		Where("expires_at > ?", now)
+	if len(statuses) > 0 {
+		q = q.Where("status IN ?", statuses)
+	}
+	n, err := q.Set(
+		col("op_token", token),
+		col("op_expires_at", now.Add(ttl)),
+	).Update(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		// Distinguish missing row, a live lease held by another op,
+		// and a status/expiry that forbids the claim.
+		row, gerr := gorm.G[instanceRow](d.g).Where("id = ?", id).Take(ctx)
+		if gerr != nil {
+			return nil, mapNotFound(gerr)
+		}
+		if row.OpExpiresAt != nil && row.OpExpiresAt.UTC().After(now) {
+			return nil, store.ErrConflict
+		}
+		ok := true
+		if len(statuses) > 0 {
+			ok = slices.Contains(statuses, row.Status)
+		}
+		if !ok || !row.ExpiresAt.UTC().After(now) {
+			return nil, store.ErrNotClaimable
+		}
+		return nil, store.ErrConflict
+	}
+	return d.GetInstance(ctx, id)
+}
+
+func (d *sqlDB) RefreshInstanceOp(ctx context.Context, id, token string, ttl time.Duration) (bool, error) {
+	n, err := gorm.G[instanceRow](d.g).
+		Where("id = ? AND op_token = ? AND status = ?", id, token, string(types.InstanceRunning)).
+		Set(col("op_expires_at", time.Now().UTC().Add(ttl))).Update(ctx)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+func (d *sqlDB) ReleaseInstanceOp(ctx context.Context, id, token string) error {
+	_, err := gorm.G[instanceRow](d.g).
+		Where("id = ? AND op_token = ?", id, token).
+		Set(col("op_token", ""), col("op_expires_at", nil)).Update(ctx)
+	return err
+}
+
+func (d *sqlDB) MarkInstanceLost(ctx context.Context, id, token string, endedAt time.Time) (bool, error) {
+	n, err := gorm.G[instanceRow](d.g).
+		Where("id = ? AND op_token = ? AND status = ?", id, token, string(types.InstanceRunning)).
+		Set(
+			col("status", string(types.InstanceLost)),
+			col("ended_at", endedAt.UTC()),
+		).Update(ctx)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+func (d *sqlDB) TouchInstanceLive(ctx context.Context, id, token string, lastActive, expiresAt time.Time, driftDelta int64) (bool, error) {
+	n, err := gorm.G[instanceRow](d.g).
+		Where("id = ? AND op_token = ? AND status = ?", id, token, string(types.InstanceRunning)).
+		Set(
+			col("last_active_at", lastActive.UTC()),
+			col("expires_at", expiresAt.UTC()),
+			col("drift", gorm.Expr("drift + ?", driftDelta)),
+		).Update(ctx)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+func (d *sqlDB) BumpRunSeq(ctx context.Context, id, token string) (int64, error) {
+	n, err := gorm.G[instanceRow](d.g).
+		Where("id = ? AND op_token = ? AND status = ?", id, token, string(types.InstanceRunning)).
+		Set(col("run_seq", gorm.Expr("run_seq + 1"))).Update(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if n == 0 {
+		return 0, store.ErrConflict
+	}
+	row, err := gorm.G[instanceRow](d.g).Select("run_seq").Where("id = ?", id).Take(ctx)
+	if err != nil {
+		return 0, mapNotFound(err)
+	}
+	return row.RunSeq, nil
+}
+
+func (d *sqlDB) CommitRestore(ctx context.Context, id, token, nodeID string, epoch, incarnation int64, restoredAt time.Time) (bool, error) {
+	n, err := gorm.G[instanceRow](d.g).
+		Where("id = ? AND op_token = ? AND status = ?", id, token, string(types.InstanceLost)).
+		Where("expires_at > ?", time.Now().UTC()).
+		Set(
+			col("status", string(types.InstanceRunning)),
+			col("node_id", nodeID),
+			col("lease_epoch", epoch),
+			col("incarnation", incarnation),
+			col("restored_at", restoredAt.UTC()),
+			col("drift", 0),
+			col("ended_at", nil),
+			col("op_token", ""),
+			col("op_expires_at", nil),
+		).Update(ctx)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+func (d *sqlDB) ClearRestoreBinding(ctx context.Context, id, token string) error {
+	_, err := gorm.G[instanceRow](d.g).
+		Where("id = ? AND op_token = ? AND status = ?", id, token, string(types.InstanceLost)).
+		Set(col("op_token", ""), col("op_expires_at", nil)).Update(ctx)
+	return err
+}
+
+// --- notebook sections ---
+
+type notebookSectionRow struct {
+	InstanceID      string `gorm:"primaryKey"`
+	Name            string `gorm:"primaryKey"`
+	Position        int64
+	Description     string
+	Code            string
+	CodeSHA256      string
+	Rerun           string
+	Defines         []string `gorm:"serializer:json"`
+	Uses            []string `gorm:"serializer:json"`
+	Effects         []string `gorm:"serializer:json"`
+	DependsOn       []string `gorm:"serializer:json"`
+	LastExecID      string
+	LastIncarnation int64
+	LastRunSeq      int64
+	LastStatus      string
+	LastCodeSHA256  string
+	LastRunAt       *time.Time
+	SucceededBefore bool
+	CreatedBy       string
+	UpdatedBy       string
+	EditedAt        time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+func (notebookSectionRow) TableName() string { return "notebook_sections" }
+
+func (r notebookSectionRow) toStore() *store.NotebookSection {
+	s := &store.NotebookSection{
+		InstanceID: r.InstanceID, Name: r.Name, Position: r.Position,
+		Description: r.Description, Code: r.Code, CodeSHA256: r.CodeSHA256,
+		Rerun: r.Rerun, Defines: r.Defines, Uses: r.Uses, Effects: r.Effects,
+		DependsOn:  r.DependsOn,
+		LastExecID: r.LastExecID, LastIncarnation: r.LastIncarnation,
+		LastRunSeq: r.LastRunSeq, LastStatus: r.LastStatus,
+		LastCodeSHA256:  r.LastCodeSHA256,
+		SucceededBefore: r.SucceededBefore,
+		CreatedBy:       r.CreatedBy, UpdatedBy: r.UpdatedBy,
+		EditedAt: r.EditedAt.UTC(), CreatedAt: r.CreatedAt.UTC(), UpdatedAt: r.UpdatedAt.UTC(),
+	}
+	if r.LastRunAt != nil {
+		t := r.LastRunAt.UTC()
+		s.LastRunAt = &t
+	}
+	if s.Defines == nil {
+		s.Defines = []string{}
+	}
+	if s.Uses == nil {
+		s.Uses = []string{}
+	}
+	if s.Effects == nil {
+		s.Effects = []string{}
+	}
+	if s.DependsOn == nil {
+		s.DependsOn = []string{}
+	}
+	return s
+}
+
+func sectionRowOf(s *store.NotebookSection) notebookSectionRow {
+	// JSON list columns are NOT NULL: a nil slice must serialize as
+	// [] rather than SQL NULL.
+	defs, uses, effects, deps := s.Defines, s.Uses, s.Effects, s.DependsOn
+	if defs == nil {
+		defs = []string{}
+	}
+	if uses == nil {
+		uses = []string{}
+	}
+	if effects == nil {
+		effects = []string{}
+	}
+	if deps == nil {
+		deps = []string{}
+	}
+	return notebookSectionRow{
+		InstanceID: s.InstanceID, Name: s.Name, Position: s.Position,
+		Description: s.Description, Code: s.Code, CodeSHA256: s.CodeSHA256,
+		Rerun: s.Rerun, Defines: defs, Uses: uses, Effects: effects,
+		DependsOn:  deps,
+		LastExecID: s.LastExecID, LastIncarnation: s.LastIncarnation,
+		LastRunSeq: s.LastRunSeq, LastStatus: s.LastStatus,
+		LastCodeSHA256: s.LastCodeSHA256, LastRunAt: s.LastRunAt,
+		SucceededBefore: s.SucceededBefore,
+		CreatedBy:       s.CreatedBy, UpdatedBy: s.UpdatedBy,
+		EditedAt: s.EditedAt.UTC(), CreatedAt: s.CreatedAt.UTC(), UpdatedAt: s.UpdatedAt.UTC(),
+	}
+}
+
+func (d *sqlDB) GetNotebookSection(ctx context.Context, instanceID, name string) (*store.NotebookSection, error) {
+	row, err := gorm.G[notebookSectionRow](d.g).
+		Where("instance_id = ? AND name = ?", instanceID, name).Take(ctx)
+	if err != nil {
+		return nil, mapNotFound(err)
+	}
+	return row.toStore(), nil
+}
+
+func (d *sqlDB) ListNotebookSections(ctx context.Context, instanceID string) ([]*store.NotebookSection, error) {
+	rows, err := gorm.G[notebookSectionRow](d.g).
+		Where("instance_id = ?", instanceID).Order("position ASC").Find(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*store.NotebookSection, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.toStore())
+	}
+	return out, nil
+}
+
+// SaveNotebookSection upserts under notebook_rev CAS inside one
+// transaction: verify the revision, write the row, then renumber
+// positions when `after` reorders. Returns the row and new revision.
+func (d *sqlDB) SaveNotebookSection(ctx context.Context, instanceID string, expectedRev int64, row *store.NotebookSection, after string) (*store.NotebookSection, int64, error) {
+	var saved *store.NotebookSection
+	var newRev int64
+	err := d.g.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		inst, err := gorm.G[instanceRow](tx, clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", instanceID).Take(ctx)
+		if err != nil {
+			return mapNotFound(err)
+		}
+		if inst.NotebookRev != expectedRev {
+			return store.ErrConflict
+		}
+		existing, err := gorm.G[notebookSectionRow](tx).
+			Where("instance_id = ? AND name = ?", instanceID, row.Name).Take(ctx)
+		have := err == nil
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if !have {
+			cnt, cerr := gorm.G[notebookSectionRow](tx).
+				Where("instance_id = ?", instanceID).Count(ctx, "*")
+			if cerr != nil {
+				return cerr
+			}
+			if cnt >= 200 {
+				return fmt.Errorf("gormstore: notebook section limit reached")
+			}
+		}
+		now := time.Now().UTC()
+		if !have {
+			row.Position = -1 // assigned by renumber below
+			row.CreatedAt = now
+		} else {
+			row.Position = existing.Position
+			row.CreatedAt = existing.CreatedAt.UTC()
+			if row.CodeSHA256 == "" {
+				row.CodeSHA256 = existing.CodeSHA256
+			}
+		}
+		row.UpdatedAt = now
+		if row.EditedAt.IsZero() {
+			row.EditedAt = now
+		}
+		rr := sectionRowOf(row)
+		if have {
+			// Edits touch author fields and static analysis only; last-run
+			// facts (last_*, succeeded_before, effects) change exclusively
+			// through StampSectionRun so an edit reads as stale, not erased.
+			defsJ, _ := json.Marshal(rr.Defines)
+			usesJ, _ := json.Marshal(rr.Uses)
+			depsJ, _ := json.Marshal(rr.DependsOn)
+			if _, err := gorm.G[notebookSectionRow](tx).
+				Where("instance_id = ? AND name = ?", instanceID, row.Name).
+				Set(
+					col("position", rr.Position), col("description", rr.Description),
+					col("code", rr.Code), col("code_sha256", rr.CodeSHA256),
+					col("rerun", rr.Rerun),
+					col("defines", string(defsJ)), col("uses", string(usesJ)),
+					col("depends_on", string(depsJ)),
+					col("updated_by", rr.UpdatedBy), col("edited_at", rr.EditedAt),
+					col("updated_at", rr.UpdatedAt),
+				).Update(ctx); err != nil {
+				return err
+			}
+		} else {
+			if err := gorm.G[notebookSectionRow](tx).Create(ctx, &rr); err != nil {
+				return err
+			}
+		}
+		// Reorder when needed: append (new, no after), insert after a
+		// named section, or keep the stored position.
+		if after != "" || (!have && row.Position < 0) {
+			rows, lerr := gorm.G[notebookSectionRow](tx).
+				Where("instance_id = ?", instanceID).Order("position ASC").Find(ctx)
+			if lerr != nil {
+				return lerr
+			}
+			names := make([]string, 0, len(rows))
+			for _, r := range rows {
+				names = append(names, r.Name)
+			}
+			// Remove the saved section, then insert at the right slot.
+			filtered := names[:0]
+			for _, n := range names {
+				if n != row.Name {
+					filtered = append(filtered, n)
+				}
+			}
+			names = filtered
+			idx := len(names)
+			if after != "" {
+				found := false
+				for i, n := range names {
+					if n == after {
+						idx = i + 1
+						found = true
+						break
+					}
+				}
+				if !found {
+					return store.ErrNotFound
+				}
+			}
+			names = append(names[:idx], append([]string{row.Name}, names[idx:]...)...)
+			for i, n := range names {
+				if _, uerr := gorm.G[notebookSectionRow](tx).
+					Where("instance_id = ? AND name = ?", instanceID, n).
+					Set(col("position", int64(i))).Update(ctx); uerr != nil {
+					return uerr
+				}
+			}
+		}
+		nrev := inst.NotebookRev + 1
+		if _, uerr := gorm.G[instanceRow](tx).
+			Where("id = ?", instanceID).
+			Set(col("notebook_rev", nrev)).Update(ctx); uerr != nil {
+			return uerr
+		}
+		newRev = nrev
+		fresh, ferr := gorm.G[notebookSectionRow](tx).
+			Where("instance_id = ? AND name = ?", instanceID, row.Name).Take(ctx)
+		if ferr != nil {
+			return mapNotFound(ferr)
+		}
+		saved = fresh.toStore()
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return saved, newRev, nil
+}
+
+func (d *sqlDB) DeleteNotebookSection(ctx context.Context, instanceID, name string, revision int64) ([]string, int64, error) {
+	var affected []string
+	var newRev int64
+	err := d.g.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		inst, err := gorm.G[instanceRow](tx, clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", instanceID).Take(ctx)
+		if err != nil {
+			return mapNotFound(err)
+		}
+		if inst.NotebookRev != revision {
+			return store.ErrConflict
+		}
+		// Sections whose `uses` name a define this section owned.
+		victim, err := gorm.G[notebookSectionRow](tx).
+			Where("instance_id = ? AND name = ?", instanceID, name).Take(ctx)
+		if err != nil {
+			return mapNotFound(err)
+		}
+		defs := victim.Defines
+		if len(defs) > 0 {
+			others, lerr := gorm.G[notebookSectionRow](tx).
+				Where("instance_id = ? AND name != ?", instanceID, name).Find(ctx)
+			if lerr != nil {
+				return lerr
+			}
+			defset := map[string]bool{}
+			for _, df := range defs {
+				defset[df] = true
+			}
+			for _, o := range others {
+				for _, u := range o.Uses {
+					if defset[u] {
+						affected = append(affected, o.Name)
+						break
+					}
+				}
+			}
+		}
+		if _, derr := gorm.G[notebookSectionRow](tx).
+			Where("instance_id = ? AND name = ?", instanceID, name).Delete(ctx); derr != nil {
+			return derr
+		}
+		// Close the position gap.
+		rows, lerr := gorm.G[notebookSectionRow](tx).
+			Where("instance_id = ?", instanceID).Order("position ASC").Find(ctx)
+		if lerr != nil {
+			return lerr
+		}
+		for i, r := range rows {
+			if r.Position != int64(i) {
+				if _, uerr := gorm.G[notebookSectionRow](tx).
+					Where("instance_id = ? AND name = ?", instanceID, r.Name).
+					Set(col("position", int64(i))).Update(ctx); uerr != nil {
+					return uerr
+				}
+			}
+		}
+		nrev := inst.NotebookRev + 1
+		if _, uerr := gorm.G[instanceRow](tx).
+			Where("id = ?", instanceID).
+			Set(col("notebook_rev", nrev)).Update(ctx); uerr != nil {
+			return uerr
+		}
+		newRev = nrev
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return affected, newRev, nil
+}
+
+func (d *sqlDB) StampSectionRun(ctx context.Context, instanceID, name, execID, status string, incarnation, runSeq int64, at time.Time, effects []string, succeeded bool, codeSHA, token string) (int64, error) {
+	var newRev int64
+	err := d.g.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		inst, err := gorm.G[instanceRow](tx, clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", instanceID).Take(ctx)
+		if err != nil {
+			return mapNotFound(err)
+		}
+		// The stamp is only valid while the instance is still running
+		// under this op token in this incarnation — a late result must
+		// never write run facts onto a settled or restored row.
+		if inst.Status != string(types.InstanceRunning) ||
+			inst.OpToken != token || inst.Incarnation != incarnation {
+			return store.ErrConflict
+		}
+		sets := []clause.Assigner{
+			col("last_exec_id", execID),
+			col("last_incarnation", incarnation),
+			col("last_run_seq", runSeq),
+			col("last_status", status),
+			col("last_code_sha256", codeSHA),
+			col("last_run_at", at.UTC()),
+			col("updated_at", at.UTC()),
+		}
+		if succeeded {
+			sets = append(sets, col("succeeded_before", true))
+		}
+		if effects != nil {
+			ej, _ := json.Marshal(effects)
+			sets = append(sets, col("effects", string(ej)))
+		}
+		if _, uerr := gorm.G[notebookSectionRow](tx).
+			Where("instance_id = ? AND name = ?", instanceID, name).
+			Set(sets...).Update(ctx); uerr != nil {
+			return uerr
+		}
+		nrev := inst.NotebookRev + 1
+		if _, uerr := gorm.G[instanceRow](tx).
+			Where("id = ?", instanceID).
+			Set(col("notebook_rev", nrev)).Update(ctx); uerr != nil {
+			return uerr
+		}
+		newRev = nrev
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return newRev, nil
+}
+
 // --- executions ---
 
 func (d *sqlDB) CreateExecution(ctx context.Context, e *store.Execution) error {
@@ -786,7 +1340,8 @@ func (d *sqlDB) CreateExecution(ctx context.Context, e *store.Execution) error {
 		OutputBytes: e.OutputBytes, Via: string(e.Via),
 		Output: e.Output, OutputTruncated: e.OutputTruncated,
 		ErrorMessage: e.ErrorMessage, ErrorBacktrace: e.ErrorBacktrace,
-		CreatedAt: e.CreatedAt.UTC(),
+		CreatedAt:   e.CreatedAt.UTC(),
+		SectionName: e.SectionName, Incarnation: e.Incarnation,
 	})
 }
 
