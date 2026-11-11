@@ -391,6 +391,61 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
     return () => window.clearTimeout(t)
   }, [sectionParam, shown.length])
 
+  // Scroll-spy for the sticky directory (S3/S1): one IntersectionObserver
+  // over the shown cards plus scratch; its top edge sits under the head
+  // (--nb-bar-h is the same reservation the cards' scroll-margin uses),
+  // and the first intersecting chip in shown order — scratch last — is
+  // highlighted paint-only via aria-current.
+  const [activeNav, setActiveNav] = useState('')
+  const headRef = useRef<HTMLDivElement | null>(null)
+  const dirRef = useRef<HTMLElement | null>(null)
+  const scratchNav = canExec && (live || lost)
+  const navNames = shown.map((s) => s.name)
+  const navKey = JSON.stringify([...navNames, scratchNav])
+  useEffect(() => {
+    const barH = headRef.current
+      ? parseFloat(getComputedStyle(headRef.current).getPropertyValue('--nb-bar-h')) || 0
+      : 0
+    const targets = [
+      ...navNames.map((n) => ({ key: n, id: `section-${n}` })),
+      ...(scratchNav ? [{ key: 'scratch', id: 'run-code' }] : []),
+    ]
+    const els = targets
+      .map((t) => ({ key: t.key, el: document.getElementById(t.id) }))
+      .filter((t): t is { key: string; el: HTMLElement } => t.el !== null)
+    if (!els.length) {
+      setActiveNav('')
+      return
+    }
+    const hit = new Set<string>()
+    const byEl = new Map(els.map((t) => [t.el, t.key]))
+    const io = new IntersectionObserver((entries) => {
+      for (const en of entries) {
+        const k = byEl.get(en.target as HTMLElement)
+        if (!k) continue
+        if (en.isIntersecting) hit.add(k)
+        else hit.delete(k)
+      }
+      const next = els.map((t) => t.key).find((k) => hit.has(k))
+      if (next !== undefined) setActiveNav((prev) => (prev === next ? prev : next))
+    }, { rootMargin: `-${57 + barH + 8}px 0px 0px 0px` })
+    for (const t of els) io.observe(t.el)
+    return () => io.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navKey])
+
+  // Keep the active chip inside the strip by moving the nav's own
+  // scrollLeft — never scrollIntoView, which could move the page (S6).
+  useEffect(() => {
+    const nav = dirRef.current
+    const chip = nav?.querySelector<HTMLElement>('.nb-dir-row[aria-current="true"]')
+    if (!nav || !chip) return
+    const n = nav.getBoundingClientRect()
+    const c = chip.getBoundingClientRect()
+    const d = c.left < n.left ? c.left - n.left : c.right > n.right ? c.right - n.right : 0
+    if (d) nav.scrollLeft += d
+  }, [activeNav])
+
   // One-line status, first match wins (S3/S4: it replaces every banner
   // that used to push the cells down). Warning tone carries the failed
   // signal mark; everything else stays quiet secondary text.
@@ -444,48 +499,94 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
 
   return (
     <div className="nb">
-      {/* Sticky status toolbar: run actions | one-line status | details.
-          Every notice that used to be a banner above the cells now lives
-          in this fixed-height row or behind Details — nothing inserts
-          content above the cells after a click or a poll (S3/S5). */}
-      <div className="nb-toolbar">
-        <div className="nb-toolbar-actions">
-          {canExec && !empty && (
-            <>
-              <Button variant="ghost" size="xs" disabled={running !== null || scratchRunning}
-                onClick={() => void runSections('all')}
-                title="Run every section in notebook order; once-sections that already succeeded are skipped">
-                <Icon name="run-all" />
-                <SwapLabel show={running === 'all' ? 'Running…' : 'Run all'} options={['Run all', 'Running…']} />
+      {/* Sticky two-row head (S3): the toolbar row plus the section
+          directory ride together as one fixed-height overlay — cards
+          scroll beneath it with scroll-margin clearance, so the run
+          actions and the outline stay reachable on a long notebook. */}
+      <div className="nb-head" ref={headRef}>
+        {/* Sticky status toolbar: run actions | one-line status | details.
+            Every notice that used to be a banner above the cells now lives
+            in this fixed-height row or behind Details — nothing inserts
+            content above the cells after a click or a poll (S3/S5). */}
+        <div className="nb-toolbar">
+          <div className="nb-toolbar-actions">
+            {canExec && !empty && (
+              <>
+                <Button variant="ghost" size="xs" disabled={running !== null || scratchRunning}
+                  onClick={() => void runSections('all')}
+                  title="Run every section in notebook order; once-sections that already succeeded are skipped">
+                  <Icon name="run-all" />
+                  <SwapLabel show={running === 'all' ? 'Running…' : 'Run all'} options={['Run all', 'Running…']} />
+                </Button>
+                <Button variant="ghost" size="xs" disabled={running !== null || scratchRunning}
+                  onClick={() => void runSections('stale')}
+                  title="Run every stale or never-run section in order; once-sections that already succeeded are skipped">
+                  <Icon name="play" />
+                  <SwapLabel show={running === 'stale' ? 'Running…' : 'Run stale'} options={['Run stale', 'Running…']} />
+                </Button>
+              </>
+            )}
+            {canEdit && (
+              <Button variant="ghost" size="xs" disabled={adding} onClick={() => void addSection()}>
+                <Icon name="plus" />Add section
               </Button>
-              <Button variant="ghost" size="xs" disabled={running !== null || scratchRunning}
-                onClick={() => void runSections('stale')}
-                title="Run every stale or never-run section in order; once-sections that already succeeded are skipped">
-                <Icon name="play" />
-                <SwapLabel show={running === 'stale' ? 'Running…' : 'Run stale'} options={['Run stale', 'Running…']} />
-              </Button>
-            </>
-          )}
-          {canEdit && (
-            <Button variant="ghost" size="xs" disabled={adding} onClick={() => void addSection()}>
-              <Icon name="plus" />Add section
+            )}
+          </div>
+          <span className={`nb-status${status.warn ? ' nb-status-warn' : ''}`} role="status">
+            {status.warn && <SignalMark signal="failed" />}
+            <span className="nb-status-text">{status.text}</span>
+          </span>
+          <div className="nb-toolbar-side">
+            <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />
+            <Button
+              variant="ghost" size="xs"
+              style={{ visibility: hasDetails ? 'visible' : 'hidden' }}
+              onClick={() => setDetailsOpen(true)}
+            >
+              Details
             </Button>
-          )}
+          </div>
         </div>
-        <span className={`nb-status${status.warn ? ' nb-status-warn' : ''}`} role="status">
-          {status.warn && <SignalMark signal="failed" />}
-          <span className="nb-status-text">{status.text}</span>
-        </span>
-        <div className="nb-toolbar-side">
-          <Button
-            variant="ghost" size="xs"
-            style={{ visibility: hasDetails ? 'visible' : 'hidden' }}
-            onClick={() => setDetailsOpen(true)}
-          >
-            Details
-          </Button>
-          <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />
-        </div>
+
+        {/* Compact section directory (C4): held shown order, click
+            deep-links and scrolls to the card. The trailing scratch
+            chip reaches the runner from anywhere in a long notebook. */}
+        {navNames.length > 0 && (
+          <nav className="nb-directory" aria-label="Section directory" ref={dirRef}>
+            {shown.map((m, i) => (
+              <button
+                key={m.name}
+                type="button"
+                className="nb-dir-row"
+                title={m.description || sectionStateLabel(m.state)}
+                aria-current={activeNav === m.name ? 'true' : undefined}
+                data-running={running === m.name ? 'true' : undefined}
+                onClick={() => {
+                  setParams((p) => { const n = new URLSearchParams(p); n.set('section', m.name); return n })
+                  document.getElementById(`section-${m.name}`)?.scrollIntoView({ block: 'start' })
+                }}
+              >
+                <span className="nb-dir-ord">{i + 1}.</span>
+                <span className="nb-dir-name">{m.name}</span>
+                <span className="nb-dir-dot" data-state={m.state} />
+                <span className="sr-only">{sectionStateLabel(m.state)}</span>
+              </button>
+            ))}
+            {scratchNav && (
+              <button
+                type="button"
+                className="nb-dir-row nb-dir-scratch"
+                aria-current={activeNav === 'scratch' ? 'true' : undefined}
+                onClick={() => {
+                  setParams((p) => { const n = new URLSearchParams(p); n.delete('section'); return n })
+                  document.getElementById('run-code')?.scrollIntoView({ block: 'start' })
+                }}
+              >
+                scratch
+              </button>
+            )}
+          </nav>
+        )}
       </div>
 
       {empty ? (
@@ -498,67 +599,44 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
           )}
         </div>
       ) : (
-        <>
-          {/* Compact section directory (C4): held shown order, click
-              deep-links and scrolls to the card. */}
-          <nav className="nb-directory" aria-label="Section directory">
-            {shown.map((m, i) => (
-              <button
-                key={m.name}
-                type="button"
-                className="nb-dir-row"
-                title={m.description || sectionStateLabel(m.state)}
-                onClick={() => {
-                  setParams((p) => { const n = new URLSearchParams(p); n.set('section', m.name); return n })
-                  document.getElementById(`section-${m.name}`)?.scrollIntoView({ block: 'start' })
-                }}
-              >
-                <span className="nb-dir-ord">{i + 1}.</span>
-                <span className="nb-dir-name">{m.name}</span>
-                <span className="nb-dir-dot" data-state={m.state} />
-                <span className="sr-only">{sectionStateLabel(m.state)}</span>
-              </button>
-            ))}
-          </nav>
-          <div className="nb-cards">
-            {shown.map((meta) => (
-              <Fragment key={meta.name}>
-                <SectionCard
-                  id={id}
-                  inst={inst}
-                  meta={meta}
-                  order={order}
-                  incarnation={incarnation}
-                  canRun={canRun}
-                  busy={running === meta.name}
-                  blocked={scratchRunning}
-                  adding={adding}
-                  register={register}
-                  onStructural={onStructural}
-                  onRun={runOne}
-                  onInsertAfter={(n) => void addSection(n)}
-                  note={cellNote && cellNote.name === meta.name ? cellNote : null}
-                  focusOnMount={focusName === meta.name}
-                />
-                {/* Inserter after every cell — the row keeps its height
-                    even without edit rights so cells never move (S3). */}
-                <div className="nb-insert">
-                  {canEdit && (
-                    <Button
-                      variant="ghost" size="xs"
-                      className="nb-icon-btn nb-insert-btn"
-                      aria-label={`Insert section after ${meta.name}`}
-                      disabled={adding}
-                      onClick={() => void addSection(meta.name)}
-                    >
-                      <Icon name="plus" />
-                    </Button>
-                  )}
-                </div>
-              </Fragment>
-            ))}
-          </div>
-        </>
+        <div className="nb-cards">
+          {shown.map((meta) => (
+            <Fragment key={meta.name}>
+              <SectionCard
+                id={id}
+                inst={inst}
+                meta={meta}
+                order={order}
+                incarnation={incarnation}
+                canRun={canRun}
+                busy={running === meta.name}
+                blocked={scratchRunning}
+                adding={adding}
+                register={register}
+                onStructural={onStructural}
+                onRun={runOne}
+                onInsertAfter={(n) => void addSection(n)}
+                note={cellNote && cellNote.name === meta.name ? cellNote : null}
+                focusOnMount={focusName === meta.name}
+              />
+              {/* Inserter after every cell — the row keeps its height
+                  even without edit rights so cells never move (S3). */}
+              <div className="nb-insert">
+                {canEdit && (
+                  <Button
+                    variant="ghost" size="xs"
+                    className="nb-icon-btn nb-insert-btn"
+                    aria-label={`Insert section after ${meta.name}`}
+                    disabled={adding}
+                    onClick={() => void addSection(meta.name)}
+                  >
+                    <Icon name="plus" />
+                  </Button>
+                )}
+              </div>
+            </Fragment>
+          ))}
+        </div>
       )}
 
       {(canExec && (live || lost)) || expired ? (

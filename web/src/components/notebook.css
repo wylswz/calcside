@@ -3,20 +3,25 @@
    (P2 — no primary or default-size buttons inside .nb). Paint-only
    states (S1); polled arrivals stay held behind "Show N new" (S5). */
 
-.nb { display: grid; gap: 12px; --nb-bar-h: 37px; }
+.nb { display: grid; gap: 12px; --nb-bar-h: 67px; }
 /* grid items default to min-width:auto — a wide CodeMirror line or
    unbreakable fact string would stretch the track past the viewport.
    Let every card/section shrink; inner scrollers clip horizontally. */
 .nb > *, .nb-cards > * { min-width: 0; }
 
-/* ---- sticky toolbar: run actions | one-line status | details/reveal ----
+/* ---- sticky head: toolbar row + section directory ----
    Sits under the console header (56px + 1px border) and spans the
-   work-surface's padded width via negative margins. */
-.nb-toolbar {
+   work-surface's padded width via negative margins. One fixed-height
+   overlay (S3): the 36px toolbar keeps row 1, the directory is a
+   fixed 31px row 2 — cards scroll beneath with scroll-margin clearance. */
+.nb-head {
   position: sticky; top: 57px; z-index: 30;
-  display: flex; align-items: center; gap: 4px 10px; flex-wrap: nowrap;
-  height: 36px; margin: 0 -24px; padding: 0 24px;
+  margin: 0 -24px; padding: 0 24px;
   background: var(--detail-work);
+}
+.nb-toolbar {
+  display: flex; align-items: center; gap: 4px 10px; flex-wrap: nowrap;
+  height: 36px;
   border-bottom: 1px solid var(--detail-edge);
 }
 .nb-toolbar-actions { display: flex; align-items: center; gap: 4px; flex: none; }
@@ -31,11 +36,12 @@
 }
 .nb-toolbar-side { display: flex; align-items: center; gap: 2px; flex: none; }
 
-/* section directory — borderless chip strip under the toolbar (S5:
-   held order, constant height, horizontal scroll instead of wrap) */
+/* section directory — fixed-height chip strip as row 2 of the sticky
+   head (S5: held order; constant height, horizontal scroll not wrap) */
 .nb-directory {
-  display: flex; flex-wrap: nowrap; gap: 2px;
-  overflow-x: auto; padding: 2px 0;
+  display: flex; align-items: center; flex-wrap: nowrap; gap: 2px;
+  height: 31px; overflow-x: auto;
+  border-bottom: 1px solid var(--detail-edge);
   scrollbar-width: none;
 }
 .nb-directory::-webkit-scrollbar { display: none; }
@@ -50,6 +56,17 @@
 }
 .nb-dir-row:hover { background: rgb(var(--ink) / 0.05); }
 .nb-dir-row:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+/* scroll-spy highlight is paint-only (S1): tint + name colour, nothing
+   that moves or resizes the chip */
+.nb-dir-row[aria-current='true'] { background: rgb(var(--accent) / 0.1); }
+.nb-dir-row[aria-current='true'] .nb-dir-name { color: rgb(var(--accent)); }
+.nb-dir-scratch[aria-current='true'] { color: rgb(var(--accent)); }
+/* a single-section run pulses its chip's dot — opacity only, and only
+   when reduced motion is not requested (P4) */
+@keyframes nb-dir-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: no-preference) {
+  .nb-dir-row[data-running='true'] .nb-dir-dot { animation: nb-dir-pulse 420ms ease-in-out infinite; }
+}
 .nb-dir-ord {
   font-family: var(--font-mono); font-size: 11px; color: rgb(var(--mute));
   font-variant-numeric: tabular-nums;
@@ -108,6 +125,7 @@
   border: 1px solid transparent; border-radius: var(--detail-radius-inset);
   background: transparent; padding: 2px 6px; box-shadow: none;
   font-size: 13px; line-height: 20px; color: rgb(var(--ink));
+  overflow: hidden; text-overflow: ellipsis;
 }
 .nb .nb-card .nb-card-head input.nb-desc-input::placeholder { color: rgb(var(--mute)); }
 .nb .nb-card .nb-card-head input.nb-desc-input:hover { background: rgb(var(--ink) / 0.04); }
@@ -203,21 +221,21 @@
 .nb .nb-facts code { font-family: var(--font-mono); font-size: 11px; }
 .nb-readonly-note { color: rgb(var(--sec)); }
 
-/* inserter rows between cells — fixed height, paint-only reveal (S1).
-   The Button primitive supplies the ghost/xs chrome (P2); this class
-   only shrinks it into the 20px seam — mobile restores the 44px hit
-   target with the row below. */
+/* inserter rows between cells — fixed height (S3). The Button
+   primitive supplies the ghost/xs chrome (P2); this class shrinks it
+   into a quiet framed 22px control inside the 32px seam — the ghost
+   hover/focus paint still wins on specificity. Mobile restores the
+   44px hit target with the row below. */
 .nb-insert {
-  height: 20px; display: flex; align-items: center; justify-content: center;
+  height: 32px; display: flex; align-items: center; justify-content: center;
 }
 .nb [data-ui='button'].nb-insert-btn {
-  width: 20px; height: 20px; min-height: 20px; padding: 0;
+  width: 22px; height: 22px; min-height: 22px; padding: 0;
+  border-color: var(--detail-edge);
+  background-color: var(--detail-work);
+  color: rgb(var(--sec));
 }
 .nb [data-ui='button'].nb-insert-btn svg { width: 12px; height: 12px; }
-@media (hover: hover) {
-  .nb-insert { opacity: 0.35; transition: opacity 150ms var(--ease-damped); }
-  .nb-insert:hover, .nb-insert:focus-within { opacity: 1; }
-}
 
 /* empty notebook — intentional, not an error */
 .nb-empty {
@@ -226,7 +244,10 @@
 }
 .nb-empty p { margin: 0 0 10px; font-size: 13px; color: rgb(var(--sec)); }
 
-/* scratch cell — same chrome, dashed edge */
+/* scratch cell — same chrome, dashed edge. The -12px pulls it back over
+   the grid gap so the last inserter seam measures the same 32px as the
+   seams between cards. */
+.nb-cards + .nb-scratch { margin-top: -12px; }
 .nb-scratch {
   border: 1px dashed var(--detail-edge); border-radius: var(--detail-radius-inset);
   background: var(--detail-work);
@@ -292,15 +313,20 @@
 @media (max-width: 900px) {
   /* wrapped toolbar: actions row, then status + side — the status text
      reserves a constant two-line box so the bar height never changes
-     with content (S4); --nb-bar-h tracks the measured bar height. */
-  .nb { --nb-bar-h: 105px; }
+     with content (S4); --nb-bar-h tracks the measured head height
+     (wrapped toolbar + fixed directory row). */
+  .nb { --nb-bar-h: 136px; }
+  .nb-head { margin: 0 -16px; padding: 0 16px; }
   .nb-toolbar {
     height: auto; min-height: 36px; flex-wrap: wrap;
-    margin: 0 -16px; padding: 6px 16px;
+    padding: 6px 0;
   }
   .nb-toolbar-actions { flex-basis: 100%; }
+  /* the status row keeps a fixed 36px box so the wrapped bar height is
+     identical for one- and two-line statuses (S4) */
+  .nb-status { height: 36px; }
   .nb-status-text {
-    height: 36px;
+    max-height: 36px;
     white-space: normal;
     display: -webkit-box;
     -webkit-box-orient: vertical;
@@ -314,7 +340,10 @@
     order: 1; flex-basis: 100%;
   }
   .nb-body { padding: 0 12px 10px; }
-  .nb-gutter { padding-top: 11px; }
+  /* the 44px run button centres on the first header row's text —
+     padding-top 0 is the measured value (the gutter column does not
+     affect the header row, so this moves only the button). */
+  .nb-gutter { padding-top: 0; }
   /* 44px hit targets: the gutter widens so run/menu buttons fit, and the
      inserter row grows to hold its button (instance-detail.css). */
   .nb-card, .nb-run-code { grid-template-columns: 48px minmax(0, 1fr); }
