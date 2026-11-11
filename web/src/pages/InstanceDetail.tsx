@@ -5,7 +5,7 @@ import { api, Instance, Execution, APIKey, SharedInstance, workspaces } from '..
 import { instanceDescription, instanceTitle } from '../activity'
 import { nextStep } from '../nextStep'
 import { useRole } from '../workspace'
-import { Button, Confirm, Loading, Menu, MenuItem, SectionTitle, InstanceStatus, Modal, Notice, SwapLabel } from '../components/ui'
+import { Button, Confirm, Loading, Menu, MenuItem, InstanceStatus, Modal, Notice, SwapLabel } from '../components/ui'
 import ShareDialog from '../components/ShareDialog'
 import ConnectAgent from '../components/ConnectAgent'
 import { Allowed } from '../components/Allowed'
@@ -49,6 +49,7 @@ export default function InstanceDetail() {
   const [agent, setAgent] = useState(false)
   const [prompt, setPrompt] = useState(false)
   const [focusId, setFocusId] = useState<string | undefined>()
+  const [stateTab, setStateTab] = useState<'state' | 'files'>('state')
 
   const { data: inst, isError: instErr } = useQuery({
     queryKey: ['instance', id],
@@ -237,20 +238,27 @@ export default function InstanceDetail() {
           <div hidden={view !== 'activity'}>
             <Activity id={id} focusId={focusId} />
           </div>
-          {inst.spec?.capabilities?.fs != null && (
-            <section aria-label="Results" className="results-block">
-              <h2 className="mb-4 font-semibold text-ink">Results</h2>
-              <div className="results-content">
-                <div>
-                  <SectionTitle>Files</SectionTitle>
-                  <ArtifactBrowser key={id} id={id} running={live} busy={false} />
-                </div>
-              </div>
-            </section>
-          )}
         </div>
         <aside className="side-col">
-          <StatePanel key={`state-${id}`} id={id} running={live} revision={stateRevision} capNames={Object.keys(inst.spec?.capabilities ?? {})} />
+          {/* Files are runtime state like variables — they live beside
+              State under one tabbed panel; both stay mounted so the
+              browser's directory and selection survive switches (C2/C3). */}
+          {inst.spec?.capabilities?.fs != null ? (
+            <section aria-label="Live state">
+              <div className="state-tabs" role="tablist" aria-label="Live state">
+                <button role="tab" aria-selected={stateTab === 'state'} data-on={stateTab === 'state'} className="view-tab" onClick={() => setStateTab('state')}>State</button>
+                <button role="tab" aria-selected={stateTab === 'files'} data-on={stateTab === 'files'} className="view-tab" onClick={() => setStateTab('files')}>Files</button>
+              </div>
+              <div hidden={stateTab !== 'state'}>
+                <StatePanel key={`state-${id}`} id={id} running={live} revision={stateRevision} capNames={Object.keys(inst.spec?.capabilities ?? {})} heading={false} />
+              </div>
+              <div hidden={stateTab !== 'files'}>
+                <ArtifactBrowser key={id} id={id} running={live} busy={false} />
+              </div>
+            </section>
+          ) : (
+            <StatePanel key={`state-${id}`} id={id} running={live} revision={stateRevision} capNames={Object.keys(inst.spec?.capabilities ?? {})} />
+          )}
           <section aria-label="Boundary">
             <h2>Boundary</h2>
             <p className="side-text mb-3">Fixed at creation.</p>

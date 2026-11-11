@@ -53,15 +53,20 @@ body:has(.instance-detail) .console-profile { font-size: 13px; color: rgb(var(--
 .instance-detail .next-text { font-size: 14px; line-height: 22px; color: rgb(var(--body)); margin: 0; overflow-wrap: anywhere; }
 .instance-detail .next-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
 
-/* main column (Work then Results) + right sidebar */
+/* main column + right sidebar */
 .instance-detail .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 32px; align-items: start; }
 .instance-detail .work-surface {
   background: var(--detail-work); border: 1px solid var(--detail-edge);
   border-radius: var(--detail-radius-surface); box-shadow: var(--detail-shadow-surface); padding: 24px;
 }
-.instance-detail .results-block { margin-top: 32px; }
-.instance-detail .results-content { display: grid; gap: 24px; }
 .instance-detail .side-col { display: grid; gap: 24px; min-width: 0; font-size: 13px; }
+/* live-state tabs — same underline look as the view tabs; both panels
+   stay mounted behind `hidden` (C2/C3) */
+.instance-detail .state-tabs {
+  display: flex; gap: 4px;
+  border-bottom: 1px solid var(--detail-edge);
+  margin-bottom: 12px;
+}
 .instance-detail .side-col h2 { margin: 0 0 10px; }
 .instance-detail .side-label { color: rgb(var(--body)); margin: 16px 0 4px; }
 .instance-detail .side-text { color: rgb(var(--sec)); min-width: 0; overflow-wrap: anywhere; }

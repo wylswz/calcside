@@ -329,8 +329,8 @@ test('directory + collapse: outline rows deep-link; code folds per card', async 
   await page.goto(`${rt.viteURL}/instances/${id}`)
   const dir = page.locator('.nb-directory')
   await expect(dir).toBeVisible()
-  await expect(dir.locator('.nb-dir-row')).toHaveCount(2)
-  await expect(dir.locator('.nb-dir-row').first()).toContainText('alpha')
+  await expect(dir.locator('.nb-dir-row:not(.nb-dir-scratch)')).toHaveCount(2)
+  await expect(dir.locator('.nb-dir-row:not(.nb-dir-scratch)').first()).toContainText('alpha')
   // Click deep-links ?section= and scrolls the card into view (C4).
   await dir.locator('.nb-dir-row', { hasText: 'beta' }).click()
   await expect(page).toHaveURL(/section=beta/)
@@ -342,6 +342,79 @@ test('directory + collapse: outline rows deep-link; code folds per card', async 
   await expect(c.locator('.nb-card-head')).toBeVisible()
   await c.getByRole('button', { name: 'Expand beta code' }).click()
   await expect(c.locator('.cm-content')).toBeVisible()
+})
+
+test('S3: section directory stays visible while a long notebook scrolls', async ({ page }) => {
+  const id = await createInstance()
+  for (let i = 1; i <= 8; i++) await saveSection(id, `sec${i}`, `v${i} = ${i}`)
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  const dir = page.locator('.nb-directory')
+  const head = page.locator('.nb-head')
+  await expect(dir).toBeVisible()
+  // 8 section chips + the trailing scratch chip.
+  await expect(dir.locator('.nb-dir-row')).toHaveCount(9)
+  const headBefore = (await head.boundingBox())!.height
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+  await page.waitForTimeout(300)
+  // The strip is pinned as row 2 of the sticky head: its top is the
+  // toolbar's bottom edge and the head keeps one height (S3).
+  await expect(dir).toBeInViewport()
+  const dirBox = (await dir.boundingBox())!
+  const barBox = (await page.locator('.nb-toolbar').boundingBox())!
+  expect(Math.abs(dirBox.y - (barBox.y + barBox.height))).toBeLessThanOrEqual(1)
+  expect((await head.boundingBox())!.height).toBe(headBefore)
+})
+
+test('S3: jumping to a section lands the card below the sticky head', async ({ page }) => {
+  const id = await createInstance()
+  for (let i = 1; i <= 8; i++) await saveSection(id, `sec${i}`, `v${i} = ${i}`)
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  const dir = page.locator('.nb-directory')
+  await dir.locator('.nb-dir-row', { hasText: 'sec8' }).click()
+  await expect(page).toHaveURL(/section=sec8/)
+  const c = card(page, 'sec8')
+  await expect(c).toBeInViewport()
+  const cBox = (await c.boundingBox())!
+  const dBox = (await dir.boundingBox())!
+  expect(cBox.y).toBeGreaterThanOrEqual(dBox.y + dBox.height)
+})
+
+test('S1: scroll-spy highlight is paint-only', async ({ page }) => {
+  const id = await createInstance()
+  for (let i = 1; i <= 8; i++) await saveSection(id, `sec${i}`, `v${i} = ${i}`)
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  const dir = page.locator('.nb-directory')
+  const chip = dir.locator('.nb-dir-row', { hasText: 'sec5' })
+  await expect(chip).toBeVisible()
+  const before = (await chip.boundingBox())!
+  await chip.click()
+  // The jumped-to chip carries the marker and it is the only one (S1:
+  // aria-current repaints background/name colour, never the box).
+  await expect(chip).toHaveAttribute('aria-current', 'true')
+  await expect(dir.locator('.nb-dir-row[aria-current="true"]')).toHaveCount(1)
+  const after = (await chip.boundingBox())!
+  expect(after.width).toBe(before.width)
+  expect(after.height).toBe(before.height)
+})
+
+test('scratch chip reaches the scratch runner', async ({ page }) => {
+  const id = await createInstance()
+  for (let i = 1; i <= 8; i++) await saveSection(id, `sec${i}`, `v${i} = ${i}`)
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  const dir = page.locator('.nb-directory')
+  // Set ?section= first so the chip's param cleanup is observable.
+  await dir.locator('.nb-dir-row', { hasText: 'sec3' }).click()
+  await expect(page).toHaveURL(/section=sec3/)
+  await page.evaluate(() => window.scrollTo(0, 0))
+  const chip = dir.locator('.nb-dir-scratch')
+  await expect(chip).toBeVisible()
+  await chip.click()
+  await expect(page).not.toHaveURL(/section=/)
+  const scratch = page.locator('#run-code')
+  await expect(scratch).toBeInViewport()
+  const sBox = (await scratch.boundingBox())!
+  const dBox = (await dir.boundingBox())!
+  expect(sBox.y).toBeGreaterThanOrEqual(dBox.y + dBox.height)
 })
 
 test('run CAS: an agent edit between validation and POST conflicts — nothing executes', async ({ page }) => {
@@ -616,7 +689,7 @@ test('screenshots: notebook desktop/mobile × light/dark', async ({ page }) => {
   await page.goto(`${rt.viteURL}/instances/${id}`)
   await expect(card(page, 'setup')).toBeVisible()
   await expect(card(page, 'report')).toBeVisible()
-  await expect(page.locator('.nb-directory .nb-dir-row')).toHaveCount(6)
+  await expect(page.locator('.nb-directory .nb-dir-row:not(.nb-dir-scratch)')).toHaveCount(6)
   for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme })
     // The previous iteration's mobile shots leave the page scrolled.
@@ -630,19 +703,18 @@ test('screenshots: notebook desktop/mobile × light/dark', async ({ page }) => {
     const bar = await page.locator('.nb-toolbar').boundingBox()
     expect(bar).not.toBeNull()
     expect(Math.round(bar!.y)).toBe(57)
-    // The bar paints above the cells scrolling beneath it and is opaque.
+    // The two-row head paints above the cells scrolling beneath it and
+    // is opaque; the toolbar keeps its 1px bottom edge as row 1.
     const barBox = bar!
     const topmost = await page.evaluate(
-      ([x, y]) => document.elementFromPoint(x, y)?.closest('.nb-toolbar') != null,
+      ([x, y]) => document.elementFromPoint(x, y)?.closest('.nb-head') != null,
       [barBox.x + barBox.width / 2, barBox.y + barBox.height / 2],
     )
     expect(topmost).toBe(true)
-    const barStyle = await page.locator('.nb-toolbar').evaluate((el) => {
-      const cs = getComputedStyle(el)
-      return { bg: cs.backgroundColor, bw: cs.borderBottomWidth }
-    })
-    expect(barStyle.bg).not.toBe('rgba(0, 0, 0, 0)')
-    expect(barStyle.bw).toBe('1px')
+    const headBg = await page.locator('.nb-head').evaluate((el) => getComputedStyle(el).backgroundColor)
+    expect(headBg).not.toBe('rgba(0, 0, 0, 0)')
+    const barBw = await page.locator('.nb-toolbar').evaluate((el) => getComputedStyle(el).borderBottomWidth)
+    expect(barBw).toBe('1px')
     // No horizontal overflow at desktop width either.
     const deskOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     expect(deskOverflow).toBeLessThanOrEqual(1)
@@ -661,6 +733,13 @@ test('screenshots: notebook desktop/mobile × light/dark', async ({ page }) => {
     await page.keyboard.press('Escape')
     await page.setViewportSize({ width: 390, height: 844 })
     await expect(page.locator('.nb')).toBeVisible()
+    // --nb-bar-h must equal the measured sticky head so the cards'
+    // scroll-margin clears both rows at mobile width too (S3).
+    const mobHead = (await page.locator('.nb-head').boundingBox())!
+    const mobBarH = await page.locator('.nb').evaluate(
+      (el) => parseFloat(getComputedStyle(el).getPropertyValue('--nb-bar-h')),
+    )
+    expect(Math.round(mobHead.height)).toBe(Math.round(mobBarH))
     // No horizontal overflow at mobile width.
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     expect(overflow).toBeLessThanOrEqual(1)
