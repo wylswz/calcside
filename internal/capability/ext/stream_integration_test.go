@@ -987,3 +987,59 @@ for part in s:
 		})
 	}
 }
+
+// TestProviderStructuredOptionsReachWire verifies ext.llm.structured
+// forwards options (e.g. max_tokens) to the provider request, so
+// callers can bound output length and stay inside the exec deadline.
+// The provider protocol previously ignored options on structured()
+// entirely, which made large structured generations time out.
+func TestProviderStructuredOptionsReachWire(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		source   string
+		optKey   string
+		response string
+	}{
+		{
+			name: "openai", source: "contrib/llm-openai@0.1.0",
+			optKey:   "max_output_tokens",
+			response: `{"output":[{"type":"message","content":[{"type":"output_text","text":"{\"ok\": true}"}]}],"usage":{"input_tokens":2,"output_tokens":1}}`,
+		},
+		{
+			name: "compat", source: "contrib/llm-openai-compat@0.1.0",
+			optKey:   "max_tokens",
+			response: `{"choices":[{"message":{"content":"{\"ok\": true}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1}}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				raw, _ := io.ReadAll(r.Body)
+				if !strings.Contains(string(raw), `"`+tc.optKey+`":42`) {
+					t.Errorf("%s body missing %s=42: %s", tc.name, tc.optKey, raw)
+				}
+				if !strings.Contains(string(raw), `"model":"m1"`) {
+					t.Errorf("%s body missing model: %s", tc.name, raw)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, tc.response)
+			}))
+			defer srv.Close()
+			f := providerFixture{
+				name: tc.name, source: tc.source, model: "m1",
+				cfg: func(srv *httptest.Server) map[string]any { return map[string]any{"base_url": srv.URL, "api_key": ""} },
+			}
+			s, e := llmSession(t, nil, nil, []providerFixture{f}, map[string]*httptest.Server{f.name: srv})
+			code := `res = ext.llm.structured("` + tc.name + `", [{"role": "user", "content": "hi"}], {"type": "object", "properties": {"ok": {"type": "boolean"}}}, model = "m1", options = {"max_tokens": 42})
+print(res)`
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			res := e.Exec(ctx, s, "x", code, 8*time.Second, 1<<20, s.Out.String)
+			if res.Error != nil {
+				t.Fatalf("exec: %+v", res.Error)
+			}
+			if out := strings.TrimSpace(s.Out.String()); !strings.Contains(out, `"ok": True`) {
+				t.Fatalf("structured result %q", out)
+			}
+		})
+	}
+}

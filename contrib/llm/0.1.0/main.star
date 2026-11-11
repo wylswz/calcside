@@ -41,9 +41,14 @@ def stream(provider, messages, model=None, options=None):
     return p.stream(messages, _model(p, model), options)
 
 
-def structured(provider, messages, schema, model=None):
+def structured(provider, messages, schema, model=None, options=None):
     p = _provider(provider)
-    return p.structured(messages, schema, _model(p, model))
+    m = _model(p, model)
+    # Pass options only when given: providers that predate the options
+    # parameter (e.g. anthropic, gemini) still accept 3 arguments.
+    if options == None:
+        return p.structured(messages, schema, m)
+    return p.structured(messages, schema, m, options)
 
 
 def score(provider, content, criteria, scale=1.0, model=None):

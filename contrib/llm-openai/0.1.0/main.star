@@ -98,7 +98,8 @@ def respond(messages, model, options=None):
     }
 
 
-def structured(messages, schema, model):
+def structured(messages, schema, model, options=None):
+    opts = _options(options)
     if config["json_schema"]:
         body = {
             "model": model,
@@ -110,6 +111,8 @@ def structured(messages, schema, model):
                 "strict": False,
             }},
         }
+        for k in opts:
+            body[k] = opts[k]
         d = _post(body)
         v = _decode(_text(d))
     else:
@@ -117,7 +120,10 @@ def structured(messages, schema, model):
         fixed.append({"role": "user", "content":
             "Respond with ONLY a JSON value conforming to this schema, " +
             "no prose, no code fences: " + json.encode(schema)})
-        d = _post({"model": model, "input": fixed})
+        body = {"model": model, "input": fixed}
+        for k in opts:
+            body[k] = opts[k]
+        d = _post(body)
         v = _decode(_text(d))
     _check_schema(v, schema)
     return v
