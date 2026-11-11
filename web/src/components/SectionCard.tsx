@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { api, ApiError, Instance, Notebook, NotebookSectionMeta, NotebookSectionResponse, SaveNotebookSectionResponse } from '../api'
 import { AutosaveQueue, type AutosaveState } from '../autosave'
 import { readPendingDraft, writePendingDraft, type PendingDraft } from '../pendingDraft'
-import { Button, Confirm, Menu, MenuItem, SwapLabel } from './ui'
+import { Button, Confirm, Icon, Menu, MenuItem, MenuSeparator, SwapLabel } from './ui'
 import { useStarlarkEditor } from './editor'
 import { cmTheme } from './codemirror'
 import { fmtTime, relTime } from '../format'
@@ -40,15 +40,17 @@ const pendingKey = (ws: string, instance: string, name: string) =>
 
 // SectionStateBadge renders the derived run state; colors follow the
 // shared signals — failed is the warn tone, stale a warning tone.
+export const sectionStateLabel = (state: NotebookSectionMeta['state']): string =>
+  ({ not_run: 'not run', fresh: 'fresh', stale: 'stale', failed: 'failed' } as const)[state] ?? 'not run'
+
+const stateTone: Record<string, string> = {
+  not_run: 'text-mute',
+  fresh: 'text-sec',
+  stale: 'text-warn-text',
+  failed: 'text-danger',
+}
 export function SectionStateBadge({ state }: { state: NotebookSectionMeta['state'] }) {
-  const map: Record<string, { text: string; cls: string }> = {
-    not_run: { text: 'not run', cls: 'text-mute' },
-    fresh: { text: 'fresh', cls: 'text-sec' },
-    stale: { text: 'stale', cls: 'text-warn-text' },
-    failed: { text: 'failed', cls: 'text-danger' },
-  }
-  const s = map[state] ?? map.not_run
-  return <span className={`whitespace-nowrap text-xs font-medium ${s.cls}`}>{s.text}</span>
+  return <span className={`whitespace-nowrap text-xs font-medium ${stateTone[state] ?? stateTone.not_run}`}>{sectionStateLabel(state)}</span>
 }
 
 // SaveStatus is the persistent autosave indicator (C2): it always shows
@@ -82,11 +84,17 @@ export interface SectionCardProps {
   busy?: boolean
   /** another run (scratch or batch) is in flight — disables without relabeling */
   blocked?: boolean
+  /** a section creation is in flight — disables the insert-after item */
+  adding?: boolean
   register: (name: string, q: AutosaveQueue<SectionValue> | null) => void
   onStructural: () => void
   /** onceConfirmed: the card's own once-warning was already accepted */
   onRun: (name: string, onceConfirmed?: boolean) => void
   onInsertAfter: (name: string) => void
+  /** per-cell run feedback from the parent's last single-section run (P5) */
+  note?: { tone: 'warning' | 'neutral'; text: string } | null
+  /** focus the CodeMirror once when this card's editor is created */
+  focusOnMount?: boolean
 }
 
 // SectionCard is one notebook section: ordinal + name + description,
@@ -94,7 +102,7 @@ export interface SectionCardProps {
 // serial CAS queue, last-run output, and the Run action. Polling never
 // overwrites a dirty draft (C2) and never reorders the card (S5 is
 // handled by the parent's held order).
-export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, blocked, register, onStructural, onRun, onInsertAfter }: SectionCardProps) {
+export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, blocked, adding, register, onStructural, onRun, onInsertAfter, note, focusOnMount }: SectionCardProps) {
   const name = meta.name
   const qc = useQueryClient()
   const live = inst.status === 'running'
@@ -112,6 +120,9 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
   const [codeOpen, setCodeOpen] = useState(true)
   const [structErr, setStructErr] = useState('')
   const [recovered, setRecovered] = useState<PendingDraft<SectionValue> | null>(null)
+  // A just-created section focuses its editor once; collapsing and
+  // reopening must not steal focus again (C1).
+  const didFocus = useRef(false)
   const pKey = pendingKey(inst.workspace_id ?? '', id, name)
 
   const det = useQuery({
@@ -288,6 +299,10 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
   }
 
   const runOnce = meta.rerun === 'once' && meta.once_ran
+  // The once menu item reads the DRAFT rerun so the label flips as soon
+  // as it is picked, before the poll returns the saved meta; the header
+  // `once` tag stays on saved meta only.
+  const draftRerun = value?.rerun ?? meta.rerun
   // Output provenance comes from the section DETAIL (fresher than the
   // outline row): a previous incarnation marks it previous-runtime,
   // and a stale state means the code changed since that run.
@@ -297,6 +312,36 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
   const outTag = prevRuntime ? 'previous runtime' : outStale ? 'code changed since run' : ''
   const editor = useStarlarkEditor(id, live, as?.saving ?? false)
 
+  // The gutter Run control and ⌘/Ctrl+Enter share one path: same
+  // disabled conditions, same once-confirm detour (P1/P2).
+  const runDisabled = busy || blocked || as?.conflict || !!as?.error || det.isLoading
+  const startRun = () => {
+    if (runDisabled) return
+    if (runOnce) setConfirmOnce(true)
+    else onRun(name, false)
+  }
+  // ⌘/Ctrl+Enter inside THIS section's editor runs this section — never
+  // scratch (the capture stops it reaching the scratch window listener).
+  // The chord is always claimed so a disabled run cannot fall through
+  // to an editor binding; startRun honours the disabled conditions.
+  const onEditorKeyDown = (e: KeyboardEvent<HTMLElement>) => {
+    if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return
+    e.preventDefault()
+    e.stopPropagation()
+    startRun()
+  }
+
+  const factParts: ReactNode[] = []
+  if (meta.defines.length > 0) factParts.push(<>defines <code>{meta.defines.join(', ')}</code></>)
+  if (meta.uses.length > 0) factParts.push(<>uses <code>{meta.uses.join(', ')}</code></>)
+  if (meta.effects.length > 0) factParts.push(<>calls <code>{meta.effects.join(', ')}</code></>)
+  if (meta.depends_on.length > 0) factParts.push(<>needs <code>{meta.depends_on.join(', ')}</code></>)
+  const readonlyNote = inst.status === 'expired'
+    ? 'Expired — read-only.'
+    : lost
+      ? 'Runtime lost — code is retained; running restores an empty process.'
+      : 'Read-only.'
+
   return (
     <section
       id={`section-${name}`}
@@ -304,138 +349,155 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
       className="nb-card"
       data-section={name}
     >
-      <header className="nb-card-head">
-        <span className="nb-ordinal">{meta.position + 1}.</span>
-        <div className="nb-card-title min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h3 className="nb-name">{name}</h3>
-            <SectionStateBadge state={meta.state} />
-            {meta.rerun === 'once' && (
-              <span className="text-xs text-sec" title="Skipped by bulk runs after a prior success">once · skip in bulk after success</span>
-            )}
-          </div>
-          {meta.description && <p className="nb-desc">{meta.description}</p>}
-          {(meta.defines.length > 0 || meta.uses.length > 0 || meta.effects.length > 0 || meta.depends_on.length > 0) && (
-            <p className="nb-facts">
-              {meta.defines.length > 0 && <>defines <code>{meta.defines.join(', ')}</code>{' · '}</>}
-              {meta.uses.length > 0 && <>uses <code>{meta.uses.join(', ')}</code>{' · '}</>}
-              {meta.effects.length > 0 && <>calls <code>{meta.effects.join(', ')}</code>{' · '}</>}
-              {meta.depends_on.length > 0 && <>needs <code>{meta.depends_on.join(', ')}</code></>}
-            </p>
-          )}
-        </div>
-        <div className="nb-card-actions">
-          <SaveStatus st={as} onRetry={retrySave} />
-          <button
-            type="button"
-            className="nb-collapse text-btn text-xs text-sec"
-            aria-expanded={codeOpen}
-            aria-label={`${codeOpen ? 'Collapse' : 'Expand'} ${name} code`}
-            onClick={() => setCodeOpen((o) => !o)}
+      <div className="nb-gutter">
+        {canExec && (
+          <Button
+            variant="ghost" size="xs" className="nb-icon-btn"
+            aria-label="Run section" aria-busy={busy}
+            title={as?.conflict ? 'Resolve the save conflict first' : 'Run section (⌘/Ctrl + Enter)'}
+            disabled={runDisabled}
+            onClick={startRun}
           >
-            <SwapLabel show={codeOpen ? '▾ code' : '▸ code'} options={['▾ code', '▸ code']} />
-          </button>
-          {canExec && (
-            <Button size="sm" variant="primary" disabled={busy || blocked || as?.conflict || !!as?.error || det.isLoading}
-              title={as?.conflict ? 'Resolve the save conflict first' : undefined}
-              onClick={() => (runOnce ? setConfirmOnce(true) : onRun(name, false))}>
-              <SwapLabel show={busy ? 'Running…' : 'Run section'} options={['Run section', 'Running…']} />
-            </Button>
+            {busy
+              ? <span className="inline-block h-3.5 w-3.5 motion-safe:animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden />
+              : <Icon name="play" />}
+          </Button>
+        )}
+      </div>
+      <div className="nb-body">
+        <header className="nb-card-head">
+          <span className="nb-ordinal">{meta.position + 1}.</span>
+          <h3 className="nb-name">{name}</h3>
+          <SectionStateBadge state={meta.state} />
+          {meta.rerun === 'once' && (
+            <span className="nb-once" title="Skipped by bulk runs after a prior success">once</span>
           )}
-          {canEdit && (
-            <Menu trigger={<Button size="sm" aria-label={`Section ${name} actions`}>⋯</Button>}>
-              <MenuItem disabled={idx <= 0} onSelect={() => void move(-1)}>Move up</MenuItem>
-              <MenuItem disabled={idx < 0 || idx >= order.length - 1} onSelect={() => void move(1)}>Move down</MenuItem>
-              <MenuItem onSelect={() => onInsertAfter(name)}>Insert section after…</MenuItem>
-              <MenuItem tone="danger" onSelect={() => setConfirmDelete(true)}>Delete…</MenuItem>
-            </Menu>
-          )}
-        </div>
-      </header>
-
-      {as?.conflict && (
-        <div className="nb-conflict" role="alert">
-          <p className="text-sm text-ink">This section changed elsewhere — your draft is kept.</p>
-          <div className="mt-2 flex gap-2">
-            <Button size="sm" onClick={() => void resolveConflict('reload').catch((e) => setStructErr(e.message))}>Reload server copy</Button>
-            <Button size="sm" variant="primary" onClick={() => void resolveConflict('draft').catch((e) => setStructErr(e.message))}>Keep my draft</Button>
-          </div>
-        </div>
-      )}
-      {recovered && (
-        <div className="nb-conflict" role="alert">
-          <p className="text-sm text-ink">Unsaved local edits from a previous visit are still here.</p>
-          <div className="mt-2 flex gap-2">
-            <Button size="sm" onClick={discardPending}>Discard backup</Button>
-            <Button size="sm" variant="primary" onClick={restorePending}>Restore edits</Button>
-          </div>
-        </div>
-      )}
-      {structErr && <p className="nb-err">{structErr}</p>}
-
-      {codeOpen && (
-      <div className="nb-editor">
-        {canEdit ? (
-          <>
+          {canEdit ? (
             <input
               className="nb-desc-input"
               value={value?.description ?? ''}
-              placeholder="one-line description (required)"
+              placeholder="Describe this section (required)"
               maxLength={200}
               aria-label={`${name} description`}
               onChange={(e) => update({ description: e.target.value })}
             />
-            <CodeMirror
-              value={value?.code ?? ''}
-              height="180px"
-              extensions={editor.extensions}
-              onChange={(code) => update({ code })}
-              theme={cmTheme}
-            />
-            <label className="nb-once">
-              <input
-                type="checkbox"
-                checked={value?.rerun === 'once'}
-                onChange={(e) => update({ rerun: e.target.checked ? 'once' : 'safe' })}
-              />
-              Skip in bulk runs after success
-            </label>
-          </>
-        ) : (
-          <>
-            <pre className="nb-code-readonly">{value?.code || '(empty)'}</pre>
-            <p className="nb-readonly-note">
-              {inst.status === 'expired' ? 'Expired — read-only.' : lost ? 'Runtime lost — code is retained; running restores an empty process.' : 'Read-only.'}
-            </p>
-          </>
-        )}
-      </div>
-      )}
+          ) : meta.description ? (
+            <span className="nb-desc-text" title={meta.description}>{meta.description}</span>
+          ) : null}
+          <div className="nb-card-actions">
+            <SaveStatus st={as} onRetry={retrySave} />
+            <Button
+              variant="ghost" size="xs" className="nb-icon-btn nb-collapse"
+              aria-expanded={codeOpen}
+              aria-label={`${codeOpen ? 'Collapse' : 'Expand'} ${name} code`}
+              onClick={() => setCodeOpen((o) => !o)}
+            >
+              <span className="nb-chevs" aria-hidden>
+                <Icon name="chevron" className="nb-chev nb-chev-down" />
+                <Icon name="chevron" className="nb-chev nb-chev-right" />
+              </span>
+            </Button>
+            {canEdit && (
+              <Menu trigger={
+                <Button variant="ghost" size="xs" className="nb-icon-btn" aria-label={`Section ${name} actions`}>
+                  <Icon name="more" />
+                </Button>
+              }>
+                <MenuItem disabled={idx <= 0} onSelect={() => void move(-1)}>Move up</MenuItem>
+                <MenuItem disabled={idx < 0 || idx >= order.length - 1} onSelect={() => void move(1)}>Move down</MenuItem>
+                <MenuItem disabled={adding} onSelect={() => onInsertAfter(name)}>Insert section after</MenuItem>
+                <MenuItem onSelect={() => update({ rerun: draftRerun === 'once' ? 'safe' : 'once' })}>
+                  {draftRerun === 'once' ? 'Unmark run-once' : 'Mark as run-once'}
+                </MenuItem>
+                <MenuSeparator />
+                <MenuItem tone="danger" onSelect={() => setConfirmDelete(true)}>Delete…</MenuItem>
+              </Menu>
+            )}
+          </div>
+        </header>
 
-      <footer className="nb-card-foot">
-        <span className="text-xs text-sec">
-          {meta.last_run_at
-            ? <>last run <span title={fmtTime(meta.last_run_at)}>{relTime(meta.last_run_at)}</span>{meta.last_status ? ` · ${meta.last_status}` : ''}</>
-            : 'never run'}
-        </span>
+        {codeOpen && (
+          <div className="nb-editor" onKeyDownCapture={onEditorKeyDown}>
+            {canEdit ? (
+              <CodeMirror
+                value={value?.code ?? ''}
+                minHeight="44px"
+                maxHeight="420px"
+                extensions={editor.extensions}
+                onChange={(code) => update({ code })}
+                onCreateEditor={(view) => {
+                  if (focusOnMount && !didFocus.current) {
+                    didFocus.current = true
+                    view.focus()
+                  }
+                }}
+                theme={cmTheme}
+              />
+            ) : (
+              <pre className="nb-code-readonly">{value?.code || '(empty)'}</pre>
+            )}
+          </div>
+        )}
+
+        {(as?.conflict || recovered || structErr || note) && (
+          <div className="nb-alerts">
+            {as?.conflict && (
+              <div className="nb-conflict" role="alert">
+                <p className="nb-conflict-text">This section changed elsewhere — your draft is kept.</p>
+                <div className="nb-conflict-actions">
+                  <Button size="xs" onClick={() => void resolveConflict('reload').catch((e) => setStructErr(e.message))}>Reload server copy</Button>
+                  <Button size="xs" onClick={() => void resolveConflict('draft').catch((e) => setStructErr(e.message))}>Keep my draft</Button>
+                </div>
+              </div>
+            )}
+            {recovered && (
+              <div className="nb-conflict" role="alert">
+                <p className="nb-conflict-text">Unsaved local edits from a previous visit are still here.</p>
+                <div className="nb-conflict-actions">
+                  <Button size="xs" onClick={discardPending}>Discard backup</Button>
+                  <Button size="xs" onClick={restorePending}>Restore edits</Button>
+                </div>
+              </div>
+            )}
+            {structErr && <p className="nb-err">{structErr}</p>}
+            {note && <p className={`nb-note${note.tone === 'warning' ? ' nb-note-warn' : ''}`} role="status">{note.text}</p>}
+          </div>
+        )}
+
         {detail?.output ? (
-          <details className="nb-output">
-            <summary className="cursor-pointer text-xs text-sec">
-              output{outTag && <span className="ml-2 text-warn-text">{outTag}</span>}
-              {detail.output_truncated && <span className="ml-2 text-warn-text">truncated</span>}
-            </summary>
-            <pre className="pre mt-2 max-h-48">{detail.output}</pre>
-          </details>
+          <div className="nb-output">
+            <div className="nb-output-head">
+              <span className="nb-output-kind">output</span>
+              {outTag && <span className="nb-output-tag">{outTag}</span>}
+              {detail.output_truncated && <span className="nb-output-tag">truncated</span>}
+            </div>
+            <pre className="nb-output-pre">{detail.output}</pre>
+          </div>
         ) : null}
         {detail?.error && (
-          <details className="nb-output" open={meta.state === 'failed'}>
-            <summary className="cursor-pointer text-xs text-warn-text">
-              error{outTag && <span className="ml-2">· {outTag}</span>}
-            </summary>
-            <pre className="pre mt-2 max-h-48 border-l-4 border-l-warn text-warn-text">{detail.error}</pre>
-          </details>
+          <div className="nb-output nb-output-err">
+            <div className="nb-output-head">
+              <span className="nb-output-kind">error</span>
+              {outTag && <span className="nb-output-tag">{outTag}</span>}
+            </div>
+            <pre className="nb-output-pre">{detail.error}</pre>
+          </div>
         )}
-      </footer>
+
+        <footer className="nb-card-foot">
+          <span>
+            {meta.last_run_at
+              ? <>last run <span title={fmtTime(meta.last_run_at)}>{relTime(meta.last_run_at)}</span>{meta.last_status ? ` · ${meta.last_status}` : ''}</>
+              : 'never run'}
+          </span>
+          {factParts.length > 0 && (
+            <span className="nb-facts">
+              {factParts.map((p, i) => <Fragment key={i}>{i > 0 && ' · '}{p}</Fragment>)}
+            </span>
+          )}
+          {!canEdit && <span className="nb-readonly-note">{readonlyNote}</span>}
+        </footer>
+      </div>
 
       {confirmOnce && (
         <Confirm

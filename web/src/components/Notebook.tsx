@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { api, ApiError, Instance, Notebook as NotebookData, NotebookSectionResponse, RunSectionsResponse, SaveNotebookSectionResponse } from '../api'
 import { AutosaveQueue } from '../autosave'
-import { Button, Confirm, Loading, Modal, Notice, RevealNew, SectionTitle, SwapLabel } from './ui'
-import { SectionCard, SectionStateBadge, SectionValue, sectionFingerprint, sectionPath } from './SectionCard'
+import { Button, Confirm, Icon, Loading, Modal, Notice, RevealNew, SignalMark, SwapLabel } from './ui'
+import { SectionCard, SectionValue, sectionFingerprint, sectionPath, sectionStateLabel } from './SectionCard'
 import { RunCode } from './RunCode'
 import { useHeldOrder } from '../stableList'
 import './notebook.css'
@@ -16,7 +16,7 @@ function errCode(e: unknown): string {
 }
 
 const nbPath = (id: string) => `/api/v1/instances/${id}/notebook`
-const EMPTY_FORM = { name: '', description: '', code: '', after: '' }
+const EMPTY_FORM = { name: '', description: '', after: '' }
 type SectionForm = typeof EMPTY_FORM
 
 // Notebook is the instance's working document: an ordered directory of
@@ -70,12 +70,23 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
   // lease stays the authoritative backstop.
   const runLock = useRef(false)
   const scratchRunningRef = useRef(false)
-  const [form, setForm] = useState<SectionForm | null>(null)
+  // Same synchronous-guard pattern as runLock for section creation:
+  // set before the first await so repeat clicks cannot interleave
+  // GET/PUT pairs; `adding` mirrors it to disable the controls (P1).
+  const addLock = useRef(false)
+  const [adding, setAdding] = useState(false)
+  const [addErr, setAddErr] = useState('')
   const [formErr, setFormErr] = useState('')
   const [formBusy, setFormBusy] = useState(false)
   const [scratchExec, setScratchExec] = useState<string | null>(null) // exec_id of last good scratch run
   const [scratchForm, setScratchForm] = useState<SectionForm | null>(null)
   const [scratchRunning, setScratchRunningState] = useState(false)
+  // P5: a single-section run's block/error/restore feedback also lands
+  // on that cell's alerts slot — the toolbar status line only carries
+  // the one-line summary (S3: nothing is inserted above the cells).
+  const [cellNote, setCellNote] = useState<{ name: string; tone: 'warning' | 'neutral'; text: string } | null>(null)
+  const [focusName, setFocusName] = useState('') // section whose editor takes focus once mounted
+  const [detailsOpen, setDetailsOpen] = useState(false)
 
   // Scratch shares the notebook run lock through this setter: a scratch
   // start acquires runLock (refusing while a section/batch run holds it)
@@ -157,17 +168,25 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
     runLock.current = true
     const isList = Array.isArray(sel)
     const label = isList ? sel[0] ?? 'section' : sel
+    // A run aimed at exactly one section also reports its block/errors
+    // on that cell (P5); bulk runs only use the toolbar status line.
+    const single = isList && sel.length === 1 ? sel[0] : null
+    const blockWith = (msgs: string[]) => {
+      setRunBlock(msgs)
+      if (single) setCellNote({ name: single, tone: 'warning', text: msgs.join(' ') })
+    }
     // Busy state goes up BEFORE the first await so every run control —
     // section, batch and scratch — disables in the same tick (P1).
     setRunning(label)
     setRunBlock([])
     setBatch(null)
+    setCellNote(null)
     try {
       // Single-section runs only need their own save flushed; bulk runs
       // need every draft persisted so saved code matches the screen.
       const blocked = await flushSave(isList ? sel : undefined)
       if (blocked.length) {
-        setRunBlock(blocked.map((n) => `section ${n} has an unresolved save — resolve it before running`))
+        blockWith(blocked.map((n) => `section ${n} has an unresolved save — resolve it before running`))
         return
       }
       // Capture the notebook revision AFTER pending saves landed, then
@@ -180,7 +199,7 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
         const names = new Set(freshSecs.map((s) => s.name))
         const missing = sel.filter((n) => !names.has(n))
         if (missing.length) {
-          setRunBlock([`unknown section(s): ${missing.join(', ')} — reload the notebook`])
+          blockWith([`unknown section(s): ${missing.join(', ')} — reload the notebook`])
           return
         }
         // A single explicit run re-checks `once` against FRESH meta —
@@ -259,7 +278,7 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
         }
       }
       if (problems.length) {
-        setRunBlock([...new Set(problems)])
+        blockWith([...new Set(problems)])
         refresh()
         return
       }
@@ -275,15 +294,16 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
         // The restore already happened server-side; the request did NOT
         // run. Show the persistent notice and refresh — never retry.
         setRestoredNotice('trigger')
+        if (single) setCellNote({ name: single, tone: 'warning', text: 'Runtime restored — this request did not run.' })
         refresh()
       } else if (errCode(e) === 'instance_expired') {
-        setRunBlock(['instance expired — the notebook is read-only'])
+        blockWith(['instance expired — the notebook is read-only'])
         refresh()
       } else if (e instanceof ApiError && e.status === 409) {
-        setRunBlock(['notebook changed while preparing the run — reload and retry; nothing executed'])
+        blockWith(['notebook changed while preparing the run — reload and retry; nothing executed'])
         refresh()
       } else {
-        setRunBlock([(e as Error).message])
+        blockWith([(e as Error).message])
       }
     } finally {
       setRunning(null)
@@ -296,25 +316,44 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
   const freshRevision = async () =>
     notebook?.revision ?? (await api.get<{ notebook?: NotebookData }>(nbPath(id))).notebook?.revision ?? 0
 
-  const createSection = async () => {
-    if (!form) return
-    setFormBusy(true)
-    setFormErr('')
+  // Adding a section is immediate — no dialog: the first free
+  // untitled_section[_N] name is picked from a fresh notebook read so
+  // a raced name or moved revision 409s and retries (≤3 attempts)
+  // instead of colliding. `after` inserts positionally for the
+  // per-cell inserters; omitted appends at the end.
+  const addSection = async (after?: string) => {
+    if (addLock.current) return
+    addLock.current = true
+    setAdding(true)
+    setAddErr('')
     try {
-      const rev = await freshRevision()
-      await api.put<SaveNotebookSectionResponse>(
-        `/api/v1/instances/${id}/sections/${encodeURIComponent(form.name)}`,
-        {
-          code: form.code, description: form.description, create_only: true,
-          ...(form.after ? { after: form.after } : {}), revision: rev,
-        })
-      const created = form.name
-      setForm(null)
-      onStructural(created)
-    } catch (e: any) {
-      setFormErr(e.message)
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const fresh = await api.get<{ notebook?: NotebookData }>(nbPath(id))
+        const rev = fresh.notebook?.revision ?? 0
+        const taken = new Set((fresh.notebook?.sections ?? []).map((s) => s.name))
+        let name = 'untitled_section'
+        for (let n = 2; taken.has(name); n++) name = `untitled_section_${n}`
+        try {
+          // `code` is omitted: the API stores an empty section and the new
+          // cell's editor takes the code (autosave persists it).
+          await api.put<SaveNotebookSectionResponse>(
+            `/api/v1/instances/${id}/sections/${encodeURIComponent(name)}`,
+            {
+              description: 'Untitled Section', create_only: true,
+              ...(after ? { after } : {}), revision: rev,
+            })
+          setFocusName(name)
+          onStructural(name)
+          return
+        } catch (e) {
+          if (!(e instanceof ApiError) || e.status !== 409 || attempt === 2) throw e
+        }
+      }
+    } catch (e) {
+      setAddErr((e as Error).message)
     } finally {
-      setFormBusy(false)
+      addLock.current = false
+      setAdding(false)
     }
   }
 
@@ -352,6 +391,50 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
     return () => window.clearTimeout(t)
   }, [sectionParam, shown.length])
 
+  // One-line status, first match wins (S3/S4: it replaces every banner
+  // that used to push the cells down). Warning tone carries the failed
+  // signal mark; everything else stays quiet secondary text.
+  const nextItems = useMemo(() => notebook?.next ?? [], [notebook])
+  const status = useMemo(() => {
+    if (running === 'all') return { text: 'Running all sections…', warn: false }
+    if (running === 'stale') return { text: 'Running stale sections…', warn: false }
+    if (running) return { text: `Running ${running}…`, warn: false }
+    if (addErr) return { text: `Couldn't add section — ${addErr}`, warn: true }
+    if (restoredNotice === 'partial') {
+      return { text: 'Runtime restored mid-run — earlier sections in this batch did execute; review the report', warn: true }
+    }
+    if (restoredNotice === 'trigger') return { text: 'Runtime restored — your request did not run', warn: true }
+    if (runBlock.length > 0) {
+      return { text: `Run blocked — ${runBlock[0]}${runBlock.length > 1 ? ` (+${runBlock.length - 1} more)` : ''}`, warn: true }
+    }
+    if (batch) {
+      const res = batch.results
+      if (res.length === 1) {
+        const r = res[0]
+        return { text: `${r.name} · ${r.status}`, warn: r.status === 'error' || r.status === 'not_run' }
+      }
+      const ok = res.filter((r) => r.status === 'ok').length
+      const err = res.filter((r) => r.status === 'error').length
+      const skipped = res.filter((r) => r.status === 'skipped').length
+      const notRun = res.filter((r) => r.status === 'not_run').length
+      let text = `${ok + err} ran · ${ok} ok`
+      if (err > 0) text += ` · ${err} failed`
+      if (skipped > 0) text += ` · ${skipped} skipped`
+      if (notRun > 0) text += ` · ${notRun} not run`
+      return { text, warn: err > 0 || notRun > 0 || (batch.warnings?.length ?? 0) > 0 }
+    }
+    if (lost) return { text: 'Runtime lost · code is retained — running restores an empty process', warn: true }
+    if (expired) return { text: 'Expired. Read-only history — nothing can run or be edited', warn: true }
+    if (nextItems.length > 0) {
+      return { text: `${nextItems[0]}${nextItems.length > 1 ? ` (+${nextItems.length - 1} more)` : ''}`, warn: false }
+    }
+    return { text: `${sections.length} section${sections.length === 1 ? '' : 's'}`, warn: false }
+  }, [running, addErr, restoredNotice, runBlock, batch, lost, expired, nextItems, sections.length])
+
+  // Details stays mounted (visibility, never unmounted — S3/S4) and
+  // opens whenever the status line is only a summary of more content.
+  const hasDetails = !!restoredNotice || runBlock.length > 0 || !!batch || lost || expired || nextItems.length > 0
+
   if (nb.isLoading) return <Loading />
   if (nb.isError) return <Notice tone="warning">Notebook unavailable: {(nb.error as Error).message}</Notice>
   if (!notebook) return null
@@ -361,100 +444,58 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
 
   return (
     <div className="nb">
-      {lost && (
-        <Notice tone="warning">
-          <strong>Runtime lost · code is retained.</strong> The process is gone but the notebook is intact —
-          running a section or batch restores an <em>empty</em> process under the same instance; nothing re-runs automatically.
-        </Notice>
-      )}
-      {expired && (
-        <Notice tone="warning">
-          <strong>Expired.</strong> This notebook is read-only history — code, sections and run records are preserved,
-          but nothing can run or be edited.
-        </Notice>
-      )}
-      {restoredNotice && (
-        <Notice tone="warning">
-          <div className="flex items-start gap-3">
-            <p className="flex-1">
-              <strong>Runtime restored.</strong>{' '}
-              {restoredNotice === 'partial' ? (
-                <>Variables and files were cleared when the process was lost — but earlier sections in this batch did execute in the previous runtime. Review the run report before repeating side effects.</>
-              ) : (
-                <>Variables and files were cleared when the process was lost. Your request did not run — choose sections to execute.</>
-              )}
-            </p>
-            <button className="text-btn" aria-label="Dismiss restored notice" onClick={() => setRestoredNotice(null)}>×</button>
-          </div>
-        </Notice>
-      )}
-      {runBlock.length > 0 && (
-        <Notice tone="warning">
-          {runBlock.map((b) => <div key={b}>{b}</div>)}
-        </Notice>
-      )}
-      {batch && (
-        <div className="nb-batch" role="status">
-          <div className="mb-2 flex items-center gap-3">
-            <span className="text-sm font-semibold text-ink">Run report</span>
-            <button className="text-btn ml-auto text-xs text-sec" onClick={() => setBatch(null)}>dismiss</button>
-          </div>
-          <ul className="nb-batch-list">
-            {batch.results.map((r) => (
-              <li key={r.name} className="nb-batch-row">
-                <code className="nb-batch-name">{r.name}</code>
-                <span className={`nb-batch-status nb-batch-${r.status}`}>{r.status}</span>
-                {r.skipped_reason && <span className="text-xs text-sec">{r.skipped_reason}</span>}
-                {r.error && <span className="min-w-0 flex-1 truncate text-xs text-warn-text" title={r.error}>{r.error}</span>}
-              </li>
-            ))}
-          </ul>
-          {batch.warnings && batch.warnings.length > 0 && (
-            <ul className="mt-2 text-xs text-sec">
-              {batch.warnings.map((w) => <li key={w}>⚠ {w}</li>)}
-            </ul>
+      {/* Sticky status toolbar: run actions | one-line status | details.
+          Every notice that used to be a banner above the cells now lives
+          in this fixed-height row or behind Details — nothing inserts
+          content above the cells after a click or a poll (S3/S5). */}
+      <div className="nb-toolbar">
+        <div className="nb-toolbar-actions">
+          {canExec && !empty && (
+            <>
+              <Button variant="ghost" size="xs" disabled={running !== null || scratchRunning}
+                onClick={() => void runSections('all')}
+                title="Run every section in notebook order; once-sections that already succeeded are skipped">
+                <Icon name="run-all" />
+                <SwapLabel show={running === 'all' ? 'Running…' : 'Run all'} options={['Run all', 'Running…']} />
+              </Button>
+              <Button variant="ghost" size="xs" disabled={running !== null || scratchRunning}
+                onClick={() => void runSections('stale')}
+                title="Run every stale or never-run section in order; once-sections that already succeeded are skipped">
+                <Icon name="play" />
+                <SwapLabel show={running === 'stale' ? 'Running…' : 'Run stale'} options={['Run stale', 'Running…']} />
+              </Button>
+            </>
+          )}
+          {canEdit && (
+            <Button variant="ghost" size="xs" disabled={adding} onClick={() => void addSection()}>
+              <Icon name="plus" />Add section
+            </Button>
           )}
         </div>
-      )}
-
-      <div className="nb-toolbar">
-        <SectionTitle className="!mb-0 flex-1">Notebook</SectionTitle>
-        <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />
-        {canExec && !empty && (
-          <div className="flex items-center gap-2">
-            <Button size="sm" disabled={running !== null || scratchRunning} onClick={() => void runSections('stale')}
-              title="Run every stale or never-run section in order; once-sections that already succeeded are skipped">
-              <SwapLabel show={running === 'stale' ? 'Running…' : 'Run stale'} options={['Run stale', 'Running…']} />
-            </Button>
-            <Button size="sm" variant="primary" disabled={running !== null || scratchRunning} onClick={() => void runSections('all')}
-              title="Run every section in notebook order; once-sections that already succeeded are skipped">
-              <SwapLabel show={running === 'all' ? 'Running…' : 'Run all'} options={['Run all', 'Running…']} />
-            </Button>
-          </div>
-        )}
-        {canEdit && (
-          <Button size="sm" onClick={() => { setFormErr(''); setForm({ ...EMPTY_FORM }) }}>Add section</Button>
-        )}
+        <span className={`nb-status${status.warn ? ' nb-status-warn' : ''}`} role="status">
+          {status.warn && <SignalMark signal="failed" />}
+          <span className="nb-status-text">{status.text}</span>
+        </span>
+        <div className="nb-toolbar-side">
+          <Button
+            variant="ghost" size="xs"
+            style={{ visibility: hasDetails ? 'visible' : 'hidden' }}
+            onClick={() => setDetailsOpen(true)}
+          >
+            Details
+          </Button>
+          <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />
+        </div>
       </div>
-
-      {notebook.next.length > 0 && (
-        <ul className="nb-next">
-          {notebook.next.map((n) => <li key={n}>{n}</li>)}
-        </ul>
-      )}
 
       {empty ? (
         <div className="nb-empty">
-          <p className="text-sm text-sec">No sections yet — the notebook is the durable record of this instance's work.</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {canEdit && <Button size="sm" variant="primary" onClick={() => { setFormErr(''); setForm({ ...EMPTY_FORM }) }}>Add section</Button>}
-            {canExec && (
-              <Button size="sm" onClick={() => {
-                setParams((p) => { const n = new URLSearchParams(p); n.set('view', 'notebook'); return n })
-                document.getElementById('run-code')?.scrollIntoView({ block: 'center' })
-              }}>Use scratch below</Button>
-            )}
-          </div>
+          <p>No sections yet — the notebook is the durable record of this instance's work.</p>
+          {canEdit && (
+            <Button variant="ghost" size="xs" disabled={adding} onClick={() => void addSection()}>
+              <Icon name="plus" />Add section
+            </Button>
+          )}
         </div>
       ) : (
         <>
@@ -466,6 +507,7 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
                 key={m.name}
                 type="button"
                 className="nb-dir-row"
+                title={m.description || sectionStateLabel(m.state)}
                 onClick={() => {
                   setParams((p) => { const n = new URLSearchParams(p); n.set('section', m.name); return n })
                   document.getElementById(`section-${m.name}`)?.scrollIntoView({ block: 'start' })
@@ -473,38 +515,55 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
               >
                 <span className="nb-dir-ord">{i + 1}.</span>
                 <span className="nb-dir-name">{m.name}</span>
-                {m.description && <span className="nb-dir-desc">{m.description}</span>}
-                <SectionStateBadge state={m.state} />
+                <span className="nb-dir-dot" data-state={m.state} />
+                <span className="sr-only">{sectionStateLabel(m.state)}</span>
               </button>
             ))}
           </nav>
           <div className="nb-cards">
             {shown.map((meta) => (
-              <SectionCard
-                key={meta.name}
-                id={id}
-                inst={inst}
-                meta={meta}
-                order={order}
-                incarnation={incarnation}
-                canRun={canRun}
-                busy={running === meta.name}
-                blocked={scratchRunning}
-                register={register}
-                onStructural={onStructural}
-                onRun={runOne}
-                onInsertAfter={(n) => { setFormErr(''); setForm({ ...EMPTY_FORM, after: n }) }}
-              />
+              <Fragment key={meta.name}>
+                <SectionCard
+                  id={id}
+                  inst={inst}
+                  meta={meta}
+                  order={order}
+                  incarnation={incarnation}
+                  canRun={canRun}
+                  busy={running === meta.name}
+                  blocked={scratchRunning}
+                  adding={adding}
+                  register={register}
+                  onStructural={onStructural}
+                  onRun={runOne}
+                  onInsertAfter={(n) => void addSection(n)}
+                  note={cellNote && cellNote.name === meta.name ? cellNote : null}
+                  focusOnMount={focusName === meta.name}
+                />
+                {/* Inserter after every cell — the row keeps its height
+                    even without edit rights so cells never move (S3). */}
+                <div className="nb-insert">
+                  {canEdit && (
+                    <Button
+                      variant="ghost" size="xs"
+                      className="nb-icon-btn nb-insert-btn"
+                      aria-label={`Insert section after ${meta.name}`}
+                      disabled={adding}
+                      onClick={() => void addSection(meta.name)}
+                    >
+                      <Icon name="plus" />
+                    </Button>
+                  )}
+                </div>
+              </Fragment>
             ))}
           </div>
         </>
       )}
 
-      <section aria-label="Scratch" className="nb-scratch" id="run-code">
-        <SectionTitle>Scratch</SectionTitle>
-        <p className="-mt-2 mb-3 text-xs text-sec">scratch execs never become sections — promote a successful run explicitly</p>
-        {canExec && (live || lost) && (
-          <>
+      {(canExec && (live || lost)) || expired ? (
+        <section aria-label="Scratch" className="nb-scratch" id="run-code">
+          {canExec && (live || lost) && (
             <RunCode
               inst={inst}
               running={scratchRunning}
@@ -512,23 +571,15 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
               setRunning={setScratchRunningGuarded}
               onRan={(r) => { if (!r.error) setScratchExec(r.exec_id) }}
               onRestored={() => setRestoredNotice('trigger')}
+              promotable={!!scratchExec}
+              onPromote={() => { setFormErr(''); setScratchForm({ ...EMPTY_FORM }) }}
             />
-            {lost && (
-              <p className="mt-2 text-xs text-sec">On a lost instance the first run restores an empty process — this code does not execute on that call.</p>
-            )}
-          </>
-        )}
-        {!canExec && expired && (
-          <p className="text-sm text-sec">Scratch is unavailable — the instance expired.</p>
-        )}
-        {scratchExec && (
-          <div className="nb-promote">
-            <Button size="sm" onClick={() => { setFormErr(''); setScratchForm({ ...EMPTY_FORM }) }}>
-              Save last scratch run as section…
-            </Button>
-          </div>
-        )}
-      </section>
+          )}
+          {expired && (
+            <p className="nb-scratch-note">Scratch is unavailable — the instance expired.</p>
+          )}
+        </section>
+      ) : null}
 
       {pendingOnce && (
         <Confirm
@@ -542,34 +593,70 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
         </Confirm>
       )}
 
-      {form && (
-        <Modal title={form.after ? `New section after ${form.after}` : 'New section'} onClose={() => setForm(null)} footer={
-          <>
-            <Button onClick={() => setForm(null)}>Cancel</Button>
-            <Button variant="primary" disabled={formBusy || !form.name || !form.description} onClick={() => void createSection()}>
-              <SwapLabel show={formBusy ? 'Creating…' : 'Create section'} options={['Create section', 'Creating…']} />
-            </Button>
-          </>
-        }>
-          <div className="grid gap-3">
-            {formErr && <Notice tone="warning">{formErr}</Notice>}
-            <label className="block">
-              <span className="mb-1 block text-xs font-medium text-sec">Name</span>
-              <input className="input w-full font-mono" value={form.name} placeholder="load_data"
-                onChange={(e) => setForm({ ...form, name: e.target.value })} />
-              <span className="mt-1 block text-xs text-mute">[a-z][a-z0-9_] up to 48 chars</span>
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs font-medium text-sec">Description (required)</span>
-              <input className="input w-full" value={form.description} placeholder="one line — what this section does"
-                maxLength={200} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-xs font-medium text-sec">Code</span>
-              <textarea className="input w-full font-mono" rows={8} value={form.code} placeholder="# Starlark"
-                onChange={(e) => setForm({ ...form, code: e.target.value })} />
-            </label>
-            <p className="text-xs text-sec">Created but not run — use Run section or Run all/stale to execute it.</p>
+      {detailsOpen && (
+        <Modal title="Notebook status" dirty={false} onClose={() => setDetailsOpen(false)}>
+          <div className="nb-details">
+            {restoredNotice && (
+              <p className="nb-details-para">
+                <strong>Runtime restored.</strong>{' '}
+                {restoredNotice === 'partial' ? (
+                  <>Variables and files were cleared when the process was lost — but earlier sections in this batch did execute in the previous runtime. Review the run report before repeating side effects.</>
+                ) : (
+                  <>Variables and files were cleared when the process was lost. Your request did not run — choose sections to execute.</>
+                )}
+              </p>
+            )}
+            {lost && (
+              <p className="nb-details-para">
+                <strong>Runtime lost · code is retained.</strong> The process is gone but the notebook is intact —
+                running a section or batch restores an <em>empty</em> process under the same instance; nothing re-runs automatically.
+              </p>
+            )}
+            {expired && (
+              <p className="nb-details-para">
+                <strong>Expired.</strong> This notebook is read-only history — code, sections and run records are preserved,
+                but nothing can run or be edited.
+              </p>
+            )}
+            {runBlock.length > 0 && (
+              <div className="nb-details-block">
+                <h4 className="nb-details-h">Blocked</h4>
+                <ul className="nb-details-list">
+                  {runBlock.map((b) => <li key={b}>{b}</li>)}
+                </ul>
+              </div>
+            )}
+            {batch && (
+              <div className="nb-details-block">
+                <h4 className="nb-details-h">Run report</h4>
+                <div className="nb-batch">
+                  <ul className="nb-batch-list">
+                    {batch.results.map((r) => (
+                      <li key={r.name} className="nb-batch-row">
+                        <code className="nb-batch-name">{r.name}</code>
+                        <span className={`nb-batch-status nb-batch-${r.status}`}>{r.status}</span>
+                        {r.skipped_reason && <span className="nb-batch-skip">{r.skipped_reason}</span>}
+                        {r.error && <span className="nb-batch-error-text" title={r.error}>{r.error}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                  {batch.stopped_reason && <p className="nb-batch-warn-line">stopped: {batch.stopped_reason}</p>}
+                  {batch.warnings && batch.warnings.length > 0 && (
+                    <ul className="nb-batch-warnings">
+                      {batch.warnings.map((w) => <li key={w}>⚠ {w}</li>)}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
+            {nextItems.length > 0 && (
+              <div className="nb-details-block">
+                <h4 className="nb-details-h">Next</h4>
+                <ul className="nb-details-list">
+                  {nextItems.map((n) => <li key={n}>{n}</li>)}
+                </ul>
+              </div>
+            )}
           </div>
         </Modal>
       )}

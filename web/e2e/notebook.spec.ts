@@ -72,17 +72,18 @@ test('autosave: Run section awaits the pending save and executes latest code', a
   // First test pays the cold Vite transform cost — give it room.
   await expect(page.locator('.nb-toolbar')).toBeVisible({ timeout: 30_000 })
 
-  // Create a section through the UI.
+  // Add section creates an "Untitled Section" immediately — no
+  // dialog; the name is auto-generated as untitled_section.
   await page.locator('.nb-toolbar').getByRole('button', { name: 'Add section' }).click()
-  const dlg = page.getByRole('dialog')
-  await dlg.locator('input').nth(0).fill('greet')
-  await dlg.locator('input').nth(1).fill('says hello')
-  await dlg.locator('textarea').fill('print("V1")')
-  await dlg.getByRole('button', { name: 'Create section' }).click()
-  await expect(dlg).toHaveCount(0)
-
-  const c = card(page, 'greet')
+  const c = card(page, 'untitled_section')
   await expect(c).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  // 'Untitled Section' lands in the description input; code is typed
+  // into the new cell afterwards.
+  await expect(c.locator('input[aria-label="untitled_section description"]')).toHaveValue('Untitled Section')
+  // The new cell's editor takes focus; seed it with code.
+  await c.locator('.cm-content').click()
+  await page.keyboard.insertText('print("V1")')
   // Wait until the autosave queue is live (Saved, not loading…).
   await expect(c.getByText('Saved', { exact: true })).toBeVisible({ timeout: 15_000 })
 
@@ -94,16 +95,46 @@ test('autosave: Run section awaits the pending save and executes latest code', a
   await page.keyboard.insertText('print("RUNS-LATEST")')
   await c.getByRole('button', { name: 'Run section' }).click()
 
-  await expect(page.locator('.nb-batch')).toContainText('greet', { timeout: 20_000 })
-  await expect(page.locator('.nb-batch')).toContainText('ok')
+  // Single-section feedback is one line in the sticky status slot (S3).
+  await expect(page.locator('.nb-status')).toContainText('untitled_section · ok', { timeout: 20_000 })
   // The PUT landed before the run request — never the other way round.
-  expect(order.indexOf('PUT greet')).toBeGreaterThanOrEqual(0)
-  expect(order.indexOf('PUT greet')).toBeLessThan(order.indexOf('RUN'))
+  expect(order.indexOf('PUT untitled_section')).toBeGreaterThanOrEqual(0)
+  expect(order.indexOf('PUT untitled_section')).toBeLessThan(order.indexOf('RUN'))
   // And the executed code is the latest draft, verified server-side.
   await expect.poll(async () => {
-    const r = await rt.client.get(`/api/v1/instances/${id}/sections/greet?include_output=true`)
+    const r = await rt.client.get(`/api/v1/instances/${id}/sections/untitled_section?include_output=true`)
     return (await r.json()).section.output
   }, { timeout: 15_000 }).toContain('RUNS-LATEST')
+})
+
+test('Add section appends an Untitled Section without a dialog', async ({ page }) => {
+  const id = await createInstance()
+  await saveSection(id, 's1', 'a = 1')
+  await saveSection(id, 's2', 'b = 2')
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  await expect(card(page, 's1')).toBeVisible()
+  await expect(card(page, 's2')).toBeVisible()
+
+  // Toolbar adds append at the end, auto-named, with no dialog.
+  const add = page.locator('.nb-toolbar').getByRole('button', { name: 'Add section' })
+  await add.click()
+  await expect(card(page, 'untitled_section')).toBeVisible()
+  await add.click()
+  await expect(card(page, 'untitled_section_2')).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  const names = () => page.locator('.nb-cards [data-section]').evaluateAll(
+    (els) => els.map((e) => e.getAttribute('data-section')))
+  expect(await names()).toEqual(['s1', 's2', 'untitled_section', 'untitled_section_2'])
+  const nb = await (await rt.client.get(`/api/v1/instances/${id}/notebook`)).json()
+  expect(nb.notebook.sections.map((s: { name: string }) => s.name))
+    .toEqual(['s1', 's2', 'untitled_section', 'untitled_section_2'])
+
+  // The per-cell inserter creates one directly after its cell.
+  await page.getByRole('button', { name: 'Insert section after s1' }).click()
+  await expect(card(page, 'untitled_section_3')).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  expect(await names()).toEqual(['s1', 'untitled_section_3', 's2', 'untitled_section', 'untitled_section_2'])
 })
 
 test('conflict: a 409 save blocks Run until explicitly resolved (C2/F3)', async ({ page }) => {
@@ -219,10 +250,12 @@ test('once: an explicit rerun of a succeeded once-section asks first (F2)', asyn
   const c = card(page, 'charge')
   await expect(c).toBeVisible()
   await expect(c.getByText('Saved', { exact: true })).toBeVisible({ timeout: 15_000 })
-  await expect(c.getByText(/skip in bulk after success/)).toBeVisible()
+  // The once marker is a quiet tag in the cell header (it lives in the
+  // cell menu now, not a permanent checkbox row).
+  await expect(c.locator('.nb-once')).toHaveText('once')
 
   await c.getByRole('button', { name: 'Run section' }).click()
-  await expect(page.locator('.nb-batch')).toContainText('ok', { timeout: 20_000 })
+  await expect(page.locator('.nb-status')).toContainText('charge · ok', { timeout: 20_000 })
 
   // Second explicit run → Confirm, not silent repeat.
   await c.getByRole('button', { name: 'Run section' }).click()
@@ -230,7 +263,7 @@ test('once: an explicit rerun of a succeeded once-section asks first (F2)', asyn
   await expect(dlg).toContainText('Run charge again?')
   await expect(dlg.getByRole('button', { name: 'Run again' })).toBeVisible()
   await dlg.getByRole('button', { name: 'Run again' }).click()
-  await expect(page.locator('.nb-batch')).toContainText('ok', { timeout: 20_000 })
+  await expect(page.locator('.nb-status')).toContainText('charge · ok', { timeout: 20_000 })
 })
 
 test('restored: a dead child restores an EMPTY process — the request does not run', async ({ page }) => {
@@ -253,19 +286,22 @@ test('restored: a dead child restores an EMPTY process — the request does not 
   await expect(c.getByText('Saved', { exact: true })).toBeVisible({ timeout: 15_000 })
 
   await c.getByRole('button', { name: 'Run section' }).click()
-  // The persistent notice: restored empty, request did NOT run.
-  await expect(page.getByText('Runtime restored.', { exact: false })).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByText('did not run', { exact: false })).toBeVisible()
+  // The status line and the cell note both carry the restore warning —
+  // the request did NOT run (P5: single-section feedback lands on the
+  // cell too, so scope assertions to avoid strict-mode duplicates).
+  await expect(page.locator('.nb-status')).toContainText('Runtime restored', { timeout: 30_000 })
+  await expect(page.locator('.nb-status')).toContainText('did not run')
+  await expect(c.locator('.nb-note')).toContainText('did not run')
   // Exactly one run request — never an automatic retry of the trigger.
   expect(runPosts).toBe(1)
   // Sections are not_run on the empty incarnation; old output is kept
-  // and marked as previous-runtime.
+  // and marked as previous-runtime (always-visible output block now).
   await expect(c.getByText('not run', { exact: true })).toBeVisible({ timeout: 20_000 })
-  await expect(c.locator('.nb-output summary', { hasText: 'previous runtime' })).toBeVisible()
+  await expect(c.locator('.nb-output-tag', { hasText: 'previous runtime' })).toBeVisible()
   // State is verifiably empty: re-running loader alone fails (mark was
   // never defined), while the notebook itself is intact.
   await c.getByRole('button', { name: 'Run section' }).click()
-  await expect(page.locator('.nb-batch')).toContainText('loader', { timeout: 20_000 })
+  await expect(page.locator('.nb-status')).toContainText('loader', { timeout: 20_000 })
 })
 
 test('expired: read-only history with the expiry shown, no run or edit affordances', async ({ page }) => {
@@ -274,10 +310,10 @@ test('expired: read-only history with the expiry shown, no run or edit affordanc
   await page.goto(`${rt.viteURL}/instances/${id}`)
   await expect(card(page, 'eph')).toBeVisible({ timeout: 20_000 })
   // Wait for the reaper to flip status → expired (UI polls every 15s).
-  // Exact match isolates the notebook notice's <strong>Expired.</strong>
-  // from the next-step heading and scratch notice.
-  await expect(page.getByText('Expired.', { exact: true })).toBeVisible({ timeout: 60_000 })
-  await expect(page.locator('.nb').getByText('read-only history', { exact: false })).toBeVisible()
+  // The one-line status slot carries the lifecycle text — scoped so the
+  // scratch footer note and next-step heading cannot collide.
+  await expect(page.locator('.nb-status')).toContainText('Expired.', { timeout: 60_000 })
+  await expect(page.locator('.nb-status')).toContainText('Read-only history')
   // No run buttons, no Add section, no editable fields.
   await expect(page.getByRole('button', { name: 'Run section' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Run all' })).toHaveCount(0)
@@ -325,9 +361,11 @@ test('run CAS: an agent edit between validation and POST conflicts — nothing e
     await route.continue()
   })
   await c.getByRole('button', { name: 'Run section' }).click()
-  await expect(page.getByText('notebook changed while preparing the run', { exact: false })).toBeVisible({ timeout: 20_000 })
+  // No report — the status line carries the block AND the s1 cell note
+  // repeats it (P5); both are the same runBlock message.
+  await expect(page.locator('.nb-status')).toContainText('notebook changed while preparing the run', { timeout: 20_000 })
+  await expect(c.locator('.nb-note')).toContainText('notebook changed while preparing the run')
   await page.unroute('**/notebook/run')
-  // No run report was produced and no execution landed.
   await expect(page.locator('.nb-batch')).toHaveCount(0)
   const execsAfter = await (await rt.client.get(`/api/v1/instances/${id}/executions`)).json()
   expect((execsAfter.executions ?? []).length).toBe((execsBefore.executions ?? []).length)
@@ -401,7 +439,7 @@ test('run validation: an agent edit before the run blocks unseen code (F)', asyn
     if (r.method() === 'POST' && r.url().endsWith('/notebook/run')) runPosts++
   })
   await c.getByRole('button', { name: 'Run section' }).click()
-  await expect(page.getByText('changed on the server', { exact: false })).toBeVisible({ timeout: 20_000 })
+  await expect(page.locator('.nb-status')).toContainText('changed on the server', { timeout: 20_000 })
   // Nothing executed and no run request was ever sent.
   expect(runPosts).toBe(0)
   // The displayed draft is preserved — polling could not overwrite it.
@@ -436,23 +474,25 @@ test('partial restore: a mid-batch loss warns that earlier sections executed', a
     })
   })
   await page.getByRole('button', { name: 'Run all' }).click()
-  // The batch report shows every selected row's honest status.
-  const report = page.locator('.nb-batch')
-  await expect(report).toContainText('s1', { timeout: 20_000 })
+  // The status line summarizes the restore; the full report — every
+  // selected row's honest status — lives behind Details.
+  await expect(page.locator('.nb-status')).toContainText('earlier sections in this batch did execute', { timeout: 20_000 })
+  await page.locator('.nb-toolbar').getByRole('button', { name: 'Details' }).click()
+  const dlg = page.getByRole('dialog', { name: 'Notebook status' })
+  const report = dlg.locator('.nb-batch')
+  await expect(report).toContainText('s1')
   await expect(report).toContainText('ok')
   await expect(report).toContainText('not_run')
   await expect(report).toContainText('do not blindly retry')
-  // The persistent notice says PARTIAL — earlier sections DID run —
-  // and survives dismissing the batch report.
-  const notice = page.getByText('earlier sections in this batch did execute', { exact: false })
-  await expect(notice).toBeVisible()
-  await report.getByRole('button', { name: 'dismiss' }).click()
-  await expect(report).toHaveCount(0)
-  await expect(notice).toBeVisible()
+  // Closing the modal leaves the warning on the status line — the old
+  // dismiss buttons are gone; the next run replaces the state instead.
+  await dlg.getByRole('button', { name: 'Close' }).click()
+  await expect(dlg).toHaveCount(0)
+  await expect(page.locator('.nb-status')).toContainText('earlier sections in this batch did execute')
   await page.unroute('**/notebook/run')
 })
 
-test('scratch shortcut: ⌘/Ctrl+Enter only fires inside the visible scratch region', async ({ page }) => {
+test('shortcut: ⌘/Ctrl+Enter in a section editor runs that section, never scratch', async ({ page }) => {
   const id = await createInstance()
   await saveSection(id, 's1', 'x = 1')
   await page.goto(`${rt.viteURL}/instances/${id}`)
@@ -461,12 +501,18 @@ test('scratch shortcut: ⌘/Ctrl+Enter only fires inside the visible scratch reg
   await expect(c.getByText('Saved', { exact: true })).toBeVisible({ timeout: 15_000 })
 
   let execPosts = 0
+  let runPosts = 0
   page.on('request', (r) => {
-    if (r.method() === 'POST' && /\/instances\/[^/]+\/exec$/.test(r.url())) execPosts++
+    if (r.method() !== 'POST') return
+    if (/\/instances\/[^/]+\/exec$/.test(r.url())) execPosts++
+    if (r.url().endsWith('/notebook/run')) runPosts++
   })
-  // Inside a SECTION editor the shortcut must not trigger scratch.
+  // Inside a SECTION editor the chord runs THAT section — one
+  // /notebook/run POST and never a scratch /exec (P1).
   await c.locator('.cm-content').click()
   await page.keyboard.press('Control+Enter')
+  await expect.poll(() => runPosts, { timeout: 20_000 }).toBe(1)
+  await expect(page.locator('.nb-status')).toContainText('s1 · ok', { timeout: 20_000 })
   await page.waitForTimeout(400)
   expect(execPosts).toBe(0)
 
@@ -485,23 +531,148 @@ test('scratch shortcut: ⌘/Ctrl+Enter only fires inside the visible scratch reg
   await expect.poll(() => execPosts, { timeout: 10_000 }).toBe(1)
 })
 
+test('S3: run feedback never moves the cell', async ({ page }) => {
+  const id = await createInstance()
+  await saveSection(id, 'first', 'a = 1')
+  await saveSection(id, 'second', 'b = 2')
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  const c2 = card(page, 'second')
+  await expect(c2).toBeVisible()
+  await expect(c2.getByText('Saved', { exact: true })).toBeVisible({ timeout: 15_000 })
+
+  const runBtn = c2.getByRole('button', { name: 'Run section' })
+  const toolbar = page.locator('.nb-toolbar')
+  const before = {
+    btn: await runBtn.boundingBox(),
+    bar: await toolbar.boundingBox(),
+    scroll: await page.evaluate(() => window.scrollY),
+  }
+  expect(before.btn).not.toBeNull()
+  expect(before.bar).not.toBeNull()
+
+  await runBtn.click()
+  // The status line updates in place; the second cell's run control and
+  // the toolbar keep their exact boxes (S3 — no banner insertion).
+  await expect(page.locator('.nb-status')).toContainText('second · ok', { timeout: 20_000 })
+  expect(await runBtn.boundingBox()).toEqual(before.btn)
+  expect(await toolbar.boundingBox()).toEqual(before.bar)
+  expect(await page.evaluate(() => window.scrollY)).toBe(before.scroll)
+})
+
+test('S1: cell controls keep their box under hover', async ({ page }) => {
+  const id = await createInstance()
+  await saveSection(id, 's1', 'x = 1')
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  const c = card(page, 's1')
+  await expect(c).toBeVisible()
+  await expect(c.getByText('Saved', { exact: true })).toBeVisible({ timeout: 15_000 })
+
+  // Gutter run, the ⋯ menu trigger and the inserter after the cell —
+  // hover states repaint only, geometry is identical (S1).
+  const targets = [
+    c.getByRole('button', { name: 'Run section' }),
+    c.getByRole('button', { name: 'Section s1 actions' }),
+    page.getByRole('button', { name: 'Insert section after s1' }),
+  ]
+  for (const t of targets) {
+    const box = await t.boundingBox()
+    expect(box).not.toBeNull()
+    await t.hover()
+    await page.waitForTimeout(250)
+    expect(await t.boundingBox()).toEqual(box)
+  }
+})
+
+test('once toggle lives in the cell menu', async ({ page }) => {
+  const id = await createInstance()
+  await saveSection(id, 'hook', 'h = 1')
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  const c = card(page, 'hook')
+  await expect(c).toBeVisible()
+  await expect(c.getByText('Saved', { exact: true })).toBeVisible({ timeout: 15_000 })
+  await expect(c.locator('.nb-once')).toHaveCount(0)
+
+  await c.getByRole('button', { name: 'Section hook actions' }).click()
+  await page.getByRole('menuitem', { name: 'Mark as run-once' }).click()
+  // The once tag appears in the header and the server meta flips.
+  await expect(c.locator('.nb-once')).toHaveText('once', { timeout: 15_000 })
+  await expect.poll(async () => {
+    const r = await rt.client.get(`/api/v1/instances/${id}/notebook`)
+    const nb = await r.json()
+    return nb.notebook.sections.find((s: { name: string }) => s.name === 'hook')?.rerun
+  }, { timeout: 15_000 }).toBe('once')
+})
+
 test('screenshots: notebook desktop/mobile × light/dark', async ({ page }) => {
+  const beforePids = instanceChildPids()
   const id = await createInstance()
   await saveSection(id, 'setup', 'x = 40 + 2')
+  await saveSection(id, 'load', 'rows = [i * i for i in range(12)]\nlabels = {"a": 1, "b": 2}')
+  await saveSection(id, 'transform', 'def twice(v):\n    return v * 2\nvals = [twice(i) for i in range(8)]')
+  await saveSection(id, 'analyze', 'total = sum(vals)\nprint("total", total)')
   await saveSection(id, 'report', 'print("answer", x)', { rerun: 'once' })
+  await saveSection(id, 'notes', '# closing remarks\n# the notebook is the durable record')
   await runAll(id)
   await page.goto(`${rt.viteURL}/instances/${id}`)
   await expect(card(page, 'setup')).toBeVisible()
   await expect(card(page, 'report')).toBeVisible()
-  await expect(page.locator('.nb-directory .nb-dir-row')).toHaveCount(2)
+  await expect(page.locator('.nb-directory .nb-dir-row')).toHaveCount(6)
   for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme })
+    // The previous iteration's mobile shots leave the page scrolled.
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await page.waitForTimeout(150)
     await page.screenshot({ path: join(SHOTS, `notebook-desktop-${scheme}.png`), fullPage: false })
+    // Sticky toolbar pinned under the console header, overlapping cells.
+    await card(page, 'notes').scrollIntoViewIfNeeded()
+    await page.waitForTimeout(300)
+    // Pinned exactly under the 56px header + 1px border — never hidden.
+    const bar = await page.locator('.nb-toolbar').boundingBox()
+    expect(bar).not.toBeNull()
+    expect(Math.round(bar!.y)).toBe(57)
+    // The bar paints above the cells scrolling beneath it and is opaque.
+    const barBox = bar!
+    const topmost = await page.evaluate(
+      ([x, y]) => document.elementFromPoint(x, y)?.closest('.nb-toolbar') != null,
+      [barBox.x + barBox.width / 2, barBox.y + barBox.height / 2],
+    )
+    expect(topmost).toBe(true)
+    const barStyle = await page.locator('.nb-toolbar').evaluate((el) => {
+      const cs = getComputedStyle(el)
+      return { bg: cs.backgroundColor, bw: cs.borderBottomWidth }
+    })
+    expect(barStyle.bg).not.toBe('rgba(0, 0, 0, 0)')
+    expect(barStyle.bw).toBe('1px')
+    // No horizontal overflow at desktop width either.
+    const deskOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    expect(deskOverflow).toBeLessThanOrEqual(1)
+    await page.screenshot({ path: join(SHOTS, `notebook-desktop-${scheme}-sticky.png`), fullPage: false })
+    await page.evaluate(() => window.scrollTo(0, 0))
+    // Details modal open over the run report.
+    await page.locator('.nb-toolbar').getByRole('button', { name: 'Run all' }).click()
+    await expect(page.locator('.nb-status')).toContainText('ran', { timeout: 20_000 })
+    await page.locator('.nb-toolbar').getByRole('button', { name: 'Details' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Notebook status' })
+    await expect(dialog).toBeVisible()
+    // The dialog animates in (material-rise) — wait for it to settle so
+    // the screenshot is not a mid-flight frame.
+    await expect(dialog).toHaveCSS('opacity', '1')
+    await page.screenshot({ path: join(SHOTS, `notebook-desktop-${scheme}-details.png`), fullPage: false })
+    await page.keyboard.press('Escape')
     await page.setViewportSize({ width: 390, height: 844 })
     await expect(page.locator('.nb')).toBeVisible()
     // No horizontal overflow at mobile width.
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     expect(overflow).toBeLessThanOrEqual(1)
+    // The gutter run control is top-aligned with its cell, not stretched
+    // to mid-cell: its top sits within 16px of the card's top edge.
+    const setupCard = await card(page, 'setup').boundingBox()
+    const setupRun = await card(page, 'setup').getByRole('button', { name: 'Run section' }).boundingBox()
+    expect(setupCard).not.toBeNull()
+    expect(setupRun).not.toBeNull()
+    const gutterOffset = setupRun!.y - setupCard!.y
+    expect(gutterOffset).toBeGreaterThanOrEqual(0)
+    expect(gutterOffset).toBeLessThanOrEqual(16)
     // Viewport top — not a tiled fullPage capture.
     await page.screenshot({ path: join(SHOTS, `notebook-mobile-${scheme}.png`), fullPage: false })
     // A scrolled section card and the scratch area as separate shots.
@@ -511,4 +682,24 @@ test('screenshots: notebook desktop/mobile × light/dark', async ({ page }) => {
     await page.screenshot({ path: join(SHOTS, `notebook-mobile-${scheme}-scratch.png`), fullPage: false })
     await page.setViewportSize({ width: 1440, height: 1000 })
   }
+
+  // S4: the wrapped mobile toolbar keeps one height whether the status
+  // line is short or clamped at two lines — the text box is reserved.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.locator('.nb')).toBeVisible()
+  const barShort = (await page.locator('.nb-toolbar').boundingBox())!.height
+  expect((await page.locator('.nb-status-text').boundingBox())!.height).toBe(36)
+  // Killing the child makes the next run hit the restore path — the
+  // request does not execute and the status line carries the longest
+  // warning text it ever shows (a lost-status wait would not work: the
+  // batch report outranks `lost` in the status priority, and the API
+  // only marks the instance lost when a request probes the dead child).
+  const mine = instanceChildPids().filter((p) => !beforePids.includes(p))
+  expect(mine.length).toBe(1)
+  process.kill(mine[0], 'SIGKILL')
+  await page.waitForTimeout(1200)
+  await page.locator('.nb-toolbar').getByRole('button', { name: 'Run all' }).click()
+  await expect(page.locator('.nb-status')).toContainText('Runtime restored', { timeout: 30_000 })
+  const barLong = (await page.locator('.nb-toolbar').boundingBox())!.height
+  expect(Math.abs(barLong - barShort)).toBeLessThanOrEqual(1)
 })

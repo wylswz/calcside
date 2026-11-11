@@ -127,8 +127,8 @@ Every invariant has an owner mechanism, in order of preference:
 |---|---|---|
 | S1 | `material.css` paint-only states; static CSS/Tailwind check; e2e "controls keep their box under hover and press" | enforced |
 | S2 | shared `Menu` (Radix); S1; e2e "the More menu stays where it opened" | enforced |
-| S3 | fixed reveal slot (`RevealNew`); e2e "palette controls stay put", run editor placement test | partial — builder and detail only |
-| S4 | `SwapLabel` and `RevealNew`; static label check; e2e "Show latest" and "Show N new" | enforced for state/request-driven labels and counters; module workbench autosave status, Publish preparation and Run use `SwapLabel` |
+| S3 | fixed reveal slot (`RevealNew`); notebook status line + Details modal replace every banner/report above the cells and per-cell run notes sit in the alerts slot; e2e "palette controls stay put", run editor placement test, notebook "run feedback never moves the cell" | partial — builder, detail and notebook covered |
+| S4 | `SwapLabel` and `RevealNew`; notebook Details button toggles `visibility` only and inserter rows keep a fixed height; static label check; e2e "Show latest" and "Show N new", notebook "cell controls keep their box under hover" | enforced for state/request-driven labels and counters; module workbench autosave status, Publish preparation and Run use `SwapLabel`; notebook controls are the ghost/xs scale |
 | S5 | `useHeldOrder` + "Show N new"/"Show latest"; `stableList` unit tests; e2e activity, instance list and notebook sections | enforced for polled lists |
 | S6 | scroll-locked `Modal`; e2e "opening a dialog does not shift the page" | enforced for dialogs |
 | C1 | `Modal`/`Menu` return focus, removal falls back to a neighbour; e2e primitives and removal tests | enforced for overlays and removals |
@@ -139,10 +139,10 @@ Every invariant has an owner mechanism, in order of preference:
 | P2 | `ui.tsx` primitives; static browser-dialog check; e2e primitives test | enforced for buttons, menus, dialogs and labels |
 | P3, F3 | application autosave indicator; notebook SaveStatus (Saved/Saving…/Unsaved/Couldn't save/Conflict) never claims Saved for an unlanded write, Run awaits pending saves and is blocked by an unresolved conflict; `notebook.spec.ts` autosave/conflict cases | partial — application indicator and notebook save/run honesty covered |
 | P6 | app-card blocks on the application editor; danger Button variant; review | review — application editor and lists follow it |
-| P5 | policy editor footer reports validation and save failures; e2e "policy editor reports…" | partial — policy editor only |
+| P5 | policy editor footer reports validation and save failures; notebook one-line status plus per-cell `.nb-note` for single-section run blocks/errors/restores; e2e "policy editor reports…", notebook status/note assertions | partial — policy editor and notebook covered |
 | P4 | `material.css` motion block; static duration/reduced-motion check | enforced in CSS, not measured |
 | F1 | S1, S2, `Confirm`; e2e menu and removal tests | enforced for menus and removals |
-| F2 | `Confirm`; static destructive-control check | enforced for destructive controls; module/extension removal, section delete, once-section rerun, conflict reload and recovery discard use `Confirm`; review-dialog discard has a dirty-note guard |
+| F2 | `Confirm`; static destructive-control check | enforced for destructive controls; module/extension removal, section delete, once-section rerun (toggle lives in the cell ⋯ menu), conflict reload and recovery discard use `Confirm`; review-dialog discard has a dirty-note guard |
 
 ## Known gaps
 
@@ -335,11 +335,26 @@ stay mounted so editors, drafts and scroll survive switches and polls
 (C2/C3). `e2e/notebook.spec.ts` runs against a live Vite dev server
 proxying a scratch dev API + worker.
 
+- **S3/S5**: every notice that used to be a banner or report inserted
+  above the cells — lost/expired/restored, run blocks, the batch report,
+  the next-steps list — now lives in one sticky 36px toolbar row
+  (`top` sits under the console header) or behind its Details modal.
+  The row's one-line status slot (`role="status"`, ellipsis) picks the
+  first match of running → restore → blocked → report → lifecycle →
+  next → section count; the Details button is always mounted and only
+  toggles `visibility` (S4). Per-cell run feedback for a
+  single-section run — block messages, the 409, generic errors and the
+  trigger restore — lands on that cell's alerts slot as `.nb-note`
+  (P5) and is cleared at the next run start; the `S3: run feedback
+  never moves the cell` e2e measures the second cell's run button and
+  the toolbar before/after a run.
 - **S5**: polled section arrivals and reorders wait behind "Show N new"
   (`useHeldOrder` + `RevealNew`); a user-caused create/move/delete adopts
   the refetched order once it lands instead of hiding behind the reveal.
   The held-order e2e adds a section server-side and asserts the card
-  stays hidden until the explicit reveal, then checks server order.
+  stays hidden until the explicit reveal, then checks server order. The
+  directory is a borderless chip strip (`flex-wrap: nowrap;
+  overflow-x: auto`) so its height never changes on poll.
 - **C2/F3**: each card autosaves code/description/rerun through a serial
   revision-CAS queue (800 ms debounce, latest-wins). The 409 retry
   captures the notebook revision BEFORE re-reading the section, so an
@@ -357,51 +372,79 @@ proxying a scratch dev API + worker.
   POST carries only the originally captured revision, queue state is
   re-checked after the awaited reads, and a forced 409 surfaces a
   persistent Conflict state that resolves only through explicit Reload
-  server copy / Keep my draft (the conflict read is also
-  revision-first). Dirty drafts are backed up to tab-local storage
-  (`pendingDraft`) with a beforeunload guard; the polling e2e holds a
-  PUT in flight across polls and a Notebook↔Activity switch and
-  verifies the draft survives.
+  server copy / Keep my draft — rendered in the cell's alerts slot
+  AFTER the editor so a late conflict never moves what is being typed
+  (the conflict read is also revision-first). Dirty drafts are backed
+  up to tab-local storage (`pendingDraft`) with a beforeunload guard;
+  the polling e2e holds a PUT in flight across polls and a
+  Notebook↔Activity switch and verifies the draft survives.
 - **P3**: runs execute saved code only — an unresolved save blocks the
   run with a named notice rather than silently running stale code. One
   shared run lock serializes every run control in the same tick:
   section/batch runs set it before their first await, scratch acquires
   it through the parent's guarded setter (a refused start aborts before
   posting), and the server op lease remains the authoritative backstop.
-  The scratch ⌘/Ctrl+Enter shortcut only fires for key events targeting
+  Each cell's gutter carries an icon run control and ⌘/Ctrl+Enter inside
+  a section editor runs THAT section (capture-phase, never scratch);
+  the scratch ⌘/Ctrl+Enter shortcut only fires for key events targeting
   its own visible region — section editors and the Activity-hidden
-  notebook cannot trigger it (`scratch shortcut` e2e).
+  notebook cannot trigger it (`shortcut` + `scratch shortcut` e2e).
 - **F2**: section delete and explicit rerun of a succeeded `once`
-  section ("Skip in bulk runs after success") go through `Confirm`; the
-  once e2e asserts the dialog before the second run.
+  section go through `Confirm`; marking a section run-once lives in the
+  cell's ⋯ menu ("Mark as run-once" / "Unmark run-once", fixed label per
+  saved value) and shows as an `once` tag in the header — the
+  `once toggle lives in the cell menu` e2e asserts the tag and the
+  server `rerun` meta; the once e2e asserts the dialog before the
+  second run.
+- **P2**: inside `.nb` every control is a ghost/xs button (26px, icon
+  + label or 26×26 icon square) — no primary fills, no default-size
+  buttons; modal and Confirm footers keep the standard scale. State
+  styles repaint only (S1 — the `S1: cell controls keep their box under
+  hover` e2e measures gutter run, ⋯ trigger and inserter).
 - **Lifecycle honesty**: a lost instance shows "Runtime lost · code is
-  retained"; the first run restores an EMPTY process, returns a typed
-  `instance_restored` error, shows a persistent "Runtime restored …
-  Your request did not run" notice, and never auto-retries (the e2e
-  counts exactly one run POST). A mid-batch loss returns an honest
-  partial report (`restored: true`, `stopped_reason: instance_restored`)
-  with earlier results retained and the rest `not_run` — the UI shows a
-  distinct persistent notice stating earlier sections DID execute and
-  the report must be reviewed before repeating side effects; it survives
-  dismissing the batch report (`partial restore` e2e, mocked report).
-  Outputs from a previous incarnation are marked "previous runtime",
-  and outputs whose code changed since the run are marked "code changed
-  since run". Expired instances are read-only history: no run/edit
-  affordances, the expiry is shown, and there is no fake restore action.
+  retained" in the status line; the first run restores an EMPTY process,
+  returns a typed `instance_restored` error, and never auto-retries —
+  the status line and the cell note both say the request did not run
+  (the e2e counts exactly one run POST). A mid-batch loss returns an
+  honest partial report (`restored: true`, `stopped_reason:
+  instance_restored`) with earlier results retained and the rest
+  `not_run` — the status line warns that earlier sections DID execute
+  and the Details modal keeps the full report, including the "do not
+  blindly retry" warning (`partial restore` e2e, mocked report). Outputs
+  are always visible when present (no disclosure widget), capped at
+  240px; outputs from a previous incarnation are marked "previous
+  runtime", and outputs whose code changed since the run are marked
+  "code changed since run". Expired instances are read-only history:
+  the status line says so, no run/edit affordances exist, and scratch
+  shows an unavailable note — there is no fake restore action.
 - **C4**: `?section=name` deep-links scroll the addressed card into
-  view; a compact section directory above the cards lists ordinal,
-  name, description and state in held order and deep-links on click.
-- **S4**: save status, run buttons, the once label and the code-collapse
-  toggle use `SwapLabel` / fixed-width slots; per-card collapse hides
-  the editor while header/footer stay visible; mobile stacks to a
-  single column. Screenshots `notebook-{desktop,mobile}-{light,dark}.png`
-  plus `-section`/`-scratch` mobile detail shots under
+  view; the directory chip strip lists ordinal, name and a state dot
+  (state also in `title`/sr-only, description in `title`) in held
+  order and deep-links on click. Cells are flat bordered blocks on a
+  40px gutter + body grid; the header row carries ordinal, name, state
+  badge, the `once` tag, an inline borderless description input and
+  SaveStatus/collapse/⋯ actions; collapse hides only the editor —
+  alerts, output and footer stay. "Add section" appends an "Untitled
+  Section" — auto-named `untitled_section[_N]` — immediately with no
+  dialog, and the fixed-height `.nb-insert` rows between cells (and
+  after the last) create one directly after their cell; creation
+  errors go to the status line, and the row keeps its height without
+  edit rights (S3). CodeMirror
+  editors auto-size (`minHeight` 44px, `maxHeight` 420px) and a
+  just-created section focuses its editor once. Scratch is the last
+  cell with the same chrome (dashed edge) and a "Save as section…"
+  promote action enabled after a successful run. Mobile wraps the
+  toolbar to two rows and restores 44px hit targets. Screenshots
+  `notebook-{desktop,mobile}-{light,dark}.png` plus `-sticky`,
+  `-details`, `-section`/`-scratch` detail shots under
   `.devin-artifacts/screenshots/`.
 
 Known gaps: the scratch runner keeps its existing exec behavior (no
 section coupling beyond promote-from-exec); in-app navigation away from
 a dirty draft is unguarded like the rest of the console — recovery is
-the pending-draft offer on return plus the beforeunload guard.
+the pending-draft offer on return plus the beforeunload guard; agent-run
+output arriving by poll can change a cell's height by up to the 240px
+output cap (S5, bounded).
 
 ## Console shell navigation (consoleShell.spec.ts)
 

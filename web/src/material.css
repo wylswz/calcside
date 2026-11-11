@@ -187,7 +187,44 @@ body {
   border-color: rgb(var(--danger) / 0.35);
 }
 [data-ui='button'][data-variant='danger']:hover:not(:disabled) { background-color: rgb(var(--danger) / 0.08); }
-@media (max-width: 900px) { [data-ui='button'] { min-height: 44px; } }
+/* ghost: no material at all — a quiet ink-coloured control for dense
+   surfaces (the notebook); states only repaint the fill (S1) */
+[data-ui='button'][data-variant='ghost'] {
+  background-color: transparent;
+  background-image: none;
+  border-color: transparent;
+  box-shadow: none;
+  color: rgb(var(--sec));
+}
+[data-ui='button'][data-variant='ghost']:hover:not(:disabled):not([aria-expanded='true']) {
+  background-color: var(--fill-muted-hover);
+  box-shadow: none;
+  color: rgb(var(--ink));
+}
+[data-ui='button'][data-variant='ghost']:active:not(:disabled) {
+  background-color: rgb(var(--ink) / 0.09);
+  background-image: none;
+  box-shadow: none;
+}
+[data-ui='button'][data-variant='ghost'][aria-expanded='true'] {
+  background-color: var(--fill-muted-hover);
+  background-image: none;
+  box-shadow: none;
+  color: rgb(var(--ink));
+}
+/* xs: the compact control scale — 26px, owned here so it beats page-level
+   button metrics (the element qualifier wins the specificity tie) */
+button[data-ui='button'][data-size='xs'] {
+  height: 26px;
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  border-radius: var(--radius-inset);
+}
+@media (max-width: 900px) {
+  [data-ui='button'] { min-height: 44px; }
+  button[data-ui='button'][data-size='xs'] { height: auto; min-height: 44px; min-width: 44px; }
+}
 
 .segmented [role='tab']:not([aria-selected='true']):hover,
 .workspace-tabs a:not([aria-current='page']):hover { color: rgb(var(--ink)); background-color: var(--fill-muted-hover); }

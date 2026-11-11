@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>模板语言：从工作流 DSL 到 agent 沙箱</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --ink: #151517;
+    --body: #3D3D43;
+    --sec: #6C6C74;
+    --mute: #9A9AA2;
+    --line: #E7E7EB;
+    --line-strong: #D6D6DC;
+    --accent: #0066CC;
+    --accent-soft: #F2F7FD;
+    --surface: #F8F8FA;
+    --code: #F4F4F6;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    --mono: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #E9E9EC; font-family: var(--sans); color: var(--body); -webkit-font-smoothing: antialiased; }
+  .deck { position: fixed; inset: 0; display: grid; place-items: center; background: #E9E9EC; }
+  .slide { position: absolute; width: 1280px; height: 720px; background: #FFF; padding: 52px 72px 40px; display: none; flex-direction: column; transform-origin: center; box-shadow: 0 2px 24px rgba(0, 0, 0, 0.08); }
+  .slide.on { display: flex; }
+
+  .slabel { font: 500 11px var(--sans); letter-spacing: 0.14em; text-transform: uppercase; color: var(--mute); }
+  .pageno { position: absolute; right: 72px; bottom: 30px; font: 400 11px var(--mono); color: var(--mute); }
+  .wordmark { position: absolute; left: 72px; bottom: 30px; font: 500 12px var(--sans); letter-spacing: 0.02em; color: var(--mute); }
+
+  .body { flex: 1; display: flex; flex-direction: column; justify-content: flex-start; padding-top: 20px; min-height: 0; }
+  h1 { font: 600 38px/1.22 var(--sans); letter-spacing: -0.02em; color: var(--ink); margin: 8px 0 26px; }
+  h1 em { font-style: normal; color: var(--accent); }
+  h1 code { font: 500 0.9em var(--mono); color: var(--accent); background: none; padding: 0; }
+  h2 { font: 600 17px/1.35 var(--sans); color: var(--ink); letter-spacing: -0.01em; }
+  p { font-size: 16px; line-height: 1.65; color: var(--body); }
+  code { font: 400 0.9em var(--mono); color: var(--ink); background: var(--code); padding: 1px 5px; border-radius: 4px; }
+  pre { font: 400 13.5px/1.6 var(--mono); color: var(--ink); white-space: pre; }
+  .k { color: var(--accent); } .s { color: #B23A48; } .c { color: var(--mute); font-style: italic; } .fn { font-weight: 600; }
+
+  /* title slide */
+  .title-slide { justify-content: center; padding-top: 0; }
+  .title-slide::before { content: ""; width: 56px; height: 4px; background: var(--accent); margin-bottom: 26px; }
+  .title-slide h1 { font-size: 52px; line-height: 1.18; margin: 0 0 12px; }
+  .subtitle { font-size: 20px; color: var(--sec); margin-bottom: 34px; }
+  .title-code { align-self: flex-start; background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 16px 20px; font: 400 18px var(--mono); color: var(--ink); }
+  .title-caption { font-size: 14px; color: var(--mute); margin-top: 12px; }
+  .title-q { font-size: 18px; color: var(--accent); margin-top: 28px; }
+
+  /* cards */
+  .three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .three > div, .two > div { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
+  .three h2, .two h2 { margin-bottom: 6px; }
+  .three p, .two p { font-size: 14px; color: var(--sec); line-height: 1.6; }
+  .num { display: block; font: 500 11px var(--mono); color: var(--accent); margin-bottom: 8px; }
+  .ex { display: block; margin-top: 10px; font: 400 11px var(--mono); color: var(--mute); background: none; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .note { margin-top: 18px; padding: 11px 15px; background: var(--surface); border-left: 3px solid var(--accent); font-size: 15px; line-height: 1.6; color: var(--body); }
+  .note b { color: var(--ink); font-weight: 600; }
+  .takeaway { margin-top: 34px; font-size: 20px; line-height: 1.5; font-weight: 600; color: var(--ink); }
+  .takeaway em { font-style: normal; color: var(--accent); }
+
+  /* flow chips */
+  .pipe { display: flex; align-items: center; font: 400 12px var(--mono); color: var(--ink); margin: 0 0 22px; }
+  .pipe span { padding: 7px 11px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; white-space: nowrap; }
+  .pipe span.g { background: var(--accent); border-color: var(--accent); color: #FFF; }
+  .pipe i { width: 22px; height: 1px; background: var(--line-strong); position: relative; flex-shrink: 0; }
+  .pipe i::after { content: ""; position: absolute; right: 0; top: -3px; border-left: 5px solid var(--line-strong); border-top: 3px solid transparent; border-bottom: 3px solid transparent; }
+
+  .split { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 32px; }
+  .pane { background: #FFF; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .pane .bar2 { display: flex; justify-content: space-between; align-items: center; height: 32px; padding: 0 12px; background: var(--surface); border-bottom: 1px solid var(--line); font: 500 10px var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--mute); }
+  .pane pre { padding: 13px 15px; }
+
+  /* phase */
+  .phase { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 12px; margin-top: 22px; }
+  .phase > div { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; font: 600 15px var(--sans); color: var(--ink); }
+  .phase small { display: block; font: 400 11px var(--mono); color: var(--sec); margin-top: 3px; }
+  .phase .hot { background: var(--accent-soft); border-color: #B9D6F5; }
+  .phase .hot small { color: var(--accent); }
+
+  /* sandbox */
+  .sandbox { display: flex; flex-direction: column; margin: 0 0 18px; }
+  .layer { padding: 12px 16px; font: 500 14px var(--mono); border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+  .layer.gate { background: var(--accent-soft); border-color: #B9D6F5; color: var(--ink); }
+  .layer.gate small { display: block; font: 400 10.5px var(--mono); color: var(--sec); margin-top: 3px; }
+  .layer.world { color: var(--sec); }
+  .arrow { height: 16px; display: flex; align-items: center; padding-left: 24px; }
+  .arrow::before { content: ""; width: 1px; height: 16px; background: var(--line-strong); }
+
+  /* checks */
+  .checks { display: flex; flex-direction: column; }
+  .check { display: grid; grid-template-columns: 88px 1fr; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+  .check:first-child { border-top: 1px solid var(--line); }
+  .check b { font: 500 10.5px var(--mono); color: var(--accent); padding-top: 3px; }
+  .check p { font-size: 14px; line-height: 1.6; }
+
+  /* bands */
+  .trust, .versus { display: grid; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-top: 18px; background: #FFF; }
+  .trust { grid-template-columns: 1fr 1fr 1fr; }
+  .versus { grid-template-columns: 1fr 1fr; }
+  .trust > div, .versus > div { padding: 12px 16px; }
+  .trust > div + div, .versus > div + div { border-left: 1px solid var(--line); }
+  .trust b, .versus b { display: block; font: 500 10px var(--mono); letter-spacing: 0.06em; color: var(--mute); margin-bottom: 3px; }
+  .trust span, .versus span { font-size: 13.5px; color: var(--sec); }
+  .trust .no b { color: #B23A48; }
+
+  .absent { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line); margin-top: 18px; padding-top: 12px; }
+  .absent .lbl { font: 500 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--mute); }
+  .absent .lbl.right { margin-left: auto; }
+  .chip { font: 400 11px var(--mono); color: var(--sec); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; padding: 3px 8px; }
+
+  .opsline { display: flex; align-items: center; gap: 6px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .opsline b { font: 500 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--mute); margin-right: 4px; }
+  .opsline span { font: 400 11px var(--mono); color: var(--sec); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; }
+
+  .demo-body { justify-content: flex-start; }
+  .demo-frame { flex: 1; margin: 4px 0 16px; border: 1px dashed var(--line-strong); border-radius: 8px; background: var(--surface); display: grid; place-items: center; color: var(--mute); font: 400 13px var(--mono); }
+</style>
+</head>
+<body>
+<div class="deck">
+
+<!-- 01 -->
+<section class="slide" data-n="1">
+  <span class="slabel">2023 → 2026</span>
+  <span class="wordmark">calcside</span>
+  <div class="body title-slide">
+    <h1>模板语言：从<em>工作流 DSL</em><br>到 <em>agent 沙箱</em></h1>
+    <p class="subtitle">从 KubeVela workflow 到 calcside：同一个机制，换了站在对面的人</p>
+    <div class="title-code">apply: <span class="k">op.#Apply</span> &amp; {...}</div>
+    <p class="title-caption">CUE 里没有用户定义的函数。它不是函数，是一份数据。</p>
+    <p class="title-q">那它怎么就跑起来了？</p>
+  </div>
+</section>
+
+<!-- 02 -->
+<section class="slide" data-n="2">
+  <span class="slabel">模板语言</span>
+  <div class="body">
+    <h1>模板语言本来就是用来<em>少写代码</em>的</h1>
+    <div class="three">
+      <div>
+        <h2>CUE</h2>
+        <p>KubeVela 的 component / trait 抽象，一个 Application 底下几十个 k8s 对象，收成一份配置。</p>
+        <code class="ex">component: { type: "webservice" }</code>
+      </div>
+      <div>
+        <h2>HCL</h2>
+        <p>Terraform module。同样的 VPC 写八遍，抽出来只写一遍。</p>
+        <code class="ex">module "vpc" { ... }</code>
+      </div>
+      <div>
+        <h2>Starlark</h2>
+        <p>Bazel 的构建规则写成函数，能复用，能组合。</p>
+        <code class="ex">def cc_library(name, srcs):</code>
+      </div>
+    </div>
+    <div class="note">这类语言还有个共同点：<b>纯</b>。CUE 不能发 HTTP，Starlark 不能 open 文件。所以模板里那些“能做事”的东西，没有一个是语言自带的，全是宿主塞进去的。</div>
+    <p style="margin-top:14px;color:var(--sec)">纯度一开始是为了可预测、可校验，不是为了安全。但它顺带产生了一个结果：代码在被宿主执行之前，什么都干不了。</p>
+    <div class="absent">
+      <span class="lbl">语言里没有</span>
+      <span class="chip">HTTP</span><span class="chip">文件</span><span class="chip">环境变量</span>
+      <span class="lbl right">都在宿主手里</span>
+    </div>
+    <p class="takeaway">模板语言不产生副作用，它只描述<em>副作用该发生在哪</em>。</p>
+  </div>
+</section>
+
+<!-- 03 -->
+<section class="slide" data-n="3">
+  <span class="slabel">工作流 DSL</span>
+  <div class="body">
+    <h1>引擎<em>遍历</em>数据，执行 op，再把结果<em>填回去</em></h1>
+    <div class="pipe">
+      <span>CUE value</span><i></i><span class="g">cueflow 遍历</span><i></i><span>执行器</span><i></i><span>output unify</span><i></i><span>下游唤醒</span>
+    </div>
+    <div class="split">
+      <div class="pane">
+        <div class="bar2"><span>workflow.cue</span><span>KubeVela</span></div>
+<pre>apply: <span class="k">op.#Apply</span> &amp; {
+  value: { ... }
+}
+
+status: <span class="k">op.#Read</span> &amp; {
+  value: { ... }
+}</pre>
+      </div>
+      <div>
+        <p>执行器做真实世界的事：apply 一个 k8s 资源，发一个 HTTP 请求，调一次外部 API。</p>
+        <p style="margin-top:10px;color:var(--sec)">副作用不在 CUE 里。CUE 每次求值都是纯的，脏活全在引擎里，发生在两轮求值中间。</p>
+        <div class="note" style="margin-top:14px">状态全在 value 里，所以 workflow 可以停：序列化存下来，下次读出来接着填。</div>
+      </div>
+    </div>
+    <div class="phase">
+      <div>求值<small>纯 · 无副作用</small></div>
+      <div class="hot">执行<small>执行器 · 真实世界</small></div>
+      <div>求值<small>结果 unify 回来</small></div>
+    </div>
+    <div class="note">执行器是注册进来的。模板能做的事，永远不超过宿主已经提供的能力。</div>
+  </div>
+</section>
+
+<!-- 04 -->
+<section class="slide" data-n="4">
+  <span class="slabel">边界 · KubeVela</span>
+  <div class="body">
+    <h1>作者可信，<em>环境</em>不可信</h1>
+    <div class="two">
+      <div>
+        <span class="num">01</span>
+        <h2>op 是副作用点</h2>
+        <p>workflow 引擎负责调度、并行、等依赖；op 只负责在那一刻产生副作用。命令式操作全关进 op，op 外面尽量都是能推导、能校验的数据。</p>
+      </div>
+      <div>
+        <span class="num">02</span>
+        <h2>统一的是数据</h2>
+        <p>CUE 的 unify 让不同来源的 schema 在同一份 value 里共存、互相约束。</p>
+      </div>
+    </div>
+    <div class="note">写模板的是平台工程师，是可信的。不可信的是运行环境的复杂度。<b>边界画在“声明式”和“命令式”之间。</b></div>
+    <div class="opsline"><b>vela/op</b><span>#Apply</span><span>#Read</span><span>#HTTPGet</span><span>#Wait</span><span>#Suspend</span></div>
+    <div class="trust">
+      <div><b>作者</b><span>平台工程师 · 可信</span></div>
+      <div><b>引擎</b><span>cueflow · 可信</span></div>
+      <div class="no"><b>环境</b><span>运行环境 · 不可信</span></div>
+    </div>
+    <div class="note">代价是模板作者得懂 CUE，而且只能使用已经注册的执行器。</div>
+  </div>
+</section>
+
+<!-- 05 -->
+<section class="slide" data-n="5">
+  <span class="slabel">agent 沙箱 · calcside</span>
+  <div class="body">
+    <h1>同一个机制，<em>信任反过来了</em></h1>
+    <div class="sandbox">
+      <div class="layer guest">agent 写的 Starlark</div>
+      <div class="arrow"></div>
+      <div class="layer gate">Gate.Invoke · 策略 / 审计<small>secret 在能力侧注入 · 限额在运行时</small></div>
+      <div class="arrow"></div>
+      <div class="layer world">net · fs · ext → 真实世界</div>
+    </div>
+    <div class="three">
+      <div><h2>谁写代码</h2><p>agent，天然不可信。</p></div>
+      <div><h2>op 是什么</h2><p>副作用点，也是检查站。</p></div>
+      <div><h2>怎么拦</h2><p>调用拦截，不是遍历。</p></div>
+    </div>
+    <div class="note">Starlark 里没有 open、没有 socket。要做事，只能调用 Gate 后面的 builtin。ext 就是 capability.yaml 声明 op，再用 main.star 把它们拼出来。</div>
+    <div class="versus">
+      <div><b>KubeVela</b><span>遍历数据图 · op 是副作用点</span></div>
+      <div><b>calcside</b><span>拦截调用 · 同一个点，加了检查</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 06 -->
+<section class="slide" data-n="6">
+  <span class="slabel">一次调用</span>
+  <div class="body">
+    <h1><code>ext.tavily.search()</code> 在宿主眼里是什么</h1>
+    <div class="split">
+      <div class="pane">
+        <div class="bar2"><span>Starlark</span><span>agent 写的</span></div>
+<pre>rs = ext.tavily.<span class="fn">search</span>(
+  <span class="s">"capability-safe agents"</span>, 3
+)
+<span class="c"># 对 agent：一行代码</span>
+<span class="c"># 对宿主：一次可拒绝的事件</span></pre>
+      </div>
+      <div class="checks">
+        <div class="check"><b>allowlist</b><p>tavily.com 不在名单，这行直接失败。DNS 结果在 dial 前全部检查。</p></div>
+        <div class="check"><b>secret</b><p><code>{{secrets.TAVILY_API_KEY}}</code> 在宿主侧换成真值，密钥从头到尾不进沙箱。</p></div>
+        <div class="check"><b>audit</b><p>留一条记录，参数摘要，但不含响应体。</p></div>
+      </div>
+    </div>
+    <div class="note">agent 最后只拿到一个返回值。</div>
+    <div class="pipe" style="margin-top:16px">
+      <span>agent 代码</span><i></i><span class="g">Gate</span><i></i><span>allowlist / secret / audit</span><i></i><span>返回值</span>
+    </div>
+    <div class="note">宿主记的是事件，不是数据：参数摘要可以审计，响应体不进日志。</div>
+  </div>
+</section>
+
+<!-- 07 -->
+<section class="slide" data-n="7">
+  <span class="slabel">互操作 · host ↔ guest</span>
+  <div class="body">
+    <h1>宿主和 guest 之间，<em>边界是漏的</em></h1>
+    <div class="two">
+      <div>
+        <h2>好处：guest 里的一等公民</h2>
+        <p>Go 把能力注册成 Starlark builtin。<code>net.post</code> 就是一次普通调用，值直接映射，不用序列化，也不用跨进程。</p>
+        <code class="ex">r = net.post(url=..., body=...)</code>
+      </div>
+      <div>
+        <h2>坏处：内存边界不清晰</h2>
+        <p>Go 的分配器不按实例记账。guest 的值就活在宿主的 GC 堆上，一个乘法就能把进程吃掉。</p>
+        <code class="ex">"x" * 10**9   # max_steps 限不住</code>
+      </div>
+    </div>
+    <div class="note">KubeVela 不在乎：作者可信，互操作只是为了把 op 的结果填回 value。<b>calcside 在乎：作者不可信，内存不隔离就是漏洞。</b></div>
+    <div class="phase">
+      <div>语言边界<small>builtin · 值映射 · 同一条线程</small></div>
+      <div class="hot">进程边界<small>subproc · 一个实例一个进程</small></div>
+      <div>OS 边界<small>cgroup v2 · OOM 只杀它</small></div>
+    </div>
+    <div class="note">语言层只能限步数和能力；内存要靠进程和 cgroup 补。</div>
+  </div>
+</section>
+
+<!-- 08 -->
+<section class="slide" data-n="8">
+  <span class="slabel">DEMO</span>
+  <div class="body demo-body">
+    <h1>现场演示</h1>
+    <div class="demo-frame">屏幕录制 / 终端</div>
+  </div>
+</section>
+
+</div>
+<script>
+  const slides = [...document.querySelectorAll('.slide')];
+  slides.forEach((s, k) => {
+    const n = document.createElement('span');
+    n.className = 'pageno';
+    n.textContent = `0${k + 1} / 0${slides.length}`;
+    s.append(n);
+  });
+  let i = Math.max(0, Math.min(slides.length - 1, (parseInt(location.hash.slice(1)) || 1) - 1));
+  const fit = () => slides.forEach(s => s.style.transform = `scale(${Math.min(innerWidth / 1280, innerHeight / 720)})`);
+  const show = n => { i = Math.max(0, Math.min(slides.length - 1, n)); slides.forEach((s, k) => s.classList.toggle('on', k === i)); history.replaceState(null, '', '#' + (i + 1)); };
+  addEventListener('keydown', e => {
+    if (['ArrowRight', 'ArrowDown', 'PageDown', ' '].includes(e.key)) { e.preventDefault(); show(i + 1); }
+    if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(e.key)) { e.preventDefault(); show(i - 1); }
+    if (e.key === 'f') document.documentElement.requestFullscreen?.();
+  });
+  addEventListener('click', e => { if (!e.target.closest('a')) show(i + (e.clientX > innerWidth / 2 ? 1 : -1)); });
+  addEventListener('resize', fit);
+  fit(); show(i);
+</script>
+</body>
+</html>
