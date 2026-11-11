@@ -38,9 +38,10 @@ async function saveSection(id: string, name: string, code: string, extra: Record
   expect(r.status()).toBe(200)
 }
 
-async function runAll(id: string): Promise<void> {
+async function runAll(id: string) {
   const r = await rt.client.post(`/api/v1/instances/${id}/notebook/run`, { data: { sections: 'all' } })
   expect(r.status()).toBe(200)
+  return r.json()
 }
 
 function card(page: import('@playwright/test').Page, name: string) {
@@ -682,10 +683,13 @@ test('screenshots: notebook desktop/mobile × light/dark', async ({ page }) => {
   await saveSection(id, 'setup', 'x = 40 + 2')
   await saveSection(id, 'load', 'rows = [i * i for i in range(12)]\nlabels = {"a": 1, "b": 2}')
   await saveSection(id, 'transform', 'def twice(v):\n    return v * 2\nvals = [twice(i) for i in range(8)]')
-  await saveSection(id, 'analyze', 'total = sum(vals)\nprint("total", total)')
+  await saveSection(id, 'analyze', 'total = 0\nfor v in vals:\n    total += v\nprint("total", total)')
   await saveSection(id, 'report', 'print("answer", x)', { rerun: 'once' })
   await saveSection(id, 'notes', '# closing remarks\n# the notebook is the durable record')
-  await runAll(id)
+  const run = await runAll(id)
+  const results = run.report?.results ?? []
+  expect(results).toHaveLength(6)
+  expect(results.every((s: { status: string }) => s.status === 'ok')).toBe(true)
   await page.goto(`${rt.viteURL}/instances/${id}`)
   await expect(card(page, 'setup')).toBeVisible()
   await expect(card(page, 'report')).toBeVisible()

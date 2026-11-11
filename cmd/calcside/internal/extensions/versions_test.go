@@ -191,36 +191,85 @@ func TestEP0020BoundVersionConflict(t *testing.T) {
 	}
 }
 
+type barrierArtifactStore struct {
+	*artifactStore
+	reads sync.WaitGroup
+}
+
+func (s *barrierArtifactStore) GetExtensionVersion(ctx context.Context, family, version string) (*store.ExtensionVersion, error) {
+	v, err := s.artifactStore.GetExtensionVersion(ctx, family, version)
+	s.reads.Done()
+	s.reads.Wait()
+	return v, err
+}
+
 // TestEP0020ConcurrentCapture: concurrent captures of one
 // (family,version) with different content yield a single winner
 // (EP-0020).
 func TestEP0020ConcurrentCapture(t *testing.T) {
 	ctx := context.Background()
 	st := &artifactStore{}
+	race := &barrierArtifactStore{artifactStore: st}
+	race.reads.Add(2)
 	repos := [2]*Repository{}
+	roots := [2]string{}
 	for i := range repos {
 		root := filepath.Join(t.TempDir(), "fixtures")
 		writeVersion(t, root, "race", "0.1.0", "0.1.0", "def echo(value): return "+string(rune('1'+i))+"\n", nil)
-		repos[i] = mustRepo(t, st, capext.Options{CacheDir: t.TempDir(), LocalRoots: []string{root}})
+		roots[i] = root
+		repo, err := NewRepository(race, capext.Options{CacheDir: t.TempDir(), LocalRoots: []string{root}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		repos[i] = repo
 	}
 	var wg sync.WaitGroup
 	errs := [2]error{}
+	arts := [2]*store.ExtensionArtifact{}
 	for i := range repos {
-		wg.Go(func() { _, errs[i] = repos[i].Capture(ctx, "fixtures/race@0.1.0", "") })
+		wg.Go(func() { arts[i], errs[i] = repos[i].Capture(ctx, "fixtures/race@0.1.0", "") })
 	}
 	wg.Wait()
 	b, err := st.GetExtensionVersion(ctx, "fixtures/race", "0.1.0")
 	if err != nil {
 		t.Fatal(err)
 	}
+	winner := -1
 	switch {
 	case errs[0] == nil && errors.Is(errs[1], store.ErrConflict):
+		winner = 0
 	case errs[1] == nil && errors.Is(errs[0], store.ErrConflict):
+		winner = 1
 	default:
 		t.Fatalf("expected one winner: %v %v", errs[0], errs[1])
 	}
+	if arts[winner] == nil || arts[winner].Sum != b.Sum {
+		t.Fatalf("winning artifact does not match binding: %+v %+v", arts[winner], b)
+	}
 	if a, err := st.GetExtensionArtifact(ctx, b.ArtifactSource, b.Sum); err != nil || a == nil {
 		t.Fatalf("winning artifact missing: %v", err)
+	}
+	st.mu.Lock()
+	persisted := make([]*store.ExtensionArtifact, 0, len(st.data))
+	for _, a := range st.data {
+		persisted = append(persisted, a)
+	}
+	st.mu.Unlock()
+	if len(persisted) != 1 || persisted[0].Sum != b.Sum || persisted[0].Source != b.ArtifactSource {
+		t.Fatalf("unexpected persisted artifacts: %d binding %+v", len(persisted), b)
+	}
+	if err := persisted[0].Validate(); err != nil {
+		t.Fatalf("winning artifact invalid: %v", err)
+	}
+	for i := range repos {
+		recap := mustRepo(t, st, capext.Options{CacheDir: t.TempDir(), LocalRoots: []string{roots[i]}})
+		a, err := recap.Capture(ctx, "fixtures/race@0.1.0", "")
+		if err != nil {
+			t.Fatalf("unpinned recapture %d: %v", i, err)
+		}
+		if a.Sum != b.Sum || string(a.Files["main.star"]) != "def echo(value): return "+string(rune('1'+winner))+"\n" {
+			t.Fatalf("unpinned recapture %d did not return winner artifact: %s", i, a.Sum)
+		}
 	}
 }
 

@@ -30,7 +30,7 @@ test('workbench resources use pinned files; views retain editor and input (C2/C3
     data: {
       name: 'Resource workbench',
       spec: {
-        capabilities: { ext: { helper: { source: 'fixture/probe' } } },
+        capabilities: { ext: { helper: { source: 'fixture/probe@0.1.0' } } },
         modules: { toolkit: { name: 'worklib', version: 1, sum: published.latest_sum } },
       },
     },

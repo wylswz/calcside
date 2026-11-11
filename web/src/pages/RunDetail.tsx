@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getRun, cancelRun, retryRun, Interrupt, currentWorkspace } from '../api'
@@ -33,12 +33,31 @@ export default function RunDetail() {
 	const runningHandler = phase?.phase === 'running' ? phase.handler : undefined
 	const deadline = pending ? deadlineOf(pending) : undefined
 
+	const progressRef = useRef<HTMLElement | null>(null)
+	const waitingHeight = useRef<{ runId: string; height: number } | null>(null)
+	useLayoutEffect(() => {
+		if (!pending || runId == null) return
+		const el = progressRef.current
+		if (!el) return
+		const measure = () => {
+			const height = el.getBoundingClientRect().height
+			const cur = waitingHeight.current
+			if (!cur || cur.runId !== runId || cur.height !== height) waitingHeight.current = { runId, height }
+		}
+		measure()
+		const ro = new ResizeObserver(measure)
+		ro.observe(el)
+		return () => ro.disconnect()
+	}, [pending, runId])
+
 	if (q.isLoading) return <Loading />
 	if (q.isError) return <Notice tone="warning">Could not load run: {(q.error as Error).message}</Notice>
 	if (!run) return <Notice tone="warning">Run not found.</Notice>
 
 	const cancellable = run.status === 'waiting' || run.status === 'unknown'
 	const retryable = run.status === 'unknown'
+	const remembered = waitingHeight.current
+	const reserved = phase?.phase === 'running' && remembered != null && remembered.runId === runId ? remembered.height : undefined
 
 	return (
 		<div className="app-page">
@@ -74,7 +93,7 @@ export default function RunDetail() {
 			)}
 
 			{(pending || phase?.phase === 'running') && (
-				<section className="app-card">
+				<section className="app-card" data-testid="run-progress" ref={progressRef} style={reserved === undefined ? undefined : { minHeight: reserved }}>
 					<div className="app-card-head"><span className="app-card-title">{pending ? `Waiting on — ${interruptTitle(pending)}` : `Running — ${runningHandler ?? 'handler'}`}</span></div>
 					<div className="app-card-body">
 						{pending?.context_json && <pre className="app-out-pre mt-2">{pending.context_json}</pre>}

@@ -47,40 +47,64 @@ async function testRun(appID: string): Promise<{ run_id: string; int_id: string 
 
 test('a) develop waiting -> resume -> handler output on run page', async ({ page }) => {
 	const appID = await makeApp('int-e2e')
-	const { run_id: runID, int_id: intID } = await testRun(appID)
+	for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+		const { run_id: runID, int_id: intID } = await testRun(appID)
+		await page.setViewportSize(viewport)
+		await page.goto(`${viteURL}/applications/${appID}`)
+		await page.getByRole('tablist', { name: 'Application views' }).getByRole('tab', { name: 'Activity' }).click()
+		await expect(page.locator('section.app-card').filter({ hasText: 'Runs' })).toBeVisible()
+		await page.screenshot({ path: `/tmp/calcside-ep16-logs/app-detail-${viewport.width}.png` })
 
-	await page.goto(`${viteURL}/applications/${appID}`)
-	await page.getByRole('tablist', { name: 'Application views' }).getByRole('tab', { name: 'Activity' }).click()
-	await expect(page.locator('section.app-card').filter({ hasText: 'Runs' })).toBeVisible()
-	await page.screenshot({ path: '/tmp/calcside-ep16-logs/app-detail.png' })
+		await page.goto(`${viteURL}/applications/${appID}/runs/${runID}`)
+		const progress = page.getByTestId('run-progress')
+		await expect(progress).toBeVisible()
+		await expect(page.getByText('Waiting on — → on_ok')).toBeVisible()
+		await page.screenshot({ path: `/tmp/calcside-ep16-logs/run-page-${viewport.width}.png` })
 
-	await page.goto(`${viteURL}/applications/${appID}/runs/${runID}`)
-	await expect(page.getByText('Waiting on — → on_ok')).toBeVisible()
-	await page.screenshot({ path: '/tmp/calcside-ep16-logs/run-page.png' })
+		const waiting = await (await client.get(`/api/v1/runs/${runID}`)).json()
+		let resumeAccepted = false
+		page.on('response', (r) => {
+			if (r.request().method() === 'POST' && r.url().includes(`/api/v1/interrupts/${intID}/resume`)) resumeAccepted = true
+		})
+		await page.route(`**/api/v1/runs/${runID}`, (route) => {
+			if (route.request().method() !== 'GET') return route.fallback()
+			const body = resumeAccepted
+				? { run: { ...waiting.run, status: 'waiting' }, interrupts: (waiting.interrupts ?? []).map((i: any) => ({ ...i, status: 'resolved', can_resume: false })) }
+				: waiting
+			return route.fulfill({ json: body })
+		})
 
-	// Resume through the named confirm (F2); the box keeps geometry (S3).
-	const card = page.locator('section.app-card').filter({ hasText: 'Waiting on' })
-	const box = await card.boundingBox()
-	await page.locator(`#event-${intID}`).fill('{"approved":true}')
-	await card.getByRole('button', { name: 'Resume' }).click()
-	await expect(page.getByText('Calls on_ok with this event:')).toBeVisible()
-	await page.getByRole('button', { name: 'Resume', exact: true }).last().click()
-	const box2 = await card.boundingBox()
-	expect(Math.abs((box2?.height ?? 0) - (box?.height ?? 0))).toBeLessThan(80)
-	// The submit control reports a waiting state until the phase flips.
-	await expect(page.getByText(/Resumed — running handler…|Running — on_ok|Running on_ok/).first()).toBeVisible()
-	// The dispatcher runs the handler; the run completes and the
-	// handler's return value is the application output.
-	await expect.poll(async () => {
-		const r = await client.get(`/api/v1/runs/${runID}`)
-		return (await r.json()).run.status
-	}, { timeout: 30_000 }).toBe('succeeded')
-	await expect(page.locator('pre.app-out-pre').filter({ hasText: '"ok":true' })).toBeVisible()
+		// Resume through the named confirm (F2); the box keeps geometry (S3).
+		await progress.locator(`#event-${intID}`).fill('{"approved":true}')
+		const before = await progress.boundingBox()
+		expect(before).not.toBeNull()
+		await progress.getByRole('button', { name: 'Resume' }).click()
+		await expect(page.getByText('Calls on_ok with this event:')).toBeVisible()
+		const resumeResp = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().includes(`/api/v1/interrupts/${intID}/resume`))
+		await page.getByRole('button', { name: 'Resume', exact: true }).last().click()
+		expect((await resumeResp).status()).toBe(202)
+		// The submit control reports a waiting state until the phase flips.
+		await expect(progress.locator('.app-card-title')).toHaveText('Running — on_ok')
+		const after = await progress.boundingBox()
+		expect(after).not.toBeNull()
+		for (const dim of ['x', 'y', 'width', 'height'] as const) {
+			expect(Math.abs(after![dim] - before![dim])).toBeLessThanOrEqual(1)
+		}
 
-	// Deep link still works off the resumable page (C4).
-	await page.goto(`${viteURL}/inbox?interrupt=${intID}`)
-	await expect(page.getByText(/Resolved by|View run/).first()).toBeVisible()
-	await page.screenshot({ path: '/tmp/calcside-ep16-logs/inbox.png' })
+		// The dispatcher runs the handler; the run completes and the
+		// handler's return value is the application output.
+		await page.unroute(`**/api/v1/runs/${runID}`)
+		await expect.poll(async () => {
+			const r = await client.get(`/api/v1/runs/${runID}`)
+			return (await r.json()).run.status
+		}, { timeout: 30_000 }).toBe('succeeded')
+		await expect(page.locator('pre.app-out-pre').filter({ hasText: '"ok":true' })).toBeVisible()
+
+		// Deep link still works off the resumable page (C4).
+		await page.goto(`${viteURL}/inbox?interrupt=${intID}`)
+		await expect(page.getByText(/Resolved by|View run/).first()).toBeVisible()
+		await page.screenshot({ path: `/tmp/calcside-ep16-logs/inbox-${viewport.width}.png` })
+	}
 })
 
 test('b) already_resolved surfaces in place with input kept (P5/C2)', async ({ page }) => {

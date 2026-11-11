@@ -39,11 +39,11 @@ test('module debug executes ext with vault-injected credentials', async ({ page 
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
 
   const { writeFile, mkdir } = await import('node:fs/promises')
-  const { join } = await import('node:path')
-  const ext = join(rt.extensionDir, '..', 'credentials')
+  const { dirname, join } = await import('node:path')
+  const ext = join(dirname(dirname(rt.extensionDir)), 'credentials', '0.1.0')
   await mkdir(ext, { recursive: true })
   await writeFile(join(ext, 'capability.yaml'),
-    `name: credentials\nops: [{name: check, params: []}]\ndependencies: [net]\nconfig:\n  - {name: endpoint, type: string}\n  - {name: api_key, type: secret}\n  - {name: client_secret, type: secret}\n`)
+    `name: credentials\nversion: "0.1.0"\nops: [{name: check, params: []}]\ndependencies: [net]\nconfig:\n  - {name: endpoint, type: string}\n  - {name: api_key, type: secret}\n  - {name: client_secret, type: secret}\n`)
   await writeFile(join(ext, 'main.star'),
     `def check():
     r = net.get(config['endpoint'], headers={"Authorization": "Bearer " + config['api_key'], "X-Client-Secret": config['client_secret']})
@@ -81,7 +81,7 @@ test('module debug executes ext with vault-injected credentials', async ({ page 
   await expect(page.getByText(/binding/i)).toHaveCount(0)
 
   // Add the credentials extension via the catalog card, then configure.
-  await page.getByTestId('module-deps').getByRole('button', { name: 'Add credentials' }).click()
+  await page.getByTestId('module-deps').getByRole('button', { name: 'Add credentials 0.1.0' }).click()
   await page.getByRole('button', { name: 'Configure credentials' }).click()
   await page.getByLabel('credentials endpoint').fill(`http://127.0.0.1:${echoPort}/echo`)
   const pick = async (field: string, ref: string) => {
@@ -193,7 +193,7 @@ test('module debug executes ext with vault-injected credentials', async ({ page 
   await expect.poll(async () => {
     const g = await client.get(`/api/v1/modules/${mod.id}`)
     return JSON.stringify((await g.json()).module.requirements ?? {})
-  }, { timeout: 15_000 }).not.toContain('fixture/credentials')
+  }, { timeout: 15_000 }).not.toContain('fixture/credentials@0.1.0')
   await expect.poll(async () => {
     const g = await client.get(`/api/v1/modules/${mod.id}/debug`)
     const sp = (await g.json()).debug.spec

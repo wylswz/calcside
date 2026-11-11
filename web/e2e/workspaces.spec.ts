@@ -117,17 +117,20 @@ async function watchGeometry(page: Page, selectors: string[]) {
 test('workspace switcher scopes the instance list', async ({ page }) => {
   const mk = await client.post('/api/v1/instances', { data: { capabilities: { fs: {} } } })
   expect(mk.status()).toBe(201)
+  const personalId = (await mk.json()).instance.id
   const ws = await client.post('/api/v1/workspaces', { data: { name: 'e2e team' } })
   expect(ws.status()).toBe(201)
   const team = (await ws.json()).workspace
 
   await page.goto(`${consoleURL}/`)
-  await expect(page.getByRole('button', { name: /▾/ })).toBeVisible({ timeout: 15_000 })
-  await page.getByRole('button', { name: /▾/ }).click()
+  const switcher = page.locator('.ws-switcher')
+  await expect(switcher.getByRole('button')).toBeVisible({ timeout: 15_000 })
+  await switcher.getByRole('button').click()
   await page.getByRole('menuitem', { name: /e2e team/ }).click()
-  await page.waitForLoadState('networkidle')
+  await expect(switcher.getByRole('button')).toContainText('e2e team', { timeout: 15_000 })
+  await expect(page.getByText(/Decide what an agent may do/)).toBeVisible()
   // scoped: the personal-workspace instance row is absent
-  await expect(page.locator('tbody tr')).toHaveCount(0, { timeout: 5000 }).catch(() => {})
+  await expect(page.locator('tbody tr', { hasText: personalId })).toHaveCount(0)
   // settings page
   await page.goto(`${consoleURL}/workspaces/${team.id}`)
   await expect(page.getByText('e2e team').first()).toBeVisible()
@@ -714,7 +717,8 @@ test('new instance: palette controls stay put while adding and removing', async 
     await expect(page.locator('[data-row="net"]')).toBeVisible()
     expect(await snapshot()).toEqual(before)
     await targets.ext2.click()
-    await expect(targets.ext2).toHaveText('Added')
+    await expect(targets.ext2.locator('.swap-label > span[data-on="true"]')).toHaveText('Added')
+    await expect(targets.ext2).toHaveAttribute('aria-label', 'Added stable-02, show settings')
     expect(await snapshot()).toEqual(before)
     await targets.ext3.click()
     expect(await snapshot()).toEqual(before)
@@ -1048,21 +1052,29 @@ test('opening a dialog does not shift the page under it (S6)', async () => {
     ignoreDefaultArgs: ['--hide-scrollbars'],
     args: ['--disable-features=OverlayScrollbar'],
   })
-  const page = await browser.newPage({ viewport: { width: 1280, height: 500 } })
-  await page.goto(`${consoleURL}/workspace/policies`)
-  await page.addStyleTag({ content: '::-webkit-scrollbar { width: 15px; height: 15px } ::-webkit-scrollbar-thumb { background: #999 } body { min-height: 200vh }' })
-  expect(await page.evaluate(() => window.innerWidth - document.documentElement.clientWidth)).toBeGreaterThan(0)
-  const where = () => page.evaluate(() => ['main', '.console-header-inner', 'h1, [role="tablist"], .workspace-tabs'].map((s) => {
-    const b = document.querySelector(s)!.getBoundingClientRect()
-    return [s, Math.round(b.x), Math.round(b.width)]
-  }))
-  const before = await where()
-  await page.getByRole('button', { name: 'New policy' }).click()
-  await expect(page.getByRole('dialog', { name: 'New policy' })).toBeVisible()
-  expect(await where()).toEqual(before)
-  await page.keyboard.press('Escape')
-  expect(await where()).toEqual(before)
-  await browser.close()
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 500 } })
+    await page.goto(`${consoleURL}/workspace/policies`)
+    await expect(page.getByRole('button', { name: 'New policy' })).toBeVisible()
+    await expect(page.getByRole('navigation', { name: 'Workspace settings' })).toBeVisible()
+    await page.addStyleTag({ content: '::-webkit-scrollbar { width: 15px; height: 15px } ::-webkit-scrollbar-thumb { background: #999 } body { min-height: 200vh }' })
+    expect(await page.evaluate(() => window.innerWidth - document.documentElement.clientWidth)).toBeGreaterThan(0)
+    const where = () => page.evaluate(() => ['main', '.console-header-inner', 'h1, [role="tablist"], .workspace-tabs'].map((s) => {
+      const b = document.querySelector(s)!.getBoundingClientRect()
+      return [s, Math.round(b.x), Math.round(b.width)]
+    }))
+    await expect(page.locator('main')).toBeVisible()
+    await expect(page.locator('.console-header-inner')).toBeVisible()
+    await expect(page.locator('h1, [role="tablist"], .workspace-tabs').first()).toBeVisible()
+    const before = await where()
+    await page.getByRole('button', { name: 'New policy' }).click()
+    await expect(page.getByRole('dialog', { name: 'New policy' })).toBeVisible()
+    expect(await where()).toEqual(before)
+    await page.keyboard.press('Escape')
+    expect(await where()).toEqual(before)
+  } finally {
+    await browser.close()
+  }
 })
 
 // The material is real CSS, not a screenshot impression: raised faces are
@@ -1148,9 +1160,25 @@ test('new instance: picker version switch is silent', async ({ page }) => {
     // Long versions ellipsize inside the fixed segment (S1).
     const lvCard = page.locator('.extensions-block .ext-card').nth(2)
     await lvCard.locator('.ext-card-caret').click()
+    await page.getByRole('menuitem', { name: '0.1.0', exact: true }).click()
+    await expect(lvCard.locator('.ext-card-version')).toHaveText('0.1.0')
+    await expect(lvCard.locator('.ext-card-action .swap-label > span[data-on="true"]')).toHaveText('Added')
+    const lvBefore = await lvCard.boundingBox()
+    const lvSplitBefore = await lvCard.locator('.ext-split').boundingBox()
+    await lvCard.locator('.ext-card-caret').click()
     await page.getByRole('menuitem', { name: /2024\.11\.10/ }).click()
+    await expect(page.locator('.ext-live')).toHaveText('Switched lvx to 2024.11.10-beta.3-longref')
     await expect(lvCard.locator('.ext-split-version')).toHaveText('2024.11.10-beta.3-longref')
-    const fitsLong = await lvCard.locator('.ext-split-version').evaluate((el) => el.scrollWidth <= el.clientWidth + 1)
+    const fitsLong = await lvCard.locator('.ext-split-version').evaluate((el) => {
+      const cs = getComputedStyle(el)
+      const chip = el.getBoundingClientRect()
+      const action = el.closest('.ext-card-action')!.getBoundingClientRect()
+      return cs.overflowX === 'hidden' && cs.textOverflow === 'ellipsis' &&
+        chip.left >= action.left - 1 && chip.right <= action.right + 1
+    })
     expect(fitsLong).toBe(true)
+    await assertSplitGeometry()
+    expect(await lvCard.boundingBox()).toEqual(lvBefore)
+    expect(await lvCard.locator('.ext-split').boundingBox()).toEqual(lvSplitBefore)
   }
 })

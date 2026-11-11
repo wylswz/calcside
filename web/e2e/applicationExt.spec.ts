@@ -35,7 +35,7 @@ test('create application with ext -> blocked publish fails -> republish -> ready
   await page.locator('#basics-name').fill('Echo app')
   await page.getByRole('button', { name: 'Continue to configuration' }).click()
   // the Add capabilities tab holds the ext selection
-  await page.getByRole('button', { name: 'Add probe', exact: true }).click()
+  await page.getByRole('button', { name: 'Add probe 0.1.0', exact: true }).click()
   // switching tabs and back keeps the selection
   await page.getByRole('tab', { name: /Settings/ }).click()
   await page.getByRole('tab', { name: 'Add capabilities' }).click()
@@ -50,7 +50,7 @@ test('create application with ext -> blocked publish fails -> republish -> ready
   }
   // The draft keeps the unpinned selector (re-pinned at publish) —
   // assert the alias survives, not a frozen draft-time sum.
-  expect(app0.spec.capabilities.ext.probe.source).toBe('fixture/probe')
+  expect(app0.spec.capabilities.ext.probe.source).toBe('fixture/probe@0.1.0')
 
   // write code that calls the pinned extension
   const cm = page.locator('.app-cm .cm-content').first()
@@ -113,7 +113,7 @@ test('artifact persists across worker restart with empty cache', async () => {
   // create + publish a second app through the API directly so the
   // first test's UI state does not leak into this recovery case.
   const r = await client.post('/api/v1/applications', {
-    data: { name: 'Persist', spec: { capabilities: { ext: { probe: { source: 'fixture/probe' } } } } },
+    data: { name: 'Persist', spec: { capabilities: { ext: { probe: { source: 'fixture/probe@0.1.0' } } } } },
   })
   expect(r.status()).toBe(200)
   const id = (await r.json()).application.id
@@ -121,7 +121,7 @@ test('artifact persists across worker restart with empty cache', async () => {
   // The draft keeps the unpinned selector (re-pinned at publish) —
   // assert the alias survives, not a frozen draft-time sum.
   const extEntry = a0.spec.capabilities?.ext?.probe
-  expect(extEntry?.source ?? '', `ext: ${JSON.stringify(a0.spec)}`).toBe('fixture/probe')
+  expect(extEntry?.source ?? '', `ext: ${JSON.stringify(a0.spec)}`).toBe('fixture/probe@0.1.0')
   const put = await client.put(`/api/v1/applications/${id}`, {
     data: {
       version: a0.version, name: 'Persist',
@@ -171,7 +171,7 @@ test('blocked cold ext create fails then explicit retry runs and deletes', async
   // worker yet, so the artifact is genuinely missing
   const { mkdir, writeFile } = await import('node:fs/promises')
   const { join, dirname } = await import('node:path')
-  const p2 = join(dirname(rt.extensionDir), 'probe2')
+  const p2 = join(dirname(dirname(rt.extensionDir)), 'probe2', '0.1.0')
   await mkdir(p2, { recursive: true })
   await writeFile(join(p2, 'capability.yaml'), 'name: probe2\nversion: "0.1.0"\ndescription: P2\nops:\n  - name: echo\n    params: [value]\n')
   await writeFile(join(p2, 'main.star'), 'def echo(value):\n    return value\n')
@@ -180,7 +180,7 @@ test('blocked cold ext create fails then explicit retry runs and deletes', async
   rt.blockArtifacts(true)
   try {
     const r = await client.post('/api/v1/instances', {
-      data: { capabilities: { ext: { p2: { source: 'fixture/probe2' } } } },
+      data: { capabilities: { ext: { p2: { source: 'fixture/probe2@0.1.0' } } } },
     })
     expect(r.status(), await r.text()).toBeGreaterThanOrEqual(400)
   } finally {
@@ -189,7 +189,7 @@ test('blocked cold ext create fails then explicit retry runs and deletes', async
   // explicit retry once the artifact can be fetched: real create,
   // then delete is a normal lifecycle
   const r2 = await client.post('/api/v1/instances', {
-    data: { capabilities: { ext: { p2: { source: 'fixture/probe2' } } } },
+    data: { capabilities: { ext: { p2: { source: 'fixture/probe2@0.1.0' } } } },
   })
   expect(r2.status(), await r2.text()).toBe(201)
   const inst = (await r2.json()).instance.id

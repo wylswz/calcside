@@ -1,16 +1,16 @@
 import { test, expect } from '@playwright/test'
 import { startApplicationRuntime, type ApplicationRuntime } from './applicationRuntime'
 import { mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 test.setTimeout(120_000)
 
 let rt: ApplicationRuntime
 test.beforeAll(async () => {
   rt = await startApplicationRuntime()
-  const dir = join(rt.extensionDir, '..', 'needkey')
-  await mkdir(dir)
-  await writeFile(join(dir, 'capability.yaml'), 'name: needkey\nops: [{name: check, params: []}]\nconfig:\n  - {name: api_key, type: secret}\n')
+  const dir = join(dirname(dirname(rt.extensionDir)), 'needkey', '0.1.0')
+  await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, 'capability.yaml'), 'name: needkey\nversion: "0.1.0"\nops: [{name: check, params: []}]\nconfig:\n  - {name: api_key, type: secret}\n')
   await writeFile(join(dir, 'main.star'), 'def check():\n    return config["api_key"] != ""\n')
 })
 test.afterAll(async () => { await rt?.close() })
@@ -72,11 +72,11 @@ test('autosave: dep-only add publishes without debug creds', async ({ page }) =>
   const id = (await cr.json()).module.id
   await page.goto(`${rt.viteURL}/modules/${id}`)
   await expect(page.getByTestId('module-deps')).toBeVisible()
-  await page.getByTestId('module-deps').getByRole('button', { name: 'Add needkey' }).click()
+  await page.getByTestId('module-deps').getByRole('button', { name: 'Add needkey 0.1.0' }).click()
   await expect.poll(async () => {
     const g = await rt.client.get(`/api/v1/modules/${id}`)
     return JSON.stringify((await g.json()).module.requirements ?? {})
-  }, { timeout: 15_000 }).toContain('fixture/needkey')
+  }, { timeout: 15_000 }).toContain('fixture/needkey@0.1.0')
   const g = await rt.client.get(`/api/v1/modules/${id}`)
   const body = await g.json()
   expect(body.module.files['main.star']).toBe('x = 1')
@@ -91,7 +91,7 @@ test('autosave: dep-only add publishes without debug creds', async ({ page }) =>
   const dlg = page.getByRole('dialog')
   await expect(dlg).toBeVisible({ timeout: 15_000 })
   await expect(dlg).toContainText('requirements/ext/needkey')
-  await expect(dlg).toContainText('fixture/needkey')
+  await expect(dlg).toContainText('fixture/needkey@0.1.0')
   await expect(dlg).toContainText(dep.sum!)
   await expect(dlg.getByTestId('review-publish')).toBeEnabled()
   await dlg.getByTestId('review-publish').click()
@@ -110,11 +110,11 @@ test('autosave: dep remove publishes the deletion', async ({ page }) => {
   })
   const id = (await cr.json()).module.id
   await page.goto(`${rt.viteURL}/modules/${id}`)
-  await page.getByTestId('module-deps').getByRole('button', { name: 'Add probe' }).click()
+  await page.getByTestId('module-deps').getByRole('button', { name: 'Add probe 0.1.0' }).click()
   await expect.poll(async () => {
     const g = await rt.client.get(`/api/v1/modules/${id}`)
     return JSON.stringify((await g.json()).module.requirements ?? {})
-  }, { timeout: 15_000 }).toContain('fixture/probe')
+  }, { timeout: 15_000 }).toContain('fixture/probe@0.1.0')
   // publish v1 WITH the dep
   await page.getByTestId('module-publish').click()
   const dlg0 = page.getByRole('dialog')
@@ -130,7 +130,7 @@ test('autosave: dep remove publishes the deletion', async ({ page }) => {
   await expect.poll(async () => {
     const g = await rt.client.get(`/api/v1/modules/${id}`)
     return JSON.stringify((await g.json()).module.requirements ?? {})
-  }, { timeout: 15_000 }).not.toContain('fixture/probe')
+  }, { timeout: 15_000 }).not.toContain('fixture/probe@0.1.0')
   await page.getByTestId('module-publish').click()
   const dlg = page.getByRole('dialog')
   await expect(dlg).toBeVisible()
@@ -143,7 +143,7 @@ test('autosave: dep remove publishes the deletion', async ({ page }) => {
   }, { timeout: 15_000 }).toBe(2)
   const v1 = (await (await rt.client.get(`/api/v1/modules/${id}/versions/1`)).json()).version
   const v2 = (await (await rt.client.get(`/api/v1/modules/${id}/versions/2`)).json()).version
-  expect(v1.requirements.ext.probe.source).toBe('fixture/probe')
+  expect(v1.requirements.ext.probe.source).toBe('fixture/probe@0.1.0')
   expect(v2.requirements?.ext?.probe).toBeUndefined()
 })
 
@@ -156,8 +156,8 @@ test('dep remove: cancel keeps row order, confirm drops only the dep (C2/C3/F2)'
   const deps = page.getByTestId('module-deps')
   // Two fixed deps plus a non-dep capability (Files) so the summary
   // mixes managed and unmanaged rows.
-  await deps.getByRole('button', { name: 'Add needkey' }).click()
-  await deps.getByRole('button', { name: 'Add probe' }).click()
+  await deps.getByRole('button', { name: 'Add needkey 0.1.0' }).click()
+  await deps.getByRole('button', { name: 'Add probe 0.1.0' }).click()
   await deps.getByRole('button', { name: 'Add Files' }).click()
   const rowOrder = () => deps.locator('aside .selected-list').first().locator('[data-row]').evaluateAll(
     (rows) => rows.map((r) => r.getAttribute('data-row')))
@@ -176,7 +176,7 @@ test('dep remove: cancel keeps row order, confirm drops only the dep (C2/C3/F2)'
   await expect.poll(async () => {
     const g = await rt.client.get(`/api/v1/modules/${id}`)
     return JSON.stringify((await g.json()).module.requirements ?? {})
-  }, { timeout: 15_000 }).not.toContain('fixture/needkey')
+  }, { timeout: 15_000 }).not.toContain('fixture/needkey@0.1.0')
 })
 
 test('C2: pending source and caller edits survive SPA navigation', async ({ page }) => {

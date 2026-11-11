@@ -50,7 +50,7 @@ export async function startApplicationRuntime(opts: { secretKey?: string; secret
   })
 
   const extRoot = join(dir, 'fixture')
-  const probe = join(extRoot, 'probe')
+  const probe = join(extRoot, 'probe', '0.1.0')
   await mkdir(probe, { recursive: true })
   await writeFile(join(probe, 'capability.yaml'),
     'name: probe\nversion: "0.1.0"\ndescription: Fixture extension\nops:\n  - name: echo\n    params: [value]\n')
