@@ -182,6 +182,7 @@ func TestMCPTools(t *testing.T) {
 	res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "exec", Arguments: map[string]any{
 		"instance_id": created.InstanceID,
 		"code":        "print(help(\"stats\"))\nfs.write(\"x.txt\", \"hello\")",
+		"section":     map[string]any{"name": "main", "description": "stats help + write"},
 	}})
 	if err != nil || res.IsError {
 		t.Fatalf("exec: %v %+v", err, res)
@@ -221,6 +222,7 @@ func TestMCPTools(t *testing.T) {
 	// exec error carries type
 	res, _ = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "exec", Arguments: map[string]any{
 		"instance_id": created.InstanceID, "code": "1/0",
+		"section": map[string]any{"name": "probe", "description": "throwaway probe"},
 	}})
 	if res == nil || !res.IsError || !strings.Contains(toolText(t, res), "error[") {
 		t.Fatalf("exec error: %+v", res)
@@ -398,6 +400,73 @@ func TestMCPNotebookTools(t *testing.T) {
 	if out := toolText(t, res); !strings.Contains(out, "bad") || !strings.Contains(out, "first") {
 		t.Fatalf("notebook outline: %q", out)
 	}
+
+	// exec without section is refused — every execution belongs to a
+	// notebook section.
+	res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "exec", Arguments: map[string]any{
+		"instance_id": id, "code": "print(1)",
+	}})
+	if err == nil && (res == nil || !res.IsError) {
+		t.Fatal("scratch exec accepted over MCP")
+	}
+	if res != nil && !strings.Contains(toolText(t, res), "exec requires section") {
+		t.Fatalf("exec refusal text: %q", toolText(t, res))
+	}
+
+	// run_sections dry_run previews the plan without executing.
+	seqsBefore := map[string]int64{}
+	secs, err = st.ListNotebookSections(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range secs {
+		seqsBefore[s.Name] = s.LastRunSeq
+	}
+	res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "run_sections", Arguments: map[string]any{
+		"instance_id": id, "sections": "stale", "dry_run": true,
+	}})
+	if err != nil || res.IsError {
+		t.Fatalf("run_sections dry_run: %v %+v", err, res)
+	}
+	out := toolText(t, res)
+	if !strings.Contains(out, "first: planned") || !strings.Contains(out, "second: planned") {
+		t.Fatalf("dry_run report: %q", out)
+	}
+	secs, err = st.ListNotebookSections(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range secs {
+		if s.LastRunSeq != seqsBefore[s.Name] {
+			t.Fatalf("dry_run executed %s (run_seq %d → %d)", s.Name, seqsBefore[s.Name], s.LastRunSeq)
+		}
+	}
+
+	// An explicit run of "second" pulls its non-fresh upstream "first"
+	// first — dependency order, not page order.
+	res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "run_sections", Arguments: map[string]any{
+		"instance_id": id, "sections": "second",
+	}})
+	if err != nil || res.IsError {
+		t.Fatalf("run_sections second: %v %+v", err, res)
+	}
+	out = toolText(t, res)
+	if !strings.Contains(out, "first: ok (upstream: not fresh)") || !strings.Contains(out, "second: ok (target)") {
+		t.Fatalf("dependency run report: %q", out)
+	}
+
+	// exec on "second" reuses the now-fresh upstream and reports it.
+	res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "exec", Arguments: map[string]any{
+		"instance_id": id, "code": "b = a + 1\nprint(b)",
+		"section": map[string]any{"name": "second", "description": "runs second"},
+	}})
+	if err != nil || res.IsError {
+		t.Fatalf("exec second: %v %+v", err, res)
+	}
+	out = toolText(t, res)
+	if !strings.Contains(out, "2") || !strings.Contains(out, "upstream: first:reused (fresh)") {
+		t.Fatalf("exec upstream line: %q", out)
+	}
 }
 
 func TestMCPNoFS(t *testing.T) {
@@ -484,7 +553,10 @@ func TestMCPInstanceMode(t *testing.T) {
 	if !has(lt, "exec") || !has(lt, "list_files") || !has(lt, "read_file") || has(lt, "create_instance") || has(lt, "delete_instance") {
 		t.Fatalf("bound key tools: %v", lt)
 	}
-	res, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "exec", Arguments: map[string]any{"instance_id": in.ID, "code": "print(41+1)"}})
+	res, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "exec", Arguments: map[string]any{
+		"instance_id": in.ID, "code": "print(41+1)",
+		"section": map[string]any{"name": "calc", "description": "answer"},
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,7 +564,10 @@ func TestMCPInstanceMode(t *testing.T) {
 		t.Fatalf("exec: %v", res)
 	}
 	// other instance id on the bound key → isError
-	res2, _ := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "exec", Arguments: map[string]any{"instance_id": in2.ID, "code": "print(1)"}})
+	res2, _ := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "exec", Arguments: map[string]any{
+		"instance_id": in2.ID, "code": "print(1)",
+		"section": map[string]any{"name": "probe", "description": "probe"},
+	}})
 	if res2 == nil || !res2.IsError {
 		t.Fatal("bound key reached another instance")
 	}

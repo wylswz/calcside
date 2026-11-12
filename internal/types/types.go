@@ -274,6 +274,7 @@ const (
 	ErrCodeCSRF             APIErrorCode = "csrf"
 	ErrCodeForbidden        APIErrorCode = "forbidden"
 	ErrCodeFSError          APIErrorCode = "fs_error"
+	ErrCodeGraphBlocked     APIErrorCode = "graph_blocked"
 	ErrCodeInstanceExpired  APIErrorCode = "instance_expired"
 	ErrCodeInstanceRestored APIErrorCode = "instance_restored"
 	ErrCodeInternal         APIErrorCode = "internal"
@@ -285,15 +286,16 @@ const (
 	ErrCodeTooLarge         APIErrorCode = "too_large"
 	ErrCodeTooMany          APIErrorCode = "too_many"
 	ErrCodeUnauthorized     APIErrorCode = "unauthorized"
+	ErrCodeUpstreamFailed   APIErrorCode = "upstream_failed"
 )
 
 func AllAPIErrorCodes() []APIErrorCode {
 	return []APIErrorCode{
 		ErrCodeAlreadyResolved, ErrCodeAuthFailed, ErrCodeBadCapability, ErrCodeBadPolicy, ErrCodeBadRequest,
 		ErrCodeBadSecret, ErrCodeBadSpec, ErrCodeConflict, ErrCodeCSRF, ErrCodeForbidden,
-		ErrCodeFSError, ErrCodeInstanceExpired, ErrCodeInstanceRestored, ErrCodeInternal, ErrCodeMethodNotAllowed, ErrCodeNoFS,
+		ErrCodeFSError, ErrCodeGraphBlocked, ErrCodeInstanceExpired, ErrCodeInstanceRestored, ErrCodeInternal, ErrCodeMethodNotAllowed, ErrCodeNoFS,
 		ErrCodeNotFound, ErrCodeNotRunning, ErrCodeSecretsDisabled, ErrCodeTooLarge,
-		ErrCodeTooMany, ErrCodeUnauthorized,
+		ErrCodeTooMany, ErrCodeUnauthorized, ErrCodeUpstreamFailed,
 	}
 }
 

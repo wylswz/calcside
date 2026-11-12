@@ -31,6 +31,7 @@ const (
 	Csrf             APIErrorCode = "csrf"
 	Forbidden        APIErrorCode = "forbidden"
 	FsError          APIErrorCode = "fs_error"
+	GraphBlocked     APIErrorCode = "graph_blocked"
 	InstanceExpired  APIErrorCode = "instance_expired"
 	InstanceRestored APIErrorCode = "instance_restored"
 	Internal         APIErrorCode = "internal"
@@ -42,6 +43,7 @@ const (
 	TooLarge         APIErrorCode = "too_large"
 	TooMany          APIErrorCode = "too_many"
 	Unauthorized     APIErrorCode = "unauthorized"
+	UpstreamFailed   APIErrorCode = "upstream_failed"
 )
 
 // Valid indicates whether the value is a known member of the APIErrorCode enum.
@@ -69,6 +71,8 @@ func (e APIErrorCode) Valid() bool {
 		return true
 	case FsError:
 		return true
+	case GraphBlocked:
+		return true
 	case InstanceExpired:
 		return true
 	case InstanceRestored:
@@ -90,6 +94,8 @@ func (e APIErrorCode) Valid() bool {
 	case TooMany:
 		return true
 	case Unauthorized:
+		return true
+	case UpstreamFailed:
 		return true
 	default:
 		return false
@@ -378,6 +384,30 @@ func (e MemberRole) Valid() bool {
 	}
 }
 
+// Defines values for NotebookGraphDiagnosticKind.
+const (
+	Cycle           NotebookGraphDiagnosticKind = "cycle"
+	DuplicateDefine NotebookGraphDiagnosticKind = "duplicate_define"
+	MissingProvider NotebookGraphDiagnosticKind = "missing_provider"
+	ParseError      NotebookGraphDiagnosticKind = "parse_error"
+)
+
+// Valid indicates whether the value is a known member of the NotebookGraphDiagnosticKind enum.
+func (e NotebookGraphDiagnosticKind) Valid() bool {
+	switch e {
+	case Cycle:
+		return true
+	case DuplicateDefine:
+		return true
+	case MissingProvider:
+		return true
+	case ParseError:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NotebookSectionMetaRerun.
 const (
 	NotebookSectionMetaRerunOnce NotebookSectionMetaRerun = "once"
@@ -536,6 +566,8 @@ const (
 	RunSectionResultStatusError   RunSectionResultStatus = "error"
 	RunSectionResultStatusNotRun  RunSectionResultStatus = "not_run"
 	RunSectionResultStatusOk      RunSectionResultStatus = "ok"
+	RunSectionResultStatusPlanned RunSectionResultStatus = "planned"
+	RunSectionResultStatusReused  RunSectionResultStatus = "reused"
 	RunSectionResultStatusSkipped RunSectionResultStatus = "skipped"
 )
 
@@ -547,6 +579,10 @@ func (e RunSectionResultStatus) Valid() bool {
 	case RunSectionResultStatusNotRun:
 		return true
 	case RunSectionResultStatusOk:
+		return true
+	case RunSectionResultStatusPlanned:
+		return true
+	case RunSectionResultStatusReused:
 		return true
 	case RunSectionResultStatusSkipped:
 		return true
@@ -1004,6 +1040,9 @@ type ExecResult struct {
 	// SectionState the section's state after this run
 	SectionState *ExecResultSectionState `json:"section_state,omitempty"`
 	Steps        int64                   `json:"steps"`
+
+	// Upstream sectioned exec only — the upstream sections the dependency plan ran or reused before this section (ok/reused/skipped, each with its reason)
+	Upstream *[]RunSectionResult `json:"upstream,omitempty"`
 }
 
 // ExecResultSectionState the section's state after this run
@@ -1562,11 +1601,12 @@ type ModulesResponse struct {
 
 // Notebook defines model for Notebook.
 type Notebook struct {
-	Drift       int64  `json:"drift"`
-	Incarnation int64  `json:"incarnation"`
-	InstanceId  string `json:"instance_id"`
+	Drift       int64         `json:"drift"`
+	Graph       NotebookGraph `json:"graph"`
+	Incarnation int64         `json:"incarnation"`
+	InstanceId  string        `json:"instance_id"`
 
-	// Next computed guidance (stale/not_run/unbound/drift)
+	// Next computed guidance (blocked diagnostics, stale/not_run sections, once/drift)
 	Next []string `json:"next"`
 
 	// Outline rendered text outline for agents
@@ -1578,6 +1618,39 @@ type Notebook struct {
 	Revision      int64                 `json:"revision"`
 	Sections      []NotebookSectionMeta `json:"sections"`
 	Status        InstanceStatus        `json:"status"`
+}
+
+// NotebookGraph defines model for NotebookGraph.
+type NotebookGraph struct {
+	Diagnostics []NotebookGraphDiagnostic `json:"diagnostics"`
+	Edges       []NotebookGraphEdge       `json:"edges"`
+}
+
+// NotebookGraphDiagnostic defines model for NotebookGraphDiagnostic.
+type NotebookGraphDiagnostic struct {
+	Kind    NotebookGraphDiagnosticKind `json:"kind"`
+	Message string                      `json:"message"`
+
+	// Names involved variable names — sorted missing names, the duplicated name, or per-hop cycle labels
+	Names []string `json:"names"`
+
+	// Sections involved section names; a cycle reports one concrete path, start first
+	Sections []string `json:"sections"`
+}
+
+// NotebookGraphDiagnosticKind defines model for NotebookGraphDiagnostic.Kind.
+type NotebookGraphDiagnosticKind string
+
+// NotebookGraphEdge defines model for NotebookGraphEdge.
+type NotebookGraphEdge struct {
+	// From section defining the variable
+	From string `json:"from"`
+
+	// Name variable name
+	Name string `json:"name"`
+
+	// To section reading the variable
+	To string `json:"to"`
 }
 
 // NotebookResponse defines model for NotebookResponse.
@@ -1823,19 +1896,27 @@ type RunResponse struct {
 
 // RunSectionResult defines model for RunSectionResult.
 type RunSectionResult struct {
-	DurationMs    *int64                 `json:"duration_ms,omitempty"`
-	Error         *string                `json:"error,omitempty"`
-	ExecId        *string                `json:"exec_id,omitempty"`
-	Name          string                 `json:"name"`
-	SkippedReason *string                `json:"skipped_reason,omitempty"`
-	Status        RunSectionResultStatus `json:"status"`
+	DurationMs *int64  `json:"duration_ms,omitempty"`
+	Error      *string `json:"error,omitempty"`
+	ExecId     *string `json:"exec_id,omitempty"`
+	Name       string  `json:"name"`
+
+	// Reason the planner's reason ("target", "upstream: not fresh", "upstream <name> runs first", "fresh", "once section already succeeded")
+	Reason        *string `json:"reason,omitempty"`
+	SkippedReason *string `json:"skipped_reason,omitempty"`
+
+	// Status ok/error after an exec; reused = fresh upstream not executed; skipped = once rule; not_run = unreached after a stop; planned = dry-run only, would execute
+	Status RunSectionResultStatus `json:"status"`
 }
 
-// RunSectionResultStatus defines model for RunSectionResult.Status.
+// RunSectionResultStatus ok/error after an exec; reused = fresh upstream not executed; skipped = once rule; not_run = unreached after a stop; planned = dry-run only, would execute
 type RunSectionResultStatus string
 
 // RunSectionsRequest defines model for RunSectionsRequest.
 type RunSectionsRequest struct {
+	// DryRun report the run the plan would produce (planned/reused/ skipped per section) without executing, claiming the op lease, or restoring a lost instance
+	DryRun *bool `json:"dry_run,omitempty"`
+
 	// Revision notebook CAS; omit to skip the check
 	Revision *int64 `json:"revision,omitempty"`
 

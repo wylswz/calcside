@@ -82,8 +82,6 @@ export interface SectionCardProps {
   canRun: boolean
   /** this section's run is in flight — disables its Run button (P1) */
   busy?: boolean
-  /** another run (scratch or batch) is in flight — disables without relabeling */
-  blocked?: boolean
   /** a section creation is in flight — disables the insert-after item */
   adding?: boolean
   register: (name: string, q: AutosaveQueue<SectionValue> | null) => void
@@ -102,7 +100,7 @@ export interface SectionCardProps {
 // serial CAS queue, last-run output, and the Run action. Polling never
 // overwrites a dirty draft (C2) and never reorders the card (S5 is
 // handled by the parent's held order).
-export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, blocked, adding, register, onStructural, onRun, onInsertAfter, note, focusOnMount }: SectionCardProps) {
+export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, adding, register, onStructural, onRun, onInsertAfter, note, focusOnMount }: SectionCardProps) {
   const name = meta.name
   const qc = useQueryClient()
   const live = inst.status === 'running'
@@ -314,14 +312,13 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
 
   // The gutter Run control and ⌘/Ctrl+Enter share one path: same
   // disabled conditions, same once-confirm detour (P1/P2).
-  const runDisabled = busy || blocked || as?.conflict || !!as?.error || det.isLoading
+  const runDisabled = busy || as?.conflict || !!as?.error || det.isLoading
   const startRun = () => {
     if (runDisabled) return
     if (runOnce) setConfirmOnce(true)
     else onRun(name, false)
   }
-  // ⌘/Ctrl+Enter inside THIS section's editor runs this section — never
-  // scratch (the capture stops it reaching the scratch window listener).
+  // ⌘/Ctrl+Enter inside THIS section's editor runs this section.
   // The chord is always claimed so a disabled run cannot fall through
   // to an editor binding; startRun honours the disabled conditions.
   const onEditorKeyDown = (e: KeyboardEvent<HTMLElement>) => {
@@ -354,7 +351,7 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
           <Button
             variant="ghost" size="xs" className="nb-icon-btn"
             aria-label="Run section" aria-busy={busy}
-            title={as?.conflict ? 'Resolve the save conflict first' : 'Run section (⌘/Ctrl + Enter)'}
+            title={as?.conflict ? 'Resolve the save conflict first' : 'Run this section — upstream sections that are not fresh run first'}
             disabled={runDisabled}
             onClick={startRun}
           >

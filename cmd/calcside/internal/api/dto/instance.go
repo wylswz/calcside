@@ -145,15 +145,16 @@ func NewExecutionDetail(e *store.Execution) ExecutionDetail {
 // additive (EP-0022): revision/drift always present on new servers,
 // section fields only for sectioned execs.
 type ExecResult struct {
-	ExecID           string     `json:"exec_id"`
-	Output           string     `json:"output"`
-	Error            *ExecError `json:"error"`
-	DurationMs       int64      `json:"duration_ms"`
-	Steps            uint64     `json:"steps"`
-	NotebookRevision int64      `json:"notebook_revision,omitempty"`
-	Drift            int64      `json:"drift,omitempty"`
-	Section          string     `json:"section,omitempty"`
-	SectionState     string     `json:"section_state,omitempty"`
+	ExecID           string             `json:"exec_id"`
+	Output           string             `json:"output"`
+	Error            *ExecError         `json:"error"`
+	DurationMs       int64              `json:"duration_ms"`
+	Steps            uint64             `json:"steps"`
+	NotebookRevision int64              `json:"notebook_revision,omitempty"`
+	Drift            int64              `json:"drift,omitempty"`
+	Section          string             `json:"section,omitempty"`
+	SectionState     string             `json:"section_state,omitempty"`
+	Upstream         []RunSectionResult `json:"upstream,omitempty"`
 }
 
 type ExecError struct {
@@ -167,6 +168,16 @@ func NewExecResult(r *sandbox.ExecOutcome) ExecResult {
 		ExecID: r.View.ExecID, Output: r.View.Output, DurationMs: r.View.DurationMs,
 		Steps: r.View.Steps, NotebookRevision: r.Revision, Drift: r.Drift,
 		Section: r.Section, SectionState: r.State,
+	}
+	if len(r.Upstream) > 0 {
+		res.Upstream = make([]RunSectionResult, len(r.Upstream))
+		for i, u := range r.Upstream {
+			res.Upstream[i] = RunSectionResult{
+				Name: u.Name, Status: u.Status, ExecID: u.ExecID,
+				Error: u.Error, SkippedReason: u.SkippedReason,
+				Reason: u.Reason, DurationMs: u.DurationMs,
+			}
+		}
 	}
 	if r.View.Error != nil {
 		res.Error = &ExecError{Type: r.View.Error.Type, Message: r.View.Error.Message, Backtrace: r.View.Error.Backtrace}

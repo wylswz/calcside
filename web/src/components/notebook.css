@@ -3,26 +3,56 @@
    (P2 — no primary or default-size buttons inside .nb). Paint-only
    states (S1); polled arrivals stay held behind "Show N new" (S5). */
 
-.nb { display: grid; gap: 12px; --nb-bar-h: 67px; }
+/* Nested rounded corners are concentric AND circular (AGENTS.md): the
+   gap between two nested edges must be equal on both axes, then the
+   inner radius is outer − gap via calc() — never an elliptical `a / b`
+   radius to compensate for unequal gaps. The head's geometry lives in
+   these properties so every derived radius stays a visible calc(). */
+.nb {
+  display: grid; gap: 12px;
+  --nb-bar-h: 71px;
+  --nb-head-pad: 6px;
+  --nb-head-border: 1px;
+  --nb-head-radius: var(--radius-surface);        /* 12px outer corner */
+  /* corner-near inner shapes sit border+pad = 7px inside the panel's
+     border-box edge on BOTH axes → one circular inner radius (5px) */
+  --nb-head-gap: calc(var(--nb-head-border) + var(--nb-head-pad));      /* 7px */
+  --nb-head-corner-r: calc(var(--nb-head-radius) - var(--nb-head-gap)); /* 5px */
+}
 /* grid items default to min-width:auto — a wide CodeMirror line or
    unbreakable fact string would stretch the track past the viewport.
    Let every card/section shrink; inner scrollers clip horizontally. */
 .nb > *, .nb-cards > * { min-width: 0; }
 
-/* ---- sticky head: toolbar row + section directory ----
-   Sits under the console header (56px + 1px border) and spans the
-   work-surface's padded width via negative margins. One fixed-height
-   overlay (S3): the 36px toolbar keeps row 1, the directory is a
-   fixed 31px row 2 — cards scroll beneath with scroll-margin clearance. */
+/* ---- sticky head: ONE floating panel ----
+   Sits 8px under the console header (57px + 8px gap) as an opaque
+   raised surface — paper fill, hairline edge, float shadow, uniform
+   6px padding, no negative margins. Inside it a 30px toolbar row
+   (26px controls + 3px above the hairline) and a 27px directory row
+   (3px below the hairline + 24px chips) fill the padding box; the
+   whole panel is a fixed height (S3) and cards scroll beneath with
+   scroll-margin clearance. */
 .nb-head {
-  position: sticky; top: 57px; z-index: 30;
-  margin: 0 -24px; padding: 0 24px;
-  background: var(--detail-work);
+  position: sticky; top: 65px; z-index: 30;
+  padding: var(--nb-head-pad);
+  background: rgb(var(--paper));
+  border: var(--nb-head-border) solid var(--edge);
+  border-radius: var(--nb-head-radius);
+  box-shadow: var(--shadow-float);
+}
+/* mask the 8px gap to the console header — scrolling content must not
+   peek through between header and panel (the strip matches the paper
+   work surface, so the gap reads as background, not content) */
+.nb-head::before {
+  content: ''; position: absolute; left: 0; right: 0; top: -9px; height: 9px;
+  background: rgb(var(--paper));
 }
 .nb-toolbar {
   display: flex; align-items: center; gap: 4px 10px; flex-wrap: nowrap;
-  height: 36px;
-  border-bottom: 1px solid var(--detail-edge);
+  /* 26px content for the controls + 3px of space above the hairline —
+     the directory row mirrors it below (equal spacing) */
+  height: 30px; padding-bottom: 3px;
+  border-bottom: 1px solid var(--edge);
 }
 .nb-toolbar-actions { display: flex; align-items: center; gap: 4px; flex: none; }
 .nb-status {
@@ -34,14 +64,20 @@
 .nb-status-text {
   min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
-.nb-toolbar-side { display: flex; align-items: center; gap: 2px; flex: none; }
+.nb-toolbar-side { display: flex; align-items: center; gap: 4px; flex: none; margin-left: 8px; }
+/* every control in the head shares the panel's corner treatment:
+   circular radius = outer 12px − the uniform 7px inset = 5px (S1:
+   paint-only state changes either way). Three classes beat the
+   `button[data-ui='button'][data-size='xs']` material rule (0-2-1). */
+.nb .nb-toolbar [data-ui='button'] { border-radius: var(--nb-head-corner-r); }
 
-/* section directory — fixed-height chip strip as row 2 of the sticky
+/* section directory — fixed-height chip strip as row 2 of the floating
    head (S5: held order; constant height, horizontal scroll not wrap) */
 .nb-directory {
-  display: flex; align-items: center; flex-wrap: nowrap; gap: 2px;
-  height: 31px; overflow-x: auto;
-  border-bottom: 1px solid var(--detail-edge);
+  display: flex; align-items: flex-end; flex-wrap: nowrap; gap: 2px;
+  /* 3px below the hairline + 24px chips bottom-aligned → chip bottoms
+     sit on the content-box bottom edge, 7px from the panel's edge */
+  height: 27px; overflow-x: auto;
   scrollbar-width: none;
 }
 .nb-directory::-webkit-scrollbar { display: none; }
@@ -51,16 +87,16 @@
   position: relative;
   display: inline-flex; align-items: center; gap: 6px; flex: none;
   border: 0; background: transparent; cursor: pointer;
-  padding: 3px 8px; border-radius: var(--detail-radius-inset);
+  height: 24px; padding: 0 10px;
+  border-radius: var(--nb-head-corner-r);
   font-size: 12px; color: rgb(var(--body)); max-width: 100%;
 }
 .nb-dir-row:hover { background: rgb(var(--ink) / 0.05); }
 .nb-dir-row:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
-/* scroll-spy highlight is paint-only (S1): tint + name colour, nothing
-   that moves or resizes the chip */
-.nb-dir-row[aria-current='true'] { background: rgb(var(--accent) / 0.1); }
+/* scroll-spy/explicit-pick highlight is paint-only (S1): a tinted pill
+   + name colour — the chip box never changes */
+.nb-dir-row[aria-current='true'] { background: rgb(var(--accent) / 0.14); }
 .nb-dir-row[aria-current='true'] .nb-dir-name { color: rgb(var(--accent)); }
-.nb-dir-scratch[aria-current='true'] { color: rgb(var(--accent)); }
 /* a single-section run pulses its chip's dot — opacity only, and only
    when reduced motion is not requested (P4) */
 @keyframes nb-dir-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
@@ -80,13 +116,46 @@
 .nb-dir-dot[data-state='stale'] { background: rgb(var(--warn-text)); }
 .nb-dir-dot[data-state='failed'] { background: rgb(var(--danger)); }
 
+/* Code|Graph view — a real segmented control on the seg-filters
+   material, sized down to the toolbar's 26px control scale: one
+   rounded track, two equal segments, the active segment a raised
+   thumb (material.css paints the states — paint-only, S1). No track
+   border: the thumb's inset gap is the padding alone, so thumb radius
+   = track radius − padding stays concentric and circular. */
+.nb .seg-filters.nb-view-toggle {
+  flex: none; width: 104px; height: 26px; gap: 2px;
+  --nb-toggle-pad: 2px;
+  --nb-toggle-thumb-r: calc(var(--nb-head-corner-r) - var(--nb-toggle-pad)); /* 3px */
+  padding: var(--nb-toggle-pad);
+  border: 0;
+  border-radius: var(--nb-head-corner-r);
+  /* ≥12px clear of the "Show N new" slot on its left */
+  margin-left: 8px;
+}
+.nb .seg-filters.nb-view-toggle button {
+  /* fills the track's 22px content box → the thumb's gap to the track
+     edge is the 2px padding on ALL sides (concentric, circular) */
+  flex: 1; min-width: 0; height: 22px; min-height: 22px;
+  padding: 0 6px; font-size: 12px; font-weight: 500; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--nb-toggle-thumb-r);
+}
+.nb .seg-filters.nb-view-toggle button[aria-pressed='true'] { color: rgb(var(--ink)); }
+.nb .seg-filters.nb-view-toggle button:focus-visible {
+  outline: 2px solid rgb(var(--accent)); outline-offset: 1px;
+}
+@media (max-width: 900px) {
+  .nb .seg-filters.nb-view-toggle { height: auto; }
+  .nb .seg-filters.nb-view-toggle button { height: auto; min-height: 44px; }
+}
+
 /* ---- cells: flat bordered blocks, 40px gutter + body ---- */
 .nb-cards { display: grid; }
 .nb-card {
   display: grid; grid-template-columns: 40px minmax(0, 1fr);
   border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-inset);
   background: var(--detail-work);
-  scroll-margin-top: calc(57px + var(--nb-bar-h) + 8px);
+  scroll-margin-top: calc(73px + var(--nb-bar-h));
 }
 .nb-card:focus-within {
   border-color: rgb(var(--accent) / 0.35);
@@ -244,59 +313,6 @@
 }
 .nb-empty p { margin: 0 0 10px; font-size: 13px; color: rgb(var(--sec)); }
 
-/* scratch cell — same chrome, dashed edge. The -12px pulls it back over
-   the grid gap so the last inserter seam measures the same 32px as the
-   seams between cards. */
-.nb-cards + .nb-scratch { margin-top: -12px; }
-.nb-scratch {
-  border: 1px dashed var(--detail-edge); border-radius: var(--detail-radius-inset);
-  background: var(--detail-work);
-  scroll-margin-top: calc(57px + var(--nb-bar-h) + 8px);
-}
-.nb-run-code { display: grid; grid-template-columns: 40px minmax(0, 1fr); min-width: 0; }
-.nb-scratch-name {
-  font-family: var(--font-mono); font-size: 12px; color: rgb(var(--mute));
-  white-space: nowrap;
-}
-.nb-scratch-hint { font-size: 12px; color: rgb(var(--sec)); }
-.nb-scratch-foot {
-  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px;
-  margin-top: 4px; padding: 6px 0 4px;
-  border-top: 1px solid var(--detail-edge);
-  font-size: 11px; line-height: 16px; color: rgb(var(--mute));
-}
-.nb-scratch-note {
-  margin: 0; padding: 12px 14px;
-  font-size: 12px; line-height: 18px; color: rgb(var(--sec));
-}
-.nb-warn { color: rgb(var(--warn-text)); }
-
-/* Details modal content */
-.nb-details { display: grid; gap: 14px; }
-.nb-details-para { margin: 0; font-size: 13px; line-height: 20px; color: rgb(var(--body)); }
-.nb-details-block { display: grid; gap: 6px; }
-.nb-details-h {
-  margin: 0; font-size: 12px; font-weight: 600; color: rgb(var(--sec));
-}
-.nb-details-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 20px; color: rgb(var(--body)); }
-.nb-details-list li { margin: 2px 0; }
-.nb-batch { border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-inset); padding: 10px 12px; }
-.nb-batch-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.nb-batch-row { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-.nb-batch-name { font-family: var(--font-mono); font-size: 12px; color: rgb(var(--ink)); }
-.nb-batch-status { font-size: 12px; font-weight: 500; white-space: nowrap; }
-.nb-batch-ok { color: rgb(var(--sec)); }
-.nb-batch-skipped { color: rgb(var(--sec)); }
-.nb-batch-error, .nb-batch-not_run { color: rgb(var(--warn-text)); }
-.nb-batch-skip { font-size: 12px; color: rgb(var(--sec)); white-space: nowrap; }
-.nb-batch-error-text {
-  min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 12px; color: rgb(var(--warn-text));
-}
-.nb-batch-warn-line { margin: 8px 0 0; font-size: 12px; color: rgb(var(--warn-text)); }
-.nb-batch-warnings { margin: 8px 0 0; padding: 0; list-style: none; font-size: 12px; color: rgb(var(--warn-text)); }
-.nb-batch-warnings li { margin: 2px 0; }
-
 /* view tabs — underline style, addressable via ?view= (C4) */
 .view-tabs {
   border-bottom: 1px solid var(--detail-edge);
@@ -310,16 +326,177 @@
 .view-tab[data-on='true'] { color: rgb(var(--ink)); border-bottom-color: rgb(var(--accent)); }
 .view-tab:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }
 
+/* ---- dependency graph view (read-only) ----
+   Fixed-height region: a scrollable canvas (native pan, no zoom, no
+   auto-fit) beside a fixed-width detail aside that stacks below the
+   canvas under 820px. Nodes are absolutely positioned buttons over an
+   SVG edge layer; every state is paint-only — colour/opacity/
+   box-shadow, never size, position or font metrics (S1). The held
+   structural snapshot means polls never re-layout: drift surfaces as
+   the reserved "Graph changed — Refresh" slot (S4/S5). */
+.nb-code { display: grid; gap: 12px; }
+.nb-code[hidden], .nb-graph-panel[hidden] { display: none; }
+
+.nb-graph {
+  display: flex; flex-direction: column;
+  height: min(70vh, 640px); min-height: 320px;
+  border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-inset);
+  background: var(--detail-work); overflow: hidden;
+}
+.nb-graph-head {
+  display: flex; align-items: center; gap: 10px;
+  height: 34px; flex: none; padding: 0 12px;
+  border-bottom: 1px solid var(--detail-edge);
+}
+.nb-graph-note { flex: 1; min-width: 0; font-size: 12px; color: rgb(var(--sec)); }
+.nb-graph-changed { flex: none; }
+.nb-graph-changed[hidden] { display: none; }
+.nb-graph-refresh {
+  border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-inset);
+  background: transparent; cursor: pointer;
+  padding: 2px 10px; font-size: 12px; color: rgb(var(--accent));
+}
+.nb-graph-refresh:hover { background: rgb(var(--ink) / 0.05); }
+.nb-graph-refresh:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+
+.nb-graph-empty {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; color: rgb(var(--sec));
+}
+.nb-graph-body { display: flex; flex: 1; min-height: 0; }
+.nb-graph-scroll { flex: 1; min-width: 0; overflow: auto; position: relative; }
+.nb-graph-layer { position: relative; }
+.nb-graph-edges { position: absolute; inset: 0; overflow: visible; }
+.nb-graph-edge {
+  fill: none; stroke: rgb(var(--mute) / 0.55); stroke-width: 1.5;
+}
+.nb-graph-link-hi .nb-graph-edge { stroke: rgb(var(--accent)); stroke-width: 2; }
+.nb-graph-link-dim .nb-graph-edge { stroke: rgb(var(--mute) / 0.25); }
+.nb-graph-arrowhead { fill: rgb(var(--mute) / 0.55); }
+.nb-graph-arrowhead-hi { fill: rgb(var(--accent)); }
+.nb-graph-arrowhead-dim { fill: rgb(var(--mute) / 0.25); }
+.nb-graph-edge-label {
+  font-size: 10px; fill: rgb(var(--mute));
+  paint-order: stroke; stroke: var(--detail-work); stroke-width: 3px;
+}
+.nb-graph-link-hi .nb-graph-edge-label { fill: rgb(var(--accent)); }
+.nb-graph-link-dim .nb-graph-edge-label { opacity: 0.4; }
+
+.nb-graph-node {
+  position: absolute; display: flex; flex-direction: column; gap: 2px;
+  padding: 6px 10px; text-align: left; cursor: pointer;
+  border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-inset);
+  background: var(--paper); color: rgb(var(--ink));
+}
+.nb-graph-node:hover { border-color: rgb(var(--accent) / 0.4); }
+.nb-graph-node:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.nb-graph-node.is-sel {
+  border-color: rgb(var(--accent));
+  box-shadow: 0 0 0 3px rgb(var(--accent) / 0.15);
+}
+.nb-graph-node.is-dim { opacity: 0.4; }
+.nb-graph-node.is-removed {
+  opacity: 0.55; border-style: dashed; background: transparent;
+}
+.nb-graph-node-name {
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nb-graph-node-meta {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  font-size: 10px; color: rgb(var(--mute));
+}
+.nb-graph-node-removed-tag { font-style: italic; }
+.nb-graph-node-diag {
+  margin-left: auto; flex: none;
+  width: 14px; height: 14px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgb(var(--warn) / 0.18); color: rgb(var(--warn-text));
+  font-size: 10px; font-weight: 700; line-height: 1;
+}
+
+.nb-graph-aside {
+  width: 240px; flex: none; min-height: 0; overflow-y: auto;
+  border-left: 1px solid var(--detail-edge); padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.nb-graph-aside-h {
+  margin: 0; font-size: 12px; font-weight: 600; color: rgb(var(--sec));
+}
+.nb-graph-aside-note { margin: 4px 0 0; font-size: 12px; color: rgb(var(--mute)); }
+.nb-graph-issues { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.nb-graph-issue { display: grid; gap: 4px; font-size: 12px; line-height: 17px; }
+.nb-graph-issue-msg { color: rgb(var(--body)); }
+.nb-graph-issue-tag {
+  margin-left: 6px; padding: 0 5px; border-radius: 4px;
+  border: 1px solid var(--detail-edge);
+  font-size: 10px; line-height: 14px; color: rgb(var(--warn-text));
+  vertical-align: 1px; white-space: nowrap;
+}
+.nb-graph-issue-secs { display: flex; flex-wrap: wrap; gap: 4px; }
+.nb-graph-sec-btn {
+  border: 1px solid var(--detail-edge); border-radius: 4px;
+  background: transparent; cursor: pointer;
+  padding: 0 6px; font-family: var(--font-mono); font-size: 11px;
+  color: rgb(var(--accent)); line-height: 18px;
+}
+.nb-graph-sec-btn:hover { background: rgb(var(--ink) / 0.05); }
+.nb-graph-sec-btn:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+
+.nb-graph-detail { display: grid; gap: 10px; align-content: start; }
+.nb-graph-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.nb-graph-detail-name {
+  margin: 0; font-family: var(--font-mono); font-size: 14px; font-weight: 600;
+  color: rgb(var(--ink)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nb-graph-clear {
+  border: 0; background: transparent; cursor: pointer; flex: none;
+  font-size: 12px; color: rgb(var(--sec)); padding: 2px 6px; border-radius: 4px;
+}
+.nb-graph-clear:hover { color: rgb(var(--ink)); background: rgb(var(--ink) / 0.05); }
+.nb-graph-clear:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.nb-graph-detail-desc { margin: 0; font-size: 12px; color: rgb(var(--sec)); }
+.nb-graph-detail-line { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 12px; color: rgb(var(--body)); }
+.nb-graph-detail-line-text { margin: 0; font-size: 12px; }
+.nb-graph-detail-note { margin: 0; font-size: 12px; color: rgb(var(--mute)); }
+.nb-graph-detail-block { display: grid; gap: 4px; }
+.nb-graph-detail-h { margin: 0; font-size: 11px; font-weight: 600; color: rgb(var(--mute)); }
+.nb-graph-detail-list { margin: 0; padding-left: 16px; font-size: 12px; color: rgb(var(--body)); }
+.nb-graph-reads { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 12px; }
+.nb-graph-reads li { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; min-width: 0; }
+.nb-graph-reads code { font-family: var(--font-mono); font-size: 11px; color: rgb(var(--ink)); }
+.nb-graph-read-arrow { color: rgb(var(--mute)); }
+.nb-graph-read-names { color: rgb(var(--mute)); font-size: 11px; }
+.nb-graph-unresolved { color: rgb(var(--warn-text)); }
+.nb-graph-detail-foot { margin-top: auto; padding-top: 8px; }
+.nb-graph-open {
+  border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-inset);
+  background: transparent; cursor: pointer;
+  padding: 4px 12px; font-size: 12px; color: rgb(var(--accent));
+}
+.nb-graph-open:hover { background: rgb(var(--ink) / 0.05); }
+.nb-graph-open:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+
+@media (max-width: 820px) {
+  /* the aside stacks below the canvas with its own fixed height — the
+     graph region keeps its fixed box either way (S4) */
+  .nb-graph-body { flex-direction: column; }
+  .nb-graph-aside {
+    width: auto; height: 260px; flex: none;
+    border-left: 0; border-top: 1px solid var(--detail-edge);
+  }
+}
+
 @media (max-width: 900px) {
-  /* wrapped toolbar: actions row, then status + side — the status text
-     reserves a constant two-line box so the bar height never changes
-     with content (S4); --nb-bar-h tracks the measured head height
-     (wrapped toolbar + fixed directory row). */
-  .nb { --nb-bar-h: 136px; }
-  .nb-head { margin: 0 -16px; padding: 0 16px; }
+  /* wrapped toolbar inside the same floating panel: actions row, then
+     status + side — the status text reserves a constant two-line box so
+     the bar height never changes with content (S4); --nb-bar-h tracks
+     the measured panel height (panel padding + wrapped toolbar + hairline
+     + fixed directory row). */
+  .nb { --nb-bar-h: 143px; }
   .nb-toolbar {
-    height: auto; min-height: 36px; flex-wrap: wrap;
-    padding: 6px 0;
+    height: auto; min-height: 26px; flex-wrap: wrap; row-gap: 6px;
+    padding: 0 0 3px;
   }
   .nb-toolbar-actions { flex-basis: 100%; }
   /* the status row keeps a fixed 36px box so the wrapped bar height is
@@ -346,7 +523,7 @@
   .nb-gutter { padding-top: 0; }
   /* 44px hit targets: the gutter widens so run/menu buttons fit, and the
      inserter row grows to hold its button (instance-detail.css). */
-  .nb-card, .nb-run-code { grid-template-columns: 48px minmax(0, 1fr); }
+  .nb-card { grid-template-columns: 48px minmax(0, 1fr); }
   .nb-insert { height: 44px; }
   .nb [data-ui='button'].nb-insert-btn {
     width: 44px; height: 44px; min-height: 44px; min-width: 44px;

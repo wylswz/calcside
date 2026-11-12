@@ -46,8 +46,29 @@ func NewNotebookSectionMetas(in []sandbox.NotebookSectionMeta) []NotebookSection
 	return out
 }
 
+// NotebookGraphEdge/NotebookGraphDiagnostic/NotebookGraph mirror the
+// service graph shape.
+type NotebookGraphEdge struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	Name string `json:"name"`
+}
+
+type NotebookGraphDiagnostic struct {
+	Kind     string   `json:"kind"`
+	Message  string   `json:"message"`
+	Sections []string `json:"sections"`
+	Names    []string `json:"names"`
+}
+
+type NotebookGraph struct {
+	Edges       []NotebookGraphEdge       `json:"edges"`
+	Diagnostics []NotebookGraphDiagnostic `json:"diagnostics"`
+}
+
 // Notebook is the outline view: instance facts plus per-section
-// metadata, the rendered outline text, and computed next-step guidance.
+// metadata, the rendered outline text, computed next-step guidance,
+// and the dependency graph.
 type Notebook struct {
 	InstanceID    string                `json:"instance_id"`
 	Status        types.InstanceStatus  `json:"status"`
@@ -59,6 +80,7 @@ type Notebook struct {
 	Sections      []NotebookSectionMeta `json:"sections"`
 	Outline       string                `json:"outline"`
 	Next          []string              `json:"next"`
+	Graph         NotebookGraph         `json:"graph"`
 }
 
 type NotebookEnvelope struct {
@@ -66,12 +88,27 @@ type NotebookEnvelope struct {
 }
 
 func NewNotebook(v *sandbox.NotebookView) Notebook {
+	strs := func(s []string) []string {
+		if s == nil {
+			return []string{}
+		}
+		return s
+	}
+	graph := NotebookGraph{Edges: []NotebookGraphEdge{}, Diagnostics: []NotebookGraphDiagnostic{}}
+	for _, e := range v.Graph.Edges {
+		graph.Edges = append(graph.Edges, NotebookGraphEdge{From: e.From, To: e.To, Name: e.Name})
+	}
+	for _, d := range v.Graph.Diagnostics {
+		graph.Diagnostics = append(graph.Diagnostics, NotebookGraphDiagnostic{
+			Kind: d.Kind, Message: d.Message, Sections: strs(d.Sections), Names: strs(d.Names),
+		})
+	}
 	return Notebook{
 		InstanceID: v.InstanceID, Status: v.Status, Incarnation: v.Incarnation,
 		RestoredAt: v.RestoredAt, RestoredEmpty: v.RestoredEmpty,
 		Revision: v.Revision, Drift: v.Drift,
 		Sections: NewNotebookSectionMetas(v.Sections), Outline: v.Outline,
-		Next: v.Next,
+		Next: v.Next, Graph: graph,
 	}
 }
 
@@ -117,6 +154,7 @@ type DeleteSectionResult struct {
 type RunSectionResult struct {
 	Name          string `json:"name"`
 	Status        string `json:"status"`
+	Reason        string `json:"reason,omitempty"`
 	ExecID        string `json:"exec_id,omitempty"`
 	Error         string `json:"error,omitempty"`
 	SkippedReason string `json:"skipped_reason,omitempty"`
@@ -146,7 +184,7 @@ func NewRunSectionsEnvelope(r *sandbox.RunReport) RunSectionsEnvelope {
 	}}
 	for _, res := range r.Results {
 		out.Report.Results = append(out.Report.Results, RunSectionResult{
-			Name: res.Name, Status: res.Status, ExecID: res.ExecID,
+			Name: res.Name, Status: res.Status, Reason: res.Reason, ExecID: res.ExecID,
 			Error: res.Error, SkippedReason: res.SkippedReason, DurationMs: res.DurationMs,
 		})
 	}

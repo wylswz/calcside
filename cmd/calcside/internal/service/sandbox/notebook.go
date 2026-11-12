@@ -92,8 +92,8 @@ type DeleteSectionResult struct {
 	Revision int64    `json:"revision"`
 }
 
-// SectionSelector picks run targets: everything, only stale, or an
-// explicit name list (resolved into notebook order).
+// SectionSelector picks run targets: everything, only non-fresh
+// sections, or an explicit name list.
 type SectionSelector struct {
 	All   bool
 	Stale bool
@@ -101,12 +101,17 @@ type SectionSelector struct {
 }
 
 // RunSectionResult is one section's outcome inside a notebook run.
+// Status is ok|error|reused|skipped|not_run — "planned" appears only
+// in dry-run reports. Reason is the planner's reason the section was
+// scheduled this way ("target", "upstream: not fresh", "upstream
+// <name> runs first", "fresh", "once section already succeeded").
 type RunSectionResult struct {
 	Name          string `json:"name"`
-	Status        string `json:"status"` // ok|error|skipped|not_run
+	Status        string `json:"status"`
 	ExecID        string `json:"exec_id,omitempty"`
 	Error         string `json:"error,omitempty"`
 	SkippedReason string `json:"skipped_reason,omitempty"`
+	Reason        string `json:"reason,omitempty"`
 	DurationMs    int64  `json:"duration_ms,omitempty"`
 }
 
@@ -127,13 +132,15 @@ type RunReport struct {
 
 // ExecOutcome is an exec result plus additive notebook facts: the
 // notebook revision after the call, the drift counter, and — for a
-// sectioned exec — the section name and its post-run state.
+// sectioned exec — the section name, its post-run state, and the
+// upstream sections the dependency plan ran or reused first.
 type ExecOutcome struct {
-	View     *ExecView `json:"-"`
-	Revision int64     `json:"notebook_revision"`
-	Drift    int64     `json:"drift"`
-	Section  string    `json:"section,omitempty"`
-	State    string    `json:"section_state,omitempty"`
+	View     *ExecView          `json:"-"`
+	Revision int64              `json:"notebook_revision"`
+	Drift    int64              `json:"drift"`
+	Section  string             `json:"section,omitempty"`
+	State    string             `json:"section_state,omitempty"`
+	Upstream []RunSectionResult `json:"upstream,omitempty"`
 }
 
 // NotebookSectionMeta is one outline row: metadata only, no code or
@@ -157,11 +164,35 @@ type NotebookSectionMeta struct {
 	OnceRan         bool       `json:"once_ran"`
 }
 
+// NotebookGraphEdge is one variable dependency in the notebook graph:
+// From defines Name, To reads it.
+type NotebookGraphEdge struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	Name string `json:"name"`
+}
+
+// NotebookGraphDiagnostic is one graph problem: kind is one of
+// duplicate_define, cycle, missing_provider, parse_error.
+type NotebookGraphDiagnostic struct {
+	Kind     string   `json:"kind"`
+	Message  string   `json:"message"`
+	Sections []string `json:"sections"`
+	Names    []string `json:"names"`
+}
+
+// NotebookGraph is the dependency graph derived from current saved
+// code on every read; it also drives run order and staleness.
+type NotebookGraph struct {
+	Edges       []NotebookGraphEdge       `json:"edges"`
+	Diagnostics []NotebookGraphDiagnostic `json:"diagnostics"`
+}
+
 // NotebookView is the outline: instance facts plus one meta row per
-// section, the rendered text outline, and computed next-step warnings.
-// RestoredEmpty is true only while the restored process is verifiably
-// untouched: restored_at set, no section run and no scratch exec in the
-// current incarnation.
+// section, the rendered text outline, computed next-step warnings, and
+// the dependency graph. RestoredEmpty is true only while the restored
+// process is verifiably untouched: restored_at set, no section run and
+// no scratch exec in the current incarnation.
 type NotebookView struct {
 	InstanceID    string                `json:"instance_id"`
 	Status        types.InstanceStatus  `json:"status"`
@@ -173,6 +204,7 @@ type NotebookView struct {
 	Sections      []NotebookSectionMeta `json:"sections"`
 	Outline       string                `json:"outline"`
 	Next          []string              `json:"next"`
+	Graph         NotebookGraph         `json:"graph"`
 }
 
 // SectionDetail is one section with its code and, on request, the last
@@ -267,34 +299,83 @@ func restoredEmpty(in *store.Instance, states []sectionState, execs []*store.Exe
 	return true
 }
 
-// computeStates derives every section's state in notebook order. Rules:
-//   - not_run: no recorded run in this incarnation.
-//   - failed: the last run in this incarnation errored on the CURRENT
-//     code (an edit after a failure reads as stale instead — the new
-//     code is unverified, not proven broken).
-//   - stale: ran this incarnation but the code changed since, an
-//     earlier section it reads from is itself stale/failed, or such a
-//     section ran after it.
-//   - fresh: ran ok this incarnation on current code with trustworthy
-//     inputs.
-//
-// bad accumulates defines of stale/failed sections so staleness
-// propagates transitively downstream; not_run sections do not taint —
-// their absence is reported through warnings instead.
-func computeStates(in *store.Instance, secs []*store.NotebookSection) []sectionState {
-	out := make([]sectionState, 0, len(secs))
-	type ranDep struct {
-		defs []string
-		seq  int64
-	}
-	var deps []ranDep        // earlier sections that ran this incarnation
-	bad := map[string]bool{} // names defined by stale/failed sections
-	posByName := map[string]int64{}
-	stateByName := map[string]string{}
-	runSeqByName := map[string]int64{}
+// analyzeNotebook rebuilds per-section static facts and the dependency
+// graph from each section's CURRENT saved code — stored defines/uses
+// are provenance, not graph input.
+func analyzeNotebook(in *store.Instance, secs []*store.NotebookSection) ([]notebook.GraphSection, notebook.Graph) {
+	caps := specCaps(in)
+	inputs := make([]notebook.GraphSection, 0, len(secs))
 	for _, sec := range secs {
-		posByName[sec.Name] = sec.Position
+		defs, uses, ok := notebook.Analyze(sec.Code, caps)
+		inputs = append(inputs, notebook.GraphSection{
+			Name: sec.Name, Defines: defs, Uses: uses, ParseOK: ok,
+		})
 	}
+	return inputs, notebook.BuildGraph(inputs)
+}
+
+// graphProviders maps each consumer section to its deduplicated direct
+// provider names, sorted. graphReads maps consumer → used name →
+// provider section for resolved reads only.
+func graphProviders(g notebook.Graph) map[string][]string {
+	seen := map[string]map[string]bool{}
+	for _, e := range g.Edges {
+		if seen[e.To] == nil {
+			seen[e.To] = map[string]bool{}
+		}
+		seen[e.To][e.From] = true
+	}
+	out := make(map[string][]string, len(seen))
+	for to, set := range seen {
+		for from := range set {
+			out[to] = append(out[to], from)
+		}
+		sort.Strings(out[to])
+	}
+	return out
+}
+
+func graphReads(g notebook.Graph) map[string]map[string]string {
+	out := map[string]map[string]string{}
+	for _, e := range g.Edges {
+		if out[e.To] == nil {
+			out[e.To] = map[string]string{}
+		}
+		out[e.To][e.Name] = e.From
+	}
+	return out
+}
+
+// notebookModel is one call's consistent view of a notebook: sections,
+// derived states, the dependency graph rebuilt from saved code, and
+// the graph-derived lookups the outline and run planner share.
+type notebookModel struct {
+	secs      []*store.NotebookSection
+	states    []sectionState
+	inputs    []notebook.GraphSection
+	graph     notebook.Graph
+	providers map[string][]string
+	reads     map[string]map[string]string
+}
+
+func buildNotebookModel(in *store.Instance, secs []*store.NotebookSection) *notebookModel {
+	inputs, g := analyzeNotebook(in, secs)
+	providers := graphProviders(g)
+	return &notebookModel{
+		secs: secs, inputs: inputs, graph: g, providers: providers,
+		states: computeStates(in, secs, providers),
+		reads:  graphReads(g),
+	}
+}
+
+// computeStates derives every section's state. Base rules are
+// unchanged — not_run without a recorded run this incarnation, failed
+// on a current-code error, stale on a code change, fresh otherwise —
+// then staleness propagates over graph edges to a fixed point: a fresh
+// section is stale when a direct provider is not fresh (stale, failed
+// or not_run) or ran after it. Page position no longer matters.
+func computeStates(in *store.Instance, secs []*store.NotebookSection, providers map[string][]string) []sectionState {
+	out := make([]sectionState, 0, len(secs))
 	for _, sec := range secs {
 		st := sectionState{sec: sec}
 		// A lost instance's recorded runs belong to a dead process:
@@ -314,116 +395,35 @@ func computeStates(in *store.Instance, secs []*store.NotebookSection) []sectionS
 		default:
 			st.state = SectionFresh
 		}
-		if st.state == SectionFresh {
-			// Check upstream trust before finalizing fresh: a stale or
-			// failed section it reads from, or such a section that ran
-			// after it, makes this one's result untrustworthy.
-			depBad := false
-			depLater := false
-			for _, u := range sec.Uses {
-				if bad[u] {
-					depBad = true
-				}
-			}
-			if !depBad {
-				for _, d := range deps {
-					if d.seq <= st.runSeq {
-						continue
-					}
-					for _, df := range d.defs {
-						for _, u := range sec.Uses {
-							if df == u {
-								depLater = true
-							}
-						}
-					}
-				}
-			}
-			if depBad || depLater {
-				st.state = SectionStale
-			}
-		}
-		// Provenance deps: a provider that was edited (stale), failed,
-		// deleted, or moved behind this section invalidates the result
-		// even when its define names still happen to resolve — the
-		// binding this run actually used may no longer exist.
-		if st.state == SectionFresh {
-			for _, dep := range sec.DependsOn {
-				if dep == sec.Name {
-					continue
-				}
-				dpos, ok := posByName[dep]
-				if !ok || dpos > sec.Position {
-					st.state = SectionStale
-					break
-				}
-				if ds := stateByName[dep]; ds == SectionStale || ds == SectionFailed {
-					st.state = SectionStale
-					break
-				}
-				// A provider that re-ran after this section may have
-				// changed or dropped the bindings this run used —
-				// even when its define names still happen to overlap.
-				if prs := runSeqByName[dep]; prs > st.runSeq {
-					st.state = SectionStale
-					break
-				}
-			}
-		}
-		if st.state == SectionStale || st.state == SectionFailed {
-			for _, df := range sec.Defines {
-				bad[df] = true
-			}
-		}
-		if st.ranThisInc {
-			deps = append(deps, ranDep{defs: sec.Defines, seq: st.runSeq})
-		}
-		stateByName[sec.Name] = st.state
-		runSeqByName[sec.Name] = st.runSeq
 		out = append(out, st)
 	}
-	return out
-}
-
-// unboundUses reports uses names with no defining earlier section that
-// has succeeded in this incarnation — advisory only, the static view
-// can be wrong.
-func unboundUses(states []sectionState, idx int) []string {
-	sec := states[idx].sec
-	if len(sec.Uses) == 0 {
-		return nil
+	stateByName := make(map[string]string, len(out))
+	runSeqByName := make(map[string]int64, len(out))
+	for _, st := range out {
+		stateByName[st.sec.Name] = st.state
+		runSeqByName[st.sec.Name] = st.runSeq
 	}
-	bound := map[string]bool{}
-	for i := 0; i < idx; i++ {
-		if states[i].ranThisInc && states[i].sec.LastStatus == "ok" {
-			for _, d := range states[i].sec.Defines {
-				bound[d] = true
+	for changed := true; changed; {
+		changed = false
+		for i := range out {
+			st := &out[i]
+			if st.state != SectionFresh {
+				continue
 			}
-		}
-	}
-	definedEarlier := map[string]string{}
-	for i := 0; i < idx; i++ {
-		for _, d := range states[i].sec.Defines {
-			if _, ok := definedEarlier[d]; !ok {
-				definedEarlier[d] = states[i].sec.Name
+			for _, p := range providers[st.sec.Name] {
+				if stateByName[p] != SectionFresh || runSeqByName[p] > st.runSeq {
+					st.state = SectionStale
+					stateByName[st.sec.Name] = SectionStale
+					changed = true
+					break
+				}
 			}
-		}
-	}
-	var out []string
-	for _, u := range sec.Uses {
-		if bound[u] {
-			continue
-		}
-		if by, ok := definedEarlier[u]; ok {
-			out = append(out, fmt.Sprintf("%s (defined by %s, not successfully run)", u, by))
-		} else {
-			out = append(out, u)
 		}
 	}
 	return out
 }
 
-func metaOf(st sectionState) NotebookSectionMeta {
+func metaOf(st sectionState, providers []string) NotebookSectionMeta {
 	sec := st.sec
 	// Slices must marshal as [] never null — the console iterates them
 	// unconditionally.
@@ -437,7 +437,7 @@ func metaOf(st sectionState) NotebookSectionMeta {
 		Name: sec.Name, Position: sec.Position, Description: sec.Description,
 		State: st.state, Rerun: sec.Rerun,
 		Defines: strs(sec.Defines), Uses: strs(sec.Uses), Effects: strs(sec.Effects),
-		DependsOn:  strs(sec.DependsOn),
+		DependsOn:  strs(providers),
 		LastExecID: sec.LastExecID, LastIncarnation: sec.LastIncarnation,
 		LastStatus: sec.LastStatus,
 		LastRunAt:  sec.LastRunAt, OnceRan: sec.SucceededBefore,
@@ -446,9 +446,9 @@ func metaOf(st sectionState) NotebookSectionMeta {
 
 // --- read paths (never restore) ---
 
-// notebookFor fetches the instance (any status) plus its sections and
-// derived states for read paths.
-func (s *Service) notebookFor(ctx context.Context, a service.Actor, id string, act access.Action) (*store.Instance, []sectionState, error) {
+// notebookFor fetches the instance (any status), its sections and the
+// derived model for read paths.
+func (s *Service) notebookFor(ctx context.Context, a service.Actor, id string, act access.Action) (*store.Instance, *notebookModel, error) {
 	in, err := s.owned(ctx, a, id, act)
 	if err != nil {
 		return nil, nil, err
@@ -457,13 +457,13 @@ func (s *Service) notebookFor(ctx context.Context, a service.Actor, id string, a
 	if err != nil {
 		return nil, nil, service.Internal(err)
 	}
-	return in, computeStates(in, secs), nil
+	return in, buildNotebookModel(in, secs), nil
 }
 
 // Notebook returns the outline view. Read-only: works on running, lost,
 // expired and deleted instances and never triggers restoration.
 func (s *Service) Notebook(ctx context.Context, a service.Actor, id string) (*NotebookView, error) {
-	in, states, err := s.notebookFor(ctx, a, id, access.View)
+	in, m, err := s.notebookFor(ctx, a, id, access.View)
 	if err != nil {
 		return nil, err
 	}
@@ -471,7 +471,7 @@ func (s *Service) Notebook(ctx context.Context, a service.Actor, id string) (*No
 	// is not verifiably empty even when no section ran (scratch fs
 	// writes do not define tracked names or bump drift).
 	execs, _ := s.st.ListExecutions(ctx, in.ID, 100)
-	empty := restoredEmpty(in, states, execs)
+	empty := restoredEmpty(in, m.states, execs)
 	v := &NotebookView{
 		InstanceID: in.ID, Status: in.Status, Incarnation: in.Incarnation,
 		RestoredAt: in.RestoredAt, RestoredEmpty: empty,
@@ -489,76 +489,119 @@ func (s *Service) Notebook(ctx context.Context, a service.Actor, id string) (*No
 		}
 	}
 	if in.Drift > 0 {
-		fmt.Fprintf(&b, " · drift: %d scratch execs changed globals", in.Drift)
+		fmt.Fprintf(&b, " · drift: %d execs outside the notebook changed globals", in.Drift)
 	}
-	fmt.Fprintf(&b, " · %d sections\n", len(states))
-	for i, st := range states {
-		m := metaOf(st)
-		v.Sections = append(v.Sections, m)
-		fmt.Fprintf(&b, "%2d %-14s %-8s", i+1, m.Name, m.State)
-		if len(m.Defines) > 0 {
-			fmt.Fprintf(&b, " defines %s", strings.Join(m.Defines, ", "))
+	fmt.Fprintf(&b, " · %d sections\n", len(m.states))
+	for i, st := range m.states {
+		meta := metaOf(st, m.providers[st.sec.Name])
+		v.Sections = append(v.Sections, meta)
+		fmt.Fprintf(&b, "%2d %-14s %-8s", i+1, meta.Name, meta.State)
+		// defines/reads come from the same fresh analysis as the
+		// graph: a use resolves to its provider section or "?".
+		defs, uses := m.inputs[i].Defines, m.inputs[i].Uses
+		if len(defs) > 0 {
+			fmt.Fprintf(&b, " defines %s", strings.Join(defs, ", "))
 		}
-		if len(m.Uses) > 0 {
-			fmt.Fprintf(&b, " uses %s", strings.Join(m.Uses, ", "))
+		if len(uses) > 0 {
+			reads := make([]string, 0, len(uses))
+			seenUse := map[string]bool{}
+			for _, u := range uses {
+				if seenUse[u] {
+					continue
+				}
+				seenUse[u] = true
+				if p, ok := m.reads[meta.Name][u]; ok {
+					reads = append(reads, u+" ← "+p)
+				} else {
+					reads = append(reads, u+" ← ?")
+				}
+			}
+			fmt.Fprintf(&b, " reads %s", strings.Join(reads, ", "))
 		}
-		if m.Rerun == store.RerunOnce {
+		if meta.Rerun == store.RerunOnce {
 			b.WriteString(" (once")
-			if m.OnceRan {
+			if meta.OnceRan {
 				b.WriteString(", ran before")
 			}
 			b.WriteString(")")
 		}
-		if m.Effects != nil && len(m.Effects) > 0 {
-			fmt.Fprintf(&b, " [%s]", strings.Join(m.Effects, " "))
+		if meta.Effects != nil && len(meta.Effects) > 0 {
+			fmt.Fprintf(&b, " [%s]", strings.Join(meta.Effects, " "))
 		}
-		if m.Description != "" {
-			fmt.Fprintf(&b, " — %s", m.Description)
+		if meta.Description != "" {
+			fmt.Fprintf(&b, " — %s", meta.Description)
 		}
 		b.WriteString("\n")
 	}
 	v.Outline = strings.TrimRight(b.String(), "\n")
-	v.Next = s.nextSteps(in, states, empty)
+	v.Next = s.nextSteps(in, m, empty)
+	v.Graph = notebookGraphDTO(m.graph)
 	return v, nil
 }
 
-// nextSteps computes the outline's trailing guidance: stale and
-// not-run sections, once sections that already succeeded, sections
-// reading unbound names, and drift. restoredEmpty distinguishes a
-// still-untouched restored process from one already rebuilding state.
-func (s *Service) nextSteps(in *store.Instance, states []sectionState, restoredEmpty bool) []string {
+// notebookGraphDTO converts the pure graph into the wire shape.
+// Slices marshal as [] never null.
+func notebookGraphDTO(g notebook.Graph) NotebookGraph {
+	strs := func(s []string) []string {
+		if s == nil {
+			return []string{}
+		}
+		return s
+	}
+	out := NotebookGraph{Edges: []NotebookGraphEdge{}, Diagnostics: []NotebookGraphDiagnostic{}}
+	for _, e := range g.Edges {
+		out.Edges = append(out.Edges, NotebookGraphEdge{From: e.From, To: e.To, Name: e.Name})
+	}
+	for _, d := range g.Diagnostics {
+		out.Diagnostics = append(out.Diagnostics, NotebookGraphDiagnostic{
+			Kind: d.Kind, Message: d.Message,
+			Sections: strs(d.Sections), Names: strs(d.Names),
+		})
+	}
+	return out
+}
+
+// nextSteps computes the outline's trailing guidance: graph blocking
+// diagnostics first, then the sections a stale run would pick (every
+// non-fresh section, in dependency order), the restored-empty notice,
+// once sections that already succeeded, and drift.
+// restoredEmpty distinguishes a still-untouched restored process from
+// one already rebuilding state.
+func (s *Service) nextSteps(in *store.Instance, m *notebookModel, restoredEmpty bool) []string {
 	next := []string{}
-	var stale, notRun []string
+	for _, d := range m.graph.Diagnostics {
+		if d.Kind == notebook.DiagParseError {
+			// A parse failure does not block — the section runs and
+			// fails with the real syntax error.
+			next = append(next, d.Message)
+			continue
+		}
+		next = append(next, "blocked: "+d.Message)
+	}
+	var nonFresh, notRun []string
 	onceRan := []string{}
-	for i, st := range states {
-		switch st.state {
-		case SectionStale:
-			stale = append(stale, st.sec.Name)
-		case SectionNotRun:
+	for _, st := range m.states {
+		if st.state != SectionFresh {
+			nonFresh = append(nonFresh, st.sec.Name)
+		}
+		if st.state == SectionNotRun {
 			notRun = append(notRun, st.sec.Name)
 		}
 		if st.sec.Rerun == store.RerunOnce && st.sec.SucceededBefore {
 			onceRan = append(onceRan, st.sec.Name)
 		}
-		for _, w := range unboundUses(states, i) {
-			next = append(next, fmt.Sprintf("%s reads %s", st.sec.Name, w))
-		}
 	}
-	if len(stale) > 0 {
-		next = append([]string{fmt.Sprintf("run_sections(sections=\"stale\") re-runs %s", strings.Join(stale, ", "))}, next...)
+	if len(nonFresh) > 0 {
+		next = append(next, fmt.Sprintf("run_sections(sections=\"stale\") runs %s in dependency order", strings.Join(nonFresh, ", ")))
 	}
-	if len(notRun) > 0 {
-		if restoredEmpty {
-			next = append([]string{fmt.Sprintf("the restored process is still empty; nothing was re-run for you — %d sections not_run: %s", len(notRun), strings.Join(notRun, ", "))}, next...)
-		} else {
-			next = append([]string{fmt.Sprintf("not_run: %s", strings.Join(notRun, ", "))}, next...)
-		}
+	if restoredEmpty && len(notRun) > 0 {
+		next = append(next, fmt.Sprintf("the restored process is still empty; nothing was re-run for you — %d sections not_run: %s", len(notRun), strings.Join(notRun, ", ")))
 	}
 	if len(onceRan) > 0 {
 		next = append(next, fmt.Sprintf("once sections already succeeded: %s — bulk runs skip them; run by name only if repeating is intended", strings.Join(onceRan, ", ")))
 	}
 	if in.Drift > 0 {
-		next = append(next, fmt.Sprintf("drift: %d scratch execs changed globals outside the notebook", in.Drift))
+		next = append(next, fmt.Sprintf("drift: %d execs outside the notebook changed globals", in.Drift))
 	}
 	return next
 }
@@ -569,21 +612,21 @@ func (s *Service) ReadSection(ctx context.Context, a service.Actor, id, name str
 	if !validSectionName(name) {
 		return nil, service.BadRequest("invalid section name")
 	}
-	in, states, err := s.notebookFor(ctx, a, id, access.View)
+	in, m, err := s.notebookFor(ctx, a, id, access.View)
 	if err != nil {
 		return nil, err
 	}
 	var st *sectionState
-	for i := range states {
-		if states[i].sec.Name == name {
-			st = &states[i]
+	for i := range m.states {
+		if m.states[i].sec.Name == name {
+			st = &m.states[i]
 			break
 		}
 	}
 	if st == nil {
 		return nil, service.NotFound("section not found")
 	}
-	d := &SectionDetail{Section: metaOf(*st), Code: st.sec.Code}
+	d := &SectionDetail{Section: metaOf(*st, m.providers[st.sec.Name]), Code: st.sec.Code}
 	if includeOutput && st.sec.LastExecID != "" {
 		if ex, err := s.st.GetExecution(ctx, st.sec.LastExecID); err == nil && ex.InstanceID == in.ID {
 			d.Output, d.OutputTrunc = ex.Output, ex.OutputTruncated
@@ -1007,8 +1050,10 @@ func (s *Service) DeleteSection(ctx context.Context, a service.Actor, id, name s
 
 // --- exec ---
 
-// Exec runs a scratch exec — retained for compatibility; sectionless
-// calls route through ExecSection.
+// ExecSection saves the optional section, plans the run against the
+// dependency graph — non-fresh upstream sections execute first, each
+// as its own exec — then runs the section itself. Sectionless calls
+// are plain scratch execs, unchanged.
 func (s *Service) ExecSection(ctx context.Context, a service.Actor, id, code string, timeout time.Duration, sec *SectionInput) (*ExecOutcome, error) {
 	if len(code) > MaxCodeBytes {
 		return nil, service.Errf(types.ErrCodeTooLarge, "code exceeds 256KB")
@@ -1028,6 +1073,7 @@ func (s *Service) ExecSection(ctx context.Context, a service.Actor, id, code str
 	var secName string
 	var runSeq int64
 	var derivedState string
+	var upstream []RunSectionResult
 	if sec != nil {
 		if sec.Revision != nil && *sec.Revision != in.NotebookRev {
 			return nil, service.Conflict("notebook changed since your revision; reload and retry")
@@ -1050,6 +1096,62 @@ func (s *Service) ExecSection(ctx context.Context, a service.Actor, id, code str
 		code = sres.Section.Code
 		secName = sec.Name
 		rev = sres.Revision
+
+		// Plan against the dependency graph: the section plus every
+		// non-fresh upstream, in dependency order. A blocking
+		// diagnostic refuses the whole run — the save stands.
+		secs, err := s.st.ListNotebookSections(ctx, in.ID)
+		if err != nil {
+			return nil, service.Internal(err)
+		}
+		m := buildNotebookModel(in, secs)
+		fresh := map[string]bool{}
+		for _, st := range m.states {
+			if st.state == SectionFresh {
+				fresh[st.sec.Name] = true
+			}
+		}
+		plan := m.graph.Plan(notebook.PlanInput{Targets: []string{secName}, Fresh: fresh})
+		if len(plan.Blocked) > 0 {
+			return nil, graphBlockedErr(plan.Blocked, "section saved; ")
+		}
+		stateByName := map[string]*sectionState{}
+		for i := range m.states {
+			stateByName[m.states[i].sec.Name] = &m.states[i]
+		}
+		for _, pn := range plan.Nodes {
+			if pn.Name == secName {
+				continue // the section itself runs below
+			}
+			switch pn.Action {
+			case notebook.ActionReuse:
+				upstream = append(upstream, RunSectionResult{Name: pn.Name, Status: "reused", Reason: pn.Reason})
+				continue
+			case notebook.ActionSkip:
+				upstream = append(upstream, RunSectionResult{Name: pn.Name, Status: "skipped", Reason: pn.Reason, SkippedReason: pn.Reason})
+				continue
+			}
+			uresp, uerr := s.execPlannedSection(ctx, in, a, stateByName[pn.Name].sec, token)
+			if uerr != nil {
+				if errors.Is(uerr, runtime.ErrNotFound) {
+					return nil, s.lostAndRestore(ctx, a, in, token, s.now().UTC())
+				}
+				return nil, fail(uerr)
+			}
+			ures := &uresp.Result
+			if ures.Error != nil {
+				return nil, service.Errf(types.ErrCodeUpstreamFailed,
+					"section saved; upstream %s failed: %s", pn.Name, ures.Error.Message)
+			}
+			upstream = append(upstream, RunSectionResult{
+				Name: pn.Name, Status: "ok", ExecID: ures.ExecID,
+				Reason: pn.Reason, DurationMs: ures.DurationMs,
+			})
+		}
+		// Upstream execs slid the heartbeat/expiry forward — recompute
+		// so the target exec and final touch never regress it.
+		now = s.now().UTC()
+		deadline = renewal(in, now)
 		runSeq, err = s.st.BumpRunSeq(ctx, in.ID, token)
 		if err != nil {
 			if errors.Is(err, store.ErrConflict) {
@@ -1071,36 +1173,7 @@ func (s *Service) ExecSection(ctx context.Context, a service.Actor, id, code str
 	}
 	if err != nil {
 		if errors.Is(err, runtime.ErrNotFound) {
-			// The child is definitively gone: the code did not run.
-			// Mark lost under our lease, then restore — the triggering
-			// call still does not execute. A lost CAS means the row
-			// moved on (reaper, another op): classify, never restore
-			// blindly.
-			marked, merr := s.st.MarkInstanceLost(ctx, in.ID, token, now)
-			if merr != nil {
-				return nil, service.Internal(merr)
-			}
-			if !marked {
-				if cur, gerr := s.st.GetInstance(ctx, in.ID); gerr == nil {
-					if expiredForRun(cur, s.now().UTC()) {
-						return nil, s.expiredErr(ctx, cur)
-					}
-					if cur.Status == types.InstanceLost {
-						// Another op marked it lost first; restore now.
-						in = cur
-					} else {
-						return nil, service.Conflict("instance changed while executing; retry")
-					}
-				} else {
-					return nil, service.Conflict("instance changed while executing; retry")
-				}
-			} else if lost, gerr := s.st.GetInstance(ctx, in.ID); gerr == nil {
-				in = lost
-			}
-			if rerr := s.restoreLocked(ctx, a, in, token); rerr != nil {
-				return nil, rerr
-			}
-			return nil, instanceRestoredErr(ctx, s.st, in)
+			return nil, s.lostAndRestore(ctx, a, in, token, now)
 		}
 		return nil, fail(err)
 	}
@@ -1127,7 +1200,8 @@ func (s *Service) ExecSection(ctx context.Context, a service.Actor, id, code str
 			in = cur
 		}
 		if secs, lerr := s.st.ListNotebookSections(ctx, in.ID); lerr == nil {
-			for _, cst := range computeStates(in, secs) {
+			m2 := buildNotebookModel(in, secs)
+			for _, cst := range m2.states {
 				if cst.sec.Name == secName {
 					derivedState = cst.state
 					break
@@ -1151,7 +1225,7 @@ func (s *Service) ExecSection(ctx context.Context, a service.Actor, id, code str
 	if !touched {
 		return nil, s.leaseErr(ctx, in.ID)
 	}
-	out := &ExecOutcome{View: res, Revision: rev, Drift: drift, Section: secName}
+	out := &ExecOutcome{View: res, Revision: rev, Drift: drift, Section: secName, Upstream: upstream}
 	if secName != "" {
 		out.State = derivedState
 		if out.State == "" {
@@ -1213,13 +1287,117 @@ func execEffects(batch runtime.AuditBatch) []string {
 	return out
 }
 
+// execPlannedSection runs one planned section as its own exec under
+// the held op lease — the same sequence RunSections uses per section:
+// lease refresh, run seq bump, exec, heartbeat touch, execution
+// record, section stamp. The caller classifies runtime.ErrNotFound
+// (dead child); every other failure is already a typed service error.
+func (s *Service) execPlannedSection(ctx context.Context, in *store.Instance, a service.Actor, sec *store.NotebookSection, token string) (*runtime.ExecResponse, error) {
+	if ok, rerr := s.st.RefreshInstanceOp(ctx, in.ID, token, s.opLeaseTTL()); rerr != nil {
+		return nil, service.Internal(rerr)
+	} else if !ok {
+		return nil, s.leaseErr(ctx, in.ID)
+	}
+	runSeq, err := s.st.BumpRunSeq(ctx, in.ID, token)
+	if err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			return nil, s.leaseErr(ctx, in.ID)
+		}
+		return nil, service.Internal(err)
+	}
+	now := s.now().UTC()
+	deadline := renewal(in, now)
+	resp, err := s.rt.Exec(ctx, &runtime.ExecRequest{
+		InstanceID: in.ID, Owner: runtime.Owner{UserID: in.UserID},
+		Actor: actorOwner(a), ExecID: store.NewID(store.PrefixExecution),
+		Code: sec.Code, SourceName: sec.Name,
+		TimeoutMs: 0, RenewedExpiresAt: deadline, Epoch: in.LeaseEpoch,
+	})
+	if resp != nil {
+		s.audit.Record(resp.Audit)
+	}
+	if err != nil {
+		return resp, err
+	}
+	res := &resp.Result
+	if touched, terr := s.st.TouchInstanceLive(ctx, in.ID, token, now, deadline, 0); terr != nil {
+		return resp, service.Internal(terr)
+	} else if !touched {
+		return resp, s.leaseErr(ctx, in.ID)
+	}
+	in.LastActiveAt, in.ExpiresAt = now, deadline
+	s.recordExecutionSection(ctx, in, a, sec.Code, res, sec.Name, runSeq)
+	status := "ok"
+	if res.Error != nil {
+		status = "error"
+	}
+	if _, serr := s.st.StampSectionRun(ctx, in.ID, sec.Name, res.ExecID, status,
+		in.Incarnation, runSeq, now, execEffects(resp.Audit), res.Error == nil, sec.CodeSHA256, token); serr != nil {
+		if errors.Is(serr, store.ErrConflict) {
+			return resp, s.leaseErr(ctx, in.ID)
+		}
+		return resp, service.Internal(serr)
+	}
+	return resp, nil
+}
+
+// lostAndRestore handles a definitively dead child under the held op
+// lease: mark lost, restore the empty process, return the typed
+// instance_restored error. A lost CAS means the row moved on — the
+// outcome is classified against a fresh row, never restored blindly.
+func (s *Service) lostAndRestore(ctx context.Context, a service.Actor, in *store.Instance, token string, now time.Time) error {
+	marked, merr := s.st.MarkInstanceLost(ctx, in.ID, token, now)
+	if merr != nil {
+		return service.Internal(merr)
+	}
+	if !marked {
+		if cur, gerr := s.st.GetInstance(ctx, in.ID); gerr == nil {
+			if expiredForRun(cur, s.now().UTC()) {
+				return s.expiredErr(ctx, cur)
+			}
+			if cur.Status == types.InstanceLost {
+				// Another op marked it lost first; restore now.
+				in = cur
+			} else {
+				return service.Conflict("instance changed while executing; retry")
+			}
+		} else {
+			return service.Conflict("instance changed while executing; retry")
+		}
+	} else if lost, gerr := s.st.GetInstance(ctx, in.ID); gerr == nil {
+		in = lost
+	}
+	if rerr := s.restoreLocked(ctx, a, in, token); rerr != nil {
+		return rerr
+	}
+	return instanceRestoredErr(ctx, s.st, in)
+}
+
+// graphBlockedErr is the typed refusal for a run whose closure touches
+// blocking graph diagnostics: nothing executes. prefix lets the
+// sectioned-exec path note that its save already stands.
+func graphBlockedErr(diags []notebook.Diagnostic, prefix string) error {
+	msgs := make([]string, 0, len(diags))
+	for _, d := range diags {
+		msgs = append(msgs, d.Message)
+	}
+	return service.Errf(types.ErrCodeGraphBlocked, "%srun blocked — %s", prefix, strings.Join(msgs, "; "))
+}
+
 // --- run ---
 
-// RunSections executes selected sections in notebook order, each as its
-// own exec. Bulk selections skip `once` sections that already succeeded;
-// explicit names always run. Execution stops at the first script
-// failure; remaining selections report not_run.
-func (s *Service) RunSections(ctx context.Context, a service.Actor, id string, sel SectionSelector, revision *int64) (*RunReport, error) {
+// RunSections executes the sections a selector resolves to, in
+// dependency order: a section first runs every upstream section that
+// is not fresh, each as its own exec. Bulk selections ("all", "stale")
+// skip once sections that already succeeded unless they are needed
+// upstream; explicit names always run. Execution stops at the first
+// script failure; unreached run nodes report not_run. dryRun returns
+// the report the run would produce — planned/reused/skipped — without
+// executing, touching the lease, or restoring.
+func (s *Service) RunSections(ctx context.Context, a service.Actor, id string, sel SectionSelector, revision *int64, dryRun bool) (*RunReport, error) {
+	if dryRun {
+		return s.planRun(ctx, a, id, sel, revision)
+	}
 	in, token, err := s.prepareRun(ctx, a, id)
 	if err != nil {
 		return nil, err
@@ -1232,10 +1410,14 @@ func (s *Service) RunSections(ctx context.Context, a service.Actor, id string, s
 	if err != nil {
 		return nil, service.Internal(err)
 	}
-	states := computeStates(in, secs)
-	chosen, explicit, err := selectSections(states, sel)
+	m := buildNotebookModel(in, secs)
+	targets, bulk, err := runTargets(m.states, sel)
 	if err != nil {
 		return nil, err
+	}
+	plan := m.graph.Plan(planInput(m.states, targets, bulk))
+	if len(plan.Blocked) > 0 {
+		return nil, graphBlockedErr(plan.Blocked, "")
 	}
 	report := &RunReport{
 		InstanceID: in.ID, Incarnation: in.Incarnation,
@@ -1248,17 +1430,30 @@ func (s *Service) RunSections(ctx context.Context, a service.Actor, id string, s
 	// runtime response — a mid-batch loss after that point is an
 	// honest partial report, not a clean restore error.
 	executed := false
-	for _, st := range chosen {
-		if !explicit {
-			// once + prior success: skip in bulk runs.
-			if st.sec.Rerun == store.RerunOnce && st.sec.SucceededBefore {
-				report.Results = append(report.Results, RunSectionResult{
-					Name: st.sec.Name, Status: "skipped",
-					SkippedReason: "once section already succeeded; name it explicitly to repeat",
-				})
-				continue
-			}
+	stopped := false
+	stateByName := map[string]*sectionState{}
+	for i := range m.states {
+		stateByName[m.states[i].sec.Name] = &m.states[i]
+	}
+	for _, pn := range plan.Nodes {
+		row := RunSectionResult{Name: pn.Name, Reason: pn.Reason}
+		switch pn.Action {
+		case notebook.ActionSkip:
+			row.Status = "skipped"
+			row.SkippedReason = pn.Reason
+			report.Results = append(report.Results, row)
+			continue
+		case notebook.ActionReuse:
+			row.Status = "reused"
+			report.Results = append(report.Results, row)
+			continue
 		}
+		if stopped {
+			row.Status = "not_run"
+			report.Results = append(report.Results, row)
+			continue
+		}
+		st := stateByName[pn.Name]
 		// Refresh the lease AND the sliding heartbeat/expiry for every
 		// reached section: a long batch must not outlive either, and a
 		// lost lease means the instance was settled or claimed
@@ -1282,13 +1477,6 @@ func (s *Service) RunSections(ctx context.Context, a service.Actor, id string, s
 		// expires_at on a runtime that turns out to be dead, and a
 		// restoration must reuse the original expiry byte-for-byte.
 		// in.ExpiresAt stays untouched until then for the same reason.
-		// Advisory: uses names nothing earlier bound successfully.
-		// secs carries refreshed run facts from sections already
-		// executed in this batch, so a dependency that just succeeded
-		// does not warn.
-		for _, w := range unboundUsesForRun(in, secs, st.sec.Name) {
-			report.Warnings = append(report.Warnings, fmt.Sprintf("%s: %s", st.sec.Name, w))
-		}
 		execAt := lastActive
 		resp, err := s.rt.Exec(ctx, &runtime.ExecRequest{
 			InstanceID: in.ID, Owner: runtime.Owner{UserID: in.UserID},
@@ -1335,7 +1523,10 @@ func (s *Service) RunSections(ctx context.Context, a service.Actor, id string, s
 				report.StoppedReason = "instance_restored"
 				report.Warnings = append(report.Warnings,
 					"instance was restored during the run: earlier sections executed in the previous runtime; do not blindly retry side effects")
-				break
+				stopped = true
+				row.Status = "not_run"
+				report.Results = append(report.Results, row)
+				continue
 			}
 			return nil, fail(err)
 		}
@@ -1367,38 +1558,15 @@ func (s *Service) RunSections(ctx context.Context, a service.Actor, id string, s
 			}
 			return nil, service.Internal(err)
 		}
-		// Refresh the in-memory run facts so later sections' warnings
-		// and states see this result — a dependency that just
-		// succeeded does not warn.
-		st.sec.LastExecID = res.ExecID
-		st.sec.LastIncarnation = in.Incarnation
-		st.sec.LastRunSeq = runSeq
-		st.sec.LastStatus = status
-		st.sec.LastCodeSHA256 = st.sec.CodeSHA256
-		st.sec.LastRunAt = &execAt
-		st.sec.SucceededBefore = st.sec.SucceededBefore || res.Error == nil
-		st.sec.Effects = effects
-		report.Results = append(report.Results, RunSectionResult{
-			Name: st.sec.Name, Status: status, ExecID: res.ExecID,
-			Error: errMsg, DurationMs: res.DurationMs,
-		})
+		row.Status = status
+		row.ExecID = res.ExecID
+		row.Error = errMsg
+		row.DurationMs = res.DurationMs
+		report.Results = append(report.Results, row)
 		if res.Error != nil {
-			// Stop at the first failure: everything still selected is
-			// reported not_run by the final pass below.
-			break
-		}
-	}
-	// Sections selected but never reached (run stopped early) report
-	// not_run.
-	done := map[string]bool{}
-	for _, r := range report.Results {
-		done[r.Name] = true
-	}
-	for _, st := range chosen {
-		if !done[st.sec.Name] {
-			report.Results = append(report.Results, RunSectionResult{
-				Name: st.sec.Name, Status: "not_run",
-			})
+			// Stop at the first failure: remaining run nodes report
+			// not_run; reuse/skip rows still describe the plan.
+			stopped = true
 		}
 	}
 	// Re-read for the final revision/drift.
@@ -1412,8 +1580,8 @@ func (s *Service) RunSections(ctx context.Context, a service.Actor, id string, s
 		// touch is possible or needed.
 		return report, nil
 	}
-	// Nothing was reached (all skipped): still touch with a fresh
-	// heartbeat so the lease release below stays clean.
+	// Nothing was reached (all skipped/reused): still touch with a
+	// fresh heartbeat so the lease release below stays clean.
 	if deadline.IsZero() {
 		lastActive = s.now().UTC()
 		deadline = renewal(in, lastActive)
@@ -1426,81 +1594,117 @@ func (s *Service) RunSections(ctx context.Context, a service.Actor, id string, s
 	return report, nil
 }
 
-// selectSections resolves a selector into ordered section states.
-// explicit reports whether names were given (once-skip applies only to
-// bulk selections).
-func selectSections(states []sectionState, sel SectionSelector) ([]sectionState, bool, error) {
+// planRun is the dry-run path: resolve the selector, build the plan,
+// and report what a real run would do — planned/reused/skipped —
+// without executing, claiming the op lease, touching the heartbeat, or
+// restoring a lost instance.
+func (s *Service) planRun(ctx context.Context, a service.Actor, id string, sel SectionSelector, revision *int64) (*RunReport, error) {
+	in, err := s.owned(ctx, a, id, access.Run)
+	if err != nil {
+		return nil, err
+	}
+	if expiredForRun(in, s.now().UTC()) {
+		return nil, s.expiredErr(ctx, in)
+	}
+	if in.Status != types.InstanceRunning && in.Status != types.InstanceLost {
+		return nil, service.Errf(types.ErrCodeNotRunning, "instance not running")
+	}
+	if revision != nil && *revision != in.NotebookRev {
+		return nil, service.Conflict("notebook changed since your revision; reload and retry")
+	}
+	secs, err := s.st.ListNotebookSections(ctx, in.ID)
+	if err != nil {
+		return nil, service.Internal(err)
+	}
+	m := buildNotebookModel(in, secs)
+	targets, bulk, err := runTargets(m.states, sel)
+	if err != nil {
+		return nil, err
+	}
+	plan := m.graph.Plan(planInput(m.states, targets, bulk))
+	if len(plan.Blocked) > 0 {
+		return nil, graphBlockedErr(plan.Blocked, "")
+	}
+	report := &RunReport{
+		InstanceID: in.ID, Incarnation: in.Incarnation,
+		Revision: in.NotebookRev, Drift: in.Drift, Results: []RunSectionResult{},
+	}
+	for _, pn := range plan.Nodes {
+		row := RunSectionResult{Name: pn.Name, Reason: pn.Reason}
+		switch pn.Action {
+		case notebook.ActionRun:
+			row.Status = "planned"
+		case notebook.ActionReuse:
+			row.Status = "reused"
+		case notebook.ActionSkip:
+			row.Status = "skipped"
+			row.SkippedReason = pn.Reason
+		}
+		report.Results = append(report.Results, row)
+	}
+	return report, nil
+}
+
+// planInput maps derived states onto the planner's input: Fresh is
+// state == fresh; OnceDone is rerun == once with a prior success.
+func planInput(states []sectionState, targets []string, bulk bool) notebook.PlanInput {
+	in := notebook.PlanInput{
+		Targets:  targets,
+		Bulk:     bulk,
+		Fresh:    map[string]bool{},
+		OnceDone: map[string]bool{},
+	}
+	for _, st := range states {
+		if st.state == SectionFresh {
+			in.Fresh[st.sec.Name] = true
+		}
+		if st.sec.Rerun == store.RerunOnce && st.sec.SucceededBefore {
+			in.OnceDone[st.sec.Name] = true
+		}
+	}
+	return in
+}
+
+// runTargets resolves a selector into target section names plus the
+// bulk flag. "all" targets every section; "stale" targets every
+// non-fresh section (stale, failed, not_run); names are explicit and
+// validated. Bulk marks the once rule.
+func runTargets(states []sectionState, sel SectionSelector) ([]string, bool, error) {
 	switch {
 	case sel.All:
-		return states, false, nil
-	case sel.Stale:
-		var out []sectionState
+		names := make([]string, 0, len(states))
 		for _, st := range states {
-			if st.state == SectionStale {
-				out = append(out, st)
+			names = append(names, st.sec.Name)
+		}
+		return names, true, nil
+	case sel.Stale:
+		var names []string
+		for _, st := range states {
+			if st.state != SectionFresh {
+				names = append(names, st.sec.Name)
 			}
 		}
-		return out, false, nil
+		return names, true, nil
 	case len(sel.Names) > 0:
-		byName := map[string]sectionState{}
+		byName := map[string]bool{}
 		for _, st := range states {
-			byName[st.sec.Name] = st
+			byName[st.sec.Name] = true
 		}
 		seen := map[string]bool{}
-		var out []sectionState
+		var names []string
 		for _, n := range sel.Names {
-			st, ok := byName[n]
-			if !ok {
+			if !byName[n] {
 				return nil, false, service.BadRequest("unknown section %q", n)
 			}
 			if !seen[n] {
 				seen[n] = true
-				out = append(out, st)
+				names = append(names, n)
 			}
 		}
-		// Report in notebook order regardless of request order.
-		sort.SliceStable(out, func(i, j int) bool { return out[i].sec.Position < out[j].sec.Position })
-		return out, true, nil
+		return names, false, nil
 	default:
 		return nil, false, service.BadRequest("sections must be \"all\", \"stale\", a name, or a list of names")
 	}
-}
-
-// unboundUsesForRun reports a section's uses names that no earlier
-// section can vouch for: either nothing earlier defines the name, or
-// the defining section has not succeeded in this incarnation. Advisory
-// only — the static view can be wrong about what actually ran.
-func unboundUsesForRun(in *store.Instance, secs []*store.NotebookSection, name string) []string {
-	idx := -1
-	for i, sec := range secs {
-		if sec.Name == name {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		return nil
-	}
-	definedEarlier := map[string]*store.NotebookSection{}
-	for i := 0; i < idx; i++ {
-		for _, d := range secs[i].Defines {
-			if _, ok := definedEarlier[d]; !ok {
-				definedEarlier[d] = secs[i]
-			}
-		}
-	}
-	var out []string
-	for _, u := range secs[idx].Uses {
-		def, ok := definedEarlier[u]
-		if !ok {
-			out = append(out, fmt.Sprintf("reads %s (no earlier section defines it)", u))
-			continue
-		}
-		if def.LastIncarnation != in.Incarnation || def.LastStatus != "ok" {
-			out = append(out, fmt.Sprintf("reads %s (defined by %s, which has not succeeded this incarnation)", u, def.Name))
-		}
-	}
-	return out
 }
 
 // --- restoration ---

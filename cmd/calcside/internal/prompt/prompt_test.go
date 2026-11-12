@@ -75,7 +75,7 @@ func TestRenderToolPrefixApplied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "`sb_exec(code)`") {
+	if !strings.Contains(out, "`sb_exec(code, section={name, description?})`") {
 		t.Fatalf("prefix not applied:\n%s", out)
 	}
 	if strings.Contains(out, "calcside_") {

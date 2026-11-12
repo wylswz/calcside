@@ -222,14 +222,21 @@ test('HTML preview opens a dedicated page without changing the workspace', async
 fs.write("report.html", ${JSON.stringify(report)})
 fs.write("reconciliation.csv", "id,status\\n001,matched\\n")
 fs.write("notes.txt", "Review the exception list before closing the reporting period.")`)
+  // A notebook section gives the console a real editor — every run
+  // belongs to a section now.
+  const nbRev = (await (await client.get(`/api/v1/instances/${id}/notebook`)).json()).notebook.revision
+  await client.put(`/api/v1/instances/${id}/sections/notes`, {
+    data: { code: 'notes = "review the exceptions"', description: 'section notes', revision: nbRev },
+  })
   await page.goto(`${consoleURL}/instances/${id}`)
   await page.getByRole('tab', { name: 'Files', exact: true }).click()
   const previewLink = page.getByRole('link', { name: 'Preview report.html (new tab)', exact: true })
   await expect(previewLink).toBeVisible()
   await expect(previewLink).toHaveAttribute('target', '_blank')
-  // the editor is visible on arrival in the redesigned page
-  await expect(page.locator('#run-code .cm-editor')).toBeVisible()
-  const originalCode = await page.locator('#run-code .cm-content').innerText()
+  // the section editor is visible on arrival in the redesigned page
+  const nbCard = page.locator('[data-section="notes"]')
+  await expect(nbCard.locator('.cm-editor')).toBeVisible()
+  const originalCode = await nbCard.locator('.cm-content').innerText()
   const opened = page.waitForEvent('popup')
   await previewLink.focus()
   await page.keyboard.press('Enter')
@@ -243,7 +250,7 @@ fs.write("notes.txt", "Review the exception list before closing the reporting pe
   await expect(page).toHaveURL(`${consoleURL}/instances/${id}`)
   await expect(page.locator('iframe')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Expand preview' })).toHaveCount(0)
-  expect(await page.locator('#run-code .cm-content').innerText()).toBe(originalCode)
+  expect(await nbCard.locator('.cm-content').innerText()).toBe(originalCode)
   const iframe = viewer.locator('iframe[title="Artifact preview"]')
   const bounds = await iframe.boundingBox()
   expect(bounds!.width).toBeGreaterThan(1000)

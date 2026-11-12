@@ -317,6 +317,12 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   const ex = await client.get(`/api/v1/instances/${inst.id}/executions`)
   const runId = (await ex.json()).executions[0].id
   expect((await ex.json()).executions[0].error_type).toBe('policy_denied')
+  // One notebook section gives the Notebook view a real editor — every
+  // console execution belongs to a section now.
+  const nbRev = (await (await client.get(`/api/v1/instances/${inst.id}/notebook`)).json()).notebook.revision
+  await client.put(`/api/v1/instances/${inst.id}/sections/work`, {
+    data: { code: 'work = 1', description: 'section work', revision: nbRev },
+  })
 
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto(`${consoleURL}/instances/${inst.id}`)
@@ -330,10 +336,9 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   // live state is a tabbed side panel (State | Files), not page headings
   await expect(page.getByRole('tab', { name: 'State', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Files', exact: true })).toBeVisible()
-  // the notebook is the default view; the scratch region keeps the run
-  // editor reachable without a toggle
+  // the notebook is the default view; its section editor needs no toggle
   await expect(page.getByRole('tab', { name: 'Notebook' })).toHaveAttribute('aria-selected', 'true')
-  await expect(page.locator('#run-code')).toBeAttached()
+  await expect(page.locator('[data-section="work"]')).toBeAttached()
   // inspect (State) lives in the right rail and is visible by default
   const state = page.locator('[aria-label="State"]')
   await expect(state).toBeVisible()
@@ -444,47 +449,47 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   await expect(promptButton).toBeFocused()
   await expect(page.getByRole('button', { name: 'Share', exact: true })).toBeVisible()
 
-  // The scratch editor is its own region on the Notebook view — no
-  // toggle to reveal it. Activity is a separate addressable view; its
-  // heading/filter never move when the run list or filter changes.
+  // The section editor lives on the Notebook view — no toggle to reveal
+  // it. Activity is a separate addressable view; its heading/filter
+  // never move when the run list or filter changes.
   await page.getByRole('tab', { name: 'Notebook' }).click()
-  await expect(page.locator('#run-code .cm-editor')).toBeVisible({ timeout: 8000 })
-  await expect(page.getByRole('button', { name: 'Run code', exact: true })).toHaveCount(0)
-  // the editor's action is an icon; there is no header toggle or close
-  const runAction = page.getByRole('button', { name: 'Run', exact: true })
+  const workCard = page.locator('[data-section="work"]')
+  await expect(workCard.locator('.cm-editor')).toBeVisible({ timeout: 8000 })
+  // the cell's run action is an icon button in the gutter
+  const runAction = workCard.getByRole('button', { name: 'Run section' })
   await expect(runAction).toBeVisible()
   await expect(runAction.locator('svg')).toHaveCount(1)
-  await expect(page.locator('#run-code').getByRole('button', { name: 'Close' })).toHaveCount(0)
   // switching views keeps the editor mounted and its draft intact (C3)
-  const codeBefore = await page.locator('#run-code .cm-content').innerText()
+  const codeBefore = await workCard.locator('.cm-content').innerText()
   await page.getByRole('tab', { name: 'Activity' }).click()
   await expect(page.locator('[aria-label="Activity"]')).toBeVisible()
-  const filtersBox = (await page.locator('.seg-filters').boundingBox())!
+  const filters = page.locator('[aria-label="Activity"] .seg-filters')
+  const filtersBox = (await filters.boundingBox())!
   const headingBox = (await page.locator('.activity-heading').boundingBox())!
   expect(filtersBox.y).toBeGreaterThanOrEqual(headingBox.y)
   expect(filtersBox.y + filtersBox.height).toBeLessThanOrEqual(headingBox.y + headingBox.height)
   // the all / needs attention filter belongs to Activity's heading and
   // switching it never moves the heading or the filters
   const at = async () => ({
-    filter: await page.locator('.seg-filters').evaluate((el) => { const b = el.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y + scrollY), Math.round(b.width)] }),
+    filter: await filters.evaluate((el) => { const b = el.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y + scrollY), Math.round(b.width)] }),
     heading: await page.locator('.activity-heading').evaluate((el) => { const b = el.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y + scrollY), Math.round(b.width)] }),
   })
   await page.mouse.move(1, 1)
   await page.waitForTimeout(400)
   const closedAt = await at()
-  await page.locator('.seg-filters button').nth(1).click()
+  await filters.locator('button').nth(1).click()
   await page.waitForTimeout(400)
   expect(await at()).toEqual(closedAt)
-  await page.locator('.seg-filters button').first().click()
-  // back on Notebook the scratch draft survived the view switch
+  await filters.locator('button').first().click()
+  // back on Notebook the section draft survived the view switch
   await page.getByRole('tab', { name: 'Notebook' }).click()
-  expect(await page.locator('#run-code .cm-content').innerText()).toBe(codeBefore)
+  expect(await workCard.locator('.cm-content').innerText()).toBe(codeBefore)
 
   // mobile: Work precedes Boundary; ≥44px primary; no overflow
   await page.setViewportSize({ width: 390, height: 900 })
   await page.waitForTimeout(600)
   const mob = await page.evaluate(() => {
-    const work = document.querySelector('[aria-label="Scratch"]')!.getBoundingClientRect()
+    const work = document.querySelector('[aria-label="Section work"]')!.getBoundingClientRect()
     const bound = document.querySelector('[aria-label="Boundary"]')!.getBoundingClientRect()
     return { work: work.top, bound: bound.top, sw: document.documentElement.scrollWidth, iw: window.innerWidth }
   })
