@@ -31,6 +31,24 @@ export function devinSnippet(url: string, key: string): string {
   }, null, 2)
 }
 
+// OpenCode reads this from opencode.json(c) in the project (or the
+// global config); oauth is disabled because the key is a bearer header.
+export function opencodeSnippet(url: string, key: string): string {
+  return JSON.stringify({
+    $schema: 'https://opencode.ai/config.json',
+    mcp: {
+      servers: {
+        calcside: {
+          type: 'remote',
+          url,
+          oauth: false,
+          headers: { Authorization: `Bearer ${key}` },
+        },
+      },
+    },
+  }, null, 2)
+}
+
 export function headerSnippet(key: string): string {
   return `Authorization: Bearer ${key}`
 }

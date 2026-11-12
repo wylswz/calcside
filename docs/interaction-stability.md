@@ -430,20 +430,34 @@ proxying a scratch dev API + worker.
   no fake restore action.
 - **Graph view**: a Code|Graph segmented control (`?nbview=graph`, C4)
   swaps the cards for a fixed-height dependency graph fed by
-  `notebook.graph` — provider→consumer variable links, per-section
+  `notebook.graph` — React Flow renders the dagre-laid-out sections
+  and their provider→consumer variable links, per-section
   reads/issues in a side aside; both panels stay mounted so editors,
   drafts, autosave queues and scroll survive switches and polls
   (C2/C3 — `graph C2: a dirty draft survives Code→Graph→Code`). The
-  graph renders a held structural snapshot (names in order + edges +
-  diagnostics): a poll that changes the structure raises a reserved
-  "Graph changed — Refresh" slot instead of re-laying out, hidden
-  views adopt silently, and live state/once/description still paint
-  (S5/S4 — `graph S5: a polled structure waits behind Refresh; node
-  boxes hold` measures identical boxes until Refresh). Selection is
+  graph is a DERIVED view of the live polled structure — the S5 hold
+  applies to the editable card list, not here: every poll re-runs the
+  deterministic dagre layout and animates to it — existing nodes
+  tween ~250ms ease-out in JS (edges follow because React Flow
+  recomputes edge geometry from node positions each frame), new
+  nodes/edges fade in at their final spot, removed ones fade out then
+  unmount, and a superseding poll retargets the in-flight tween from
+  the current interpolated positions (no snap, no queue). An
+  unchanged structure yields bit-identical positions, so a state-only
+  poll repaints dots/labels and moves NOTHING (`graph: a state-only
+  poll repaints without moving nodes or viewport`); under
+  `prefers-reduced-motion` the new layout applies instantly with no
+  fades (`graph: reduced motion applies a re-layout with no
+  intermediate frames`). The viewport NEVER moves on a poll — fit
+  runs once on first reveal, the Controls fit button and
+  selection-driven pans are the only other viewport actions
+  (`graph: a polled structure re-lays out live; the viewport never
+  moves`, `graph: zoom persists across polls`). Selection is
   `?section=` and paint-only — ancestors/descendants and links
   highlight by colour/opacity, never geometry (`graph S1: selecting a
-  node never moves a node`); a section removed since the snapshot
-  keeps a muted paint. The selected node IS the active section: a
+  node never moves a node`); a section deleted by a poll clears
+  `?section=` (`graph: deleting a section removes its node and clears
+  the selection`). The selected node IS the active section: a
   directory chip click selects the node (pressed + aside) and scrolls
   the canvas just enough to reveal it, a node click moves the chip's
   `aria-current`, and clearing the selection clears the chip — the

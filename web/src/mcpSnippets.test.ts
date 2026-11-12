@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { claudeCodeSnippet, cursorSnippet, devinSnippet, headerSnippet, mcpURL } from './mcpSnippets.ts'
+import { claudeCodeSnippet, cursorSnippet, devinSnippet, headerSnippet, mcpURL, opencodeSnippet } from './mcpSnippets.ts'
 
 test('mcpURL appends /mcp', () => {
   assert.equal(mcpURL('http://localhost:5173'), 'http://localhost:5173/mcp')
@@ -25,6 +25,15 @@ test('devin snippet targets Streamable HTTP with the key', () => {
   assert.equal(o.mcpServers.calcside.url, 'https://x.example/mcp')
   assert.equal(o.mcpServers.calcside.transport, 'http')
   assert.equal(o.mcpServers.calcside.headers.Authorization, 'Bearer cs_abc')
+})
+
+test('opencode snippet is remote MCP JSON with oauth off and the bearer header', () => {
+  const s = opencodeSnippet('https://x.example/mcp', 'cs_abc')
+  const o = JSON.parse(s)
+  assert.equal(o.mcp.servers.calcside.type, 'remote')
+  assert.equal(o.mcp.servers.calcside.url, 'https://x.example/mcp')
+  assert.equal(o.mcp.servers.calcside.oauth, false)
+  assert.equal(o.mcp.servers.calcside.headers.Authorization, 'Bearer cs_abc')
 })
 
 test('generic header snippet', () => {

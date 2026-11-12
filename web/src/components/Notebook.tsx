@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { api, ApiError, Instance, Notebook as NotebookData, NotebookSectionResponse, RunSectionsResponse, SaveNotebookSectionResponse } from '../api'
@@ -6,7 +6,6 @@ import { AutosaveQueue } from '../autosave'
 import { Button, Confirm, Icon, Loading, Notice, RevealNew, SignalMark, SwapLabel } from './ui'
 import { SectionCard, SectionValue, sectionFingerprint, sectionPath, sectionStateLabel } from './SectionCard'
 import { NotebookGraph, type GraphStructure } from './NotebookGraph'
-import { layoutGraph, NODE_H, NODE_W, type GraphEdge } from '../notebookGraph'
 import { useHeldOrder } from '../stableList'
 import './notebook.css'
 
@@ -55,56 +54,16 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
     })
   }, [setParams])
 
-  // The graph renders a HELD structural snapshot (names in order +
-  // edges + diagnostics, S5): while the graph panel is visible a poll
-  // that changes the structure does not re-layout — it surfaces the
-  // reserved "Graph changed — Refresh" slot instead. Hidden in code
-  // view the latest structure is adopted silently. Node state, once,
-  // description and effects still paint live from `sections`.
-  const graphLatest = useMemo<GraphStructure>(() => ({
+  // The graph renders the LIVE structure: every poll re-lays it out —
+  // NotebookGraph tweens node positions (~250ms) and fades entries/
+  // exits while the viewport never moves (S5). State, once,
+  // description and effects paint from the same payload.
+  const graphStructure = useMemo<GraphStructure>(() => ({
     names: sections.map((s) => s.name),
     edges: notebook?.graph?.edges ?? [],
     diagnostics: notebook?.graph?.diagnostics ?? [],
   }), [sections, notebook])
-  const graphKey = useMemo(() => JSON.stringify(graphLatest), [graphLatest])
-  const [graphHeld, setGraphHeld] = useState<{ key: string; data: GraphStructure } | null>(null)
-  const [graphChanged, setGraphChanged] = useState(false)
-  const graphScrollRef = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    if (view !== 'graph') {
-      // Hidden: adopt the latest structure silently. The functional
-      // update returns prev when the key matches so polls do not
-      // re-render or loop.
-      setGraphHeld((prev) => (prev && prev.key === graphKey ? prev : { key: graphKey, data: graphLatest }))
-      setGraphChanged(false)
-      return
-    }
-    if (!graphHeld) {
-      setGraphHeld({ key: graphKey, data: graphLatest })
-      setGraphChanged(false)
-      return
-    }
-    // Visible: a differing structure key only raises the reserved
-    // refresh slot — the held layout is kept (S5). If a later poll
-    // matches the held key again the banner clears itself.
-    const differs = graphHeld.key !== graphKey
-    setGraphChanged((prev) => (prev === differs ? prev : differs))
-  }, [graphKey, graphLatest, view, graphHeld])
-  const graphStructure = graphHeld?.data ?? graphLatest
   const graphMetas = useMemo(() => new Map(sections.map((s) => [s.name, s])), [sections])
-  const refreshGraph = useCallback(() => {
-    // Adopt the latest structure; selection (?section=) is untouched
-    // and the canvas scroll position is restored around the relayout.
-    const el = graphScrollRef.current
-    const sl = el?.scrollLeft ?? 0
-    const st = el?.scrollTop ?? 0
-    setGraphHeld({ key: graphKey, data: graphLatest })
-    setGraphChanged(false)
-    requestAnimationFrame(() => {
-      const el2 = graphScrollRef.current
-      if (el2) { el2.scrollLeft = sl; el2.scrollTop = st }
-    })
-  }, [graphKey, graphLatest])
   const openGraphCode = useCallback((name: string) => {
     setParams((p) => {
       const n = new URLSearchParams(p)
@@ -426,26 +385,9 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
   // In graph view the selected node IS the active section.
   const spyHold = useRef(0)
   const selfScrollAt = useRef(0)
-  const graphStructureRef = useRef(graphStructure)
-  useEffect(() => { graphStructureRef.current = graphStructure })
   const scrollToCard = useCallback((name: string) => {
     selfScrollAt.current = performance.now()
     document.getElementById(`section-${name}`)?.scrollIntoView({ block: 'start' })
-  }, [])
-  // Reads the latest held structure through a ref so the callback — and
-  // the ?section= scroll effect depending on it — keeps a stable
-  // identity across polls.
-  const scrollGraphTo = useCallback((name: string) => {
-    const el = graphScrollRef.current
-    const structure = graphStructureRef.current
-    if (!el) return
-    const layout = layoutGraph(structure.names, structure.edges as GraphEdge[])
-    const box = layout.nodes.find((n) => n.name === name)
-    if (!box) return
-    const cx = box.x + NODE_W / 2
-    const cy = box.y + NODE_H / 2
-    el.scrollLeft = Math.max(0, Math.min(cx - el.clientWidth / 2, el.scrollWidth - el.clientWidth))
-    el.scrollTop = Math.max(0, Math.min(cy - el.clientHeight / 2, el.scrollHeight - el.clientHeight))
   }, [])
   const pickSection = useCallback((name: string) => {
     spyHold.current = performance.now() + 600
@@ -465,20 +407,68 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sectionParam])
 
+  // A ?section= pick whose section disappeared (deleted server-side,
+  // stale deep link) clears itself — the node/card it pointed at is
+  // gone, and the graph aside falls back to the issues list.
+  useEffect(() => {
+    if (!sectionParam || !notebook) return
+    if (!sections.some((s) => s.name === sectionParam)) {
+      setParams((p) => {
+        const n = new URLSearchParams(p)
+        n.delete('section')
+        return n
+      })
+    }
+  }, [sectionParam, sections, notebook, setParams])
+
+  // View-switch scroll continuity (S6): an explicit Code→Graph switch
+  // reveals the graph just under the sticky head instead of inheriting
+  // the cards' deep scroll position; Graph→Code restores the saved
+  // position unless a ?section= navigation owns the scroll. This runs
+  // only on view changes — polls never scroll the page. The scroller
+  // is the window: the console shell has no inner scroll container.
+  // codeScrollY is captured in goView BEFORE the navigation: by the
+  // time any effect runs the browser has already re-laid out and
+  // clamped scrollY against the shorter graph page, so the pre-switch
+  // position only exists in the click handler. Scrolls are instant —
+  // a view switch is already a hard cut, and animation would only race
+  // the user's own scrolling.
+  const graphPanelRef = useRef<HTMLDivElement | null>(null)
+  const codeScrollY = useRef<number | null>(null)
+  const prevView = useRef(view)
+  const goView = useCallback((v: 'code' | 'graph') => {
+    if (v === 'graph' && view === 'code') codeScrollY.current = window.scrollY
+    setView(v)
+  }, [view, setView])
+  useLayoutEffect(() => {
+    const prev = prevView.current
+    prevView.current = view
+    if (prev === view) return
+    if (view === 'graph') {
+      graphPanelRef.current
+        ?.querySelector('.nb-graph')
+        ?.scrollIntoView({ block: 'start' })
+      return
+    }
+    const y = codeScrollY.current
+    codeScrollY.current = null
+    if (y !== null && !sectionParam) {
+      // Force the reflow so scrollTo clamps against the restored card
+      // list's scrollHeight, not the short graph page's.
+      void document.documentElement.scrollHeight
+      window.scrollTo({ top: y })
+    }
+  }, [view, sectionParam])
+
   // C4: ?section=name deep-links scroll the target into view; the
   // outline sets it so a shared URL lands on the same section. In graph
-  // view the target is a node — the canvas scrolls just enough to reveal
-  // it (explicit selection); in code view the card scrolls into view.
+  // view the canvas reveals the node itself through ?section= — the
+  // only scroll this effect owns is the code-view card.
   useEffect(() => {
-    if (!sectionParam) return
-    const t = window.setTimeout(() => {
-      if (view === 'graph') scrollGraphTo(sectionParam)
-      else scrollToCard(sectionParam)
-    }, 300)
+    if (!sectionParam || view === 'graph') return
+    const t = window.setTimeout(() => scrollToCard(sectionParam), 300)
     return () => window.clearTimeout(t)
-    // `view`/`shown.length` re-fire on return from the graph panel and
-    // on held-order reveals — the scroll lands again on the same target.
-  }, [sectionParam, shown.length, view, scrollToCard, scrollGraphTo])
+  }, [sectionParam, shown.length, view, scrollToCard])
 
   useEffect(() => {
     const barH = headRef.current
@@ -692,10 +682,10 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
                 panel's right inner padding, ≥12px clear of its left
                 neighbour (S3 spacing). */}
             <div className="seg-filters nb-view-toggle" role="group" aria-label="Notebook view">
-              <button type="button" aria-pressed={view === 'code'} onClick={() => setView('code')}>
+              <button type="button" aria-pressed={view === 'code'} onClick={() => goView('code')}>
                 Code
               </button>
-              <button type="button" aria-pressed={view === 'graph'} onClick={() => setView('graph')}>
+              <button type="button" aria-pressed={view === 'graph'} onClick={() => goView('graph')}>
                 Graph
               </button>
             </div>
@@ -716,10 +706,9 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
                 data-running={running === m.name ? 'true' : undefined}
                 onClick={() => {
                   setParams((p) => { const n = new URLSearchParams(p); n.set('section', m.name); return n })
-                  // Code view scrolls the card; graph view reveals the
-                  // node on the canvas — both are explicit selections.
-                  if (view === 'graph') scrollGraphTo(m.name)
-                  else scrollToCard(m.name)
+                  // Code view scrolls the card; in graph view the
+                  // ?section= change makes the canvas reveal the node.
+                  if (view !== 'graph') scrollToCard(m.name)
                 }}
               >
                 <span className="nb-dir-ord">{i + 1}.</span>
@@ -788,8 +777,8 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
       </div>
 
       {/* Read-only dependency graph — same fixed box in both themes;
-          structure is the held snapshot, live meta paints on top. */}
-      <div className="nb-graph-panel" hidden={view !== 'graph'}>
+          follows polls live with an animated re-layout. */}
+      <div className="nb-graph-panel" hidden={view !== 'graph'} ref={graphPanelRef}>
         <NotebookGraph
           structure={graphStructure}
           metas={graphMetas}
@@ -801,9 +790,7 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
           runBusy={running !== null}
           runLabel={running === sectionParam ? 'Running…' : 'Run section'}
           onRunSection={runOne}
-          changed={graphChanged}
-          onRefresh={refreshGraph}
-          scrollRef={graphScrollRef}
+          running={running}
         />
       </div>
 

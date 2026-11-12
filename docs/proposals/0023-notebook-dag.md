@@ -86,7 +86,8 @@ direct providers for display.
   exec-with-section ignore the flag for the target itself.
 - **Blocking.** `duplicate_define`, `missing_provider` and `cycle`
   diagnostics intersecting the closure refuse the whole run —
-  `graph_blocked` (409), message `run blocked — <diagnostics>` — and
+  `graph_blocked` (400 — the code is not in `statusByCode`), message
+  `run blocked — <diagnostics>` — and
   nothing executes; an unrelated broken section does not block.
   `parse_error` never blocks: the section runs and fails with the real
   syntax error.
@@ -106,7 +107,7 @@ direct providers for display.
   (reported in `ExecResult.upstream`), fresh upstream is reused without
   a new record. A blocking diagnostic still saves — the save stands —
   and returns `graph_blocked` prefixed `section saved; `. An upstream
-  script failure returns `upstream_failed` (409) `section saved;
+  script failure returns `upstream_failed` (400) `section saved;
   upstream <name> failed: <error>`; the target never runs.
 - **Sectionless exec.** Plain REST `exec` without a section is
   unchanged — still a scratch exec for the SDK, benchmarks and module
@@ -130,17 +131,23 @@ direct providers for display.
 
 ## Console
 
-- The Code/Graph view renders the dependency graph: nodes with live
-  state, edges with variable labels, diagnostics in the aside with a
-  textual "blocks runs" tag on the blocking kinds, selection
-  highlighting, and a held structure snapshot with explicit refresh.
-  A "Run section" action in the aside drives the same run path as the
-  cell gutter.
+- The Code/Graph view renders the dependency graph with React Flow +
+  dagre (`notebookGraph.ts` stays the pure layout module): it follows
+  polls live — a changed structure re-lays out and tweens node
+  positions (~250ms, edges attached), new entries fade in and removed
+  ones fade out, while the viewport only moves on first reveal,
+  selection pans or the Controls fit button; state/once/description
+  repaint in place and an unchanged structure moves nothing. Edges
+  carry variable labels, diagnostics sit in the aside with a textual
+  "blocks runs" tag on the blocking kinds, selection highlighting is
+  `?section=`-driven and paint-only. A "Run section" action in the
+  aside drives the same run path as the cell gutter.
 - Every run first asks the server for a `dry_run` plan, validates the
   displayed-vs-saved fingerprint of every `planned` section, then posts
   the real run with the same revision; `graph_blocked` surfaces the
-  server diagnostic verbatim. The status line counts `reused` sections
-  and the Details modal shows each row's `status` + `reason`.
+  server diagnostic verbatim in the status line's `title`. The status
+  line counts `reused` sections and each batch row's `status` +
+  `reason`.
 - The scratch cell, its directory chip and the "Save as section…"
   promote flow are removed — every console execution belongs to a
   section.
