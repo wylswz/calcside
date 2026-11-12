@@ -338,7 +338,8 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   await expect(page.getByRole('tab', { name: 'Files', exact: true })).toBeVisible()
   // the notebook is the default view; its section editor needs no toggle
   await expect(page.getByRole('tab', { name: 'Notebook' })).toHaveAttribute('aria-selected', 'true')
-  await expect(page.locator('[data-section="work"]')).toBeAttached()
+  // Scoped to the code cards — graph nodes carry data-section too.
+  await expect(page.locator('.nb-cards [data-section="work"]')).toBeAttached()
   // inspect (State) lives in the right rail and is visible by default
   const state = page.locator('[aria-label="State"]')
   await expect(state).toBeVisible()
@@ -453,7 +454,7 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   // it. Activity is a separate addressable view; its heading/filter
   // never move when the run list or filter changes.
   await page.getByRole('tab', { name: 'Notebook' }).click()
-  const workCard = page.locator('[data-section="work"]')
+  const workCard = page.locator('.nb-cards [data-section="work"]')
   await expect(workCard.locator('.cm-editor')).toBeVisible({ timeout: 8000 })
   // the cell's run action is an icon button in the gutter
   const runAction = workCard.getByRole('button', { name: 'Run section' })

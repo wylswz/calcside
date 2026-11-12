@@ -45,7 +45,8 @@ async function runAll(id: string) {
 }
 
 function card(page: import('@playwright/test').Page, name: string) {
-  return page.locator(`[data-section="${name}"]`)
+  // Scoped to the code cards — graph nodes carry data-section too.
+  return page.locator(`.nb-cards [data-section="${name}"]`)
 }
 
 // instance child processes (`<worker> __instance`) — used to simulate a
@@ -444,18 +445,23 @@ test('S1: view-toggle segment boxes are identical active/inactive', async ({ pag
   const toggle = page.locator('.nb-view-toggle')
   const code = toggle.getByRole('button', { name: 'Code' })
   const graph = toggle.getByRole('button', { name: 'Graph' })
-  const codeBefore = (await code.boundingBox())!
-  const graphBefore = (await graph.boundingBox())!
+  // Segment boxes are measured RELATIVE to the toggle: the Code→Graph
+  // switch legitimately scrolls the page to reveal the graph (S6), and
+  // viewport-relative boxes would report that scroll, not a state
+  // change. Inside the toggle, paint-only state can never move them.
+  const rel = async (loc: import('@playwright/test').Locator) => {
+    const [l, t] = await Promise.all([loc.boundingBox(), toggle.boundingBox()])
+    return { x: l!.x - t!.x, y: l!.y - t!.y, width: l!.width, height: l!.height }
+  }
+  const codeBefore = await rel(code)
+  const graphBefore = await rel(graph)
   await graph.click()
   await expect(page.locator('.nb-graph')).toBeVisible()
   // State is paint-only: both segment boxes are unchanged (S1).
-  const codeAfter = (await code.boundingBox())!
-  const graphAfter = (await graph.boundingBox())!
+  const codeAfter = await rel(code)
+  const graphAfter = await rel(graph)
   for (const [a, b] of [[codeBefore, codeAfter], [graphBefore, graphAfter]] as const) {
-    expect(a.width).toBe(b.width)
-    expect(a.height).toBe(b.height)
-    expect(a.x).toBe(b.x)
-    expect(a.y).toBe(b.y)
+    expect(a).toEqual(b)
   }
   await expect(graph).toHaveAttribute('aria-pressed', 'true')
   await expect(code).toHaveAttribute('aria-pressed', 'false')
@@ -940,25 +946,60 @@ test('screenshots: notebook desktop/mobile × light/dark', async ({ page }) => {
 // --- dependency graph view (EP-0023) ----------------------------------------
 
 const graphNode = (page: import('@playwright/test').Page, name: string) =>
-  page.locator(`.nb-graph-node[data-node="${name}"]`)
+  page.locator(`[data-testid="nb-graph-node"][data-section="${name}"]`)
+
+const graphEdge = (page: import('@playwright/test').Page, from: string, to: string) =>
+  page.locator(`.react-flow__edge[data-id="${from}→${to}"]`)
+
+// The React Flow viewport transform — translate + scale as one string.
+const viewportTransform = (page: import('@playwright/test').Page) =>
+  page.locator('.react-flow__viewport').evaluate((el) => (el as HTMLElement).style.transform)
+
+const viewportScale = async (page: import('@playwright/test').Page) => {
+  const t = await viewportTransform(page)
+  const m = /scale\(([-\d.]+)\)/.exec(t)
+  return m ? +m[1] : NaN
+}
 
 async function openGraph(page: import('@playwright/test').Page) {
   await page.locator('.nb-view-toggle').getByRole('button', { name: 'Graph' }).click()
   await expect(page.locator('.nb-graph')).toBeVisible()
 }
 
-// Node boxes relative to the graph layer — the held layout makes them
-// stable across paint-only updates (S1/S5). Layer-relative so a canvas
-// pan can never masquerade as a node move.
+// Node positions in FLOW coordinates, parsed from each React Flow
+// node's translate() — viewport pans/zooms can never masquerade as a
+// node move, and paint-only updates keep these identical (S1/S5).
 async function nodeBoxes(page: import('@playwright/test').Page) {
-  return page.locator('.nb-graph-layer').evaluate((layer) => {
-    const lr = layer.getBoundingClientRect()
-    return [...layer.querySelectorAll<HTMLElement>('.nb-graph-node')].map((el) => {
-      const r = el.getBoundingClientRect()
-      return { x: r.x - lr.x, y: r.y - lr.y, w: r.width, h: r.height }
-    })
-  })
+  return page.locator('.react-flow__node').evaluateAll((els) =>
+    els.map((el) => {
+      const id = el.getAttribute('data-id') ?? ''
+      const m = /translate\(\s*(-?[\d.]+)px\s*,\s*(-?[\d.]+)px/.exec((el as HTMLElement).style.transform)
+      return { id, x: m ? +m[1] : NaN, y: m ? +m[2] : NaN }
+    }).sort((a, b) => a.id.localeCompare(b.id))
+  )
 }
+
+// Every node's SCREEN box inside the canvas box — the first-reveal fit
+// must already have landed (fitView is the only viewport move allowed
+// without a user gesture).
+async function allNodesInsideCanvas(page: import('@playwright/test').Page) {
+  const cb = (await page.locator('.nb-graph-canvas').boundingBox())!
+  const boxes = await page.locator('.react-flow__node').evaluateAll((els) =>
+    els.map((el) => {
+      const r = el.getBoundingClientRect()
+      return { x: r.x, y: r.y, r: r.right, b: r.bottom }
+    })
+  )
+  return boxes.every((b) =>
+    b.x >= cb.x - 1 && b.y >= cb.y - 1 &&
+    b.r <= cb.x + cb.width + 1 && b.b <= cb.y + cb.height + 1
+  )
+}
+
+// Wait until the canvas reports a completed fitView — viewport
+// assertions must not race the first-reveal fit.
+const graphFitted = (page: import('@playwright/test').Page) =>
+  expect(page.locator('.nb-graph-canvas')).toHaveAttribute('data-fitted', '1')
 
 test('graph: provider→consumer edge in reverse page order + duplicate issue', async ({ page }) => {
   const id = await createInstance()
@@ -975,12 +1016,13 @@ test('graph: provider→consumer edge in reverse page order + duplicate issue', 
   await expect(card(page, 'reader')).toBeVisible()
   await openGraph(page)
 
-  await expect(page.locator('.nb-graph-node')).toHaveCount(5)
-  const links = page.locator('.nb-graph-edges g[data-from]')
-  await expect(links).toHaveCount(1)
-  await expect(links.first()).toHaveAttribute('data-from', 'maker')
-  await expect(links.first()).toHaveAttribute('data-to', 'reader')
-  await expect(links.first()).toContainText('price')
+  await expect(page.locator('.react-flow__node')).toHaveCount(5)
+  // One resolved provider→consumer link — the edge id carries the
+  // direction (from→to) and its label names the variable.
+  await expect(page.locator('.react-flow__edge')).toHaveCount(1)
+  const link = graphEdge(page, 'maker', 'reader')
+  await expect(link).toBeVisible()
+  await expect(link).toContainText('price')
 
   // The aside lists the duplicate definition with its sections, tags it
   // as run-blocking, and the header slot carries the execution note.
@@ -1011,25 +1053,128 @@ test('graph C2: a dirty draft survives Code→Graph→Code', async ({ page }) =>
   await expect(c.locator('.cm-content')).toContainText('x = 999')
 })
 
-test('graph S5: a polled structure waits behind Refresh; node boxes hold', async ({ page }) => {
+test('graph: a polled structure re-lays out live; the viewport never moves', async ({ page }) => {
   const id = await createInstance()
   await saveSection(id, 'aaa', 'a = 1')
   await saveSection(id, 'bbb', 'b = a + 1')
   await page.goto(`${rt.viteURL}/instances/${id}`)
   await openGraph(page)
   await expect(page.locator('.nb-graph-node')).toHaveCount(2)
+  await graphFitted(page)
   const before = await nodeBoxes(page)
+  const vpBefore = await viewportTransform(page)
 
-  // A server-side write lands on the next poll: the held layout must
-  // not move — the reserved refresh slot appears instead (S5/S4).
-  await saveSection(id, 'ccc', 'c = 2')
-  await expect(page.locator('.nb-graph-refresh')).toBeVisible({ timeout: 20_000 })
-  await expect(page.locator('.nb-graph-node')).toHaveCount(2)
-  expect(await nodeBoxes(page)).toEqual(before)
+  // A server-side write lands on the next poll — no user action: the
+  // graph follows it live. ccc joins bbb's rank, so the deterministic
+  // re-layout really does move an existing node.
+  await saveSection(id, 'ccc', 'c = a + 1')
+  await expect(page.locator('.nb-graph-node')).toHaveCount(3, { timeout: 20_000 })
+  await expect(graphEdge(page, 'aaa', 'ccc')).toBeVisible({ timeout: 10_000 })
+  // Let the ~250ms tween finish, then the boxes are the new layout and
+  // stable — and at least one existing node actually moved.
+  await page.waitForTimeout(500)
+  const settled = await nodeBoxes(page)
+  await page.waitForTimeout(300)
+  expect(await nodeBoxes(page)).toEqual(settled)
+  // The pre-existing nodes really did re-lay out (ccc joined bbb's
+  // rank), not just appended.
+  const shared = settled.filter((n) => before.some((b) => b.id === n.id))
+  expect(shared).not.toEqual(before)
+  const pos = Object.fromEntries(settled.map((n) => [n.id, n]))
+  // aaa stays left of the rank-1 pair; bbb and ccc share that rank.
+  expect(pos['aaa'].x).toBeLessThan(pos['bbb'].x)
+  expect(pos['aaa'].x).toBeLessThan(pos['ccc'].x)
+  expect(Math.abs(pos['bbb'].x - pos['ccc'].x)).toBeLessThan(1)
+  expect(pos['bbb'].y).not.toBe(pos['ccc'].y)
+  // Polls never touch the viewport (S5).
+  expect(await viewportTransform(page)).toBe(vpBefore)
+})
 
-  await page.locator('.nb-graph-refresh').click()
+test('graph: deleting a section removes its node and clears the selection', async ({ page }) => {
+  const id = await createInstance()
+  await saveSection(id, 'del_a', 'a = 1')
+  await saveSection(id, 'del_b', 'b = a + 1')
+  await saveSection(id, 'keep', 'k = 1')
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  await openGraph(page)
   await expect(page.locator('.nb-graph-node')).toHaveCount(3)
-  await expect(graphNode(page, 'ccc')).toBeVisible()
+  await graphNode(page, 'del_b').click()
+  await expect(page).toHaveURL(/section=del_b/)
+  await expect(graphNode(page, 'del_b')).toHaveAttribute('aria-pressed', 'true')
+
+  const rev = await notebookRevision(id)
+  const dr = await rt.client.delete(`/api/v1/instances/${id}/sections/del_b?revision=${rev}`)
+  expect(dr.status()).toBe(200)
+  // The node fades out and unmounts on the next poll; the vanished
+  // selection clears ?section= so the aside falls back to issues.
+  await expect(page.locator('.nb-graph-node')).toHaveCount(2, { timeout: 20_000 })
+  await expect(graphNode(page, 'del_b')).toHaveCount(0)
+  await expect(page).not.toHaveURL(/section=/, { timeout: 10_000 })
+  await expect(graphNode(page, 'keep')).toBeVisible()
+})
+
+test('graph: a state-only poll repaints without moving nodes or viewport', async ({ page }) => {
+  const id = await createInstance()
+  await saveSection(id, 'st_a', 'a = 1')
+  await saveSection(id, 'st_b', 'b = a + 1')
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  await openGraph(page)
+  await expect(graphNode(page, 'st_a')).toHaveAttribute('data-state', 'not_run')
+  await graphFitted(page)
+  const before = await nodeBoxes(page)
+  const vpBefore = await viewportTransform(page)
+
+  // Run via the API — the next poll only changes state metadata: the
+  // deterministic layout is identical, so no tween runs and nothing
+  // geometric changes (S5).
+  const rr = await rt.client.post(`/api/v1/instances/${id}/notebook/run`, { data: { sections: 'all' } })
+  expect(rr.status()).toBe(200)
+  await expect(graphNode(page, 'st_a')).toHaveAttribute('data-state', 'fresh', { timeout: 20_000 })
+  await expect(graphNode(page, 'st_b')).toHaveAttribute('data-state', 'fresh', { timeout: 20_000 })
+  expect(await nodeBoxes(page)).toEqual(before)
+  expect(await viewportTransform(page)).toBe(vpBefore)
+})
+
+test('graph: reduced motion applies a re-layout with no intermediate frames', async ({ browser }) => {
+  const ctx = await browser.newContext({ reducedMotion: 'reduce', viewport: { width: 1280, height: 720 } })
+  const page = await ctx.newPage()
+  const id = await createInstance()
+  await saveSection(id, 'rm_a', 'a = 1')
+  await saveSection(id, 'rm_b', 'b = a + 1')
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  await openGraph(page)
+  await expect(page.locator('.nb-graph-node')).toHaveCount(2)
+  await graphFitted(page)
+
+  await saveSection(id, 'rm_c', 'c = b + 1')
+  await expect(page.locator('.nb-graph-node')).toHaveCount(3, { timeout: 20_000 })
+  // No tween: the first observable pose is already the final layout —
+  // a sample now and after the tween window must be identical.
+  const immediate = await nodeBoxes(page)
+  await page.waitForTimeout(350)
+  expect(await nodeBoxes(page)).toEqual(immediate)
+  await ctx.close()
+})
+
+test('graph: ?nbview=graph deep link and reload render nodes fitted — never a false empty state', async ({ page }) => {
+  const id = await createInstance()
+  await saveSection(id, 'deep_a', 'a = 1')
+  await saveSection(id, 'deep_b', 'b = a + 1')
+  // Direct deep link into graph view (regression: the held snapshot
+  // used to freeze the pre-load EMPTY structure here and the graph
+  // stayed "No sections yet" forever).
+  await page.goto(`${rt.viteURL}/instances/${id}?nbview=graph`)
+  await expect(page.locator('.nb-graph')).toBeVisible()
+  await expect(page.locator('.nb-graph-node')).toHaveCount(2)
+  await graphFitted(page)
+  await expect(page.locator('.nb-graph-empty')).toHaveCount(0)
+  await expect.poll(() => allNodesInsideCanvas(page), { timeout: 10_000 }).toBe(true)
+
+  // Reload on the same URL — same expectation.
+  await page.reload()
+  await expect(page.locator('.nb-graph-node')).toHaveCount(2, { timeout: 20_000 })
+  await graphFitted(page)
+  await expect(page.locator('.nb-graph-empty')).toHaveCount(0)
 })
 
 test('graph S1: selecting a node never moves a node', async ({ page }) => {
@@ -1038,12 +1183,18 @@ test('graph S1: selecting a node never moves a node', async ({ page }) => {
   await saveSection(id, 'cons', 'w = v + 1')
   await page.goto(`${rt.viteURL}/instances/${id}`)
   await openGraph(page)
+  await graphFitted(page)
   const before = await nodeBoxes(page)
+  const vpBefore = await viewportTransform(page)
 
   await graphNode(page, 'cons').click()
   await expect(graphNode(page, 'cons')).toHaveAttribute('aria-pressed', 'true')
-  // Selection is paint-only: every node keeps its exact box (S1).
+  // Give any (incorrect) selection pan a chance to run before asserting.
+  await page.waitForTimeout(300)
+  // Selection is paint-only: every node keeps its exact box and the
+  // viewport never moves for a direct node click (S1).
   expect(await nodeBoxes(page)).toEqual(before)
+  expect(await viewportTransform(page)).toBe(vpBefore)
   // Ancestor/descendant highlight applied without geometry changes.
   await expect(graphNode(page, 'prov')).toHaveClass(/is-hi/)
   await expect(page.locator('.nb-graph-aside')).toContainText('Reads')
@@ -1252,6 +1403,108 @@ test('run: a failed section shows its error on its card after a batch run', asyn
   await expect(bad.locator('.nb-output-err .nb-output-pre')).toContainText('boom-marker', { timeout: 15_000 })
 })
 
+// --- DAG execution coverage (EP-0023) — real API, no mocks ------------------
+
+test('run: a shared diamond upstream executes exactly once', async () => {
+  const id = await createInstance()
+  // src feeds BOTH mid_a and mid_b, which feed sink — the plan must
+  // dedupe the shared upstream, not run it per consumer.
+  await saveSection(id, 'src', 'base = 10')
+  await saveSection(id, 'mid_a', 'a = base + 1')
+  await saveSection(id, 'mid_b', 'b = base + 2')
+  await saveSection(id, 'sink', 'total = a + b')
+  const execsBefore = (await (await rt.client.get(`/api/v1/instances/${id}/executions`)).json()).executions.length
+
+  const r = await rt.client.post(`/api/v1/instances/${id}/notebook/run`, { data: { sections: 'sink' } })
+  expect(r.status()).toBe(200)
+  const report = (await r.json()).report
+  const srcRows = report.results.filter((x: { name: string }) => x.name === 'src')
+  expect(srcRows).toHaveLength(1)
+  expect(srcRows[0].status).toBe('ok')
+  // src, mid_a, mid_b, sink — four execs, not five.
+  const execsAfter = (await (await rt.client.get(`/api/v1/instances/${id}/executions`)).json()).executions.length
+  expect(execsAfter).toBe(execsBefore + 4)
+  // Plan order stays topological: src before its consumers.
+  const names = report.results.map((x: { name: string }) => x.name)
+  expect(names.indexOf('src')).toBeLessThan(names.indexOf('mid_a'))
+  expect(names.indexOf('src')).toBeLessThan(names.indexOf('mid_b'))
+})
+
+test('run: duplicate/cycle diagnostics block their sections but not an unrelated target', async () => {
+  const id = await createInstance()
+  // duplicate_define: `dup` defined twice, read by dup_user.
+  await saveSection(id, 'dup_a', 'dup = 1')
+  await saveSection(id, 'dup_b', 'dup = 2')
+  await saveSection(id, 'dup_user', 'show = dup + 1')
+  // cycle: cyc_a uses what cyc_b defines and vice versa.
+  await saveSection(id, 'cyc_a', 'va = vb + 1')
+  await saveSection(id, 'cyc_b', 'vb = va + 1')
+  // unrelated: no shared names, no diagnostics on its closure.
+  await saveSection(id, 'ok_sec', 'x = 1')
+
+  const execsBefore = (await (await rt.client.get(`/api/v1/instances/${id}/executions`)).json()).executions.length
+
+  // The unrelated section runs clean — diagnostics elsewhere don't leak.
+  const ok = await rt.client.post(`/api/v1/instances/${id}/notebook/run`, { data: { sections: 'ok_sec' } })
+  expect(ok.status()).toBe(200)
+
+  // dup_user's closure touches the duplicate → graph_blocked, nothing runs.
+  const dup = await rt.client.post(`/api/v1/instances/${id}/notebook/run`, { data: { sections: 'dup_user' } })
+  expect(dup.status()).toBe(400)
+  const dupBody = await dup.json()
+  expect(dupBody.error.code).toBe('graph_blocked')
+  expect(dupBody.error.message).toContain('dup')
+
+  // cyc_a's closure contains the cycle → graph_blocked too.
+  const cyc = await rt.client.post(`/api/v1/instances/${id}/notebook/run`, { data: { sections: 'cyc_a' } })
+  expect(cyc.status()).toBe(400)
+  const cycBody = await cyc.json()
+  expect(cycBody.error.code).toBe('graph_blocked')
+
+  // Only ok_sec ever executed — the blocked runs sent nothing.
+  const execsAfter = (await (await rt.client.get(`/api/v1/instances/${id}/executions`)).json()).executions.length
+  expect(execsAfter).toBe(execsBefore + 1)
+})
+
+test('run: a failed upstream stops the downstream section', async () => {
+  const id = await createInstance()
+  // prov_fail defines v statically but raises at runtime; cons_after
+  // reads v, so the plan pulls the provider in first and fail-fast
+  // must leave the consumer unreached.
+  await saveSection(id, 'prov_fail', 'v = 1\nfail("upstream-boom")')
+  await saveSection(id, 'cons_after', 'w = v + 1')
+  const execsBefore = (await (await rt.client.get(`/api/v1/instances/${id}/executions`)).json()).executions.length
+
+  const r = await rt.client.post(`/api/v1/instances/${id}/notebook/run`, { data: { sections: 'cons_after' } })
+  expect(r.status()).toBe(200)
+  const report = (await r.json()).report
+  const prov = report.results.find((x: { name: string }) => x.name === 'prov_fail')
+  const cons = report.results.find((x: { name: string }) => x.name === 'cons_after')
+  expect(prov.status).toBe('error')
+  expect(cons.status).toBe('not_run')
+  // Only the provider ever executed — the consumer never ran.
+  const execsAfter = (await (await rt.client.get(`/api/v1/instances/${id}/executions`)).json()).executions.length
+  expect(execsAfter).toBe(execsBefore + 1)
+})
+
+test('run: dry_run reports the plan without executing anything', async () => {
+  const id = await createInstance()
+  await saveSection(id, 'dry_a', 'a = 1')
+  await saveSection(id, 'dry_b', 'b = a + 1')
+  const execsBefore = (await (await rt.client.get(`/api/v1/instances/${id}/executions`)).json()).executions.length
+
+  const r = await rt.client.post(`/api/v1/instances/${id}/notebook/run`, { data: { sections: 'all', dry_run: true } })
+  expect(r.status()).toBe(200)
+  const report = (await r.json()).report
+  expect(report.results.every((x: { status: string }) => x.status === 'planned')).toBe(true)
+  // Nothing executed, nothing claimed: executions unchanged and every
+  // section still not_run on the next read.
+  const execsAfter = (await (await rt.client.get(`/api/v1/instances/${id}/executions`)).json()).executions.length
+  expect(execsAfter).toBe(execsBefore)
+  const nb = await (await rt.client.get(`/api/v1/instances/${id}/notebook`)).json()
+  expect(nb.notebook.sections.every((s: { state: string }) => s.state === 'not_run')).toBe(true)
+})
+
 test('graph: Run section from the aside runs it and repaints without moving nodes', async ({ page }) => {
   const id = await createInstance()
   await saveSection(id, 'g1', 'v = 1')
@@ -1259,7 +1512,9 @@ test('graph: Run section from the aside runs it and repaints without moving node
   await page.goto(`${rt.viteURL}/instances/${id}`)
   await openGraph(page)
   await expect(graphNode(page, 'g1')).toHaveAttribute('data-state', 'not_run')
+  await graphFitted(page)
   const before = await nodeBoxes(page)
+  const vpBefore = await viewportTransform(page)
 
   await graphNode(page, 'g2').click()
   await page.locator('.nb-graph-aside').getByRole('button', { name: 'Run section' }).click()
@@ -1267,8 +1522,272 @@ test('graph: Run section from the aside runs it and repaints without moving node
   await expect(page.locator('.nb-status')).toContainText('ran', { timeout: 30_000 })
   await expect(graphNode(page, 'g2')).toHaveAttribute('data-state', 'fresh', { timeout: 20_000 })
   await expect(graphNode(page, 'g1')).toHaveAttribute('data-state', 'fresh', { timeout: 20_000 })
-  // Feedback lives in the toolbar status line; node boxes never moved (S1).
+  // Feedback lives in the toolbar status line; node boxes and the
+  // viewport never moved (S1).
   expect(await nodeBoxes(page)).toEqual(before)
+  expect(await viewportTransform(page)).toBe(vpBefore)
+})
+
+test('graph: first reveal fits a three-layer chain inside the canvas', async ({ page }) => {
+  const id = await createInstance()
+  await saveSection(id, 'src', 'price = 10')
+  await saveSection(id, 'mid', 'total = price * 2')
+  await saveSection(id, 'out', 'print(total)')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  await openGraph(page)
+  await expect(page.locator('.react-flow__node')).toHaveCount(3)
+  // fitView ran on first reveal — every node inside the canvas, zoom
+  // capped at 100% (no upscaling).
+  await expect.poll(() => allNodesInsideCanvas(page), { timeout: 10_000 }).toBe(true)
+  expect(await viewportScale(page)).toBeLessThanOrEqual(1.001)
+})
+
+test('graph: zoom persists across polls; a chip click pans a node into view', async ({ page }) => {
+  const id = await createInstance()
+  // Six ranks — wider than the canvas at fit zoom, so zooming in pushes
+  // the tail nodes off-screen.
+  await saveSection(id, 'n1', 'v1 = 1')
+  for (let i = 2; i <= 6; i++) await saveSection(id, `n${i}`, `v${i} = v${i - 1} + 1`)
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  await openGraph(page)
+  await expect(page.locator('.react-flow__node')).toHaveCount(6)
+  await expect.poll(() => allNodesInsideCanvas(page), { timeout: 10_000 }).toBe(true)
+  await graphFitted(page)
+
+  // Zoom in through the Controls button — an explicit user action.
+  const z0 = await viewportScale(page)
+  for (let i = 0; i < 3; i++) await page.locator('.react-flow__controls-zoomin').click()
+  await expect.poll(() => viewportScale(page)).toBeGreaterThan(z0 * 1.5)
+  const vpZoomed = await viewportTransform(page)
+  const zZoomed = await viewportScale(page)
+
+  // A poll lands a new section: the graph re-lays out live (tail
+  // fades in at the end of the chain) and the user's zoom must not
+  // reset — polls never touch the viewport (S5).
+  await saveSection(id, 'tail', 'v7 = v6 + 1')
+  await expect(page.locator('.react-flow__node')).toHaveCount(7, { timeout: 20_000 })
+  await expect(graphNode(page, 'tail')).toBeVisible()
+  await page.waitForTimeout(400) // let the re-layout tween settle
+  expect(await viewportTransform(page)).toBe(vpZoomed)
+
+  // n6 sits off-screen at this zoom; its chip click pans it into view
+  // at the SAME zoom — only the translate may change.
+  await page.locator('.nb-directory .nb-dir-row', { hasText: 'n6' }).click()
+  await expect(graphNode(page, 'n6')).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(async () => {
+    const b = (await graphNode(page, 'n6').boundingBox())!
+    const cb = (await page.locator('.nb-graph-canvas').boundingBox())!
+    return b.x >= cb.x - 1 && b.y >= cb.y - 1 &&
+      b.x + b.width <= cb.x + cb.width + 1 && b.y + b.height <= cb.y + cb.height + 1
+  }, { timeout: 5_000 }).toBe(true)
+  // The 200ms pan interpolates zoom mid-flight (d3-zoom); wait for it to settle.
+  await expect.poll(async () => Math.abs(await viewportScale(page) - zZoomed) < 0.001,
+    { timeout: 5_000 }).toBe(true)
+  expect(await viewportTransform(page)).not.toBe(vpZoomed)
+})
+
+test('graph: the wheel over the canvas still scrolls the page', async ({ page }) => {
+  const id = await createInstance()
+  await saveSection(id, 'w1', 'a = 1')
+  await saveSection(id, 'w2', 'b = a + 1')
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  // A short viewport makes the fixed-height graph box taller than the
+  // remaining page — the window must still scroll with the pointer
+  // over the canvas (panOnScroll stays off; wheel is not captured).
+  await page.setViewportSize({ width: 1440, height: 460 })
+  await openGraph(page)
+  await expect(page.locator('.react-flow__node')).toHaveCount(2)
+  await graphFitted(page)
+
+  const vpBefore = await viewportTransform(page)
+  await page.evaluate(() => window.scrollTo(0, 10))
+  const cb = (await page.locator('.nb-graph-canvas').boundingBox())!
+  await page.mouse.move(cb.x + cb.width / 2, cb.y + cb.height / 2)
+  const y0 = await page.evaluate(() => window.scrollY)
+  await page.mouse.wheel(0, 300)
+  await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 5_000 }).toBeGreaterThan(y0)
+  // The canvas viewport itself did not pan — the wheel belonged to
+  // the page.
+  expect(await viewportTransform(page)).toBe(vpBefore)
+})
+
+test('graph: a structural poll tweens movers and fades entrants in', async ({ page }) => {
+  const id = await createInstance()
+  await saveSection(id, 'tw_a', 'a = 1')
+  await saveSection(id, 'tw_b', 'b = a + 1')
+  await saveSection(id, 'tw_c', 'c = b + 1')
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  await openGraph(page)
+  await expect(page.locator('.nb-graph-node')).toHaveCount(3)
+  await graphFitted(page)
+
+  // Per-frame sampler: every animation frame records each node's
+  // translate and the wrapper's inline opacity (the fade channel).
+  // It keeps running in the page until cancelled below.
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      __gs: { t: number; n: Record<string, { x: number; y: number; o: number }> }[]
+      __gsa: number
+    }
+    w.__gs = []
+    const loop = () => {
+      const nodes: Record<string, { x: number; y: number; o: number }> = {}
+      document.querySelectorAll('.react-flow__node').forEach((el) => {
+        const nid = el.getAttribute('data-id') ?? ''
+        const m = /translate\(\s*(-?[\d.]+)px\s*,\s*(-?[\d.]+)px/.exec((el as HTMLElement).style.transform)
+        nodes[nid] = {
+          x: m ? +m[1] : NaN,
+          y: m ? +m[2] : NaN,
+          o: parseFloat((el as HTMLElement).style.opacity || '1'),
+        }
+      })
+      w.__gs.push({ t: performance.now(), n: nodes })
+      w.__gsa = requestAnimationFrame(loop)
+    }
+    w.__gsa = requestAnimationFrame(loop)
+  })
+
+  // Two structural changes inside one sampling window: deleting tw_b
+  // drops its edge so tw_c loses its rank and tweens left while tw_b
+  // fades out; the new isolated tw_d fades in at its final position.
+  const rev = await notebookRevision(id)
+  const dr = await rt.client.delete(`/api/v1/instances/${id}/sections/tw_b?revision=${rev}`)
+  expect(dr.status()).toBe(200)
+  await saveSection(id, 'tw_d', 'd = 1')
+  await expect(page.locator('.react-flow__node[data-id="tw_d"]')).toHaveCount(1, { timeout: 20_000 })
+  await page.waitForTimeout(500) // let tweens and fades settle
+  await page.evaluate(() => {
+    const w = window as unknown as { __gsa?: number }
+    if (w.__gsa) cancelAnimationFrame(w.__gsa)
+  })
+  const samples = await page.evaluate(() =>
+    (window as unknown as { __gs: { t: number; n: Record<string, { x: number; y: number; o: number }> }[] }).__gs
+  )
+  expect(samples.length).toBeGreaterThan(30)
+
+  // tw_c moved ranks: some sampled frame sits strictly between its
+  // first and last observed x — proof of a tween, not a jump cut.
+  const cXs = samples.map((s) => s.n['tw_c']?.x).filter((x): x is number => typeof x === 'number' && !Number.isNaN(x))
+  expect(cXs.length).toBeGreaterThan(10)
+  const cMin = Math.min(...cXs)
+  const cMax = Math.max(...cXs)
+  expect(cMax - cMin).toBeGreaterThan(50) // it really moved
+  expect(cXs.some((x) => x > cMin + 5 && x < cMax - 5)).toBe(true)
+
+  // tw_d fades IN: its first sampled opacity is well below 1 (the
+  // layout-effect reconcile means it is never painted at 1 first) and
+  // it ends fully opaque.
+  const dSamples = samples.filter((s) => s.n['tw_d'])
+  expect(dSamples.length).toBeGreaterThan(5)
+  expect(dSamples[0].n['tw_d'].o).toBeLessThan(0.9)
+  expect(dSamples[dSamples.length - 1].n['tw_d'].o).toBeGreaterThan(0.99)
+
+  // tw_b fades OUT: opacity decreases across samples before unmount.
+  const bSamples = samples.filter((s) => s.n['tw_b'])
+  expect(bSamples.length).toBeGreaterThan(3)
+  expect(Math.min(...bSamples.map((s) => s.n['tw_b'].o))).toBeLessThan(0.6)
+})
+
+test('graph: rapid Code↔Graph toggles before first fit still land fitted', async ({ page }) => {
+  const id = await createInstance()
+  await saveSection(id, 'rq_a', 'a = 1')
+  await saveSection(id, 'rq_b', 'b = a + 1')
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  const toggle = page.locator('.nb-view-toggle')
+  const graphBtn = toggle.getByRole('button', { name: 'Graph' })
+  const codeBtn = toggle.getByRole('button', { name: 'Code' })
+  await graphBtn.click()
+  // Hammer the switch while the first fit is still pending — every
+  // hide cancels the scheduled RAFs; each reveal must retry and the
+  // fit must still complete exactly once, never while hidden.
+  for (let i = 0; i < 3; i++) {
+    await codeBtn.click()
+    await graphBtn.click()
+  }
+  await expect(page.locator('.nb-graph')).toBeVisible()
+  await graphFitted(page)
+  await expect.poll(() => allNodesInsideCanvas(page), { timeout: 10_000 }).toBe(true)
+
+  // Once fitted, a structural poll re-lays out without refitting —
+  // the viewport the user sees is the one the fit chose.
+  const vp = await viewportTransform(page)
+  await saveSection(id, 'rq_c', 'c = b + 1')
+  await expect(page.locator('.react-flow__node')).toHaveCount(3, { timeout: 20_000 })
+  await page.waitForTimeout(400)
+  expect(await viewportTransform(page)).toBe(vp)
+
+  // A user zoom is explicit state: hiding and re-revealing the panel
+  // must not refit or reset it (the first fit already ran once).
+  const z0 = await viewportScale(page)
+  for (let i = 0; i < 2; i++) await page.locator('.react-flow__controls-zoomin').click()
+  await expect.poll(() => viewportScale(page)).toBeGreaterThan(z0 * 1.2)
+  const vpZoomed = await viewportTransform(page)
+  await codeBtn.click()
+  await graphBtn.click()
+  await expect(page.locator('.nb-graph')).toBeVisible()
+  await page.waitForTimeout(400)
+  expect(await viewportTransform(page)).toBe(vpZoomed)
+})
+
+test('view switch: Code→Graph reveals the graph; polls never scroll; Code restores scroll', async ({ page }) => {
+  const id = await createInstance()
+  for (let i = 1; i <= 10; i++) await saveSection(id, `sec${i}`, `v${i} = ${i}`)
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  await expect(card(page, 'sec1')).toBeVisible()
+  // Deep scroll in Code view — the page (window) is the scroller.
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+  const yCode = await page.evaluate(() => window.scrollY)
+  expect(yCode).toBeGreaterThan(0)
+
+  // Explicit switch: the graph box lands just under the sticky head,
+  // not at the bottom of the long card list.
+  await page.locator('.nb-view-toggle').getByRole('button', { name: 'Graph' }).click()
+  await expect(page.locator('.nb-graph')).toBeVisible()
+  await graphFitted(page)
+  await expect.poll(async () => {
+    const g = await page.locator('.nb-graph').boundingBox()
+    return g ? g.y : -1
+  }, { timeout: 5_000 }).toBeGreaterThan(60)
+  await page.waitForTimeout(600) // let the smooth scrollIntoView settle
+  const gTop = (await page.locator('.nb-graph').boundingBox())!.y
+  expect(gTop).toBeLessThan(320) // revealed near the viewport top
+  expect(gTop).toBeGreaterThan(60) // and clear of the sticky head
+  const yGraph = await page.evaluate(() => window.scrollY)
+
+  // A structural poll re-lays the graph out but must NOT scroll the
+  // page — viewport pan/zoom and window scroll both stay put.
+  await saveSection(id, 'tail', 'v11 = v10 + 1')
+  await expect(page.locator('.react-flow__node')).toHaveCount(11, { timeout: 20_000 })
+  await page.waitForTimeout(500)
+  expect(await page.evaluate(() => window.scrollY)).toBe(yGraph)
+
+  // Back to Code: the previous card-list scroll position is restored
+  // (no ?section= navigation is involved, so nothing fights it).
+  await page.locator('.nb-view-toggle').getByRole('button', { name: 'Code' }).click()
+  await expect(page.locator('.nb-code')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 5_000 })
+    .toBeGreaterThan(yCode - 120)
+})
+
+test('graph: nodes are keyboard-focusable and Enter/Space select them', async ({ page }) => {
+  const id = await createInstance()
+  await saveSection(id, 'ka', 'a = 1')
+  await saveSection(id, 'kb', 'b = a + 1')
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  await openGraph(page)
+  const ka = graphNode(page, 'ka')
+  const kb = graphNode(page, 'kb')
+  // RF keeps nodes visibility:hidden until measured — wait for the
+  // real box before focusing, or focus() lands nowhere.
+  await expect(ka).toBeVisible()
+  await ka.focus()
+  await page.keyboard.press('Enter')
+  await expect(ka).toHaveAttribute('aria-pressed', 'true')
+  await kb.focus()
+  await page.keyboard.press('Space')
+  await expect(kb).toHaveAttribute('aria-pressed', 'true')
+  await expect(ka).toHaveAttribute('aria-pressed', 'false')
 })
 
 test('screenshots: notebook graph desktop/mobile × light/dark', async ({ page }) => {
@@ -1283,12 +1802,10 @@ test('screenshots: notebook graph desktop/mobile × light/dark', async ({ page }
   await saveSection(id, 'dup_user', 'show = dup + 1')
   await page.goto(`${rt.viteURL}/instances/${id}`)
   await openGraph(page)
-  await expect(page.locator('.nb-graph-node')).toHaveCount(6)
-  // The three-layer chain is fully visible — the canvas never scrolls
-  // horizontally at desktop width.
-  const scroll = page.locator('.nb-graph-scroll')
-  const dims = await scroll.evaluate((el) => ({ sw: el.scrollWidth, cw: el.clientWidth }))
-  expect(dims.sw).toBeLessThanOrEqual(dims.cw + 1)
+  await expect(page.locator('.react-flow__node')).toHaveCount(6)
+  // First reveal fit: every node box sits inside the canvas — no pan
+  // needed at desktop width (fitView is the only allowed viewport move).
+  await expect.poll(() => allNodesInsideCanvas(page), { timeout: 10_000 }).toBe(true)
   // A chip click is the explicit selection in graph view: the node is
   // pressed, the aside opens and the chip carries aria-current — the
   // shots below show the floating head with that active chip.

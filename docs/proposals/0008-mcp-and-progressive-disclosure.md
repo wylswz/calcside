@@ -192,7 +192,8 @@ change accordingly.
 - **After creation**, besides the secret shown once: the MCP URL
   (`{console origin}/mcp`) and tabs with configurations for Claude Code
   (`claude mcp add --transport http …`), Cursor/VS Code JSON, Devin
-  (Customize → MCPs form or CLI config), and a generic
+  (Customize → MCPs form or CLI config), OpenCode (`opencode.json(c)`
+  remote-server JSON), and a generic
   `Authorization: Bearer` header. Snippets use the real key, shown only in
   that dialog.
 - Runs made through MCP or the API by a restricted key appear as **agent**

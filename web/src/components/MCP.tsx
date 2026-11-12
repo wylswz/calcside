@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button, SwapLabel } from './ui'
-import { claudeCodeSnippet, cursorSnippet, devinSnippet, headerSnippet, mcpURL } from '../mcpSnippets'
+import { claudeCodeSnippet, cursorSnippet, devinSnippet, headerSnippet, mcpURL, opencodeSnippet } from '../mcpSnippets'
 
 // CopyBlock renders copyable text (secret or client snippet) with a
 // copy button — one component for every "copy this once" surface.
@@ -36,6 +36,7 @@ export function MCPGuide({ secret, url }: { secret: string; url?: string }) {
     { label: 'Claude Code', text: claudeCodeSnippet(endpoint, secret), hint: 'Run this in a terminal.' },
     { label: 'Cursor / VS Code', text: cursorSnippet(endpoint, secret), hint: 'Add this to the client MCP config.' },
     { label: 'Devin', text: devinSnippet(endpoint, secret), hint: 'Devin cloud: Customize → MCPs → Add custom MCP, then enter the URL and Authorization header. Devin CLI: save this as .devin/mcp_config.json.' },
+    { label: 'OpenCode', text: opencodeSnippet(endpoint, secret), hint: 'Save this in opencode.json(c) in the project, or your global OpenCode config.' },
     { label: 'Any client', text: `URL: ${endpoint}\n${headerSnippet(secret)}`, hint: 'Use these values wherever the client asks for an HTTP MCP server.' },
   ]
   const [tab, setTab] = useState(0)

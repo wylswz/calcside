@@ -234,7 +234,8 @@ fs.write("notes.txt", "Review the exception list before closing the reporting pe
   await expect(previewLink).toBeVisible()
   await expect(previewLink).toHaveAttribute('target', '_blank')
   // the section editor is visible on arrival in the redesigned page
-  const nbCard = page.locator('[data-section="notes"]')
+  // Scoped to the code cards — graph nodes carry data-section too.
+  const nbCard = page.locator('.nb-cards [data-section="notes"]')
   await expect(nbCard.locator('.cm-editor')).toBeVisible()
   const originalCode = await nbCard.locator('.cm-content').innerText()
   const opened = page.waitForEvent('popup')
