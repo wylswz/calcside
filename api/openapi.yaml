@@ -382,7 +382,7 @@ paths:
               $ref: '#/components/schemas/RunSectionsRequest'
       responses:
         '200':
-          description: per-section run report; stops at the first script failure
+          description: per-section run report in dependency order; stops at the first script failure; dry_run reports planned/reused/skipped without executing
           content:
             application/json:
               schema:
@@ -2017,7 +2017,7 @@ components:
       enum: [vault, inline]
     APIErrorCode:
       type: string
-      enum: [already_resolved, auth_failed, bad_capability, bad_policy, bad_request, bad_secret, bad_spec, conflict, csrf, forbidden, fs_error, instance_expired, instance_restored, internal, method_not_allowed, no_fs, not_found, not_running, secrets_disabled, too_large, too_many, unauthorized]
+      enum: [already_resolved, auth_failed, bad_capability, bad_policy, bad_request, bad_secret, bad_spec, conflict, csrf, forbidden, fs_error, graph_blocked, instance_expired, instance_restored, internal, method_not_allowed, no_fs, not_found, not_running, secrets_disabled, too_large, too_many, unauthorized, upstream_failed]
     FieldType:
       type: string
       enum: [int, bool, string, string_list, string_map]
@@ -2532,8 +2532,10 @@ components:
           $ref: '#/components/schemas/ExecSection'
           description: >-
             when set, the section is created or replaced with this code
-            BEFORE it runs — failed code is preserved too. Omit for a
-            scratch exec, which never becomes a section.
+            BEFORE it runs — failed code is preserved too. Running a
+            section first runs every upstream section that is not fresh,
+            in dependency order (see `upstream` in the response). Omit
+            for a scratch exec, which never becomes a section.
     ExecSection:
       type: object
       required: [name]
@@ -2584,6 +2586,13 @@ components:
           type: string
           enum: [not_run, fresh, stale, failed]
           description: the section's state after this run
+        upstream:
+          type: array
+          items: { $ref: '#/components/schemas/RunSectionResult' }
+          description: >-
+            sectioned exec only — the upstream sections the dependency
+            plan ran or reused before this section (ok/reused/skipped,
+            each with its reason)
     FileEntry:
       type: object
       required: [name, path, is_dir, size, mtime]
@@ -2726,9 +2735,42 @@ components:
           type: array
           items: { type: string }
           description: sections whose defines this section reads — providers edited, moved, or deleted leave it stale
+    NotebookGraphEdge:
+      type: object
+      required: [from, to, name]
+      properties:
+        from: { type: string, description: section defining the variable }
+        to: { type: string, description: section reading the variable }
+        name: { type: string, description: variable name }
+    NotebookGraphDiagnostic:
+      type: object
+      required: [kind, message, sections, names]
+      properties:
+        kind:
+          type: string
+          enum: [duplicate_define, cycle, missing_provider, parse_error]
+        message: { type: string }
+        sections:
+          type: array
+          items: { type: string }
+          description: involved section names; a cycle reports one concrete path, start first
+        names:
+          type: array
+          items: { type: string }
+          description: involved variable names — sorted missing names, the duplicated name, or per-hop cycle labels
+    NotebookGraph:
+      type: object
+      required: [edges, diagnostics]
+      properties:
+        edges:
+          type: array
+          items: { $ref: '#/components/schemas/NotebookGraphEdge' }
+        diagnostics:
+          type: array
+          items: { $ref: '#/components/schemas/NotebookGraphDiagnostic' }
     Notebook:
       type: object
-      required: [instance_id, status, incarnation, restored_empty, revision, drift, sections, outline, next]
+      required: [instance_id, status, incarnation, restored_empty, revision, drift, sections, outline, next, graph]
       properties:
         instance_id: { type: string }
         status: { $ref: '#/components/schemas/InstanceStatus' }
@@ -2748,7 +2790,10 @@ components:
         next:
           type: array
           items: { type: string }
-          description: computed guidance (stale/not_run/unbound/drift)
+          description: computed guidance (blocked diagnostics, stale/not_run sections, once/drift)
+        graph:
+          $ref: '#/components/schemas/NotebookGraph'
+          description: dependency graph derived from current saved code
     NotebookResponse:
       type: object
       properties:
@@ -2820,6 +2865,12 @@ components:
           type: integer
           format: int64
           description: notebook CAS; omit to skip the check
+        dry_run:
+          type: boolean
+          description: >-
+            report the run the plan would produce (planned/reused/
+            skipped per section) without executing, claiming the op
+            lease, or restoring a lost instance
     RunSectionResult:
       type: object
       required: [name, status]
@@ -2827,7 +2878,17 @@ components:
         name: { type: string }
         status:
           type: string
-          enum: [ok, error, skipped, not_run]
+          enum: [ok, error, reused, skipped, not_run, planned]
+          description: >-
+            ok/error after an exec; reused = fresh upstream not
+            executed; skipped = once rule; not_run = unreached after
+            a stop; planned = dry-run only, would execute
+        reason:
+          type: string
+          description: >-
+            the planner's reason ("target", "upstream: not fresh",
+            "upstream <name> runs first", "fresh",
+            "once section already succeeded")
         exec_id: { type: string }
         error: { type: string }
         skipped_reason: { type: string }

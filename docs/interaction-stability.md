@@ -125,10 +125,10 @@ Every invariant has an owner mechanism, in order of preference:
 
 | Invariant | Mechanism | Status |
 |---|---|---|
-| S1 | `material.css` paint-only states; static CSS/Tailwind check; e2e "controls keep their box under hover and press"; notebook directory scroll-spy (`aria-current` tint + name colour only) and the State/Files tab active state reuse paint-only styles — e2e "S1: scroll-spy highlight is paint-only" | enforced |
+| S1 | `material.css` paint-only states; static CSS/Tailwind check; e2e "controls keep their box under hover and press"; notebook directory active chip (`aria-current` tint + name colour only, whether set by the scroll-spy or an explicit pick), the Code|Graph segmented control's active segment and the State/Files tab active state reuse paint-only styles — e2e "S1: scroll-spy highlight is paint-only", "S1/S3: a chip click highlights immediately; a user scroll hands back to the spy", "S1: view-toggle segment boxes are identical active/inactive" | enforced |
 | S2 | shared `Menu` (Radix); S1; e2e "the More menu stays where it opened" | enforced |
-| S3 | fixed reveal slot (`RevealNew`); notebook status line + Details modal replace every banner/report above the cells and per-cell run notes sit in the alerts slot; the notebook's sticky two-row head (toolbar + fixed-height directory) is one fixed overlay — cards scroll beneath via `scroll-margin-top`; the run page's progress card reserves its measured waiting height through the running phase (`RunDetail` layout effect + `ResizeObserver`, run-id guarded); e2e "palette controls stay put", run editor placement test, notebook "run feedback never moves the cell", "section directory stays visible while a long notebook scrolls", "jumping to a section lands the card below the sticky head" | partial — builder, detail and notebook covered |
-| S4 | `SwapLabel` and `RevealNew`; notebook Details button toggles `visibility` only and inserter rows keep a fixed height; static label check; e2e "Show latest" and "Show N new", notebook "cell controls keep their box under hover" | enforced for state/request-driven labels and counters; module workbench autosave status, Publish preparation and Run use `SwapLabel`; notebook controls are the ghost/xs scale |
+| S3 | fixed reveal slot (`RevealNew`); the notebook's one-line status slot (`role="status"`, ellipsis) carries every run/lifecycle/block/next notice — its `title` holds the full untruncated text — and per-cell run notes sit in the alerts slot; the notebook's floating panel head (toolbar + fixed-height directory rows inside one opaque rounded surface pinned 8px under the console header, its header gap masked) is one fixed overlay — cards scroll beneath via `scroll-margin-top`; nested radii are concentric and circular (`inner = outer − edge gap`, gap equal on both axes, via `calc()` from shared custom properties); the run page's progress card reserves its measured waiting height through the running phase (`RunDetail` layout effect + `ResizeObserver`, run-id guarded); e2e "palette controls stay put", run editor placement test, notebook "run feedback never moves the cell", "section directory stays visible while a long notebook scrolls", "jumping to a section lands the card below the sticky head", "floating head box is constant across scroll, view switch and a run", "toolbar spacing holds and nested radii are concentric" | partial — builder, detail and notebook covered |
+| S4 | `SwapLabel` and `RevealNew`; inserter rows keep a fixed height; static label check; e2e "Show latest" and "Show N new", notebook "cell controls keep their box under hover" | enforced for state/request-driven labels and counters; module workbench autosave status, Publish preparation and Run use `SwapLabel`; notebook controls are the ghost/xs scale except the seg-filters Code|Graph toggle |
 | S5 | `useHeldOrder` + "Show N new"/"Show latest"; `stableList` unit tests; e2e activity, instance list and notebook sections; the directory keeps held order inside the sticky head (the side-column file list is not polled — refresh is explicit — so it needs no hold) | enforced for polled lists |
 | S6 | scroll-locked `Modal`; e2e "opening a dialog does not shift the page" | enforced for dialogs |
 | C1 | `Modal`/`Menu` return focus, removal falls back to a neighbour; e2e primitives and removal tests | enforced for overlays and removals |
@@ -337,15 +337,20 @@ proxying a scratch dev API + worker.
 
 - **S3/S5**: every notice that used to be a banner or report inserted
   above the cells — lost/expired/restored, run blocks, the batch report,
-  the next-steps list — now lives in one sticky 36px toolbar row
-  (`top` sits under the console header) or behind its Details modal.
-  The row's one-line status slot (`role="status"`, ellipsis) picks the
-  first match of running → restore → blocked → report → lifecycle →
-  next → section count; the Details button is always mounted and only
-  toggles `visibility` (S4). Per-cell run feedback for a
+  the next-steps list — now lives in one sticky toolbar row inside the
+  floating head (`top` sits under the console header). The row's
+  one-line status slot (`role="status"`, ellipsis) picks the first
+  match of running → restore → blocked → report → lifecycle →
+  next → section count; its `title` carries the FULL text — every
+  blocked message, every `name · status — reason` batch row, every
+  next item, one per line — so nothing is hidden behind a modal (there
+  is no Details button any more). Per-cell run feedback for a
   single-section run — block messages, the 409, generic errors and the
   trigger restore — lands on that cell's alerts slot as `.nb-note`
-  (P5) and is cleared at the next run start; the `S3: run feedback
+  (P5) and is cleared at the next run start; a failed batch section's
+  error stays visible on its own card's output block
+  (`a failed section shows its error on its card after a batch run`
+  e2e). The `S3: run feedback
   never moves the cell` e2e measures the second cell's run button and
   the toolbar before/after a run.
 - **S5**: polled section arrivals and reorders wait behind "Show N new"
@@ -360,16 +365,24 @@ proxying a scratch dev API + worker.
   captures the notebook revision BEFORE re-reading the section, so an
   agent write landing in that gap conflicts instead of overwriting
   unseen code (`save CAS gap` e2e: remote code and the local draft both
-  survive). Run flushes pending saves, captures the notebook revision,
-  re-checks `once` against FRESH meta (a stale outline cannot skip the
-  confirmation — the Notebook-level Confirm covers the discovered case),
-  then verifies EVERY selected section: a registered autosave queue must
-  exist (sections held behind "Show N new" or still loading block the
-  run), the queue must be clean, and a per-section detail read must
-  fingerprint-match BOTH the displayed draft and the last saved value —
-  an agent edit landing before the revision capture is caught here, not
-  executed (`run validation` e2e: zero run POSTs, draft preserved). The
-  POST carries only the originally captured revision, queue state is
+  survive). Run flushes ALL pending saves (the dependency closure can
+  pull in any section), reads the notebook fresh for its revision,
+  re-checks `once` against FRESH meta for a single explicit target (a
+  stale outline cannot skip the confirmation — the Notebook-level
+  Confirm covers the discovered case; upstream `once` sections re-run
+  without a prompt), then asks the server for a `dry_run` plan. Only
+  the plan's `planned` sections will execute, so the displayed-vs-saved
+  fingerprint proof covers exactly that set — a registered autosave
+  queue must exist for each (sections held behind "Show N new" or still
+  loading block the run), the queue must be clean, and a per-section
+  detail read must fingerprint-match BOTH the displayed draft and the
+  last saved value — an agent edit landing before the revision capture
+  is caught here, not executed (`run validation` + `run: an agent edit
+  to an upstream section blocks the run` e2e: zero real run POSTs,
+  draft preserved). The real POST reuses the same revision; a 409
+  `graph_blocked` surfaces the server's diagnostic verbatim (not the
+  generic revision text — `run: graph_blocked` e2e), other 409s keep
+  the conflict wording. Queue state is
   re-checked after the awaited reads, and a forced 409 surfaces a
   persistent Conflict state that resolves only through explicit Reload
   server copy / Keep my draft — rendered in the cell's alerts slot
@@ -380,15 +393,13 @@ proxying a scratch dev API + worker.
   Notebook↔Activity switch and verifies the draft survives.
 - **P3**: runs execute saved code only — an unresolved save blocks the
   run with a named notice rather than silently running stale code. One
-  shared run lock serializes every run control in the same tick:
-  section/batch runs set it before their first await, scratch acquires
-  it through the parent's guarded setter (a refused start aborts before
-  posting), and the server op lease remains the authoritative backstop.
-  Each cell's gutter carries an icon run control and ⌘/Ctrl+Enter inside
-  a section editor runs THAT section (capture-phase, never scratch);
-  the scratch ⌘/Ctrl+Enter shortcut only fires for key events targeting
-  its own visible region — section editors and the Activity-hidden
-  notebook cannot trigger it (`shortcut` + `scratch shortcut` e2e).
+  shared run lock serializes every run control in the same tick —
+  section and batch runs set it before their first await, and the
+  server op lease remains the authoritative backstop. Every console
+  execution is a section run — there is no scratch runner. Each cell's
+  gutter carries an icon run control and ⌘/Ctrl+Enter inside a section
+  editor runs THAT section (capture-phase); the `shortcut` e2e asserts
+  the chord posts `/notebook/run` and never a scratch `/exec`.
 - **F2**: section delete and explicit rerun of a succeeded `once`
   section go through `Confirm`; marking a section run-once lives in the
   cell's ⋯ menu ("Mark as run-once" / "Unmark run-once", fixed label per
@@ -409,18 +420,62 @@ proxying a scratch dev API + worker.
   honest partial report (`restored: true`, `stopped_reason:
   instance_restored`) with earlier results retained and the rest
   `not_run` — the status line warns that earlier sections DID execute
-  and the Details modal keeps the full report, including the "do not
+  and its `title` keeps the full report, including the "do not
   blindly retry" warning (`partial restore` e2e, mocked report). Outputs
   are always visible when present (no disclosure widget), capped at
   240px; outputs from a previous incarnation are marked "previous
   runtime", and outputs whose code changed since the run are marked
   "code changed since run". Expired instances are read-only history:
-  the status line says so, no run/edit affordances exist, and scratch
-  shows an unavailable note — there is no fake restore action.
+  the status line says so and no run/edit affordances exist — there is
+  no fake restore action.
+- **Graph view**: a Code|Graph segmented control (`?nbview=graph`, C4)
+  swaps the cards for a fixed-height dependency graph fed by
+  `notebook.graph` — provider→consumer variable links, per-section
+  reads/issues in a side aside; both panels stay mounted so editors,
+  drafts, autosave queues and scroll survive switches and polls
+  (C2/C3 — `graph C2: a dirty draft survives Code→Graph→Code`). The
+  graph renders a held structural snapshot (names in order + edges +
+  diagnostics): a poll that changes the structure raises a reserved
+  "Graph changed — Refresh" slot instead of re-laying out, hidden
+  views adopt silently, and live state/once/description still paint
+  (S5/S4 — `graph S5: a polled structure waits behind Refresh; node
+  boxes hold` measures identical boxes until Refresh). Selection is
+  `?section=` and paint-only — ancestors/descendants and links
+  highlight by colour/opacity, never geometry (`graph S1: selecting a
+  node never moves a node`); a section removed since the snapshot
+  keeps a muted paint. The selected node IS the active section: a
+  directory chip click selects the node (pressed + aside) and scrolls
+  the canvas just enough to reveal it, a node click moves the chip's
+  `aria-current`, and clearing the selection clears the chip — the
+  scroll-spy is inert while the graph is visible (`graph: chip and
+  node selection stay in sync`). The aside lists blocking diagnostics
+  (`duplicate_define`/`missing_provider`/`cycle`) with a textual
+  "blocks runs" tag — never colour alone. "Open code" returns to the
+  cards and the `?section=` scroll lands on the card (`graph: Open
+  code lands on the section card`); a "Run section" action in the
+  aside drives the same `runOne` path as the cell gutter — once
+  confirmation and save validation included — with feedback in the
+  toolbar status line (`graph: Run section from the aside runs it and
+  repaints without moving nodes`). Running sections repaints state
+  dots without moving nodes (`graph: running sections repaints state
+  without moving nodes`). Mobile stacks the aside below the canvas
+  inside the same fixed box (`screenshots: notebook graph desktop/
+  mobile × light/dark`).
 - **C4**: `?section=name` deep-links scroll the addressed card into
   view; the directory chip strip lists ordinal, name and a state dot
   (state also in `title`/sr-only, description in `title`) in held
-  order and deep-links on click. Cells are flat bordered blocks on a
+  order and is the single active-section indicator — a click sets
+  `?section=`, marks the chip `aria-current` immediately and scrolls
+  the card (or, in graph view, selects the node and reveals it on the
+  canvas). In code view an IntersectionObserver whose top edge sits
+  under the head marks the first intersecting chip in shown order —
+  paint-only tint + name colour (S1, measured identical chip boxes);
+  an explicit pick holds the spy until the programmatic scroll settles
+  or the next user scroll (wheel/touch/scroll key/scrollbar) hands
+  control back (`S1/S3: a chip click highlights immediately; a user
+  scroll hands back to the spy`). The strip keeps the active chip
+  visible through its own `scrollLeft`, never `scrollIntoView` (S6).
+  Cells are flat bordered blocks on a
   40px gutter + body grid; the header row carries ordinal, name, state
   badge, the `once` tag, an inline borderless description input and
   SaveStatus/collapse/⋯ actions; collapse hides only the editor —
@@ -431,35 +486,48 @@ proxying a scratch dev API + worker.
   errors go to the status line, and the row keeps its height without
   edit rights (S3). CodeMirror
   editors auto-size (`minHeight` 44px, `maxHeight` 420px) and a
-  just-created section focuses its editor once. Scratch is the last
-  cell with the same chrome (dashed edge) and a "Save as section…"
-  promote action enabled after a successful run. Mobile wraps the
+  just-created section focuses its editor once. There is no scratch
+  cell — every console execution belongs to a section (`no scratch
+  affordance` e2e). Mobile wraps the
   toolbar to two rows and restores 44px hit targets. Screenshots
   `notebook-{desktop,mobile}-{light,dark}.png` plus `-sticky`,
-  `-details`, `-section`/`-scratch` detail shots under
-  `.devin-artifacts/screenshots/`.
+  `-section`/`-notes` detail shots and the 2x `nb-corner-*-2x.png`
+  close-ups under `.devin-artifacts/screenshots/`.
 
 The section directory is no longer a strip that scrolls away with the
-cards: `.nb-head` wraps the toolbar and the directory as one sticky
-two-row overlay of fixed height (`--nb-bar-h` reserves both rows for
-the cards' `scroll-margin-top`), so the outline and run actions stay
-reachable on a long notebook (S3 — the e2e measures the strip pinned
-under the toolbar at scroll bottom and a jumped card landing below the
-head). An IntersectionObserver whose top edge sits under the head marks
-the in-view chip `aria-current` — the first intersecting target in
-shown order, scratch last — a paint-only tint + name colour (S1,
-measured identical chip boxes); the strip then keeps that chip visible
-through its own `scrollLeft`, never `scrollIntoView` (S6). A trailing
-`scratch` chip jumps to `#run-code` and clears `?section=`; a
-single-section run pulses its chip's dot, opacity-only and disabled
-under `prefers-reduced-motion`. On the detail page's side column, an
+cards: `.nb-head` is ONE floating panel — an opaque raised surface
+(`--paper` fill, `--radius-surface`, `--shadow-float`, 1px `--edge`
+border, real `6px 10px` padding, no negative margins) pinned 8px under
+the console header, its header gap masked by an opaque `::before` so
+scrolling content never peeks through. Inside it the toolbar row and
+the 30px directory row are split by one inner hairline; the whole
+panel is a fixed height (`--nb-bar-h` reserves it for the cards'
+`scroll-margin-top` and the observer's `rootMargin`), so the outline,
+the segmented Code|Graph control and the run actions stay reachable on
+a long notebook (S3 — e2e measures the strip pinned, the jumped card
+landing below the head, and the panel box constant across scroll, view
+switch and a run). Spacing is explicit: the toolbar's left group and
+the chip row share the panel's `6px` inner padding (7px from the
+border-box edge), the segmented Code|Graph toggle is the LAST toolbar
+item — ≥12px clear of the "Show N new" slot, its right edge 7px inside
+the panel edge like every corner-near control (the `toolbar spacing
+holds` e2e measures both). Nested rounded corners are concentric and
+circular — the gap is equal on both axes and inner radius = outer
+radius − gap, written as `calc()` from the `--nb-head-*` custom
+properties (every head control takes the panel's 12px corner minus the
+uniform 7px inset = 5px; the toggle thumb takes the track's 5px minus
+its 2px padding = 3px). The active chip's paint-only highlight is set by
+the explicit pick or the scroll-spy as described under C4, and the
+strip keeps it visible through its own `scrollLeft`, never
+`scrollIntoView` (S6). A single-section run pulses its chip's dot, opacity-only and
+disabled under `prefers-reduced-motion`. On the detail page's side
+column, an
 fs-capable instance's State panel and file browser share one "Live
 state" tablist — both panels stay mounted behind `hidden` like the
 Notebook/Activity views (C2/C3, covered by the artifacts e2e) — and
 the bottom Results block is gone, freeing the work surface.
 
-Known gaps: the scratch runner keeps its existing exec behavior (no
-section coupling beyond promote-from-exec); in-app navigation away from
+Known gaps: in-app navigation away from
 a dirty draft is unguarded like the rest of the console — recovery is
 the pending-draft offer on return plus the beforeunload guard; agent-run
 output arriving by poll can change a cell's height by up to the 240px

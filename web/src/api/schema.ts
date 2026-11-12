@@ -1193,7 +1193,7 @@ export interface components {
         /** @enum {string} */
         SecretSource: "vault" | "inline";
         /** @enum {string} */
-        APIErrorCode: "already_resolved" | "auth_failed" | "bad_capability" | "bad_policy" | "bad_request" | "bad_secret" | "bad_spec" | "conflict" | "csrf" | "forbidden" | "fs_error" | "instance_expired" | "instance_restored" | "internal" | "method_not_allowed" | "no_fs" | "not_found" | "not_running" | "secrets_disabled" | "too_large" | "too_many" | "unauthorized";
+        APIErrorCode: "already_resolved" | "auth_failed" | "bad_capability" | "bad_policy" | "bad_request" | "bad_secret" | "bad_spec" | "conflict" | "csrf" | "forbidden" | "fs_error" | "graph_blocked" | "instance_expired" | "instance_restored" | "internal" | "method_not_allowed" | "no_fs" | "not_found" | "not_running" | "secrets_disabled" | "too_large" | "too_many" | "unauthorized" | "upstream_failed";
         /** @enum {string} */
         FieldType: "int" | "bool" | "string" | "string_list" | "string_map";
         /** @enum {string} */
@@ -1587,7 +1587,7 @@ export interface components {
             code: string;
             /** Format: int64 */
             timeout_ms?: number;
-            /** @description when set, the section is created or replaced with this code BEFORE it runs — failed code is preserved too. Omit for a scratch exec, which never becomes a section. */
+            /** @description when set, the section is created or replaced with this code BEFORE it runs — failed code is preserved too. Running a section first runs every upstream section that is not fresh, in dependency order (see `upstream` in the response). Omit for a scratch exec, which never becomes a section. */
             section?: components["schemas"]["ExecSection"];
         };
         ExecSection: {
@@ -1636,6 +1636,8 @@ export interface components {
              * @enum {string}
              */
             section_state?: "not_run" | "fresh" | "stale" | "failed";
+            /** @description sectioned exec only — the upstream sections the dependency plan ran or reused before this section (ok/reused/skipped, each with its reason) */
+            upstream?: components["schemas"]["RunSectionResult"][];
         };
         FileEntry: {
             name: string;
@@ -1762,6 +1764,27 @@ export interface components {
             /** @description sections whose defines this section reads — providers edited, moved, or deleted leave it stale */
             depends_on: string[];
         };
+        NotebookGraphEdge: {
+            /** @description section defining the variable */
+            from: string;
+            /** @description section reading the variable */
+            to: string;
+            /** @description variable name */
+            name: string;
+        };
+        NotebookGraphDiagnostic: {
+            /** @enum {string} */
+            kind: "duplicate_define" | "cycle" | "missing_provider" | "parse_error";
+            message: string;
+            /** @description involved section names; a cycle reports one concrete path, start first */
+            sections: string[];
+            /** @description involved variable names — sorted missing names, the duplicated name, or per-hop cycle labels */
+            names: string[];
+        };
+        NotebookGraph: {
+            edges: components["schemas"]["NotebookGraphEdge"][];
+            diagnostics: components["schemas"]["NotebookGraphDiagnostic"][];
+        };
         Notebook: {
             instance_id: string;
             status: components["schemas"]["InstanceStatus"];
@@ -1778,8 +1801,10 @@ export interface components {
             sections: components["schemas"]["NotebookSectionMeta"][];
             /** @description rendered text outline for agents */
             outline: string;
-            /** @description computed guidance (stale/not_run/unbound/drift) */
+            /** @description computed guidance (blocked diagnostics, stale/not_run sections, once/drift) */
             next: string[];
+            /** @description dependency graph derived from current saved code */
+            graph: components["schemas"]["NotebookGraph"];
         };
         NotebookResponse: {
             notebook?: components["schemas"]["Notebook"];
@@ -1833,11 +1858,18 @@ export interface components {
              * @description notebook CAS; omit to skip the check
              */
             revision?: number;
+            /** @description report the run the plan would produce (planned/reused/ skipped per section) without executing, claiming the op lease, or restoring a lost instance */
+            dry_run?: boolean;
         };
         RunSectionResult: {
             name: string;
-            /** @enum {string} */
-            status: "ok" | "error" | "skipped" | "not_run";
+            /**
+             * @description ok/error after an exec; reused = fresh upstream not executed; skipped = once rule; not_run = unreached after a stop; planned = dry-run only, would execute
+             * @enum {string}
+             */
+            status: "ok" | "error" | "reused" | "skipped" | "not_run" | "planned";
+            /** @description the planner's reason ("target", "upstream: not fresh", "upstream <name> runs first", "fresh", "once section already succeeded") */
+            reason?: string;
             exec_id?: string;
             error?: string;
             skipped_reason?: string;
@@ -2924,7 +2956,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description per-section run report; stops at the first script failure */
+            /** @description per-section run report in dependency order; stops at the first script failure; dry_run reports planned/reused/skipped without executing */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5072,7 +5104,7 @@ export const phaseValues: ReadonlyArray<FlattenedDeepRequired<components>["schem
 export const capabilityNameValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CapabilityName"]> = ["fs", "net", "io", "ext", "interrupt"];
 export const hTTPMethodValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HTTPMethod"]> = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
 export const secretSourceValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SecretSource"]> = ["vault", "inline"];
-export const aPIErrorCodeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["APIErrorCode"]> = ["already_resolved", "auth_failed", "bad_capability", "bad_policy", "bad_request", "bad_secret", "bad_spec", "conflict", "csrf", "forbidden", "fs_error", "instance_expired", "instance_restored", "internal", "method_not_allowed", "no_fs", "not_found", "not_running", "secrets_disabled", "too_large", "too_many", "unauthorized"];
+export const aPIErrorCodeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["APIErrorCode"]> = ["already_resolved", "auth_failed", "bad_capability", "bad_policy", "bad_request", "bad_secret", "bad_spec", "conflict", "csrf", "forbidden", "fs_error", "graph_blocked", "instance_expired", "instance_restored", "internal", "method_not_allowed", "no_fs", "not_found", "not_running", "secrets_disabled", "too_large", "too_many", "unauthorized", "upstream_failed"];
 export const fieldTypeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["FieldType"]> = ["int", "bool", "string", "string_list", "string_map"];
 export const authKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AuthKind"]> = ["session", "api_key", "anonymous"];
 export const artifactPreviewKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ArtifactPreview"]["kind"]> = ["text", "csv", "json", "html"];
@@ -5081,9 +5113,10 @@ export const execSectionRerunValues: ReadonlyArray<FlattenedDeepRequired<compone
 export const execResultSection_stateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExecResult"]["section_state"]> = ["not_run", "fresh", "stale", "failed"];
 export const notebookSectionMetaStateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["NotebookSectionMeta"]["state"]> = ["not_run", "fresh", "stale", "failed"];
 export const notebookSectionMetaRerunValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["NotebookSectionMeta"]["rerun"]> = ["safe", "once"];
+export const notebookGraphDiagnosticKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["NotebookGraphDiagnostic"]["kind"]> = ["duplicate_define", "cycle", "missing_provider", "parse_error"];
 export const saveNotebookSectionRequestRerunValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SaveNotebookSectionRequest"]["rerun"]> = ["safe", "once"];
 export const runSectionsRequestSectionsOneOf0Values: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["RunSectionsRequest"]["sections"]> = ["all", "stale"];
-export const runSectionResultStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["RunSectionResult"]["status"]> = ["ok", "error", "skipped", "not_run"];
+export const runSectionResultStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["RunSectionResult"]["status"]> = ["ok", "error", "reused", "skipped", "not_run", "planned"];
 export const policyKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Policy"]["kind"]> = ["builtin", "rego"];
 export const applicationStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ApplicationStatus"]> = ["draft", "preparing", "ready", "degraded", "disabled"];
 export const reviewChangeCategoryValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ReviewChange"]["category"]> = ["sources", "contract", "grants", "rules", "inputs", "requirements"];

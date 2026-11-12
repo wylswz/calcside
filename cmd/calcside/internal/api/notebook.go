@@ -167,7 +167,11 @@ func (s *strictImpl) RunNotebookSections(ctx context.Context, req gen.RunNoteboo
 	if err != nil {
 		return runNotebookSectionsResp{fail(err)}, nil
 	}
-	report, err := s.d.Sandbox.RunSections(ctx, actorOf(p), req.Id, sel, req.Body.Revision)
+	var dryRun bool
+	if req.Body.DryRun != nil {
+		dryRun = *req.Body.DryRun
+	}
+	report, err := s.d.Sandbox.RunSections(ctx, actorOf(p), req.Id, sel, req.Body.Revision, dryRun)
 	if err != nil {
 		return runNotebookSectionsResp{fail(err)}, nil
 	}

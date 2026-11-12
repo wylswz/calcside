@@ -4,11 +4,13 @@
 // by the request context, and maps service errors onto isError results.
 // Authorization stays in the service layer, so MCP and REST agree.
 //
-// EP-0022: the MCP surface is deliberately coarser than the console's —
-// agents get exec (which auto-saves a section when given section
-// metadata), the notebook outline, section reads, explicit batch runs,
-// and add_section for authoring without execution. Fine-grained
-// save/move/delete authoring stays REST/console-only.
+// EP-0022/EP-0023: the MCP surface is deliberately coarser than the
+// console's — agents get exec (which requires section metadata and
+// runs the section's upstream first), the notebook outline, section
+// reads, explicit batch runs, and add_section for authoring without
+// execution. Fine-grained save/move/delete authoring stays
+// REST/console-only. There is no scratch exec over MCP: every
+// execution belongs to a notebook section.
 package mcp
 
 import (
@@ -37,13 +39,13 @@ type Sandbox interface {
 	Notebook(ctx context.Context, a service.Actor, id string) (*sandbox.NotebookView, error)
 	ReadSection(ctx context.Context, a service.Actor, id, name string, includeOutput bool) (*sandbox.SectionDetail, error)
 	AddSection(ctx context.Context, a service.Actor, id, name, description, code, rerun, after string) (*sandbox.SaveSectionResult, error)
-	RunSections(ctx context.Context, a service.Actor, id string, sel sandbox.SectionSelector, revision *int64) (*sandbox.RunReport, error)
+	RunSections(ctx context.Context, a service.Actor, id string, sel sandbox.SectionSelector, revision *int64, dryRun bool) (*sandbox.RunReport, error)
 	Browse(ctx context.Context, a service.Actor, id, path string, listOnly bool) (*sandbox.FileView, error)
 	Delete(ctx context.Context, a service.Actor, id string) error
 	Prompt(ctx context.Context, a service.Actor, id, toolPrefix string) (*sandbox.PromptView, error)
 }
 
-const instructions = "Calcside runs Starlark in capability-gated instances with durable notebook sections. Call create_instance first, follow the returned prompt, then exec on the returned instance_id. exec with section metadata saves the section before running it — failed code is kept too. notebook shows the outline (states, defines/uses); run executes sections in order; add_section writes code without running it. Denied or policy_denied results mean the boundary refused the call — do not retry the same action."
+const instructions = "Calcside runs Starlark in capability-gated instances with durable notebook sections — the notebook is a dependency graph: a section reads names other sections define, and running a section first runs every upstream section that is not fresh, in dependency order. Call create_instance first, follow the returned prompt, then exec on the returned instance_id — exec requires section={name, description}: every execution belongs to a section. notebook shows the outline (states, defines, reads name ← provider, blocked diagnostics); run_sections executes sections in dependency order; add_section writes code without running it. Denied or policy_denied results mean the boundary refused the call — do not retry the same action."
 
 func errText(err error) *mcp.CallToolResult {
 	return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}
@@ -106,9 +108,12 @@ type addSectionArgs struct {
 }
 
 type runArgs struct {
-	InstanceID string          `json:"instance_id"`
-	Sections   json.RawMessage `json:"sections"`
-	Revision   *int64          `json:"revision,omitempty"`
+	InstanceID string `json:"instance_id"`
+	// Sections is "all", "stale", one name, or a list of names — kept
+	// as any so the tool schema accepts every form.
+	Sections any    `json:"sections"`
+	Revision *int64 `json:"revision,omitempty"`
+	DryRun   bool   `json:"dry_run,omitempty"`
 }
 
 type pathArgs struct {
@@ -152,6 +157,17 @@ func execOutcomeText(out *sandbox.ExecOutcome) string {
 	} else if out.Drift > 0 {
 		fmt.Fprintf(&b, "\n[drift %d · notebook_rev %d]", out.Drift, out.Revision)
 	}
+	if len(out.Upstream) > 0 {
+		parts := make([]string, 0, len(out.Upstream))
+		for _, u := range out.Upstream {
+			s := u.Name + ":" + u.Status
+			if u.Reason != "" {
+				s += " (" + u.Reason + ")"
+			}
+			parts = append(parts, s)
+		}
+		b.WriteString("\nupstream: " + strings.Join(parts, ", "))
+	}
 	return b.String()
 }
 
@@ -186,14 +202,14 @@ func newServerMode(sb Sandbox, a service.Actor, bound string, boundIn *store.Ins
 			})
 	}
 	mcp.AddTool(srv, &mcp.Tool{Name: "exec",
-		Description: "Run Starlark code on an instance; returns printed output or the error. With section {name, description?, rerun?, after?} the section is saved BEFORE running — failed code is preserved as a failed section. Without section it is a scratch exec (never becomes a section; may count as drift)."},
+		Description: "Run Starlark code on an instance AS a notebook section — section {name, description?, rerun?, after?} is required: the section is saved BEFORE running (failed code is preserved as a failed section) and every upstream section that is not fresh runs first, in dependency order. There is no scratch exec over MCP."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in execArgs) (*mcp.CallToolResult, any, error) {
-			var sec *sandbox.SectionInput
-			if in.Section != nil {
-				sec = &sandbox.SectionInput{
-					Name: in.Section.Name, Description: in.Section.Description,
-					Rerun: in.Section.Rerun, After: in.Section.After, Revision: in.Section.Revision,
-				}
+			if in.Section == nil {
+				return errText(service.BadRequest("exec requires section={name, description}: every execution belongs to a notebook section so its inputs and outputs stay visible. For a throwaway probe reuse one section, e.g. name \"probe\".")), nil, nil
+			}
+			sec := &sandbox.SectionInput{
+				Name: in.Section.Name, Description: in.Section.Description,
+				Rerun: in.Section.Rerun, After: in.Section.After, Revision: in.Section.Revision,
 			}
 			out, err := sb.ExecSection(ctx, a, effID(in.InstanceID, bound), in.Code, 0, sec)
 			if err != nil {
@@ -206,7 +222,7 @@ func newServerMode(sb Sandbox, a service.Actor, bound string, boundIn *store.Ins
 			return text(t), nil, nil
 		})
 	mcp.AddTool(srv, &mcp.Tool{Name: "notebook",
-		Description: "Read the instance's notebook outline: every section's state (not_run/fresh/stale/failed), defines/uses, effects, plus guidance. Read-only — never restores a lost instance."},
+		Description: "Read the instance's notebook outline: every section's state (not_run/fresh/stale/failed), defines and reads (name ← provider), effects, blocked diagnostics, plus guidance. Read-only — never restores a lost instance."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in instanceOnlyArgs) (*mcp.CallToolResult, any, error) {
 			v, err := sb.Notebook(ctx, a, effID(in.InstanceID, bound))
 			if err != nil {
@@ -243,18 +259,21 @@ func newServerMode(sb Sandbox, a service.Actor, bound string, boundIn *store.Ins
 	// surface agents get (no alias, no fine-grained authoring tools).
 	// The agent prompt names run_sections so every surface agrees.
 	runSections := func(ctx context.Context, _ *mcp.CallToolRequest, in runArgs) (*mcp.CallToolResult, any, error) {
-		sel, err := parseSections(in.Sections)
+		raw, _ := json.Marshal(in.Sections)
+		sel, err := parseSections(raw)
 		if err != nil {
 			return errText(err), nil, nil
 		}
-		rep, err := sb.RunSections(ctx, a, effID(in.InstanceID, bound), sel, in.Revision)
+		rep, err := sb.RunSections(ctx, a, effID(in.InstanceID, bound), sel, in.Revision, in.DryRun)
 		if err != nil {
 			return errText(err), nil, nil
 		}
 		var b strings.Builder
 		for _, r := range rep.Results {
 			fmt.Fprintf(&b, "%s: %s", r.Name, r.Status)
-			if r.SkippedReason != "" {
+			if r.Reason != "" {
+				b.WriteString(" (" + r.Reason + ")")
+			} else if r.SkippedReason != "" {
 				b.WriteString(" (" + r.SkippedReason + ")")
 			}
 			if r.Error != "" {
@@ -277,7 +296,7 @@ func newServerMode(sb Sandbox, a service.Actor, bound string, boundIn *store.Ins
 		}
 		return text(b.String()), nil, nil
 	}
-	runDesc := "Run notebook sections in order: sections is \"all\", \"stale\", one name, or a list of names. Bulk selections skip once-sections that already succeeded; execution stops at the first failure and reports the rest not_run. On a lost instance the first run restores an EMPTY process and returns instance_restored without executing — call it again afterwards."
+	runDesc := "Run notebook sections in dependency order: sections is \"all\", \"stale\", one name, or a list of names. A run first executes every upstream section that is not fresh; bulk selections skip once-sections that already succeeded unless needed upstream; execution stops at the first failure and reports the rest not_run. Set dry_run to preview planned/reused/skipped without executing. On a lost instance the first run restores an EMPTY process and returns instance_restored without executing — call it again afterwards."
 	mcp.AddTool(srv, &mcp.Tool{Name: "run_sections", Description: runDesc}, runSections)
 	mcp.AddTool(srv, &mcp.Tool{Name: "add_section",
 		Description: "Create a NEW notebook section WITHOUT running it — fails if the name already exists (edit via exec with section metadata instead). Args: name ([a-z][a-z0-9_]{0,47}), description (required, one line), code (may be empty), optional rerun (safe|once) and after_section to insert after a named section. The current notebook revision is fetched server-side."},

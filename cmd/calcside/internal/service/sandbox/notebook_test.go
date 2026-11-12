@@ -182,7 +182,7 @@ func TestNotebookSectionLifecycle(t *testing.T) {
 	}
 
 	// run(stale) re-runs both in order; double sees the new x.
-	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Stale: true}, nil)
+	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Stale: true}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestNotebookFailedSectionPreserved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil)
+	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func TestNotebookOnceSemantics(t *testing.T) {
 	}
 
 	// Bulk run skips it after success.
-	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil)
+	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestNotebookOnceSemantics(t *testing.T) {
 	}
 
 	// Explicit run by name still executes it.
-	rep, err = e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Names: []string{"init"}}, nil)
+	rep, err = e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Names: []string{"init"}}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,17 +364,20 @@ func TestNotebookRestore(t *testing.T) {
 		}
 	}
 
-	// Running "show" alone fails — the process is empty.
-	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Names: []string{"show"}}, nil)
+	// Running "show" alone rebuilds its upstream first: "load" is not
+	// fresh on the empty process, so it runs before "show" — dependency
+	// order, not page order.
+	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Names: []string{"show"}}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Results[0].Status != "error" {
-		t.Fatalf("show on empty process should fail: %+v", rep.Results[0])
+	if len(rep.Results) != 2 || rep.Results[0].Name != "load" || rep.Results[0].Status != "ok" ||
+		rep.Results[1].Name != "show" || rep.Results[1].Status != "ok" {
+		t.Fatalf("show should pull upstream load first: %+v", rep.Results)
 	}
 
 	// run(all) restores state in order.
-	rep, err = e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil)
+	rep, err = e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -554,7 +557,7 @@ func TestNotebookRestoreConcurrency(t *testing.T) {
 	}
 
 	// An explicit re-run now works on the empty process.
-	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Names: []string{"seed"}}, nil)
+	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Names: []string{"seed"}}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -638,6 +641,96 @@ func TestNotebookAddSectionAndOutline(t *testing.T) {
 
 func strPtr(s string) *string { return &s }
 
+// The graph is rebuilt from saved code on every read: a provider
+// declared after its consumer still yields the edge, and duplicate /
+// missing / parse problems surface as diagnostics.
+func TestNotebookGraph(t *testing.T) {
+	e := newNBEnv(t)
+	id := e.create(t)
+
+	// Consumer first, provider second — reversed page order.
+	if _, err := e.svc.AddSection(e.ctx, e.actor, id, "use", "reads price", "total = price * 2", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.AddSection(e.ctx, e.actor, id, "price", "the price", "price = 10", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.AddSection(e.ctx, e.actor, id, "dup1", "first dup", "dup = 1", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.AddSection(e.ctx, e.actor, id, "dup2", "second dup", "dup = 2", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	// A reader makes the duplicate ambiguous-name diagnostic fire;
+	// unread duplicates are harmless and emit nothing.
+	if _, err := e.svc.AddSection(e.ctx, e.actor, id, "use_dup", "reads dup", "v = dup", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.AddSection(e.ctx, e.actor, id, "ghost", "reads nothing saved", "g = ghost + 1", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.AddSection(e.ctx, e.actor, id, "bad", "does not parse", "def broken(:", "", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	nb, err := e.svc.Notebook(e.ctx, e.actor, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nb.Graph.Edges) != 1 ||
+		nb.Graph.Edges[0] != (NotebookGraphEdge{From: "price", To: "use", Name: "price"}) {
+		t.Fatalf("edges: %+v", nb.Graph.Edges)
+	}
+	wantKinds := []string{"parse_error", "duplicate_define", "missing_provider"}
+	if len(nb.Graph.Diagnostics) != len(wantKinds) {
+		t.Fatalf("diagnostics: %+v", nb.Graph.Diagnostics)
+	}
+	for i, k := range wantKinds {
+		if nb.Graph.Diagnostics[i].Kind != k {
+			t.Fatalf("diagnostic %d kind %q want %q: %+v", i, nb.Graph.Diagnostics[i].Kind, k, nb.Graph.Diagnostics)
+		}
+	}
+	if nb.Graph.Diagnostics[0].Message != "bad does not parse" {
+		t.Fatalf("parse diag: %+v", nb.Graph.Diagnostics[0])
+	}
+	if nb.Graph.Diagnostics[1].Message != "dup is defined by dup1, dup2" {
+		t.Fatalf("dup diag: %+v", nb.Graph.Diagnostics[1])
+	}
+	if nb.Graph.Diagnostics[2].Message != "ghost reads ghost — no section defines it" {
+		t.Fatalf("missing diag: %+v", nb.Graph.Diagnostics[2])
+	}
+
+	// Saving new code is reflected on the next read — the graph is
+	// derived, not stored.
+	if _, err := e.svc.SaveSection(e.ctx, e.actor, id, "price", SaveSectionRequest{
+		Code: strPtr("price = 20"), Revision: nb.Revision,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nb2, err := e.svc.Notebook(e.ctx, e.actor, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nb2.Graph.Edges) != 1 || nb2.Graph.Edges[0].Name != "price" {
+		t.Fatalf("edges after save: %+v", nb2.Graph.Edges)
+	}
+}
+
+func TestNotebookGraphEmpty(t *testing.T) {
+	e := newNBEnv(t)
+	id := e.create(t)
+	nb, err := e.svc.Notebook(e.ctx, e.actor, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nb.Graph.Edges == nil || nb.Graph.Diagnostics == nil {
+		t.Fatalf("graph slices must marshal as []: %+v", nb.Graph)
+	}
+	if len(nb.Graph.Edges) != 0 || len(nb.Graph.Diagnostics) != 0 {
+		t.Fatalf("empty graph: %+v", nb.Graph)
+	}
+}
+
 func TestNotebookOutlineJSON(t *testing.T) {
 	e := newNBEnv(t)
 	id := e.create(t)
@@ -715,7 +808,7 @@ func TestNotebookRunDeadRuntimeKeepsExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil)
+	_, err = e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil, false)
 	var se *service.Error
 	if !errors.As(err, &se) || se.Code != types.ErrCodeInstanceRestored {
 		t.Fatalf("dead-first run: %v, want instance_restored", err)
@@ -756,7 +849,7 @@ func TestNotebookRunPartialRestore(t *testing.T) {
 	}
 	specBefore := string(before.Spec)
 
-	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil)
+	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil, false)
 	if err != nil {
 		t.Fatalf("partial run returned error: %v", err)
 	}
@@ -895,10 +988,11 @@ func TestNotebookPrepareRunIncarnationRace(t *testing.T) {
 	}
 }
 
-// TestNotebookProviderRerunStale: A defines x, B reads x. Re-running A
-// with code that no longer defines x must stale B even though A itself
-// is fresh — the binding B's recorded run used is gone.
-func TestNotebookProviderRerunStale(t *testing.T) {
+// TestNotebookProviderDropsDefine: A defines x, B reads x. Re-running A
+// with code that no longer defines x removes the edge — B's read becomes
+// a missing_provider diagnostic and any run touching B is refused with
+// graph_blocked; nothing executes.
+func TestNotebookProviderDropsDefine(t *testing.T) {
 	e := newNBEnv(t)
 	id := e.create(t)
 	if _, err := e.svc.AddSection(e.ctx, e.actor, id, "a", "defines x", "x = 1", "", ""); err != nil {
@@ -907,7 +1001,7 @@ func TestNotebookProviderRerunStale(t *testing.T) {
 	if _, err := e.svc.AddSection(e.ctx, e.actor, id, "b", "reads x", "y = x + 1", "", "a"); err != nil {
 		t.Fatal(err)
 	}
-	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil)
+	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -915,9 +1009,6 @@ func TestNotebookProviderRerunStale(t *testing.T) {
 		if r.Status != "ok" {
 			t.Fatalf("initial run: %+v", rep.Results)
 		}
-	}
-	if got := sectionStateOfView(t, e, id, "b"); got != SectionFresh {
-		t.Fatalf("b after initial run: %s", got)
 	}
 	// Re-run A alone with code that drops x.
 	out, err := e.svc.ExecSection(e.ctx, e.actor, id, "z = 1", 0,
@@ -928,8 +1019,28 @@ func TestNotebookProviderRerunStale(t *testing.T) {
 	if got := sectionStateOfView(t, e, id, "a"); got != SectionFresh {
 		t.Fatalf("a after rerun: %s", got)
 	}
-	if got := sectionStateOfView(t, e, id, "b"); got != SectionStale {
-		t.Fatalf("b after provider rerun: %s, want stale", got)
+	nb, err := e.svc.Notebook(e.ctx, e.actor, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawMissing bool
+	for _, d := range nb.Graph.Diagnostics {
+		if d.Kind == "missing_provider" && d.Message == "b reads x — no section defines it" {
+			sawMissing = true
+		}
+	}
+	if !sawMissing {
+		t.Fatalf("want missing_provider for b: %+v", nb.Graph.Diagnostics)
+	}
+	// Running B is refused — the missing provider is inside its
+	// closure; A is unaffected and stays fresh.
+	_, err = e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Names: []string{"b"}}, nil, false)
+	var se *service.Error
+	if !errors.As(err, &se) || se.Code != types.ErrCodeGraphBlocked {
+		t.Fatalf("run b: %v, want graph_blocked", err)
+	}
+	if got := sectionStateOfView(t, e, id, "b"); got == SectionNotRun {
+		t.Fatalf("b should keep its recorded state, got %s", got)
 	}
 }
 
@@ -942,7 +1053,7 @@ func TestNotebookLostDerivesNotRun(t *testing.T) {
 	if _, err := e.svc.AddSection(e.ctx, e.actor, id, "s1", "first", "x = 1", "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil); err != nil {
+	if _, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if got := sectionStateOfView(t, e, id, "s1"); got != SectionFresh {
@@ -1050,5 +1161,499 @@ func TestNotebookRestoredEmptyAfterFileWrite(t *testing.T) {
 	}
 	if nb.RestoredEmpty {
 		t.Fatal("file upload after restore must clear restored_empty")
+	}
+}
+
+// --- dependency-graph execution (EP-0023) ---
+
+func addSec(t *testing.T, e *nbEnv, id, name, desc, code string) {
+	t.Helper()
+	if _, err := e.svc.AddSection(e.ctx, e.actor, id, name, desc, code, "", ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func execCount(t *testing.T, e *nbEnv, id string) int {
+	t.Helper()
+	exs, err := e.st.ListExecutions(e.ctx, id, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(exs)
+}
+
+func resultByName(rep *RunReport, name string) *RunSectionResult {
+	for i := range rep.Results {
+		if rep.Results[i].Name == name {
+			return &rep.Results[i]
+		}
+	}
+	return nil
+}
+
+// TestNotebookDependencyOrderRun: the provider sits AFTER its consumer
+// in page order — running the consumer executes the provider first,
+// and both end fresh.
+func TestNotebookDependencyOrderRun(t *testing.T) {
+	e := newNBEnv(t)
+	id := e.create(t)
+	addSec(t, e, id, "total", "consumer", "t = price * 2")
+	addSec(t, e, id, "price", "provider", "price = 21")
+
+	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Names: []string{"total"}}, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Results) != 2 ||
+		rep.Results[0].Name != "price" || rep.Results[0].Status != "ok" || rep.Results[0].Reason != "upstream: not fresh" ||
+		rep.Results[1].Name != "total" || rep.Results[1].Status != "ok" || rep.Results[1].Reason != "target" {
+		t.Fatalf("dependency-ordered results: %+v", rep.Results)
+	}
+	if got := sectionStateOfView(t, e, id, "price"); got != SectionFresh {
+		t.Fatalf("price: %s", got)
+	}
+	if got := sectionStateOfView(t, e, id, "total"); got != SectionFresh {
+		t.Fatalf("total: %s", got)
+	}
+}
+
+// TestNotebookFreshUpstreamReused: a fresh upstream is reused — no new
+// execution record — while the explicit target always runs.
+func TestNotebookFreshUpstreamReused(t *testing.T) {
+	e := newNBEnv(t)
+	id := e.create(t)
+	addSec(t, e, id, "seed", "provider", "x = 1")
+	addSec(t, e, id, "use", "consumer", "y = x + 1")
+
+	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rep.Results {
+		if r.Status != "ok" {
+			t.Fatalf("initial run: %+v", rep.Results)
+		}
+	}
+	before := execCount(t, e, id)
+	seedExec := ""
+	nb, _ := e.svc.Notebook(e.ctx, e.actor, id)
+	for _, s := range nb.Sections {
+		if s.Name == "seed" {
+			seedExec = s.LastExecID
+		}
+	}
+
+	rep, err = e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Names: []string{"use"}}, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Results) != 2 ||
+		rep.Results[0].Name != "seed" || rep.Results[0].Status != "reused" || rep.Results[0].Reason != "fresh" ||
+		rep.Results[1].Name != "use" || rep.Results[1].Status != "ok" || rep.Results[1].Reason != "target" {
+		t.Fatalf("reuse plan: %+v", rep.Results)
+	}
+	if got := execCount(t, e, id); got != before+1 {
+		t.Fatalf("execs %d → %d, want exactly one new exec (the target)", before, got)
+	}
+	nb, _ = e.svc.Notebook(e.ctx, e.actor, id)
+	for _, s := range nb.Sections {
+		if s.Name == "seed" && s.LastExecID != seedExec {
+			t.Fatalf("seed gained an exec record: %q → %q", seedExec, s.LastExecID)
+		}
+	}
+}
+
+// TestNotebookEditedUpstreamRestale: editing the provider makes the
+// consumer stale over the edge; running the consumer re-runs upstream
+// then consumer, in that order.
+func TestNotebookEditedUpstreamRestale(t *testing.T) {
+	e := newNBEnv(t)
+	id := e.create(t)
+	addSec(t, e, id, "seed", "provider", "x = 1")
+	addSec(t, e, id, "use", "consumer", "y = x + 1")
+	if _, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	nb, err := e.svc.Notebook(e.ctx, e.actor, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.SaveSection(e.ctx, e.actor, id, "seed", SaveSectionRequest{
+		Code: strPtr("x = 2"), Revision: nb.Revision,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := sectionStateOfView(t, e, id, "seed"); got != SectionStale {
+		t.Fatalf("seed after edit: %s", got)
+	}
+	if got := sectionStateOfView(t, e, id, "use"); got != SectionStale {
+		t.Fatalf("use should be stale via the edge: %s", got)
+	}
+	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Names: []string{"use"}}, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Results) != 2 ||
+		rep.Results[0].Name != "seed" || rep.Results[0].Status != "ok" || rep.Results[0].Reason != "upstream: not fresh" ||
+		rep.Results[1].Name != "use" || rep.Results[1].Status != "ok" || rep.Results[1].Reason != "target" {
+		t.Fatalf("rerun order: %+v", rep.Results)
+	}
+	if got := sectionStateOfView(t, e, id, "use"); got != SectionFresh {
+		t.Fatalf("use after rerun: %s", got)
+	}
+}
+
+// TestNotebookUpstreamFailure: a failing upstream stops the run — the
+// report shows the provider's error and the target not_run; a
+// sectioned exec instead fails with upstream_failed and the target
+// stays unrun.
+func TestNotebookUpstreamFailure(t *testing.T) {
+	e := newNBEnv(t)
+	id := e.create(t)
+	addSec(t, e, id, "prov", "fails at runtime", "v = 1 / 0")
+	addSec(t, e, id, "cons", "consumer", "w = v + 1")
+
+	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Names: []string{"cons"}}, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Results) != 2 ||
+		rep.Results[0].Name != "prov" || rep.Results[0].Status != "error" ||
+		rep.Results[1].Name != "cons" || rep.Results[1].Status != "not_run" {
+		t.Fatalf("fail-fast report: %+v", rep.Results)
+	}
+
+	// Sectioned exec: the save stands, the upstream failure is typed.
+	_, err = e.svc.ExecSection(e.ctx, e.actor, id, "w = v + 2", 0,
+		&SectionInput{Name: "cons", Description: "consumer"})
+	var se *service.Error
+	if !errors.As(err, &se) || se.Code != types.ErrCodeUpstreamFailed {
+		t.Fatalf("want upstream_failed, got %v", err)
+	}
+	if !strings.HasPrefix(se.Msg, "section saved; upstream prov failed:") {
+		t.Fatalf("upstream_failed message: %q", se.Msg)
+	}
+	if got := sectionStateOfView(t, e, id, "cons"); got == SectionFresh {
+		t.Fatal("cons must not be fresh — it never ran")
+	}
+}
+
+// TestNotebookGraphBlockedRuns: missing_provider and read
+// duplicate_define block runs whose closure touches them; an
+// unrelated broken section and unread duplicates do not.
+func TestNotebookGraphBlockedRuns(t *testing.T) {
+	e := newNBEnv(t)
+	id := e.create(t)
+	addSec(t, e, id, "needs", "missing provider", "n = ghost + 1")
+	addSec(t, e, id, "d1", "dup one", "dup = 1")
+	addSec(t, e, id, "d2", "dup two", "dup = 2")
+	addSec(t, e, id, "reader", "reads dup", "r = dup * 2")
+	addSec(t, e, id, "u1", "unread dup one", "tmp = 1")
+	addSec(t, e, id, "u2", "unread dup two", "tmp = 2")
+	addSec(t, e, id, "ok", "clean provider", "v = 7")
+	addSec(t, e, id, "ok2", "clean consumer", "w = v + 1")
+
+	// Unrelated clean run is not blocked.
+	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Names: []string{"ok2"}}, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Results) != 2 || rep.Results[0].Name != "ok" || rep.Results[1].Name != "ok2" {
+		t.Fatalf("clean run: %+v", rep.Results)
+	}
+	// Unread duplicate names do not block their own run.
+	rep, err = e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Names: []string{"u1"}}, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Results) != 1 || rep.Results[0].Status != "ok" {
+		t.Fatalf("unread dup run: %+v", rep.Results)
+	}
+
+	// Missing provider blocks; nothing executes.
+	_, err = e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Names: []string{"needs"}}, nil, false)
+	var se *service.Error
+	if !errors.As(err, &se) || se.Code != types.ErrCodeGraphBlocked {
+		t.Fatalf("missing provider: %v, want graph_blocked", err)
+	}
+	if !strings.Contains(se.Msg, "run blocked — needs reads ghost") {
+		t.Fatalf("blocked message: %q", se.Msg)
+	}
+	// Read duplicate blocks the reader's run.
+	_, err = e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Names: []string{"reader"}}, nil, false)
+	if !errors.As(err, &se) || se.Code != types.ErrCodeGraphBlocked {
+		t.Fatalf("read duplicate: %v, want graph_blocked", err)
+	}
+	// "all" touches every diagnostic — fully blocked.
+	_, err = e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil, false)
+	if !errors.As(err, &se) || se.Code != types.ErrCodeGraphBlocked {
+		t.Fatalf("all: %v, want graph_blocked", err)
+	}
+	// Blocked sections never ran.
+	for _, name := range []string{"needs", "reader", "d1", "d2"} {
+		if got := sectionStateOfView(t, e, id, name); got != SectionNotRun {
+			t.Fatalf("%s ran despite block: %s", name, got)
+		}
+	}
+}
+
+// TestNotebookStaleSelectorNonFresh: "stale" targets every non-fresh
+// section — stale, failed AND not_run — and skips fresh ones.
+func TestNotebookStaleSelectorNonFresh(t *testing.T) {
+	e := newNBEnv(t)
+	id := e.create(t)
+	addSec(t, e, id, "good", "runs ok", "gv = 1")
+	addSec(t, e, id, "bad", "fails", "bv = 1 / 0")
+	addSec(t, e, id, "fresh", "also ok", "fv = 2")
+	addSec(t, e, id, "never", "never ran", "nv = 3")
+
+	if _, err := e.svc.ExecSection(e.ctx, e.actor, id, "gv = 1", 0, &SectionInput{Name: "good", Description: "runs ok"}); err != nil {
+		t.Fatal(err)
+	}
+	// "fresh" runs ok through exec too — it must NOT be a stale target.
+	if _, err := e.svc.ExecSection(e.ctx, e.actor, id, "fv = 2", 0, &SectionInput{Name: "fresh", Description: "also ok"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.ExecSection(e.ctx, e.actor, id, "bv = 1 / 0", 0, &SectionInput{Name: "bad", Description: "fails"}); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Stale: true}, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, r := range rep.Results {
+		names = append(names, r.Name)
+		if r.Name == "good" || r.Name == "fresh" {
+			t.Fatalf("fresh section targeted by stale: %+v", rep.Results)
+		}
+	}
+	// bad fails again (fail-fast), never was not reached.
+	want := map[string]bool{"bad": true, "never": true}
+	if len(names) != 2 || !want[names[0]] || !want[names[1]] {
+		t.Fatalf("stale targets: %v want bad+never", names)
+	}
+	if resultByName(rep, "bad").Status != "error" || resultByName(rep, "never").Status != "not_run" {
+		t.Fatalf("stale report: %+v", rep.Results)
+	}
+}
+
+// TestNotebookOnceBulkUpstream: bulk skips a fresh once-done leaf, but
+// a non-fresh once-done PROVIDER of a target still runs — the once rule
+// yields to the dependency closure.
+func TestNotebookOnceBulkUpstream(t *testing.T) {
+	e := newNBEnv(t)
+	id := e.create(t)
+	// once leaf with no consumers — skipped once it succeeded.
+	if _, err := e.svc.ExecSection(e.ctx, e.actor, id, "leaf = 1", 0,
+		&SectionInput{Name: "leaf", Rerun: "once", Description: "once leaf"}); err != nil {
+		t.Fatal(err)
+	}
+	// once provider feeding a consumer.
+	if _, err := e.svc.ExecSection(e.ctx, e.actor, id, "ox = 10", 0,
+		&SectionInput{Name: "prov", Rerun: "once", Description: "once provider"}); err != nil {
+		t.Fatal(err)
+	}
+	addSec(t, e, id, "cons", "consumer", "cx = ox + 1")
+	if _, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	// Edit the once provider: still OnceDone (succeeded before) but stale.
+	nb, err := e.svc.Notebook(e.ctx, e.actor, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.SaveSection(e.ctx, e.actor, id, "prov", SaveSectionRequest{
+		Code: strPtr("ox = 20"), Revision: nb.Revision,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf := resultByName(rep, "leaf")
+	if leaf == nil || leaf.Status != "skipped" || leaf.Reason != "once section already succeeded" {
+		t.Fatalf("once leaf should skip: %+v", rep.Results)
+	}
+	prov := resultByName(rep, "prov")
+	if prov == nil || prov.Status != "ok" || prov.Reason != "upstream: not fresh" {
+		t.Fatalf("non-fresh once provider should run upstream: %+v", rep.Results)
+	}
+	cons := resultByName(rep, "cons")
+	if cons == nil || cons.Status != "ok" || cons.Reason != "target" {
+		t.Fatalf("consumer should run as target: %+v", rep.Results)
+	}
+	// Exactly one skip row — prov re-entered as upstream, not skipped.
+	var skips int
+	for _, r := range rep.Results {
+		if r.Status == "skipped" {
+			skips++
+		}
+	}
+	if skips != 1 {
+		t.Fatalf("skip rows: %+v", rep.Results)
+	}
+}
+
+// TestNotebookDryRun: dry_run reports planned/reused/skipped without
+// executing — no run seqs, no new executions, no lease side effects.
+func TestNotebookDryRun(t *testing.T) {
+	e := newNBEnv(t)
+	id := e.create(t)
+	addSec(t, e, id, "seed", "provider", "x = 1")
+	addSec(t, e, id, "use", "consumer", "y = x + 1")
+	if _, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{All: true}, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	before := execCount(t, e, id)
+
+	// Edit the provider → both stale; dry-run shows the plan.
+	nb, err := e.svc.Notebook(e.ctx, e.actor, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.SaveSection(e.ctx, e.actor, id, "seed", SaveSectionRequest{
+		Code: strPtr("x = 2"), Revision: nb.Revision,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Names: []string{"use"}}, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Results) != 2 ||
+		rep.Results[0].Name != "seed" || rep.Results[0].Status != "planned" || rep.Results[0].Reason != "upstream: not fresh" ||
+		rep.Results[1].Name != "use" || rep.Results[1].Status != "planned" || rep.Results[1].Reason != "target" {
+		t.Fatalf("dry-run report: %+v", rep.Results)
+	}
+	if got := execCount(t, e, id); got != before {
+		t.Fatalf("dry-run executed: execs %d → %d", before, got)
+	}
+	// States untouched — still stale, not fresh.
+	if got := sectionStateOfView(t, e, id, "seed"); got != SectionStale {
+		t.Fatalf("seed after dry-run: %s", got)
+	}
+
+	// dry_run surfaces graph_blocked too.
+	addSec(t, e, id, "needs", "missing", "n = ghost + 1")
+	_, err = e.svc.RunSections(e.ctx, e.actor, id, SectionSelector{Names: []string{"needs"}}, nil, true)
+	var se *service.Error
+	if !errors.As(err, &se) || se.Code != types.ErrCodeGraphBlocked {
+		t.Fatalf("dry-run blocked: %v", err)
+	}
+}
+
+// TestNotebookExecSectionUpstream: exec-with-section runs non-fresh
+// upstream first (stamped, own exec), reuses fresh upstream, and
+// reports both in outcome.upstream.
+func TestNotebookExecSectionUpstream(t *testing.T) {
+	e := newNBEnv(t)
+	id := e.create(t)
+	// Provider positioned AFTER the consumer.
+	addSec(t, e, id, "cons", "consumer", "w = v + 1")
+	addSec(t, e, id, "prov", "provider", "v = 41")
+
+	out, err := e.svc.ExecSection(e.ctx, e.actor, id, "w = v + 1", 0,
+		&SectionInput{Name: "cons", Description: "consumer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.View.Error != nil {
+		t.Fatalf("exec error: %+v", out.View.Error)
+	}
+	if len(out.Upstream) != 1 || out.Upstream[0].Name != "prov" ||
+		out.Upstream[0].Status != "ok" || out.Upstream[0].Reason != "upstream: not fresh" {
+		t.Fatalf("upstream entries: %+v", out.Upstream)
+	}
+	if got := sectionStateOfView(t, e, id, "prov"); got != SectionFresh {
+		t.Fatalf("prov: %s", got)
+	}
+	if got := sectionStateOfView(t, e, id, "cons"); got != SectionFresh {
+		t.Fatalf("cons: %s", got)
+	}
+
+	// Second exec: upstream is fresh → reused, no new exec for it.
+	before := execCount(t, e, id)
+	out, err = e.svc.ExecSection(e.ctx, e.actor, id, "w = v + 1\nprint(w)", 0,
+		&SectionInput{Name: "cons", Description: "consumer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.View.Output != "42\n" {
+		t.Fatalf("output: %q", out.View.Output)
+	}
+	if len(out.Upstream) != 1 || out.Upstream[0].Status != "reused" || out.Upstream[0].Reason != "fresh" {
+		t.Fatalf("reused upstream: %+v", out.Upstream)
+	}
+	if got := execCount(t, e, id); got != before+1 {
+		t.Fatalf("execs %d → %d, want one new exec (the section only)", before, got)
+	}
+}
+
+// TestNotebookExecSectionBlocked: a sectioned exec whose closure hits a
+// blocking diagnostic still saves (the save stands) but returns
+// graph_blocked and runs nothing.
+func TestNotebookExecSectionBlocked(t *testing.T) {
+	e := newNBEnv(t)
+	id := e.create(t)
+	addSec(t, e, id, "needs", "missing provider", "n = ghost + 1")
+	before := execCount(t, e, id)
+
+	_, err := e.svc.ExecSection(e.ctx, e.actor, id, "n = ghost + 1", 0,
+		&SectionInput{Name: "needs", Description: "missing provider"})
+	var se *service.Error
+	if !errors.As(err, &se) || se.Code != types.ErrCodeGraphBlocked {
+		t.Fatalf("want graph_blocked, got %v", err)
+	}
+	if !strings.HasPrefix(se.Msg, "section saved; run blocked — ") {
+		t.Fatalf("blocked message: %q", se.Msg)
+	}
+	// The section was saved (new code persisted) but never executed.
+	sec, err := e.st.GetNotebookSection(e.ctx, id, "needs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sec.Code != "n = ghost + 1" {
+		t.Fatalf("saved code: %q", sec.Code)
+	}
+	if got := execCount(t, e, id); got != before {
+		t.Fatalf("blocked exec ran code: execs %d → %d", before, got)
+	}
+}
+
+// TestNotebookOutlineReadsAndBlocked: the outline shows reads as
+// `name ← provider` and surfaces diagnostics as `blocked:` lines.
+func TestNotebookOutlineReadsAndBlocked(t *testing.T) {
+	e := newNBEnv(t)
+	id := e.create(t)
+	addSec(t, e, id, "prov", "provider", "v = 3")
+	addSec(t, e, id, "cons", "consumer", "w = v + ghost")
+
+	nb, err := e.svc.Notebook(e.ctx, e.actor, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(nb.Outline, "v ← prov") {
+		t.Fatalf("outline missing provider read: %q", nb.Outline)
+	}
+	if !strings.Contains(nb.Outline, "ghost ← ?") {
+		t.Fatalf("outline missing unresolved read: %q", nb.Outline)
+	}
+	var sawBlocked bool
+	for _, n := range nb.Next {
+		if strings.HasPrefix(n, "blocked: cons reads ghost") {
+			sawBlocked = true
+		}
+	}
+	if !sawBlocked {
+		t.Fatalf("next missing blocked line: %v", nb.Next)
+	}
+	// depends_on meta is the graph's direct providers, sorted.
+	for _, s := range nb.Sections {
+		if s.Name == "cons" && (len(s.DependsOn) != 1 || s.DependsOn[0] != "prov") {
+			t.Fatalf("cons depends_on: %v", s.DependsOn)
+		}
 	}
 }

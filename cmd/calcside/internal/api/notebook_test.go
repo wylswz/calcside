@@ -41,6 +41,16 @@ func TestNotebookEndpoints(t *testing.T) {
 	if nb["instance_id"] != id || nb["revision"] == nil {
 		t.Fatalf("notebook: %v", nb)
 	}
+	// Empty notebook still serializes graph arrays as [], never null.
+	graph := nb["graph"].(map[string]any)
+	edges, ok := graph["edges"].([]any)
+	if !ok || edges == nil || len(edges) != 0 {
+		t.Fatalf("graph.edges: %v", graph["edges"])
+	}
+	diags, ok := graph["diagnostics"].([]any)
+	if !ok || diags == nil || len(diags) != 0 {
+		t.Fatalf("graph.diagnostics: %v", graph["diagnostics"])
+	}
 
 	// Save a section: response is {section: meta, revision}.
 	code, m, _ = e.req("PUT", "/api/v1/instances/"+id+"/sections/setup",
@@ -162,10 +172,15 @@ func TestNotebookRunSelectors(t *testing.T) {
 	if len(results) != 2 {
 		t.Fatalf("stale should select both: %v", results)
 	}
-	// explicit array
+	// explicit array — beta pulls its upstream alpha into the closure
+	// (fresh → reused, no exec); beta itself runs.
 	code, m = run(`["beta"]`)
-	if code != 200 || len(m["report"].(map[string]any)["results"].([]any)) != 1 {
+	results = m["report"].(map[string]any)["results"].([]any)
+	if code != 200 || len(results) != 2 {
 		t.Fatalf("array selector: %d %v", code, m)
+	}
+	if statusOf(m, "alpha") != "reused" || statusOf(m, "beta") != "ok" {
+		t.Fatalf("array selector statuses: %v", results)
 	}
 	// invalid selectors
 	for _, sel := range []string{`123`, `{"x":1}`, `[]`, `true`, `""`} {

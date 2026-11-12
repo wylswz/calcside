@@ -120,7 +120,7 @@ func (s *Service) promptLost(ctx context.Context, in *store.Instance, toolPrefix
 	}
 	prompt := "You are connected to calcside instance " + in.ID + ".\n\n" +
 		"IMPORTANT: this instance's runtime process was lost. All in-memory state — variables, functions, files — is GONE. " +
-		"The instance's NOTEBOOK is preserved: it is a durable, ordered list of named code sections and your only memory of prior work.\n\n"
+		"The instance's NOTEBOOK is preserved: it is a durable dependency graph of named code sections and your only memory of prior work.\n\n"
 	if len(names) > 0 {
 		prompt += "The notebook has " + strconv.Itoa(len(names)) + " sections: " + strings.Join(names, ", ") + ".\n" +
 			"Nothing has been re-executed; every section is not_run.\n\n"
@@ -128,10 +128,10 @@ func (s *Service) promptLost(ctx context.Context, in *store.Instance, toolPrefix
 		prompt += "The notebook is empty — there are no saved sections.\n\n"
 	}
 	prompt += "How to continue:\n" +
-		"1. Read the notebook outline before doing anything (" + toolPrefix + "notebook or GET /api/v1/instances/" + in.ID + "/notebook): it lists every section's state, defines and uses.\n" +
+		"1. Read the notebook outline before doing anything (" + toolPrefix + "notebook or GET /api/v1/instances/" + in.ID + "/notebook): it lists every section's state, defines and reads (name ← provider), plus blocked diagnostics.\n" +
 		"2. Your next exec or run call will RESTORE the instance into a fresh EMPTY process under the same id. That call returns an instance_restored error and does NOT execute — it only brings the process back.\n" +
-		"3. After the restore, run the sections you need in order (" + toolPrefix + "run_sections with sections=\"all\" or \"stale\", or name specific sections). The notebook's meaning is: run sections top to bottom in a fresh process.\n" +
-		"4. Do not assume any variable, file, or function from before the loss exists. Re-run what you need; scratch execs work but do not create sections — save durable code as sections.\n"
+		"3. After the restore, run the sections you need (" + toolPrefix + "run_sections with sections=\"all\" or \"stale\", or name specific sections). Sections run in dependency order — each section's non-fresh upstream runs first — which rebuilds the same in-memory state in a fresh process.\n" +
+		"4. Do not assume any variable, file, or function from before the loss exists. Re-run what you need through sections — every exec belongs to a section so its inputs and outputs stay visible.\n"
 	return &PromptView{
 		InstanceID: in.ID,
 		Prompt:     prompt,
