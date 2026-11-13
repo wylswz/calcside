@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"calcside/internal/capability"
 	"calcside/internal/extartifact"
 	"calcside/internal/types"
 )
@@ -130,11 +131,17 @@ type CapabilityManifest struct {
 	Config       []ConfigField          `yaml:"config"`
 }
 
-// OpSpec declares one exported operation.
+// OpSpec declares one exported operation. Params holds the positional
+// parameter names in order; ParamDocs/Returns/Example carry optional
+// structured documentation decoded from mapping-form params items (see
+// OpSpec.UnmarshalYAML in manifest.go).
 type OpSpec struct {
-	Name   string   `yaml:"name" json:"name"`
-	Doc    string   `yaml:"doc" json:"doc"`
-	Params []string `yaml:"params" json:"params"`
+	Name      string                `yaml:"name" json:"name"`
+	Doc       string                `yaml:"doc" json:"doc"`
+	Params    []string              `yaml:"params" json:"params"`
+	ParamDocs []capability.ParamDoc `yaml:"-" json:"param_docs,omitempty"`
+	Returns   string                `yaml:"returns" json:"returns,omitempty"`
+	Example   string                `yaml:"example" json:"example,omitempty"`
 }
 
 // ConfigField declares one config key accepted by the extension.

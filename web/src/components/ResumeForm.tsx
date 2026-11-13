@@ -67,7 +67,7 @@ export function ResumeForm({ interrupt: i, scope, onResumed }: {
 			)}
 			{err !== '' && <Notice tone="warning">{err}</Notice>}
 			<div className="mt-2">
-				<label className="app-label" htmlFor={`event-${i.id}`}>Event — a JSON object passed to {i.handler ?? 'the handler'} as ctx["event"]</label>
+				<label className="app-label" htmlFor={`event-${i.id}`}>Event (JSON object)</label>
 				<textarea id={`event-${i.id}`} className="app-area" rows={4} spellCheck={false}
 					value={event} disabled={readOnly}
 					onChange={(e) => { setEvent(e.target.value); persist(e.target.value) }} />

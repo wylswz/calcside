@@ -54,7 +54,7 @@ export default function WorkspacePage() {
   if (ws.personal) return (
     <div>
       <PageHeader title={ws.name} />
-      <Notice>Your personal workspace has exactly one member — you. Use a shared workspace to work with other people.</Notice>
+      <Notice>Personal workspaces have one member.</Notice>
     </div>
   )
   const err = (rename.error || add.error || setRoleM.error) as ApiError | null
@@ -139,7 +139,7 @@ export default function WorkspacePage() {
           {confirmDel && (
             <Confirm title={`Delete ${ws.name}?`} confirm="Delete workspace" pending="Deleting…"
               action={async () => { await api.del(`/api/v1/workspaces/${id}`); nav('/') }} onClose={() => setConfirmDel(false)}>
-              <p className="text-sm text-body">Its policies, secrets and keys are deleted. Stop running instances first. This cannot be undone.</p>
+              <p className="text-sm text-body">Its policies, secrets and keys are deleted; this cannot be undone.</p>
             </Confirm>
           )}
         </>

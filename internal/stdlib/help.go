@@ -29,6 +29,7 @@ var moduleDocs = map[string]string{
 	"decimal":  "exact decimal arithmetic on strings/ints; minor-unit conversion",
 	"linalg":   "matrix matmul, solve, lstsq, inv, det",
 	"stream":   "Pull-based, single-execution streams; iteration consumes values and exec end closes unclosed streams.",
+	"chart":    "Vega-Lite spec constructors and validation for io.display (chart types live in the contrib/charts extension)",
 }
 
 // helpIndex is the per-instance documentation catalog: stdlib modules

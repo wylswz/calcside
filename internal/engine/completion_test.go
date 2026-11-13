@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	capfs "calcside/internal/capability/fs"
 	capio "calcside/internal/capability/io"
 	capnet "calcside/internal/capability/net"
+	"calcside/internal/completion"
 )
 
 type opaqueCompletionValue struct{ starlark.Value }
@@ -129,6 +131,89 @@ func checkCompletionFields(name string, expected map[string]string, values map[s
 	return nil
 }
 
+type paramDocsFactory struct {
+	capability.Factory
+	ops []capability.OpInfo
+}
+
+func (f *paramDocsFactory) Ops() []capability.OpInfo { return f.ops }
+
+func TestCompletionsCarryParamDocs(t *testing.T) {
+	reg := capability.NewRegistry()
+	f := &paramDocsFactory{Factory: capio.Factory()}
+	reg.Register(f)
+	s, err := NewSession(SessionDeps{Registry: reg, Limits: capability.ServerLimits{MaxFSQuotaBytes: 256 << 20}}, SessionCreation{Capabilities: map[string]any{}, MaxOutputBytes: 1024, Policies: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	docs := []capability.ParamDoc{
+		{Name: "value", Type: "any", Doc: "Value to print."},
+		{Name: "opts", Type: "dict", Optional: true, HasDefault: true, Doc: "Print options.", Fields: []capability.ParamDoc{
+			{Name: "sep", Type: "string", HasDefault: true, Doc: "Separator."},
+			{Name: "end", Type: "string", HasDefault: true, Default: "\n", Doc: "Terminator."},
+		}},
+	}
+	withOps := func(paramDocs []capability.ParamDoc) {
+		ops := capio.Factory().Ops()
+		for i := range ops {
+			if ops[i].Name == capio.OpPrintln {
+				ops[i].Params = []string{"value", "opts=None"}
+				ops[i].ParamDocs = paramDocs
+			}
+		}
+		f.ops = ops
+	}
+	find := func(out *completion.Context) *completion.Symbol {
+		for i := range out.Symbols {
+			if out.Symbols[i].Name == "io.println" {
+				return &out.Symbols[i]
+			}
+		}
+		return nil
+	}
+
+	withOps(docs)
+	out, err := s.Completions(context.Background(), reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := find(out)
+	if got == nil {
+		t.Fatal("missing io.println")
+	}
+	if got.Detail != "(value, opts=None)" {
+		t.Fatalf("signature detail: %q", got.Detail)
+	}
+	if !reflect.DeepEqual(got.ParamDocs, docs) {
+		t.Fatalf("param docs: %+v", got.ParamDocs)
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded completion.Context
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if rt := find(&decoded); rt == nil || !reflect.DeepEqual(rt.ParamDocs, docs) {
+		t.Fatalf("param docs lost on the wire: %+v", rt)
+	}
+
+	withOps([]capability.ParamDoc{{Name: "value", Doc: strings.Repeat("d", 20000)}})
+	out, err = s.Completions(context.Background(), reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := find(out); got == nil || got.ParamDocs != nil {
+		t.Fatalf("oversized param docs kept: %+v", got)
+	}
+	if !out.Truncated {
+		t.Fatal("oversized param docs did not mark the context truncated")
+	}
+}
+
 func TestCompletionSchemasMatchGatedOperations(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "ok")
@@ -166,6 +251,7 @@ fs.walk("dir")
 fs.delete("dir", recursive=True)
 io.println("hello")
 print("world")
+io.display(chart.spec("point", data=[{"x": 1, "y": 2}], encoding={"x": chart.field("x", "quantitative"), "y": chart.field("y", "quantitative")}))
 net.get(%q)
 net.post(%q, "body")
 net.request("GET", %q)

@@ -1,6 +1,7 @@
 import { findExtension } from '../builderCatalog.ts' 
 import { useEffect, useRef, useState } from 'react'
 import type { ExtensionInfo } from '../api'
+import { formatOpDoc } from '../opDoc.ts'
 import type { ExtDraft, JsonValue } from '../instanceDraft'
 import { Field, inputCls } from './ui'
 
@@ -139,14 +140,24 @@ export function InstanceExtensionEditor({ value, catalog, secretNames, vaultName
               </Field>
             )
           })}
-          {(entry.config ?? []).some((f) => f.type === 'secret') && <p className="text-xs text-sec">Choose an existing vault reference, or add a secret under Inputs. Values are never shown here.</p>}
         </>
       )}
       {entry && (
         <details className="ext-advanced">
           <summary>Advanced extension settings</summary>
           <div className="mt-3 space-y-4">{sourceFields}
-            {(entry.ops ?? []).length > 0 && <p className="break-words font-mono text-xs text-sec">{(entry.ops ?? []).map((op) => `ext.${value.alias || '?'}.${op.name}()`).join(' · ')}</p>}
+            {(entry.ops ?? []).length > 0 && (
+              <details className="ext-advanced">
+                <summary>Operations ({(entry.ops ?? []).length})</summary>
+                <div className="mt-2 space-y-2">
+                  {(entry.ops ?? []).map((op) => (
+                    <pre key={op.name} className="m-0 whitespace-pre-wrap break-words font-mono text-xs text-sec">
+                      {formatOpDoc(`ext.${value.alias || '?'}.${op.name}`, op)}
+                    </pre>
+                  ))}
+                </div>
+              </details>
+            )}
           </div>
         </details>
       )}

@@ -1243,6 +1243,7 @@ export interface components {
             detail?: string;
             doc?: string;
             params?: string[];
+            param_docs?: components["schemas"]["ParamDoc"][];
         };
         CompletionContext: {
             symbols: components["schemas"]["CompletionSymbol"][];
@@ -1266,10 +1267,24 @@ export interface components {
             rego: components["schemas"]["CompletionSymbol"][];
             capabilities: components["schemas"]["CapabilityDoc"][];
         };
+        ParamDoc: {
+            name: string;
+            /** @description Free-text parameter type, e.g. string, dict, list[dict]. */
+            type?: string;
+            doc?: string;
+            optional?: boolean;
+            /** @description Declared default rendered with Starlark spelling; present (possibly null) only when declared. */
+            default?: unknown;
+            /** @description Documented keys of a dict parameter; one level deep. */
+            fields?: components["schemas"]["ParamDoc"][];
+        };
         OpDoc: {
             name?: string;
             doc?: string;
             params?: string[];
+            param_docs?: components["schemas"]["ParamDoc"][];
+            returns?: string;
+            example?: string;
             policy_args?: {
                 [key: string]: string;
             };
@@ -1638,6 +1653,20 @@ export interface components {
             section_state?: "not_run" | "fresh" | "stale" | "failed";
             /** @description sectioned exec only — the upstream sections the dependency plan ran or reused before this section (ok/reused/skipped, each with its reason) */
             upstream?: components["schemas"]["RunSectionResult"][];
+            /** @description chart specs attached via io.display (omitted when none) */
+            displays?: components["schemas"]["Display"][];
+        };
+        Display: {
+            /** @enum {string} */
+            kind: "vega-lite";
+            /** @description display title (explicit arg or spec title) */
+            title?: string;
+            /** @description canonical Vega-Lite spec JSON */
+            spec: {
+                [key: string]: unknown;
+            };
+            /** @description true when known secrets were scrubbed from the spec tree */
+            redacted?: boolean;
         };
         FileEntry: {
             name: string;
@@ -1718,6 +1747,8 @@ export interface components {
             steps: number;
             /** Format: int64 */
             output_bytes: number;
+            /** @description number of chart displays attached by io.display */
+            display_count: number;
             /** @description how the run was authenticated (absent for executions recorded before this field existed) */
             via?: components["schemas"]["AuthKind"];
             /** Format: date-time */
@@ -1736,6 +1767,8 @@ export interface components {
             output_truncated: boolean;
             /** @description structured failure; null when the run completed without error */
             error: components["schemas"]["ExecError"];
+            /** @description chart specs attached via io.display ([] when none) */
+            displays: components["schemas"]["Display"][];
         };
         NotebookSectionMeta: {
             name: string;
@@ -1817,6 +1850,8 @@ export interface components {
             /** @description last run's error + backtrace (include_output only) */
             error?: string;
             output_truncated?: boolean;
+            /** @description last run's chart displays (include_output only) */
+            displays?: components["schemas"]["Display"][];
         };
         NotebookSectionResponse: {
             section?: components["schemas"]["NotebookSection"];
@@ -5111,6 +5146,7 @@ export const artifactPreviewKindValues: ReadonlyArray<FlattenedDeepRequired<comp
 export const memberRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MemberRole"]> = ["viewer", "editor", "owner"];
 export const execSectionRerunValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExecSection"]["rerun"]> = ["safe", "once"];
 export const execResultSection_stateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExecResult"]["section_state"]> = ["not_run", "fresh", "stale", "failed"];
+export const displayKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Display"]["kind"]> = ["vega-lite"];
 export const notebookSectionMetaStateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["NotebookSectionMeta"]["state"]> = ["not_run", "fresh", "stale", "failed"];
 export const notebookSectionMetaRerunValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["NotebookSectionMeta"]["rerun"]> = ["safe", "once"];
 export const notebookGraphDiagnosticKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["NotebookGraphDiagnostic"]["kind"]> = ["duplicate_define", "cycle", "missing_provider", "parse_error"];

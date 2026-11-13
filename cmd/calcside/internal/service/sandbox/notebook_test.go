@@ -14,6 +14,7 @@ import (
 	"calcside/internal/capability"
 	capfs "calcside/internal/capability/fs"
 	capio "calcside/internal/capability/io"
+	"calcside/internal/chart"
 	"calcside/internal/engine"
 	"calcside/internal/runtime"
 	"calcside/internal/runtime/instance"
@@ -1654,6 +1655,77 @@ func TestNotebookOutlineReadsAndBlocked(t *testing.T) {
 	for _, s := range nb.Sections {
 		if s.Name == "cons" && (len(s.DependsOn) != 1 || s.DependsOn[0] != "prov") {
 			t.Fatalf("cons depends_on: %v", s.DependsOn)
+		}
+	}
+}
+
+// displayInjectRuntime appends canned displays to every exec result —
+// the API tier must sanitize them before responding or storing.
+type displayInjectRuntime struct {
+	runtime.Runtime
+	displays []runtime.Display
+}
+
+func (d *displayInjectRuntime) Exec(ctx context.Context, req *runtime.ExecRequest) (*runtime.ExecResponse, error) {
+	resp, err := d.Runtime.Exec(ctx, req)
+	if err != nil || resp == nil {
+		return resp, err
+	}
+	resp.Result.Displays = append(resp.Result.Displays, d.displays...)
+	return resp, nil
+}
+
+// TestNotebookDisplaySanitize: the API tier re-validates worker
+// displays in place — an invalid spec and an unknown kind are dropped
+// from BOTH the exec response and the stored executions, while the
+// valid display survives canonicalized. Covers the target exec and
+// the upstream exec (execPlannedSection) paths.
+func TestNotebookDisplaySanitize(t *testing.T) {
+	validSpec := `{"mark":"point","data":{"values":[{"a":1}]},"encoding":{"x":{"field":"a","type":"quantitative"}}}`
+	var inj *displayInjectRuntime
+	e := newNBEnvWrap(t, func(rt runtime.Runtime) runtime.Runtime {
+		inj = &displayInjectRuntime{Runtime: rt, displays: []runtime.Display{
+			{Kind: chart.Kind, Title: "ok", Spec: json.RawMessage(validSpec)},
+			{Kind: chart.Kind, Title: "bad", Spec: json.RawMessage(`{"mark":"image","data":{"values":[]}}`)},
+			{Kind: "png", Title: "wrong-kind", Spec: json.RawMessage(validSpec)},
+		}}
+		return inj
+	})
+	id := e.create(t)
+	// Provider section so "b" pulls "a" through execPlannedSection.
+	if _, err := e.svc.AddSection(e.ctx, e.actor, id, "a", "provider", "av = 1", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	out, err := e.svc.ExecSection(e.ctx, e.actor, id, "bv = av + 1", 0,
+		&SectionInput{Name: "b", Description: "consumer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.View.Error != nil {
+		t.Fatalf("exec error: %+v", out.View.Error)
+	}
+	if len(out.Upstream) != 1 || out.Upstream[0].Name != "a" || out.Upstream[0].Status != "ok" {
+		t.Fatalf("upstream: %+v", out.Upstream)
+	}
+	// The target exec's response carries only the valid display.
+	if len(out.View.Displays) != 1 || out.View.Displays[0].Title != "ok" {
+		t.Fatalf("response displays: %+v", out.View.Displays)
+	}
+	// Both stored executions (upstream "a" and target "b") agree.
+	for _, name := range []string{"a", "b"} {
+		d, err := e.svc.ReadSection(e.ctx, e.actor, id, name, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(d.Displays) != 1 || d.Displays[0].Title != "ok" {
+			t.Fatalf("%s stored displays: %+v", name, d.Displays)
+		}
+		var spec map[string]any
+		if err := json.Unmarshal(d.Displays[0].Spec, &spec); err != nil {
+			t.Fatal(err)
+		}
+		if spec["mark"] != "point" {
+			t.Fatalf("%s spec not canonicalized: %s", name, d.Displays[0].Spec)
 		}
 	}
 }

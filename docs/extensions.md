@@ -49,6 +49,21 @@ ops:
   - name: search              # must be a top-level def in main.star
     doc: Search the web; returns list of {title,url,content}
     params: [query, max_results]
+    # or document each parameter (params stays a plain name list for
+    # callArgs/audit; param docs drive help(), completion and console):
+    # params:
+    #   - name: query
+    #     type: string
+    #     doc: Search query text.
+    #   - name: options
+    #     type: dict
+    #     doc: Optional overrides; unknown keys are errors.
+    #     optional: true
+    #     fields:                # keys of a dict param, one level deep
+    #       - {name: depth, type: int, doc: Result depth., default: 1}
+    # returns: "list[dict] — search results"
+    # example: |
+    #   results = ext.tavily.search("calcside", {"depth": 2})
 config:
   - name: base_url
     type: string
@@ -68,7 +83,9 @@ config:
 | `name`, `version`, `description` | Displayed by `GET /api/v1/extensions` and in instance prompts. |
 | `dependencies` | Base capability names the module needs as globals: `net`, `fs`, `io`. Extensions cannot depend on `ext` or on other extensions. The instance must also grant each dependency. |
 | `ops[].name` | Exported op. Must be a valid Starlark identifier and resolve to a top-level function in `main.star`. |
-| `ops[].params` | Positional parameter names; used to label args in audit/policy records. |
+| `ops[].params` | Positional parameter names; used to label args in audit/policy records. Each item is a plain name or a mapping `{name, type, doc, optional, default, fields}` — mixing both forms in one list is allowed. `type` is free text (`string`, `dict`, `list[dict]`, ≤ 64 bytes), `doc` ≤ 1 KiB, `default` must be a JSON scalar (explicit `null` renders as `None`), and `fields` documents the keys of a dict param one level deep (≤ 32 entries, names must be identifiers, unique per level). `ParamDocs` is populated only when at least one item is a mapping. |
+| `ops[].returns` | Optional one-line return description (≤ 512 bytes), shown in `help()` and completion. |
+| `ops[].example` | Optional Starlark usage example (≤ 4 KiB), shown by `help()` only — never in completion docs. |
 | `config[].type` | `string`, `int`, `bool`, `string_list`, `string_map`, or `secret`. |
 | `config[].default` | Applied when the instance doesn't override the key. |
 

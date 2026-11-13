@@ -31,7 +31,6 @@ export default function ConnectAgent({ id, workspaceId, onClose }: { id: string;
     }>
       {!secret ? (
         <div className="space-y-3 text-sm">
-          <p className="text-sec">Creates a key bound to this instance only — an agent using it can run code here but reaches nothing else.</p>
           <Field label="Key name"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} /></Field>
           <Field label="Expires in (days; 0 = never)"><input type="number" className={inputCls} value={days} onChange={(e) => setDays(Number(e.target.value))} /></Field>
           {err && <p className="text-xs text-warn-text">{err}</p>}

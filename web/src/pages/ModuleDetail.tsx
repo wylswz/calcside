@@ -257,7 +257,7 @@ function ModuleEditor({ id }: { id: string }) {
           setRecoverModuleConfirm(null)
         }}>
         {recoverModuleConfirm === 'restore'
-          ? 'Replace the current server draft with your recovered local edits? Publishing still requires review.'
+          ? 'Replace the current server draft with your recovered local edits?'
           : 'Discard the recovered local edits and keep the current server draft?'}
       </Confirm>}
       {confirmModReload && (
@@ -270,11 +270,6 @@ function ModuleEditor({ id }: { id: string }) {
       {modState?.error && !modConflict && <Notice tone="warning">{modState.error.message}</Notice>}
       {pubErr && <Notice tone="warning">{pubErr}</Notice>}
       <section className="module-identity rounded border border-line bg-panel p-3">
-        <p className="mb-2 text-xs text-sec">
-          Name <code className="font-mono text-ink">{m.name}</code> — unique in this workspace.
-          The debug run mounts this draft as <code>@self</code>; applications and instances mount a published
-          version by name under a mount alias. Example with this draft's files:
-        </p>
         <CopyBlock text={refExample} mono />
       </section>
       <div className="module-workbench grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
@@ -313,7 +308,7 @@ function ModuleEditor({ id }: { id: string }) {
         <Confirm title={`Remove ${depRemove}?`} tone="danger" confirm="Remove" pending="Removing…"
           action={async () => { removeDep(depRemove); setDepRemove(null) }}
           onClose={() => setDepRemove(null)}>
-          Remove the static dependency {depRemove}? Caller scripts referencing it will fail until re-added.
+          Remove the static dependency {depRemove}?
         </Confirm>
       )}
       <DebugRuntime key={`dr-${debugEpoch}`} id={id} workspaceId={m.workspace_id} debug={dq.data?.debug}
@@ -474,7 +469,6 @@ function DebugWorkspace({ id, draftVersion, workspaceId, debug, modDirty, modCon
         </div>}>
           Caller script
         </SectionTitle>
-        {modDirty && <Notice tone="neutral">Module edits are autosaving. Run waits for the latest changes.</Notice>}
         {dbgState?.error && !conflict && <Notice tone="warning">
           {dbgState.error.message}{' '}
           <button type="button" className="link" onClick={() => { void dbgQ.current?.retry().catch(() => {}) }}>Retry</button>
@@ -511,7 +505,7 @@ function DebugWorkspace({ id, draftVersion, workspaceId, debug, modDirty, modCon
           <Confirm title="Reload debug settings" tone="danger" confirm="Reload" pending="Reloading…"
             action={async () => { await doReload() }}
             onClose={() => setConfirmReload(false)}>
-            Discard local debug script/config changes and load the latest saved settings? Your module source draft is unaffected.
+            Discard local debug script/config changes and load the latest saved settings?
           </Confirm>
         )}
         {err && <Notice tone="warning">{err}</Notice>}
@@ -525,7 +519,6 @@ function DebugWorkspace({ id, draftVersion, workspaceId, debug, modDirty, modCon
         <SectionTitle aside={canEdit && result && (
           <Button size="sm" disabled={running} onClick={() => { setResult(null); setErr(''); setOutdated(false) }}>Clear output</Button>
         )}>stdout</SectionTitle>
-        {!result && !err && <p className="text-xs text-mute">Run the script to see output.</p>}
         {result && (
           <>
             {(outdated || modDirty || (resultRev !== null && resultRev !== configRevision) ||
@@ -589,8 +582,7 @@ function DebugRuntime({ id, workspaceId, debug, canEdit, specRef, fixedExtension
   return (
     <section className="mt-3 rounded border border-line bg-panel p-3" data-testid="module-deps">
       <SectionTitle>Extensions & runtime</SectionTitle>
-      <p className="mb-2 text-xs text-mute">Dependencies publish with the module (source and sum only); settings and credentials below are debug-only.</p>
-      {incomplete && <Notice tone="neutral">Debug configuration incomplete. Fix the indicated fields before running; module publishing is unaffected.</Notice>}
+      {incomplete && <Notice tone="neutral">Debug configuration incomplete.</Notice>}
       <fieldset disabled={!canEdit} className="m-0 min-w-0 border-0 p-0">
         <SpecForm ref={specRef} debug hideBasics workspaceId={workspaceId} fixedExtensions={fixedExtensions}
           onAddFixedExtension={onAddDep} onSwitchFixedExtension={onSwitchDep} onRemoveFixedExtension={onRemoveDep} fixedDepsDisabled={depsDisabled}

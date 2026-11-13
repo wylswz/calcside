@@ -110,6 +110,14 @@ var functions = []function{
 	{"stream.sse", []string{"source"}, "Parse bounded SSE events from a byte stream; returns {event,data,id} values.", streamSSECall},
 	{"math.log2", []string{"x"}, "Base-2 logarithm of an int or float; non-positive input yields NaN/-Inf as in math.log.", mathLogBase(2)},
 	{"math.log10", []string{"x"}, "Base-10 logarithm of an int or float; non-positive input yields NaN/-Inf as in math.log.", mathLogBase(10)},
+	{"chart.spec", []string{"mark", "data", "encoding", "transform", "params", "title", "width", "height"}, "Build a validated Vega-Lite spec dict ($schema, 480x280 default, IBM Plex Sans). mark is a string or {type,...} dict; data is a list of flat row dicts; encoding maps channel → chart.field(...); params is a list of {name, select, bind} dicts. Attach with io.display.", chartSpec},
+	{"chart.field", []string{"name", "type", "title", "aggregate", "bin", "time_unit", "scale", "axis", "legend", "sort", "format", "stack"}, "Build an encoding channel def {field, type, ...}; type is quantitative, temporal, ordinal or nominal. Optional keys: title, aggregate, bin, timeUnit (from time_unit), scale, axis, legend, sort, format, stack.", chartField},
+	{"chart.infer_type", []string{"rows", "field"}, "Infer quantitative, temporal or nominal from the first non-null value of field in rows: number → quantitative, YYYY-MM-DD/RFC3339 → temporal, else nominal.", chartInferType},
+	{"chart.layer", []string{"*specs", "title"}, "Combine spec dicts into a layered view; child $schema/config are stripped and the first spec's size is kept at top level.", chartCompose("layer")},
+	{"chart.hconcat", []string{"*specs", "title"}, "Combine spec dicts horizontally; child $schema/config are stripped.", chartCompose("hconcat")},
+	{"chart.vconcat", []string{"*specs", "title"}, "Combine spec dicts vertically; child $schema/config are stripped.", chartCompose("vconcat")},
+	{"chart.validate", []string{"spec"}, "Validate a spec dict; returns the canonical dict or an error naming the JSON path.", chartValidate},
+	{"chart.summary", []string{"spec"}, "One-line summary of a spec dict: mark, row count, x/y ranges.", chartSummary},
 }
 
 // mathModule wraps go.starlark.net/lib/math in a fresh module so the

@@ -28,7 +28,7 @@ export default function WorkspaceTabs() {
   return (
     <div>
       <PageHeader title={ws.name}>
-        Settings for <code className="font-mono text-ink">{ws.id}</code>.
+        <code className="font-mono text-ink">{ws.id}</code>
       </PageHeader>
       <nav className="workspace-tabs" aria-label="Workspace settings">
         {tabs.map((t) => (

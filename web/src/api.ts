@@ -46,6 +46,7 @@ export type SaveNotebookSectionRequest = components['schemas']['SaveNotebookSect
 export type DeleteNotebookSectionResponse = components['schemas']['DeleteNotebookSectionResponse']
 export type RunSectionsResponse = components['schemas']['RunSectionsResponse']
 export type RunSectionResult = components['schemas']['RunSectionResult']
+export type Display = components['schemas']['Display']
 
 export interface ArtifactDownload { blob: Blob; filename: string; redacted: boolean; fileCount: number }
 

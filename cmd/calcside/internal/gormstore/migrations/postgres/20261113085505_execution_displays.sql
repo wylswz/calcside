@@ -1,0 +1,2 @@
+ALTER TABLE executions ADD COLUMN displays TEXT NOT NULL DEFAULT '';
+ALTER TABLE executions ADD COLUMN display_count BIGINT NOT NULL DEFAULT 0;

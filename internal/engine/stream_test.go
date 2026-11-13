@@ -28,12 +28,14 @@ func streamSession(t *testing.T, hooks []capability.Hook, obs capability.Observe
 	t.Helper()
 	gate := capability.NewGate(capability.GateOwner{}, hooks, obs)
 	buf := capio.NewBuffer(1 << 20)
+	disp := capio.NewDisplays()
 	pre := stdlib.Modules()
-	pre["io"] = capio.BindBuffer(buf, gate)
+	pre["io"] = capio.BindBuffer(buf, disp, gate)
 	pre["print"] = capio.PrintBuiltin(buf, gate)
 	s := &Session{
 		Gate: gate, Predeclared: pre, Globals: starlark.StringDict{},
 		InstanceID: "ins_t", UserID: "u", UserEmail: "u@x",
+		Displays: disp,
 	}
 	return s, buf
 }

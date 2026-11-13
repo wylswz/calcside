@@ -43,7 +43,7 @@ export default function Profile({ user }: { user: User }) {
             changePassword.mutate()
           }
         }}>
-          <p className="text-sm text-sec">Changing your password signs out all current sessions. API keys are not affected.</p>
+          <p className="text-sm text-sec">Signs out all sessions.</p>
           <Field label="Current password">
             <input className={inputCls} type="password" name="current-password" autoComplete="current-password" required
               value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} disabled={changePassword.isPending} />
@@ -62,7 +62,7 @@ export default function Profile({ user }: { user: User }) {
           </Button>
         </form>
       ) : (
-        <Notice>This account does not use a local password. Manage your sign-in credentials with your identity provider.</Notice>
+        <Notice>This account does not use a local password.</Notice>
       )}
     </div>
   )

@@ -32,18 +32,18 @@ export function CopyBlock({ text, mono, preClassName = '' }: { text: string; mon
 // the key is bound to one instance.
 export function MCPGuide({ secret, url }: { secret: string; url?: string }) {
   const endpoint = url ?? mcpURL(window.location.origin)
-  const tabs = [
-    { label: 'Claude Code', text: claudeCodeSnippet(endpoint, secret), hint: 'Run this in a terminal.' },
-    { label: 'Cursor / VS Code', text: cursorSnippet(endpoint, secret), hint: 'Add this to the client MCP config.' },
-    { label: 'Devin', text: devinSnippet(endpoint, secret), hint: 'Devin cloud: Customize → MCPs → Add custom MCP, then enter the URL and Authorization header. Devin CLI: save this as .devin/mcp_config.json.' },
-    { label: 'OpenCode', text: opencodeSnippet(endpoint, secret), hint: 'Save this in opencode.json(c) in the project, or your global OpenCode config.' },
-    { label: 'Any client', text: `URL: ${endpoint}\n${headerSnippet(secret)}`, hint: 'Use these values wherever the client asks for an HTTP MCP server.' },
+  const tabs: { label: string; text: string; hint?: string }[] = [
+    { label: 'Claude Code', text: claudeCodeSnippet(endpoint, secret) },
+    { label: 'Cursor / VS Code', text: cursorSnippet(endpoint, secret) },
+    { label: 'Devin', text: devinSnippet(endpoint, secret), hint: 'Cloud: Customize → MCPs → Add custom MCP. CLI: .devin/mcp_config.json' },
+    { label: 'OpenCode', text: opencodeSnippet(endpoint, secret), hint: 'opencode.json(c)' },
+    { label: 'Any client', text: `URL: ${endpoint}\n${headerSnippet(secret)}` },
   ]
   const [tab, setTab] = useState(0)
   return (
     <div className="space-y-2">
       <p className="text-xs text-sec">
-        MCP endpoint: <code className="font-mono text-ink">{endpoint}</code> — this restricted key is all an MCP client needs.
+        MCP endpoint: <code className="font-mono text-ink">{endpoint}</code>
       </p>
       <div className="flex flex-wrap gap-1 border-b border-line">
         {tabs.map(({ label }, i) => (
@@ -52,7 +52,7 @@ export function MCPGuide({ secret, url }: { secret: string; url?: string }) {
             onClick={() => setTab(i)}>{label}</button>
         ))}
       </div>
-      <p className="text-xs text-sec">{tabs[tab].hint}</p>
+      {tabs[tab].hint && <p className="text-xs text-sec">{tabs[tab].hint}</p>}
       <CopyBlock text={tabs[tab].text} />
     </div>
   )

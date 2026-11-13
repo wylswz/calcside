@@ -580,6 +580,37 @@ test('S3: the floating head box is constant across scroll, view switch and a run
   expect(await box()).toEqual(top)
 })
 
+test('S3/F1: the first Add section keeps the head, toolbar and card slot in place', async ({ page }) => {
+  const id = await createInstance()
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  await expect(page.locator('.nb-toolbar')).toBeVisible({ timeout: 30_000 })
+  const empty = page.locator('.nb-empty')
+  await expect(empty).toBeVisible()
+  const head = page.locator('.nb-head')
+  const add = page.locator('.nb-toolbar').getByRole('button', { name: 'Add section' })
+  const box = async (loc: import('@playwright/test').Locator) => {
+    const b = (await loc.boundingBox())!
+    return [b.x, b.y, b.width, b.height]
+  }
+  const near = (a: number[], b: number[], what: string) => {
+    for (let i = 0; i < 4; i++) {
+      expect(Math.abs(a[i] - b[i]), `${what}[${i}]`).toBeLessThanOrEqual(0.5)
+    }
+  }
+  const headBefore = await box(head)
+  const addBefore = await box(add)
+  const emptyTop = (await box(empty))[1]
+  await add.click()
+  const c = card(page, 'untitled_section')
+  await expect(c).toBeVisible()
+  // The directory row and the disabled Run all/Run stale already occupy
+  // their slots, so nothing above or beside the pointer moves (S3/F1);
+  // the first card takes the placeholder's exact top edge.
+  near(await box(head), headBefore, 'head box')
+  near(await box(add), addBefore, 'Add section box')
+  expect(Math.abs((await box(c))[1] - emptyTop)).toBeLessThanOrEqual(0.5)
+})
+
 test('run CAS: an agent edit between validation and POST conflicts — nothing executes', async ({ page }) => {
   const id = await createInstance()
   await saveSection(id, 's1', 'x = 1')
@@ -1029,7 +1060,7 @@ test('graph: provider→consumer edge in reverse page order + duplicate issue', 
   await expect(page.locator('.nb-graph-aside')).toContainText('Graph issues (1)')
   await expect(page.locator('.nb-graph-aside')).toContainText('dup is defined by dup_a, dup_b')
   await expect(page.locator('.nb-graph-aside')).toContainText('blocks runs')
-  await expect(page.locator('.nb-graph-note')).toContainText('Running a section first runs its upstream sections that are not fresh.')
+  await expect(page.locator('.nb-graph')).toBeVisible()
 })
 
 test('graph C2: a dirty draft survives Code→Graph→Code', async ({ page }) => {
@@ -1880,4 +1911,29 @@ test('screenshots: 2x corner close-ups — head chip, toggle, graph node', async
     })
     await ctx.close()
   }
+})
+
+// EP-0024: a section that io.display()s a chart.spec renders an SVG in
+// its card; the same SVG DOM node must survive the 5s detail poll —
+// re-embedding on every fetch would reset zoom/brush state (C3).
+test('chart: io.display renders an SVG that survives section polls', async ({ page }) => {
+  const id = await createInstance()
+  await saveSection(id, 'chartsec', `data = [{"x": 1, "y": 2}, {"x": 2, "y": 4}, {"x": 3, "y": 9}]
+spec = chart.spec("line", data=data, encoding={"x": chart.field("x", "quantitative"), "y": chart.field("y", "quantitative")}, params=[{"name": "zoom", "select": "interval", "bind": "scales"}])
+io.display(spec, title="pts")`)
+  await runAll(id)
+
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  await expect(page.locator('.nb-toolbar')).toBeVisible({ timeout: 30_000 })
+  const c = card(page, 'chartsec')
+  // svg.marks is the chart itself — the embed actions menu has its own svg.
+  const svg = c.locator('.nb-chart svg.marks')
+  // First render pays the lazy vega chunk + embed cost.
+  await expect(svg).toBeVisible({ timeout: 30_000 })
+  // Mark THIS svg node; a re-embed would replace it with an unmarked one.
+  await svg.evaluate((el) => el.setAttribute('data-chart-node', '1'))
+  // The section detail refetches every 5s while live — wait past a
+  // full poll cycle, then require the marked node to still be there.
+  await page.waitForTimeout(6500)
+  await expect(c.locator('.nb-chart svg.marks[data-chart-node="1"]')).toHaveCount(1)
 })

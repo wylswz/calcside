@@ -467,6 +467,41 @@ func TestMCPNotebookTools(t *testing.T) {
 	if !strings.Contains(out, "2") || !strings.Contains(out, "upstream: first:reused (fresh)") {
 		t.Fatalf("exec upstream line: %q", out)
 	}
+
+	// io.display + chart produce a one-line summary over MCP; the
+	// section read keeps kind/title but drops the full spec.
+	res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "exec", Arguments: map[string]any{
+		"instance_id": id,
+		"code": `data = [{"x": 1, "y": 2}, {"x": 3, "y": 5}]
+io.display(chart.spec("point", data=data, encoding={"x": chart.field("x", "quantitative"), "y": chart.field("y", "quantitative")}), title="pts")`,
+		"section": map[string]any{"name": "charted", "description": "chart section"},
+	}})
+	if err != nil || res.IsError {
+		t.Fatalf("exec chart: %v %+v", err, res)
+	}
+	out = toolText(t, res)
+	if !strings.Contains(out, `displayed: "pts" (`) || !strings.Contains(out, "point") {
+		t.Fatalf("exec display line: %q", out)
+	}
+	res, err = cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "read_section", Arguments: map[string]any{
+		"instance_id": id, "name": "charted", "include_output": true,
+	}})
+	if err != nil || res.IsError {
+		t.Fatalf("read_section charted: %v %+v", err, res)
+	}
+	var secOut struct {
+		Displays         []map[string]any `json:"displays"`
+		DisplaySummaries []string         `json:"display_summaries"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, res)), &secOut); err != nil {
+		t.Fatal(err)
+	}
+	if len(secOut.DisplaySummaries) != 1 || !strings.Contains(secOut.DisplaySummaries[0], "point") {
+		t.Fatalf("display_summaries: %v", secOut.DisplaySummaries)
+	}
+	if len(secOut.Displays) != 1 || secOut.Displays[0]["spec"] != nil || secOut.Displays[0]["title"] != "pts" {
+		t.Fatalf("read_section displays: %v", secOut.Displays)
+	}
 }
 
 func TestMCPNoFS(t *testing.T) {

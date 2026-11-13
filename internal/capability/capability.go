@@ -11,12 +11,14 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"go.starlark.net/starlark"
 
+	"calcside/internal/opdoc"
 	"calcside/internal/secrets"
 	"calcside/internal/types"
 )
@@ -234,6 +236,10 @@ func (g *Gate) Invoke(ctx context.Context, capability types.CapabilityName, op t
 	return val, opErr
 }
 
+// ParamDoc documents one operation parameter — or one key of a dict
+// parameter — for help text, editor completion and the console.
+type ParamDoc = opdoc.ParamDoc
+
 // OpInfo documents one capability operation.
 type OpInfo struct {
 	PolicyArgs map[string]string `json:"policy_args,omitempty"`
@@ -241,6 +247,9 @@ type OpInfo struct {
 	Name       types.Op          `json:"name"`
 	Doc        string            `json:"doc"`
 	Params     []string          `json:"params,omitempty"`
+	ParamDocs  []ParamDoc        `json:"param_docs,omitempty"`
+	Returns    string            `json:"returns,omitempty"`
+	Example    string            `json:"example,omitempty"`
 }
 
 // OpLine renders one op's signature line for prompt fragments:
@@ -252,6 +261,95 @@ func OpLine(capName types.CapabilityName, op OpInfo) string {
 		doc = " — " + op.Doc
 	}
 	return fmt.Sprintf("- `%s.%s(%s)`%s", capName, op.Name, params, doc)
+}
+
+// OpParamsDoc renders the Parameters/Returns block for an op (no
+// Example), unindented — shared by OpDetail and editor completion.
+func OpParamsDoc(op OpInfo) string {
+	var b strings.Builder
+	if len(op.ParamDocs) > 0 {
+		b.WriteString("Parameters:\n")
+		for _, p := range op.ParamDocs {
+			writeParamDoc(&b, "", p)
+		}
+	}
+	if op.Returns != "" {
+		fmt.Fprintf(&b, "Returns: %s\n", op.Returns)
+	}
+	return b.String()
+}
+
+// OpDetail renders one op's full help text: the OpLine signature
+// followed by the indented Parameters/Returns block and Example when
+// the op carries them. With no ParamDocs/Returns/Example it is exactly
+// OpLine + "\n", so built-in caps' help output is unchanged.
+func OpDetail(capName types.CapabilityName, op OpInfo) string {
+	line := OpLine(capName, op)
+	if len(op.ParamDocs) == 0 && op.Returns == "" && op.Example == "" {
+		return line + "\n"
+	}
+	var b strings.Builder
+	b.WriteString(line + "\n")
+	if block := OpParamsDoc(op); block != "" {
+		for _, ln := range strings.Split(strings.TrimRight(block, "\n"), "\n") {
+			b.WriteString("  " + ln + "\n")
+		}
+	}
+	if op.Example != "" {
+		b.WriteString("  Example:\n")
+		for _, ln := range strings.Split(strings.TrimRight(op.Example, "\n"), "\n") {
+			b.WriteString("    " + ln + "\n")
+		}
+	}
+	return b.String()
+}
+
+// writeParamDoc renders one param (and its dict fields, one level
+// deep) as "- `name` (type, optional, default x): doc".
+func writeParamDoc(b *strings.Builder, indent string, p ParamDoc) {
+	fmt.Fprintf(b, "%s- `%s`", indent, p.Name)
+	var meta []string
+	if p.Type != "" {
+		meta = append(meta, p.Type)
+	}
+	if p.Optional {
+		meta = append(meta, "optional")
+	}
+	if p.HasDefault || p.Default != nil {
+		meta = append(meta, "default "+starlarkDefault(p.Default))
+	}
+	if len(meta) > 0 {
+		b.WriteString(" (" + strings.Join(meta, ", ") + ")")
+	}
+	if p.Doc != "" {
+		b.WriteString(": " + p.Doc)
+	}
+	b.WriteString("\n")
+	for _, f := range p.Fields {
+		writeParamDoc(b, indent+"  ", f)
+	}
+}
+
+// starlarkDefault renders a documented default with Starlark spelling:
+// None/True/False, quoted strings, plain numbers.
+func starlarkDefault(v any) string {
+	if v == nil {
+		return "None"
+	}
+	switch t := v.(type) {
+	case bool:
+		if t {
+			return "True"
+		}
+		return "False"
+	case string:
+		return strconv.Quote(t)
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprint(v)
+	}
+	return string(raw)
 }
 
 // HelpEntry is one node in an instance's on-demand documentation. Name
@@ -268,7 +366,7 @@ func OpHelpEntry(capName types.CapabilityName, op OpInfo) HelpEntry {
 	return HelpEntry{
 		Name:    string(capName) + "." + string(op.Name),
 		Summary: op.Doc,
-		Text:    OpLine(capName, op) + "\n",
+		Text:    OpDetail(capName, op),
 	}
 }
 

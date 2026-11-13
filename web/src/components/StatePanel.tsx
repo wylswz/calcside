@@ -20,12 +20,7 @@ function MemorySparkline({ samples, max }: { samples: number[]; max: number }) {
 
 function MemoryBlock({ resources, history }: { resources?: ResourceUsages; history: number[] }) {
   if (!resources) {
-    return (
-      <details className="state-resource-note">
-        <summary>Memory reporting unavailable</summary>
-        <p className="mt-1 text-xs text-mute">Memory reporting requires process isolation with a configured memory limit.</p>
-      </details>
-    )
+    return <p className="text-xs text-mute">Memory reporting unavailable</p>
   }
   const { memory_usage: usage, memory_peak: peak, memory_max: max } = resources
   const pct = max > 0 ? Math.min(100, (usage / max) * 100) : 0
@@ -95,7 +90,7 @@ export function StatePanel({ id, running, revision, capNames = [], heading = tru
   return (
     <section aria-label="State" className="space-y-5">
       {heading && <SectionTitle>State</SectionTitle>}
-      {!running && <p className="text-xs text-mute">instance is not running — nothing to inspect</p>}
+      {!running && <p className="text-xs text-mute">Instance is not running.</p>}
       {error && <Notice tone="warning">{(error as Error).message}</Notice>}
       {data && (
         <>
@@ -103,7 +98,7 @@ export function StatePanel({ id, running, revision, capNames = [], heading = tru
           <div>
             <div className="state-variable-tools mb-2 flex items-center gap-3">
               <span className="text-sm font-medium text-ink">Variables</span>
-              <span className="text-xs tabular-nums text-sec" title="Values are representations with known secrets redacted.">{names.length}</span>
+              <span className="text-xs tabular-nums text-sec">{names.length}</span>
               {builtinCount > 0 && (
                 <button className="text-btn" onClick={() => setShowBuiltins(!showBuiltins)}>
                   <SwapLabel show={`${showBuiltins ? 'Hide' : 'Show'} built-ins (${builtinCount})`} options={[`Show built-ins (${builtinCount})`, `Hide built-ins (${builtinCount})`]} />

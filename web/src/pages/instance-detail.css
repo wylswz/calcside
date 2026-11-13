@@ -13,11 +13,9 @@
 .instance-detail h1 { font-size: 30px; line-height: 36px; font-weight: 600; letter-spacing: -0.025em; }
 .instance-detail h2 { font-size: 18px; line-height: 26px; font-weight: 600; }
 .instance-detail .side-col h2 { font-size: 16px; line-height: 22px; }
-.instance-detail .side-label { font-size: 14px; font-weight: 500; }
-.instance-detail .side-text, .instance-detail .side-group dd { font-size: 13px; line-height: 20px; }
 .instance-detail .detail-meta { font-size: 12px; line-height: 18px; }
 /* mono only for code/identifiers */
-.instance-detail .detail-code, .instance-detail .side-name, .instance-detail code,
+.instance-detail .detail-code, .instance-detail code,
 .instance-detail pre, .instance-detail .cm-editor, .instance-detail .artifact-name {
   font-family: var(--font-mono); font-size: 13px; line-height: 20px; font-weight: 400;
 }
@@ -68,15 +66,28 @@ body:has(.instance-detail) .console-profile { font-size: 13px; color: rgb(var(--
   margin-bottom: 12px;
 }
 .instance-detail .side-col h2 { margin: 0 0 10px; }
-.instance-detail .side-label { color: rgb(var(--body)); margin: 16px 0 4px; }
-.instance-detail .side-text { color: rgb(var(--sec)); min-width: 0; overflow-wrap: anywhere; }
-.instance-detail .side-name { color: rgb(var(--body)); min-width: 0; overflow-wrap: anywhere; }
-.instance-detail .side-kind { font-size: 12px; color: rgb(var(--sec)); }
 
-/* boundary fields — readable label/value rows */
-.instance-detail .side-field { margin-top: 4px; }
-.instance-detail .side-field dt { font-size: 12px; line-height: 18px; font-weight: 500; color: rgb(var(--sec)); }
-.instance-detail .side-field dd { font-size: 13px; line-height: 20px; color: rgb(var(--ink)); margin: 0; min-width: 0; overflow-wrap: anywhere; }
+/* boundary key/value rows — one uniform label/value list */
+.instance-detail .side-kv { margin: 0; border-top: 1px solid var(--detail-edge); }
+.instance-detail .side-kv-row {
+  display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px;
+  padding: 7px 0; border-bottom: 1px solid var(--detail-edge);
+  align-items: baseline;
+}
+.instance-detail .side-kv-row dt {
+  font-size: 12px; line-height: 18px; font-weight: 500; color: rgb(var(--sec));
+}
+.instance-detail .side-kv-row dd {
+  font-size: 13px; line-height: 20px; color: rgb(var(--ink));
+  margin: 0; min-width: 0; overflow-wrap: anywhere;
+}
+.instance-detail .side-kv-lines { display: grid; gap: 2px; }
+.instance-detail .side-kv-line {
+  display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; min-width: 0;
+}
+.instance-detail .side-kv-sub { color: rgb(var(--sec)); }
+.instance-detail .side-kv-env { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.instance-detail .side-actions { display: flex; gap: 8px; margin-top: 12px; }
 
 /* work-surface headings — plain, no boxes */
 .instance-detail [data-ui='section-title'] { border: 0; padding-bottom: 0; margin-bottom: 16px; flex-wrap: wrap; }
@@ -165,17 +176,7 @@ body:has(.instance-detail) .console-profile { font-size: 13px; color: rgb(var(--
 
 /* headings + metadata on owned seams */
 .instance-detail .activity-heading h3 { font-size: 18px; line-height: 26px; }
-.instance-detail .side-limit {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px;
-  padding: 4px 0; align-items: baseline;
-}
-.instance-detail .side-limit .side-value {
-  font-size: 13px; color: rgb(var(--ink)); font-variant-numeric: tabular-nums; text-align: right;
-}
 .instance-detail .artifact-empty { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 16px; min-height: 72px; }
 .instance-detail .artifact-empty-icon { height: 16px; width: 16px; color: rgb(var(--sec)); }
 .instance-detail .editor-toolbar, .instance-detail .editor-footer { font-size: 12px; color: rgb(var(--sec)); }
 .instance-detail .call-detail dt { text-transform: none; font-size: 12px; letter-spacing: normal; }
-.instance-detail .state-resource-note summary {
-  cursor: pointer; font-size: 12px; color: rgb(var(--sec));
-}

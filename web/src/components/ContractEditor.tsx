@@ -102,7 +102,7 @@ export default function ContractEditor({
 
   return (
     <div className="contract-side">
-      <label className="build-label">{label} sample <span className="dim">(raw JSON, stays in this tab)</span>
+      <label className="build-label">{label} sample
         <textarea
           aria-label={`${label} sample`}
           className={inputCls + ' mono sample-area'}

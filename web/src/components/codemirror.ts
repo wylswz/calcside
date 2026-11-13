@@ -22,6 +22,8 @@ export const cmTheme = [
     '.cm-matchingBracket, &.cm-focused .cm-matchingBracket': { backgroundColor: c('warn', 0.35), outline: 'none' },
     '.cm-tooltip': { backgroundColor: c('paper'), border: `1px solid ${c('ink')}`, color: c('ink') },
     '.cm-tooltip-autocomplete > ul > li[aria-selected]': { backgroundColor: c('accent'), color: '#fff' },
+    '.cm-tooltip-autocomplete > ul > li': { whiteSpace: 'normal', overflowWrap: 'anywhere' },
+    '.cm-completionDetail': { display: 'inline-block', maxWidth: 'min(56ch, calc(95vw - 100px))', verticalAlign: 'top', whiteSpace: 'normal', fontStyle: 'normal' },
     '.cm-placeholder': { color: c('mute') },
   }),
   syntaxHighlighting(

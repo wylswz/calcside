@@ -736,10 +736,6 @@ export function NotebookGraph({ structure, metas, selected, onSelect, onClear, o
 
   return (
     <div className="nb-graph">
-      <div className="nb-graph-head">
-        <span className="nb-graph-note">Running a section first runs its upstream sections that are not fresh.</span>
-      </div>
-
       {structure.names.length === 0 ? (
         <div className="nb-graph-empty">No sections yet</div>
       ) : (
@@ -760,10 +756,7 @@ export function NotebookGraph({ structure, metas, selected, onSelect, onClear, o
             {!selExists ? (
               <div className="nb-graph-aside-empty">
                 {issueCount === 0 ? (
-                  <>
-                    <h3 className="nb-graph-aside-h">No issues</h3>
-                    <p className="nb-graph-aside-note">Running a section first runs its upstream sections that are not fresh.</p>
-                  </>
+                  <h3 className="nb-graph-aside-h">No issues</h3>
                 ) : (
                   <>
                     <h3 className="nb-graph-aside-h">Graph issues ({issueCount})</h3>
@@ -804,10 +797,7 @@ export function NotebookGraph({ structure, metas, selected, onSelect, onClear, o
                     <div className="nb-graph-detail-block">
                       <h4 className="nb-graph-detail-h">Effects</h4>
                       {selMeta.effects.length === 0 ? (
-                        <>
-                          <p className="nb-graph-detail-note">no effects observed</p>
-                          <p className="nb-graph-detail-note">observed in last run — not a purity claim</p>
-                        </>
+                        <p className="nb-graph-detail-note">no effects observed</p>
                       ) : (
                         <ul className="nb-graph-detail-list">
                           {selMeta.effects.map((fx) => <li key={fx}><code>{fx}</code></li>)}
@@ -877,7 +867,6 @@ export function NotebookGraph({ structure, metas, selected, onSelect, onClear, o
                     <Button
                       variant="ghost" size="xs"
                       disabled={runBusy}
-                      title="Run this section — upstream sections that are not fresh run first"
                       onClick={() => onRunSection(selected)}
                     >
                       <SwapLabel show={runLabel === 'Running…' ? 'Running…' : 'Run section'} options={['Run section', 'Running…']} />

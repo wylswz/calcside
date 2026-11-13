@@ -121,40 +121,24 @@ export default function NewApplication() {
           <section className="create-basics" aria-labelledby="create-basics-title">
             <div className="create-basics-head">
               <h2 id="create-basics-title">Basics</h2>
-              <p>Give it a name and a one-line purpose. Callers will send JSON to main(input).</p>
             </div>
             <div className="create-basics-body">
               <div className="create-basics-grid">
                 <Field label="Name">
-                  <>
-                    <input id="basics-name" className={inputCls} value={name} maxLength={128}
-                      placeholder="e.g. Greeter" onChange={(e) => setName(e.target.value)} />
-                    <span className="create-field-hint">Optional — defaults to "Untitled application".</span>
-                  </>
+                  <input id="basics-name" className={inputCls} value={name} maxLength={128}
+                    placeholder="e.g. Greeter" onChange={(e) => setName(e.target.value)} />
                 </Field>
                 <Field label="Description">
-                  <>
-                    <input id="basics-description" className={inputCls} value={description} maxLength={280}
-                      placeholder="What does it do?" onChange={(e) => { basicsPending.current = true; setDescription(e.target.value) }} />
-                    <span className="create-field-hint">Shown under the name in the list.</span>
-                  </>
+                  <input id="basics-description" className={inputCls} value={description} maxLength={280}
+                    placeholder="What does it do?" onChange={(e) => { basicsPending.current = true; setDescription(e.target.value) }} />
                 </Field>
               </div>
               <div>
                 <KeyValueRows title="Labels" addText="Add label" idPrefix="basics-label" rows={labels}
                   onChange={(rows) => { basicsPending.current = true; setLabels(rows) }} />
-                <p className="create-field-hint">Optional key=value metadata — name and description have their own fields above.</p>
-              </div>
-              <div className="create-next">
-                <span className="create-next-label">After creation</span>
-                <ul className="create-next-list">
-                  <li>Edit <code className="create-code">main(input)</code> and its schemas on the application page.</li>
-                  <li>Publish a version to start serving calls.</li>
-                </ul>
               </div>
             </div>
             <div className="create-basics-actions">
-              <p className="create-basics-note">Next you'll choose capabilities, policies and limits. Publishing serves the version.</p>
               <Button variant="primary" onClick={goConfig}>Continue to configuration</Button>
             </div>
           </section>
@@ -172,7 +156,6 @@ export default function NewApplication() {
                 <Button variant="primary" className="w-full" disabled={busy || specErrs.length > 0} onClick={create}>
                   <SwapLabel show={busy ? 'Creating…' : 'Create application'} options={['Create application', 'Creating…']} />
                 </Button>
-                <p className="create-bar-note">Next: write main(input), run it, then publish.</p>
               </div>
             } />
         </div>

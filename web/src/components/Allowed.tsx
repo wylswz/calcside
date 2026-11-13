@@ -1,5 +1,6 @@
 import type { Instance } from '../api'
 import { fmtBytes } from '../format'
+import { Tag } from './ui'
 
 interface SpecSecret { ref?: string; source?: string; allowed_domains?: string[] }
 
@@ -12,19 +13,10 @@ function policyLabel(name: string): string {
   return known[name] ?? name
 }
 
-function Row({ name, children }: { name: string; children: React.ReactNode }) {
-  return (
-    <div className="side-field">
-      <dt>{name}</dt>
-      <dd>{children}</dd>
-    </div>
-  )
-}
-
 // Allowed states the instance's boundary in plain terms: what it may do,
 // under which policies, with which secrets — never values. Always visible
 // on the instance page; every other judgement depends on it.
-export function Allowed({ inst }: { inst: Instance }) {
+export function Allowed({ inst, extra }: { inst: Instance; extra?: React.ReactNode }) {
   const caps = Object.entries(inst.spec?.capabilities ?? {}) as [string, any][]
   const policies = inst.spec?.policies ?? []
   const secrets = Object.entries(inst.spec?.secrets ?? {}) as [string, SpecSecret][]
@@ -74,69 +66,73 @@ export function Allowed({ inst }: { inst: Instance }) {
 
   return (
     <section aria-label="Allowed">
-      <div className="side-group">
-        <h3 className="side-label">Abilities</h3>
-        {caps.length === 0 ? (
-          <p className="side-text">compute + print only</p>
-        ) : (
-          <dl>
-            {caps.map(([name, cfg]) => (
-              <div key={name} className="side-field"><dt>{capLabel[name] ?? name}</dt>
-                <dd className="side-text">{capSettings(name, cfg) || 'defaults'}</dd></div>
-            ))}
-          </dl>
-        )}
-      </div>
-      <div className="side-group">
-        <h3 className="side-label">Rules</h3>
-        <dl>
-          <Row name="Policies">
-            {policies.length === 0 ? (
-              <span className="side-text">server policies only</span>
-            ) : (
-              <span className="block space-y-1">
+      <dl className="side-kv">
+        <div className="side-kv-row">
+          <dt>Capabilities</dt>
+          <dd>
+            {caps.length === 0 ? 'Compute only' : (
+              <span className="side-kv-lines">
+                {caps.map(([name, cfg]) => {
+                  const detail = capSettings(name, cfg)
+                  return (
+                    <span key={name} className="side-kv-line">
+                      <Tag>{capLabel[name] ?? name}</Tag>
+                      {detail !== '' && <span className="side-kv-sub">{detail}</span>}
+                    </span>
+                  )
+                })}
+              </span>
+            )}
+          </dd>
+        </div>
+        <div className="side-kv-row">
+          <dt>Policies</dt>
+          <dd>
+            {policies.length === 0 ? 'Server only' : (
+              <span className="side-kv-lines">
                 {policies.map((n) => (
-                  <span key={n} className="side-text block" title={n}>{policyLabel(n)}</span>
+                  <span key={n} className="side-kv-line" title={n}>{policyLabel(n)}</span>
                 ))}
               </span>
             )}
-          </Row>
-          {limitParts.length > 0 && limitParts.map((l) => (
-            <div key={l.k} className="side-limit"><dt className="side-text">{l.label}</dt><dd className="side-value">{l.v}</dd></div>
-          ))}
-        </dl>
-      </div>
-      {secrets.length === 0 && env.length === 0 ? (
-        <p className="side-text">No additional inputs.</p>
-      ) : (
-        <div className="side-group">
-          <h3 className="side-label">Inputs</h3>
-          <dl>
-            {secrets.length > 0 && (
-              <Row name="secrets">
-                <span className="flex flex-wrap gap-x-4 gap-y-1">
-                  {secrets.map(([k, v]) => (
-                    <span key={k} className="side-name">
-                      {k}
-                      <span className="side-text">
-                        {' '}{v.source === 'vault' ? `vault:${v.ref ?? k}` : 'inline'}
-                        {' · '}{(v.allowed_domains ?? []).join(' ') || 'any host'}
-                      </span>
-                    </span>
-                  ))}
-                </span>
-              </Row>
-            )}
-            {env.length > 0 && (
-              <Row name="env">
-                <span className="flex flex-wrap gap-x-4 gap-y-1">
-                  {env.map((k) => <span key={k} className="side-name">{k}</span>)}
-                </span>
-              </Row>
-            )}
-          </dl>
+          </dd>
         </div>
-      )}
+        {limitParts.map((l) => (
+          <div key={l.k} className="side-kv-row">
+            <dt>{l.label}</dt>
+            <dd className="tabular-nums">{l.v}</dd>
+          </div>
+        ))}
+        {secrets.length > 0 && (
+          <div className="side-kv-row">
+            <dt>Secrets</dt>
+            <dd>
+              <span className="side-kv-lines">
+                {secrets.map(([k, v]) => (
+                  <span key={k} className="side-kv-line">
+                    <code>{k}</code>
+                    <span className="side-kv-sub">
+                      {v.source === 'vault' ? `vault:${v.ref ?? k}` : 'inline'}
+                      {' · '}{(v.allowed_domains ?? []).join(' ') || 'any host'}
+                    </span>
+                  </span>
+                ))}
+              </span>
+            </dd>
+          </div>
+        )}
+        {env.length > 0 && (
+          <div className="side-kv-row">
+            <dt>Env</dt>
+            <dd>
+              <span className="side-kv-env">
+                {env.map((k) => <code key={k}>{k}</code>)}
+              </span>
+            </dd>
+          </div>
+        )}
+        {extra}
+      </dl>
     </section>
   )
 }

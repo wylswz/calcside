@@ -50,6 +50,9 @@ type Session struct {
 
 	// Out captures print/io output; the caller resets it per exec.
 	Out *capio.Buffer
+	// Displays collects io.display chart specs; the caller resets it
+	// per exec and drains it into the result. Nil-safe.
+	Displays *capio.Displays
 	// Capabilities are the granted typed configs, including implicit io.
 	Capabilities map[string]any
 	// Closers indexes capability closers by name, for host-side access
@@ -321,6 +324,7 @@ func NewSession(d SessionDeps, c SessionCreation) (*Session, error) {
 			s.Closers[types.CapabilityName(name)] = closer
 			if ioc, ok := closer.(*capio.Closer); ok {
 				s.Out = ioc.B
+				s.Displays = ioc.D
 			}
 		}
 		predeclared[name] = val
@@ -328,6 +332,9 @@ func NewSession(d SessionDeps, c SessionCreation) (*Session, error) {
 	}
 	if s.Out == nil {
 		s.Out = capio.NewBuffer(c.MaxOutputBytes)
+	}
+	if s.Displays == nil {
+		s.Displays = capio.NewDisplays()
 	}
 	// interrupt is granted by the caller (the program path), never by
 	// the spec, and is deliberately kept out of the ext bindings map.

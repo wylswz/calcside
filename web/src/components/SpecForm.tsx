@@ -555,8 +555,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
     return (
       <div className="spec-form">
         <div className="spec-json">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-sec">{refsOnly ? 'Secrets must use vault references.' : 'Advanced editing includes any inline secret values.'} Invalid edits cannot be submitted.</p>
+          <div className="mb-3 flex flex-wrap items-center justify-end gap-3">
             <button type="button" className="text-btn underline" onClick={toggleAdvanced}>Back to editor</button>
           </div>
           <textarea aria-label={application ? 'Application spec JSON' : debug ? 'Debug spec JSON' : 'Instance spec JSON'} className={inputCls + ' min-h-[420px] font-mono text-xs'} value={json} spellCheck={false} onChange={(e) => setJSON(e.target.value)} />
@@ -583,7 +582,6 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
 
           {/* forceMount keeps both views mounted so editor state survives switching */}
           <Tabs.Content value="capabilities" forceMount className="spec-palette">
-            <p className="spec-pane-note">Optional. {application ? 'Applied when published.' : debug ? 'Used only for this module debug run.' : 'Settings are fixed after creation.'}</p>
             <div className="ability-choices">
               <button type="button" className="ability-choice" data-selected={!!draft.fs} aria-label={draft.fs ? 'Files added' : 'Add Files'} onClick={addFiles}>
                 <FilesIcon />
@@ -620,7 +618,6 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
             )}
             <div className="policies-block">
               <h4 className="mb-3 text-sm font-semibold text-ink">Policies</h4>
-              <p className="spec-pane-note">Policies constrain what capabilities may do; they never grant access.</p>
               <PolicyPicker entries={policies.data?.policies ?? []} selected={selectedPolicies}
                 loading={policies.isPending} error={policies.isError} onRetry={() => policies.refetch()}
                 onToggle={togglePolicy} onRemove={removePolicy}
@@ -653,7 +650,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
                   <div className="config-item-body">{item.body}</div>
                 </div>
               ))}
-              {Object.keys(draft.otherCaps).map((name) => <div key={name} className="settings-card"><h4 className="config-item-title">{name}</h4><p className="config-item-summary">Existing configuration preserved. Use Advanced JSON to edit.</p></div>)}
+              {Object.keys(draft.otherCaps).map((name) => <div key={name} className="settings-card"><h4 className="config-item-title">{name}</h4><p className="config-item-summary">Edit in Advanced JSON.</p></div>)}
             </section>
             <section className="settings-group" data-section="limits">
               <h3 className="spec-pane-title">Limits <span className="spec-pane-meta">{limitsSummary}</span></h3>
@@ -661,7 +658,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
             </section>
             <section className="settings-group" data-section="inputs">
               <h3 className="spec-pane-title">Inputs <span className="spec-pane-meta">{inputsSummary}</span></h3>
-              <InputsSection draft={draft} set={set} keyMode={refsOnly} application={application} hideLabels={hideBasics} vault={vault.data?.secrets ?? []} vaultError={vault.isError} onRetryVault={() => vault.refetch()} listId={`vault-names-${ws}`} />
+              <InputsSection draft={draft} set={set} keyMode={refsOnly} hideLabels={hideBasics} vault={vault.data?.secrets ?? []} vaultError={vault.isError} onRetryVault={() => vault.refetch()} listId={`vault-names-${ws}`} />
             </section>
           </Tabs.Content>
         </Tabs.Root>
@@ -685,7 +682,6 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
                 <div className="selected-row is-empty">
                   <div className="min-w-0 flex-1">
                     <h4 className="config-item-title">Compute only</h4>
-                    <span className="selected-status">Starlark and the standard library</span>
                   </div>
                 </div>
               )}
@@ -708,7 +704,6 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
                   <div className="selected-row is-empty">
                     <div className="min-w-0 flex-1">
                       <h4 className="config-item-title">No modules</h4>
-                      <span className="selected-status">Mount published modules to load() them</span>
                     </div>
                   </div>
                 )}
@@ -726,7 +721,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
                             {typeof v === 'number' && v > 0 ? ` · v${v}` : ''}
                             {typeof sum === 'string' && sum ? ` · ${sum.slice(0, 20)}…` : ''}
                           </span>
-                          <code className="block truncate text-xs text-mute" title="Use a .star file from the module and an exported symbol">{`load("@${mount.alias}/<file>.star", "<symbol>")`}</code>
+                          <code className="block truncate text-xs text-mute">{`load("@${mount.alias}/<file>.star", "<symbol>")`}</code>
                         </div>
                         <button type="button" className="text-btn" aria-label={`Remove module ${name}`} onClick={() => setModRemove(mount)}>Remove</button>
                       </div>
@@ -752,7 +747,6 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
                 <div className="selected-row is-empty">
                   <div className="min-w-0 flex-1">
                     <h4 className="config-item-title">No policies</h4>
-                    <span className="selected-status">Add one to restrict capabilities</span>
                   </div>
                 </div>
               )}
@@ -782,7 +776,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
           <Confirm title={`Remove module ${mountName(modRemove)}?`} tone="danger" confirm="Remove" pending="Removing…"
             action={async () => { doRemoveModule(modRemove); setModRemove(null) }}
             onClose={() => setModRemove(null)}>
-            Remove the {mountName(modRemove)} module mounted as @{modRemove.alias}? Scripts calling load("@{modRemove.alias}/…") will fail until it is added again.
+            Remove the {mountName(modRemove)} module mounted as @{modRemove.alias}?
           </Confirm>
         )}
       </div>

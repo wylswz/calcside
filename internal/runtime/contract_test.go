@@ -21,6 +21,13 @@ import (
 // transit is context the node will silently be missing.
 func TestMessagesRoundTrip(t *testing.T) {
 	ts := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	paramDocsSymbol := completion.Symbol{}
+	if err := json.Unmarshal([]byte(`{"name":"fs.read","kind":"function","params":["path"],"param_docs":[{"name":"path","type":"string","doc":"File path.","default":"in.txt","fields":[{"name":"recursive","type":"bool","default":false}]}]}`), &paramDocsSymbol); err != nil {
+		t.Fatal(err)
+	}
+	if len(paramDocsSymbol.ParamDocs) != 1 || len(paramDocsSymbol.ParamDocs[0].Fields) != 1 {
+		t.Fatalf("param_docs fixture did not decode: %+v", paramDocsSymbol.ParamDocs)
+	}
 	cases := []any{
 		&CreateRequest{
 			InstanceID: "ins_1",
@@ -88,7 +95,7 @@ func TestMessagesRoundTrip(t *testing.T) {
 		&InspectRequest{InstanceID: "ins_1", Owner: Owner{UserID: "usr_1"}, Epoch: 3},
 		&InspectRequest{InstanceID: "ins_1", Owner: Owner{UserID: "usr_1"}, Epoch: 3, CompletionsOnly: true},
 		&InspectResponse{Completions: &completion.Context{
-			Symbols: []completion.Symbol{{Name: "fs.read", Kind: "function", Params: []string{"path"}}},
+			Symbols: []completion.Symbol{paramDocsSymbol},
 			EnvKeys: []string{"REGION"}, Truncated: true,
 		}},
 		&InspectResponse{

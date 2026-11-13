@@ -1,0 +1,182 @@
+name: charts
+version: 0.1.0
+description: Ready-made Vega-Lite chart specs for io.display
+dependencies: []
+ops:
+  - name: line
+    doc: Line chart spec for io.display.
+    returns: "dict — validated Vega-Lite spec; pass it to io.display(spec, title=None)"
+    example: |
+      data = [{"day": "2026-01-01", "latency": 120}, {"day": "2026-01-02", "latency": 95}]
+      spec = ext.charts.line(data, "day", "latency", {"zoom": True})
+      io.display(spec, title="Latency by day")
+    params:
+      - name: data
+        type: "list[dict]"
+        doc: Rows of flat dicts with scalar values (at most 5,000 rows); x, y and the option fields must name keys in these rows.
+      - name: x
+        type: string
+        doc: Field name for the x channel.
+      - name: y
+        type: string
+        doc: Field name for the y channel.
+      - name: options
+        type: dict
+        doc: Chart options; unknown keys are errors.
+        optional: true
+        fields:
+          - {name: color, type: string, doc: "Field name for a colour encoding.", default: null}
+          - {name: title, type: string, doc: "Chart title.", default: null}
+          - {name: x_type, type: string, doc: "quantitative|temporal|ordinal|nominal; inferred from the first non-null value when omitted.", default: null}
+          - {name: y_type, type: string, doc: "quantitative|temporal|ordinal|nominal; inferred from the first non-null value when omitted.", default: null}
+          - {name: tooltip, type: bool, doc: "Show per-point tooltips.", default: true}
+          - {name: zoom, type: bool, doc: "Drag to pan, scroll to zoom in the console.", default: false}
+          - {name: legend_filter, type: bool, doc: "Click legend entries to filter; requires color.", default: false}
+          - {name: width, type: int, doc: "Spec width in px.", default: 480}
+          - {name: height, type: int, doc: "Spec height in px.", default: 280}
+  - name: area
+    doc: Area chart spec for io.display.
+    returns: "dict — validated Vega-Lite spec; pass it to io.display(spec, title=None)"
+    example: |
+      spec = ext.charts.area(data, "day", "latency", {"color": "service"})
+      io.display(spec, title="Latency by service")
+    params:
+      - name: data
+        type: "list[dict]"
+        doc: Rows of flat dicts with scalar values (at most 5,000 rows); x, y and the option fields must name keys in these rows.
+      - name: x
+        type: string
+        doc: Field name for the x channel.
+      - name: y
+        type: string
+        doc: Field name for the y channel.
+      - name: options
+        type: dict
+        doc: Chart options; unknown keys are errors.
+        optional: true
+        fields:
+          - {name: color, type: string, doc: "Field name for a colour encoding.", default: null}
+          - {name: title, type: string, doc: "Chart title.", default: null}
+          - {name: x_type, type: string, doc: "quantitative|temporal|ordinal|nominal; inferred from the first non-null value when omitted.", default: null}
+          - {name: y_type, type: string, doc: "quantitative|temporal|ordinal|nominal; inferred from the first non-null value when omitted.", default: null}
+          - {name: tooltip, type: bool, doc: "Show per-point tooltips.", default: true}
+          - {name: zoom, type: bool, doc: "Drag to pan, scroll to zoom in the console.", default: false}
+          - {name: legend_filter, type: bool, doc: "Click legend entries to filter; requires color.", default: false}
+          - {name: width, type: int, doc: "Spec width in px.", default: 480}
+          - {name: height, type: int, doc: "Spec height in px.", default: 280}
+  - name: bar
+    doc: Bar chart spec for io.display; x defaults to nominal unless temporal.
+    returns: "dict — validated Vega-Lite spec; pass it to io.display(spec, title=None)"
+    example: |
+      data = [{"service": "api", "errors": 3}, {"service": "web", "errors": 7}]
+      spec = ext.charts.bar(data, "service", "errors")
+      io.display(spec, title="Errors by service")
+    params:
+      - name: data
+        type: "list[dict]"
+        doc: Rows of flat dicts with scalar values (at most 5,000 rows); x, y and the option fields must name keys in these rows.
+      - name: x
+        type: string
+        doc: Field name for the x channel.
+      - name: y
+        type: string
+        doc: Field name for the y channel.
+      - name: options
+        type: dict
+        doc: Chart options; unknown keys are errors.
+        optional: true
+        fields:
+          - {name: color, type: string, doc: "Field name for a colour encoding.", default: null}
+          - {name: title, type: string, doc: "Chart title.", default: null}
+          - {name: x_type, type: string, doc: "quantitative|temporal|ordinal|nominal; nominal unless the data looks temporal when omitted.", default: null}
+          - {name: y_type, type: string, doc: "quantitative|temporal|ordinal|nominal; inferred from the first non-null value when omitted.", default: null}
+          - {name: tooltip, type: bool, doc: "Show per-bar tooltips.", default: true}
+          - {name: zoom, type: bool, doc: "Drag to pan, scroll to zoom in the console.", default: false}
+          - {name: legend_filter, type: bool, doc: "Click legend entries to filter; requires color.", default: false}
+          - {name: width, type: int, doc: "Spec width in px.", default: 480}
+          - {name: height, type: int, doc: "Spec height in px.", default: 280}
+  - name: scatter
+    doc: Scatter (point) chart spec for io.display; options may add size.
+    returns: "dict — validated Vega-Lite spec; pass it to io.display(spec, title=None)"
+    example: |
+      spec = ext.charts.scatter(data, "price", "score", {"size": "visits"})
+      io.display(spec, title="Score vs price")
+    params:
+      - name: data
+        type: "list[dict]"
+        doc: Rows of flat dicts with scalar values (at most 5,000 rows); x, y and the option fields must name keys in these rows.
+      - name: x
+        type: string
+        doc: Field name for the x channel.
+      - name: y
+        type: string
+        doc: Field name for the y channel.
+      - name: options
+        type: dict
+        doc: Chart options; unknown keys are errors.
+        optional: true
+        fields:
+          - {name: color, type: string, doc: "Field name for a colour encoding.", default: null}
+          - {name: size, type: string, doc: "Field name for point size.", default: null}
+          - {name: title, type: string, doc: "Chart title.", default: null}
+          - {name: x_type, type: string, doc: "quantitative|temporal|ordinal|nominal; inferred from the first non-null value when omitted.", default: null}
+          - {name: y_type, type: string, doc: "quantitative|temporal|ordinal|nominal; inferred from the first non-null value when omitted.", default: null}
+          - {name: tooltip, type: bool, doc: "Show per-point tooltips.", default: true}
+          - {name: zoom, type: bool, doc: "Drag to pan, scroll to zoom in the console.", default: false}
+          - {name: legend_filter, type: bool, doc: "Click legend entries to filter; requires color.", default: false}
+          - {name: width, type: int, doc: "Spec width in px.", default: 480}
+          - {name: height, type: int, doc: "Spec height in px.", default: 280}
+  - name: histogram
+    doc: Histogram spec for io.display.
+    returns: "dict — validated Vega-Lite spec; pass it to io.display(spec, title=None)"
+    example: |
+      spec = ext.charts.histogram(data, "latency", {"bins": 20})
+      io.display(spec, title="Latency distribution")
+    params:
+      - name: data
+        type: "list[dict]"
+        doc: Rows of flat dicts with scalar values (at most 5,000 rows); field and the option fields must name keys in these rows.
+      - name: field
+        type: string
+        doc: Numeric field to bin on x; y counts rows per bin.
+      - name: options
+        type: dict
+        doc: Chart options; unknown keys are errors.
+        optional: true
+        fields:
+          - {name: bins, type: int, doc: "Maximum bins for the x axis.", default: 30}
+          - {name: color, type: string, doc: "Field name for a colour encoding.", default: null}
+          - {name: title, type: string, doc: "Chart title.", default: null}
+          - {name: tooltip, type: bool, doc: "Show per-bar tooltips.", default: true}
+          - {name: width, type: int, doc: "Spec width in px.", default: 480}
+          - {name: height, type: int, doc: "Spec height in px.", default: 280}
+  - name: heatmap
+    doc: Heatmap (rect) spec for io.display; color is quantitative.
+    returns: "dict — validated Vega-Lite spec; pass it to io.display(spec, title=None)"
+    example: |
+      spec = ext.charts.heatmap(data, "hour", "weekday", "errors")
+      io.display(spec, title="Errors by hour and weekday")
+    params:
+      - name: data
+        type: "list[dict]"
+        doc: Rows of flat dicts with scalar values (at most 5,000 rows); x, y, color and the option fields must name keys in these rows.
+      - name: x
+        type: string
+        doc: Field name for the x channel.
+      - name: y
+        type: string
+        doc: Field name for the y channel.
+      - name: color
+        type: string
+        doc: Numeric field for the colour encoding.
+      - name: options
+        type: dict
+        doc: Chart options; unknown keys are errors.
+        optional: true
+        fields:
+          - {name: title, type: string, doc: "Chart title.", default: null}
+          - {name: x_type, type: string, doc: "quantitative|temporal|ordinal|nominal; inferred from the first non-null value when omitted.", default: null}
+          - {name: y_type, type: string, doc: "quantitative|temporal|ordinal|nominal; inferred from the first non-null value when omitted.", default: null}
+          - {name: tooltip, type: bool, doc: "Show per-cell tooltips.", default: true}
+          - {name: width, type: int, doc: "Spec width in px.", default: 480}
+          - {name: height, type: int, doc: "Spec height in px.", default: 280}

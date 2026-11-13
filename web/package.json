@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build && echo 'placeholder so `go build` works before `pnpm -C web build` generates the real assets' > dist/README.txt",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/components/completion.test.ts src/api.test.ts src/activity.test.ts src/mcpSnippets.test.ts src/applicationSnippets.test.ts src/nextStep.test.ts src/instanceDraft.test.ts src/environment.test.ts src/autosave.test.ts src/pendingDraft.test.ts src/buildDraft.test.ts src/builderCatalog.test.ts src/stableList.test.ts src/notebookGraph.test.ts src/interrupts.test.ts src/workspace.test.ts src/interactionStability.test.ts src/moduleMounts.test.ts src/api.stream.test.ts",
+    "test": "node --experimental-strip-types --test src/components/completion.test.ts src/api.test.ts src/activity.test.ts src/mcpSnippets.test.ts src/applicationSnippets.test.ts src/nextStep.test.ts src/instanceDraft.test.ts src/environment.test.ts src/autosave.test.ts src/pendingDraft.test.ts src/buildDraft.test.ts src/builderCatalog.test.ts src/stableList.test.ts src/notebookGraph.test.ts src/interrupts.test.ts src/workspace.test.ts src/interactionStability.test.ts src/moduleMounts.test.ts src/api.stream.test.ts src/chartEmbed.test.ts src/opDoc.test.ts",
     "lint": "eslint . && node --experimental-strip-types --test src/interactionStability.test.ts",
     "gen": "openapi-typescript ../api/openapi.yaml -o src/api/schema.ts --enum-values",
     "test:browser": "pnpm build && playwright test"
@@ -30,7 +30,11 @@
     "openapi-fetch": "0.17.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "react-router-dom": "6.28.0"
+    "react-router-dom": "6.28.0",
+    "vega": "6.4.0",
+    "vega-embed": "7.3.0",
+    "vega-interpreter": "2.3.2",
+    "vega-lite": "6.5.0"
   },
   "devDependencies": {
     "@eslint/js": "9.14.0",

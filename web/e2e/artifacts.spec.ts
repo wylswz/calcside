@@ -199,7 +199,7 @@ fs.write("unsupported.png", "not an image")`)
   await page.goto(`${consoleURL}/instances/${id}`)
   await page.getByRole('tab', { name: 'Files', exact: true }).click()
   const viewer = await openPreview(page, 'many.csv')
-  await expect(viewer.getByText(/Table preview is limited to 200 rows/)).toBeVisible()
+  await expect(viewer.getByText(/Table preview is truncated/)).toBeVisible()
   await expect(viewer.getByText(/221 records parsed/)).toBeVisible()
   await viewer.close()
   let downloads = 0

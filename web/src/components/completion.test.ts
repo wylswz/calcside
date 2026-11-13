@@ -145,11 +145,11 @@ test('utility completion uses runtime symbols and options', async () => {
 const appMetadata: EditorMetadata = {
   utilities: [
     { name: 'json', kind: 'namespace' },
-    { name: 'json.encode', kind: 'function', params: ['value'], detail: '(value)' },
+    { name: 'json.encode', kind: 'function', params: ['value'], detail: '(value)', param_docs: [{ name: 'value', doc: 'Value to encode.' }] },
   ],
   rego: [],
   capabilities: [
-    { name: 'fs', ops: [{ name: 'read', params: ['path'], doc: 'Read a file' }, { name: 'list', params: ['dir'] }] },
+    { name: 'fs', ops: [{ name: 'read', params: ['path'], doc: 'Read a file', param_docs: [{ name: 'path', type: 'string', doc: 'File path.' }] }, { name: 'list', params: ['dir'] }] },
     { name: 'net', ops: [{ name: 'get', params: ['url'] }] },
     { name: 'io', ops: [{ name: 'println', params: ['value'] }] },
     { name: 'interrupt', ops: [{ name: 'run_id', doc: 'Return the run id' }, { name: 'new', params: ['expires_in_s=None'] }, { name: 'wait', params: ['id', 'handler', 'on_expire=None', 'context'] }] },
@@ -157,7 +157,7 @@ const appMetadata: EditorMetadata = {
   ],
 }
 const appCatalog: ExtensionInfo[] = [
-  { source: 'contrib/tavily@0.1.0', family: 'contrib/tavily', version: '0.1.0', sum: 'h1:x', name: 'tavily', dependencies: [], config: [], ops: [{ name: 'search', params: ['q'], doc: 'Web search' }] },
+  { source: 'contrib/tavily@0.1.0', family: 'contrib/tavily', version: '0.1.0', sum: 'h1:x', name: 'tavily', dependencies: [], config: [], ops: [{ name: 'search', params: ['q'], doc: 'Web search', param_docs: [{ name: 'q', type: 'string', doc: 'Search query.' }] }] },
 ]
 
 const map = (symbols: CompletionSymbol[]) => Object.fromEntries(symbols.map((s) => [s.name, s]))
@@ -205,4 +205,89 @@ test('interrupt ops complete with keyword parameter hints', async () => {
   assert.ok((await complete(source, 'interrupt.new('))?.options.some((o) => o.label === 'expires_in_s='))
   const waitKw = (await complete(source, 'interrupt.wait(req["id"], '))?.options.map((o) => o.label) ?? []
   for (const kw of ['handler=', 'on_expire=', 'context=']) assert.ok(waitKw.includes(kw), kw)
+})
+
+const chartContext: InstanceContext = {
+  symbols: [
+    { name: 'ext', kind: 'namespace' },
+    { name: 'ext.charts', kind: 'namespace' },
+    {
+      name: 'ext.charts.line', kind: 'function',
+      params: ['data', 'x?', 'options=None'], detail: '(data, x?, options=None)', doc: 'Line chart spec.',
+      param_docs: [
+        { name: 'data', type: 'list[dict]', doc: 'Input rows.' },
+        { name: 'x', type: 'string', optional: true, doc: 'Column for x.' },
+        { name: 'options', type: 'dict', optional: true, default: null, doc: 'Chart options.', fields: [{ name: 'title', type: 'string', doc: 'Chart title' }] },
+      ],
+    },
+    { name: 'ext.charts.render', kind: 'function', params: ['spec', '*args', 'strict?', '**kwargs'], detail: '(...)' },
+    { name: 'ext.charts.aggregate', kind: 'function', params: ['items', '*', 'key?'], detail: '(...)' },
+  ],
+  env_keys: [], truncated: false,
+}
+const chartStar = starlarkCompletions(chartContext)
+
+test('parameter completion shows per-parameter usage instead of the signature', async () => {
+  const result = await complete(chartStar, 'ext.charts.line(')
+  const opts = Object.fromEntries((result?.options ?? []).map((o) => [o.label, o]))
+  assert.equal(opts['data=']?.detail, 'Input rows.')
+  assert.equal(opts['x=']?.detail, 'Column for x.')
+  assert.notEqual(opts['data=']?.detail, opts['x=']?.detail)
+  assert.equal(opts['data=']?.info, 'list[dict], required\n\nInput rows.')
+  assert.equal(opts['x=']?.info, 'string, optional\n\nColumn for x.')
+  assert.equal(opts['options=']?.detail, 'Chart options.')
+  const info = String(opts['options=']?.info)
+  assert.ok(info.includes('dict, optional, default None'))
+  assert.ok(info.includes('Chart options.'))
+  assert.ok(info.includes('Chart title'))
+  for (const o of result?.options ?? []) {
+    assert.ok(!String(o.detail).includes('ext.charts.line('), `signature leaked into ${o.label} detail`)
+    assert.ok(!String(o.detail).includes('(data'), `signature leaked into ${o.label} detail`)
+  }
+  assert.ok(!String(opts['data=']?.info).includes('Column for x'), 'data info shows another param doc')
+  assert.ok(!String(opts['x=']?.info).includes('Input rows'), 'x info shows another param doc')
+  const used = await complete(chartStar, 'ext.charts.line(data=[], x="a", ')
+  assert.ok(!used?.options.some((o) => o.label === 'data='))
+  assert.ok(!used?.options.some((o) => o.label === 'x='))
+  assert.ok(used?.options.some((o) => o.label === 'options='))
+  const members = await complete(chartStar, 'ext.charts.')
+  assert.equal(members?.options.find((o) => o.label === 'line')?.detail, '(data, x?, options=None)')
+})
+
+test('variadic forms offer only real parameter names', async () => {
+  const kwargs = async (text: string) => ((await complete(chartStar, text))?.options ?? [])
+    .filter((o) => o.label.endsWith('=')).map((o) => o.label).sort()
+  assert.deepEqual(await kwargs('ext.charts.render('), ['spec=', 'strict='])
+  assert.deepEqual(await kwargs('ext.charts.aggregate('), ['items=', 'key='])
+})
+
+test('parameters without docs fall back to plain requirement details', async () => {
+  const result = await complete(star, 'fs.write(path="a", ')
+  const content = result?.options.find((o) => o.label === 'content=')
+  assert.equal(content?.detail, 'required')
+  assert.equal(content?.info, undefined)
+  assert.ok(!String(content?.detail).includes('fs.write'))
+})
+
+test('document defs offer defaults as optional without docs', async () => {
+  const ctx = applicationSymbols({}, appMetadata, undefined, 'def render(data, suffix = ".png"):\n    return data + suffix\n')
+  const source = starlarkCompletions(ctx)
+  const result = await complete(source, 'render(')
+  assert.equal(result?.options.find((o) => o.label === 'data=')?.detail, 'required')
+  assert.equal(result?.options.find((o) => o.label === 'suffix=')?.detail, 'optional')
+})
+
+test('application symbols carry param docs into parameter completion', async () => {
+  const ctx = applicationSymbols({ capabilities: { fs: {}, ext: { tav: { source: 'contrib/tavily@0.1.0' } } } }, appMetadata, appCatalog)
+  const s = map(ctx.symbols)
+  assert.equal(s['fs.read']?.param_docs?.[0]?.name, 'path')
+  assert.equal(s['ext.tav.search']?.param_docs?.[0]?.name, 'q')
+  assert.equal(s['json.encode']?.param_docs?.[0]?.name, 'value')
+  const source = starlarkCompletions(ctx)
+  const read = (await complete(source, 'fs.read('))?.options.find((o) => o.label === 'path=')
+  assert.equal(read?.detail, 'File path.')
+  assert.equal(read?.info, 'string, required\n\nFile path.')
+  const search = (await complete(source, 'ext.tav.search('))?.options.find((o) => o.label === 'q=')
+  assert.equal(search?.detail, 'Search query.')
+  assert.equal(search?.info, 'string, required\n\nSearch query.')
 })

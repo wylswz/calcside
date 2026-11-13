@@ -294,23 +294,25 @@ type ExecActivity struct {
 }
 
 type Execution struct {
-	ID          string              `json:"id"`
-	InstanceID  string              `json:"instance_id"`
-	UserID      string              `json:"user_id"`
-	CodeSHA256  string              `json:"code_sha256"`
-	CodeSnippet string              `json:"code_snippet"`
-	Code        string              `json:"-"` // full code; served only by the execution detail endpoint
-	Status      types.ExecStatus    `json:"status"`
-	ErrorType   types.ExecErrorType `json:"error_type,omitempty"` // "" = no error
-	DurationMs  int64               `json:"duration_ms"`
-	Steps       uint64              `json:"steps"`
-	OutputBytes int64               `json:"output_bytes"`
-	Via         types.AuthKind      `json:"via,omitempty"` // "" = recorded before this field existed
+	ID           string              `json:"id"`
+	InstanceID   string              `json:"instance_id"`
+	UserID       string              `json:"user_id"`
+	CodeSHA256   string              `json:"code_sha256"`
+	CodeSnippet  string              `json:"code_snippet"`
+	Code         string              `json:"-"` // full code; served only by the execution detail endpoint
+	Status       types.ExecStatus    `json:"status"`
+	ErrorType    types.ExecErrorType `json:"error_type,omitempty"` // "" = no error
+	DurationMs   int64               `json:"duration_ms"`
+	Steps        uint64              `json:"steps"`
+	OutputBytes  int64               `json:"output_bytes"`
+	DisplayCount int                 `json:"display_count"`
+	Via          types.AuthKind      `json:"via,omitempty"` // "" = recorded before this field existed
 	// Detail-only fields; served only by the execution detail endpoint.
 	Output          string    `json:"-"`
 	OutputTruncated bool      `json:"-"`
 	ErrorMessage    string    `json:"-"`
 	ErrorBacktrace  string    `json:"-"`
+	Displays        []byte    `json:"-"` // JSON array of {kind,title,spec,redacted}
 	CreatedAt       time.Time `json:"created_at"`
 
 	// Notebook provenance (EP-0022): empty SectionName marks a scratch

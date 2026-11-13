@@ -1,5 +1,6 @@
 import { findExtension } from '../builderCatalog.ts' 
 import { useState } from 'react'
+import { formatOpDoc } from '../opDoc.ts'
 import { useQuery } from '@tanstack/react-query'
 import { api, type ExtensionCatalog } from '../api'
 import { mountName, parseModuleMounts, type ModuleMount } from '../moduleMounts'
@@ -81,7 +82,7 @@ export function ApplicationResources({ specText, workspaceId, onConfigure, onOpe
                     onClick={() => onOpenDocument({
                       kind: 'extension', alias, operation: op.name!, source: String(source),
                       signature: `ext.${alias}.${op.name}(${(op.params ?? []).join(', ')})`,
-                      documentation: op.doc ?? '', extensionFingerprint: JSON.stringify(raw),
+                      documentation: formatOpDoc(`ext.${alias}.${op.name}`, op), extensionFingerprint: JSON.stringify(raw),
                     })}><Icon name="code" /><span>{op.name}</span></button>
                 ))}
               </div>

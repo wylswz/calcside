@@ -135,11 +135,10 @@ test('create modal validates the unique name and keeps input on conflict', async
   await page.goto(`${viteURL}/modules`)
   await page.getByRole('button', { name: 'New module' }).click()
   const input = page.getByLabel('Unique name')
-  // Grammar violation → the local help text, no request fires.
+  // Grammar violation → the error notice carries the name help; no request fires.
   await input.fill('bad name!')
   await page.getByRole('button', { name: 'Create' }).click()
-  // The grammar help is always present once; the error notice is a second copy.
-  await expect(page.getByText(/Workspace-unique name/)).toHaveCount(2)
+  await expect(page.getByText(/Workspace-unique name/)).toHaveCount(1)
   // Duplicate → the server conflict message; the modal keeps the
   // entered name so a rename retry is one edit (C2/P5).
   await input.fill('dupmod')

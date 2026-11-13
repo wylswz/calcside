@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { Fragment, lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { api, ApiError, Instance, Notebook, NotebookSectionMeta, NotebookSectionResponse, SaveNotebookSectionResponse } from '../api'
@@ -8,6 +8,11 @@ import { Button, Confirm, Icon, Menu, MenuItem, MenuSeparator, SwapLabel } from 
 import { useStarlarkEditor } from './editor'
 import { cmTheme } from './codemirror'
 import { fmtTime, relTime } from '../format'
+import { chartReservedBox } from '../chartBox'
+
+// ChartView is lazy so the vega stack lands in its own chunk; the
+// Suspense fallback reserves the same box the chart will occupy (S).
+const ChartView = lazy(() => import('./ChartView'))
 
 // SectionValue is everything one autosave PUT carries: code, the
 // one-line description and the bulk-run mode move together so a single
@@ -351,7 +356,7 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
           <Button
             variant="ghost" size="xs" className="nb-icon-btn"
             aria-label="Run section" aria-busy={busy}
-            title={as?.conflict ? 'Resolve the save conflict first' : 'Run this section — upstream sections that are not fresh run first'}
+            title={as?.conflict ? 'Resolve the save conflict first' : undefined}
             disabled={runDisabled}
             onClick={startRun}
           >
@@ -367,7 +372,7 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
           <h3 className="nb-name">{name}</h3>
           <SectionStateBadge state={meta.state} />
           {meta.rerun === 'once' && (
-            <span className="nb-once" title="Skipped by bulk runs after a prior success">once</span>
+            <span className="nb-once">once</span>
           )}
           {canEdit ? (
             <input
@@ -471,6 +476,18 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
             <pre className="nb-output-pre">{detail.output}</pre>
           </div>
         ) : null}
+        {detail?.displays?.map((d, i) => (
+          <div className="nb-output" key={i}>
+            <div className="nb-output-head">
+              <span className="nb-output-kind">chart</span>
+              {d.title && <span className="nb-output-meta">{d.title}</span>}
+              {d.redacted && <span className="nb-output-tag">redacted</span>}
+            </div>
+            <Suspense fallback={<div className="nb-chart" style={chartReservedBox(d.spec)} />}>
+              <ChartView display={d} />
+            </Suspense>
+          </div>
+        ))}
         {detail?.error && (
           <div className="nb-output nb-output-err">
             <div className="nb-output-head">
@@ -504,7 +521,7 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
           action={async () => { setConfirmOnce(false); onRun(name, true) }}
           onClose={() => setConfirmOnce(false)}
         >
-          <p className="text-sm text-body">This section is marked “once” — it already succeeded. Bulk runs skip it; running it explicitly repeats it in the current process.</p>
+          <p className="text-sm text-body">It already succeeded once.</p>
         </Confirm>
       )}
       {confirmDelete && (
@@ -516,7 +533,7 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
           action={doDelete}
           onClose={() => setConfirmDelete(false)}
         >
-          <p className="text-sm text-body">The code is removed from the notebook; run history stays. Sections that read its definitions are marked stale.</p>
+          <p className="text-sm text-body">Sections that read its definitions become stale.</p>
         </Confirm>
       )}
     </section>

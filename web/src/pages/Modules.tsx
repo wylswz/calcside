@@ -108,7 +108,6 @@ export default function Modules() {
             <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="strkit"
               maxLength={64} pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}" title={NAME_HELP} autoFocus />
           </Field>
-          <p className="app-dim mt-2 text-xs">{NAME_HELP} Creates main.star with a hello example — edit it on the module page.</p>
         </Modal>
       )}
       {deleting && (
@@ -119,7 +118,7 @@ export default function Modules() {
             void qc.invalidateQueries({ queryKey: ['modules'] })
           }}
           onClose={() => setDeleting(null)}>
-          Delete <b>{deleting.name}</b>? The library versions are removed — releases that already captured a snapshot keep working.
+          Delete <b>{deleting.name}</b>? This cannot be undone.
         </Confirm>
       )}
     </div>

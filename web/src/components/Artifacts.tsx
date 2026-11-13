@@ -145,7 +145,7 @@ export function ArtifactBrowser({ id, running, busy }: { id: string; running: bo
       <button className="artifact-action" title="Upload files" aria-label="Upload files" disabled={disabled} onClick={() => fileInput.current?.click()}><Icon name="upload" /></button>
       <button className="artifact-action" title="Refresh files" aria-label="Refresh files" disabled={disabled || isFetching} onClick={() => void refetch()}><Icon name="refresh" className={isFetching ? 'motion-safe:animate-spin' : ''} /></button>
     </div>
-    {!running && <Notice>Instance is not running. Files are only available while its filesystem is live.</Notice>}
+    {!running && <Notice>Instance is not running.</Notice>}
     {listingError && <Notice tone="warning">{(listingError as Error).message}</Notice>}
     {error && <div role="alert"><Notice tone="warning">{error}</Notice></div>}
     {tasks.length > 0 && <ul aria-label="Uploads" className="divide-y divide-line border-y border-line">
@@ -187,7 +187,7 @@ export function ArtifactBrowser({ id, running, busy }: { id: string; running: bo
         </li>
       })}
       {isLoading && <li className="py-6"><Loading label="Loading files…" /></li>}
-      {!isLoading && data && entries.length === 0 && <li className="artifact-empty"><Icon name="file" className="artifact-empty-icon" /><p className="text-sm text-sec">No files yet.</p><p className="mt-1 text-xs text-mute">Drop files here to upload them.</p></li>}
+      {!isLoading && data && entries.length === 0 && <li className="artifact-empty"><Icon name="file" className="artifact-empty-icon" /><p className="text-sm text-sec">No files yet.</p></li>}
     </ul>
     <div className="flex items-center justify-between gap-2">
       <span className="text-xs text-sec">{selected.size ? `${selected.size} selected` : `${entries.length} item${entries.length === 1 ? '' : 's'}`}</span>
@@ -206,7 +206,7 @@ export function ArtifactBrowser({ id, running, busy }: { id: string; running: bo
       action={async () => { await runTask(replacing, true) }}
       onClose={() => setReplacing(null)}
     >
-      <p className="text-sm text-sec"><code className="font-mono">{replacing.path}</code> already exists. Uploading will replace its contents; this cannot be undone.</p>
+      <p className="text-sm text-sec"><code className="font-mono">{replacing.path}</code> already exists; replacing it cannot be undone.</p>
     </Confirm>}
   </div>
 }
