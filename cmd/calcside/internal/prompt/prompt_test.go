@@ -88,7 +88,7 @@ func TestUtilityPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"`url`", "`csv`", "`base64`", "`hashlib`", "`regex`", "`datetime`", "`stats`", "`linalg`", "`dist`", "`series`", "`decimal`"} {
+	for _, name := range []string{"`url`", "`csv`", "`base64`", "`hashlib`", "`regex`", "`datetime`", "`stats`", "`linalg`", "`dist`", "`series`", "`decimal`", "`chart`"} {
 		if !strings.Contains(out, name) {
 			t.Errorf("missing utility module %s", name)
 		}

@@ -1881,3 +1881,28 @@ test('screenshots: 2x corner close-ups — head chip, toggle, graph node', async
     await ctx.close()
   }
 })
+
+// EP-0024: a section that io.display()s a chart.spec renders an SVG in
+// its card; the same SVG DOM node must survive the 5s detail poll —
+// re-embedding on every fetch would reset zoom/brush state (C3).
+test('chart: io.display renders an SVG that survives section polls', async ({ page }) => {
+  const id = await createInstance()
+  await saveSection(id, 'chartsec', `data = [{"x": 1, "y": 2}, {"x": 2, "y": 4}, {"x": 3, "y": 9}]
+spec = chart.spec("line", data=data, encoding={"x": chart.field("x", "quantitative"), "y": chart.field("y", "quantitative")}, params=[{"name": "zoom", "select": "interval", "bind": "scales"}])
+io.display(spec, title="pts")`)
+  await runAll(id)
+
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  await expect(page.locator('.nb-toolbar')).toBeVisible({ timeout: 30_000 })
+  const c = card(page, 'chartsec')
+  // svg.marks is the chart itself — the embed actions menu has its own svg.
+  const svg = c.locator('.nb-chart svg.marks')
+  // First render pays the lazy vega chunk + embed cost.
+  await expect(svg).toBeVisible({ timeout: 30_000 })
+  // Mark THIS svg node; a re-embed would replace it with an unmarked one.
+  await svg.evaluate((el) => el.setAttribute('data-chart-node', '1'))
+  // The section detail refetches every 5s while live — wait past a
+  // full poll cycle, then require the marked node to still be there.
+  await page.waitForTimeout(6500)
+  await expect(c.locator('.nb-chart svg.marks[data-chart-node="1"]')).toHaveCount(1)
+})

@@ -695,11 +695,12 @@ func callArgs(op OpSpec, args starlark.Tuple, kwargs []starlark.Tuple) map[strin
 }
 
 // gateArgValue normalizes one call argument for audit. Prompt-bearing
-// parameters (messages/options) are summarized to shape before any
-// traversal — never serialized and never containing content.
+// parameters (messages/options) and bulk row data are summarized to
+// shape before any traversal — never serialized and never containing
+// content.
 func gateArgValue(name string, v starlark.Value) any {
 	switch name {
-	case "messages", "options":
+	case "messages", "options", "data":
 		return shapeStarlark(v)
 	}
 	return argValue(v)

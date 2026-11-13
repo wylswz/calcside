@@ -79,21 +79,60 @@ type InstancesEnvelope struct {
 	Instances []Instance `json:"instances"`
 }
 
+// Display is one validated chart spec attached to an exec (EP-0024):
+// kind is "vega-lite"; spec is the canonical spec object.
+type Display struct {
+	Kind     string          `json:"kind"`
+	Title    string          `json:"title,omitempty"`
+	Spec     json.RawMessage `json:"spec"`
+	Redacted bool            `json:"redacted,omitempty"`
+}
+
+func NewDisplay(d runtime.Display) Display {
+	return Display{Kind: d.Kind, Title: d.Title, Spec: d.Spec, Redacted: d.Redacted}
+}
+
+func NewDisplays(in []runtime.Display) []Display {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]Display, len(in))
+	for i, d := range in {
+		out[i] = NewDisplay(d)
+	}
+	return out
+}
+
+// storedDisplays decodes the detail-only executions.displays column
+// into wire displays; always non-nil so the detail endpoint renders [].
+func storedDisplays(raw []byte) []Display {
+	out := []Display{}
+	if len(raw) == 0 {
+		return out
+	}
+	var ds []Display
+	if json.Unmarshal(raw, &ds) == nil {
+		out = ds
+	}
+	return out
+}
+
 // Execution has no Code field: full code only exists on the detail
 // endpoint (ExecutionDetail).
 type Execution struct {
-	ID          string              `json:"id"`
-	InstanceID  string              `json:"instance_id"`
-	UserID      string              `json:"user_id"`
-	CodeSHA256  string              `json:"code_sha256"`
-	CodeSnippet string              `json:"code_snippet"`
-	Status      types.ExecStatus    `json:"status"`
-	ErrorType   types.ExecErrorType `json:"error_type,omitempty"`
-	DurationMs  int64               `json:"duration_ms"`
-	Steps       uint64              `json:"steps"`
-	OutputBytes int64               `json:"output_bytes"`
-	Via         types.AuthKind      `json:"via,omitempty"`
-	CreatedAt   time.Time           `json:"created_at"`
+	ID           string              `json:"id"`
+	InstanceID   string              `json:"instance_id"`
+	UserID       string              `json:"user_id"`
+	CodeSHA256   string              `json:"code_sha256"`
+	CodeSnippet  string              `json:"code_snippet"`
+	Status       types.ExecStatus    `json:"status"`
+	ErrorType    types.ExecErrorType `json:"error_type,omitempty"`
+	DurationMs   int64               `json:"duration_ms"`
+	Steps        uint64              `json:"steps"`
+	OutputBytes  int64               `json:"output_bytes"`
+	DisplayCount int                 `json:"display_count"`
+	Via          types.AuthKind      `json:"via,omitempty"`
+	CreatedAt    time.Time           `json:"created_at"`
 }
 
 func NewExecution(e *store.Execution) Execution {
@@ -101,7 +140,8 @@ func NewExecution(e *store.Execution) Execution {
 		ID: e.ID, InstanceID: e.InstanceID, UserID: e.UserID,
 		CodeSHA256: e.CodeSHA256, CodeSnippet: e.CodeSnippet,
 		Status: e.Status, ErrorType: e.ErrorType, DurationMs: e.DurationMs,
-		Steps: e.Steps, OutputBytes: e.OutputBytes, Via: e.Via, CreatedAt: e.CreatedAt,
+		Steps: e.Steps, OutputBytes: e.OutputBytes, DisplayCount: e.DisplayCount,
+		Via: e.Via, CreatedAt: e.CreatedAt,
 	}
 }
 
@@ -118,13 +158,14 @@ type ExecutionsEnvelope struct {
 }
 
 // ExecutionDetail is the GET /executions/{id} body: the record plus the
-// detail-only fields (full code, output, error).
+// detail-only fields (full code, output, error, displays).
 type ExecutionDetail struct {
 	Execution       Execution  `json:"execution"`
 	Code            string     `json:"code"`
 	Output          string     `json:"output"`
 	OutputTruncated bool       `json:"output_truncated"`
 	Error           *ExecError `json:"error"`
+	Displays        []Display  `json:"displays"`
 }
 
 // NewExecutionDetail builds the detail body; Error is null for runs that
@@ -133,6 +174,7 @@ func NewExecutionDetail(e *store.Execution) ExecutionDetail {
 	d := ExecutionDetail{
 		Execution: NewExecution(e), Code: e.Code,
 		Output: e.Output, OutputTruncated: e.OutputTruncated,
+		Displays: storedDisplays(e.Displays),
 	}
 	if e.Status != types.ExecOK {
 		d.Error = &ExecError{Type: e.ErrorType, Message: e.ErrorMessage, Backtrace: e.ErrorBacktrace}
@@ -155,6 +197,7 @@ type ExecResult struct {
 	Section          string             `json:"section,omitempty"`
 	SectionState     string             `json:"section_state,omitempty"`
 	Upstream         []RunSectionResult `json:"upstream,omitempty"`
+	Displays         []Display          `json:"displays,omitempty"`
 }
 
 type ExecError struct {
@@ -168,6 +211,7 @@ func NewExecResult(r *sandbox.ExecOutcome) ExecResult {
 		ExecID: r.View.ExecID, Output: r.View.Output, DurationMs: r.View.DurationMs,
 		Steps: r.View.Steps, NotebookRevision: r.Revision, Drift: r.Drift,
 		Section: r.Section, SectionState: r.State,
+		Displays: NewDisplays(r.View.Displays),
 	}
 	if len(r.Upstream) > 0 {
 		res.Upstream = make([]RunSectionResult, len(r.Upstream))

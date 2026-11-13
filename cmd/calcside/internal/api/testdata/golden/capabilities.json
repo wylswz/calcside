@@ -164,6 +164,18 @@
             "result_meta": {
               "bytes": "number"
             }
+          },
+          {
+            "doc": "attach a validated Vega-Lite spec dict to the exec result (max 8 per exec)",
+            "name": "display",
+            "policy_args": {
+              "bytes": "number",
+              "mark": "string",
+              "rows": "number"
+            },
+            "result_meta": {
+              "bytes": "number"
+            }
           }
         ]
       },

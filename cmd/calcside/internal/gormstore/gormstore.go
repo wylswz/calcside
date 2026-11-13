@@ -299,12 +299,21 @@ type execRow struct {
 	OutputTruncated bool
 	ErrorMessage    string
 	ErrorBacktrace  string
+	Displays        string
+	DisplayCount    int64
 	CreatedAt       time.Time `gorm:"index:idx_executions_instance_created"`
 	SectionName     string
 	Incarnation     int64
 }
 
 func (execRow) TableName() string { return "executions" }
+
+func displaysBytes(s string) []byte {
+	if s == "" {
+		return nil
+	}
+	return []byte(s)
+}
 
 func (r execRow) toStore() *store.Execution {
 	return &store.Execution{
@@ -320,6 +329,8 @@ func (r execRow) toStore() *store.Execution {
 		OutputTruncated: r.OutputTruncated,
 		ErrorMessage:    r.ErrorMessage,
 		ErrorBacktrace:  r.ErrorBacktrace,
+		Displays:        displaysBytes(r.Displays),
+		DisplayCount:    int(r.DisplayCount),
 		CreatedAt:       r.CreatedAt.UTC(),
 		SectionName:     r.SectionName,
 		Incarnation:     r.Incarnation,
@@ -1340,6 +1351,7 @@ func (d *sqlDB) CreateExecution(ctx context.Context, e *store.Execution) error {
 		OutputBytes: e.OutputBytes, Via: string(e.Via),
 		Output: e.Output, OutputTruncated: e.OutputTruncated,
 		ErrorMessage: e.ErrorMessage, ErrorBacktrace: e.ErrorBacktrace,
+		Displays: string(e.Displays), DisplayCount: int64(e.DisplayCount),
 		CreatedAt:   e.CreatedAt.UTC(),
 		SectionName: e.SectionName, Incarnation: e.Incarnation,
 	})

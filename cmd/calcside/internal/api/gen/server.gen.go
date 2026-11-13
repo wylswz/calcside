@@ -219,6 +219,21 @@ func (e Decision) Valid() bool {
 	}
 }
 
+// Defines values for DisplayKind.
+const (
+	VegaLite DisplayKind = "vega-lite"
+)
+
+// Valid indicates whether the value is a known member of the DisplayKind enum.
+func (e DisplayKind) Valid() bool {
+	switch e {
+	case VegaLite:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ExecErrorType.
 const (
 	MemoryLimit  ExecErrorType = "memory_limit"
@@ -981,6 +996,23 @@ type DeleteNotebookSectionResponse struct {
 	Revision int64    `json:"revision"`
 }
 
+// Display defines model for Display.
+type Display struct {
+	Kind DisplayKind `json:"kind"`
+
+	// Redacted true when known secrets were scrubbed from the spec tree
+	Redacted *bool `json:"redacted,omitempty"`
+
+	// Spec canonical Vega-Lite spec JSON
+	Spec map[string]interface{} `json:"spec"`
+
+	// Title display title (explicit arg or spec title)
+	Title *string `json:"title,omitempty"`
+}
+
+// DisplayKind defines model for Display.Kind.
+type DisplayKind string
+
 // EditorMetadata defines model for EditorMetadata.
 type EditorMetadata struct {
 	Capabilities []CapabilityDoc    `json:"capabilities"`
@@ -1024,6 +1056,9 @@ type ExecRequest struct {
 
 // ExecResult defines model for ExecResult.
 type ExecResult struct {
+	// Displays chart specs attached via io.display (omitted when none)
+	Displays *[]Display `json:"displays,omitempty"`
+
 	// Drift scratch execs that changed globals outside the notebook
 	Drift      *int64    `json:"drift,omitempty"`
 	DurationMs int64     `json:"duration_ms"`
@@ -1070,24 +1105,30 @@ type ExecStatus string
 
 // Execution defines model for Execution.
 type Execution struct {
-	CodeSha256  string         `json:"code_sha256"`
-	CodeSnippet string         `json:"code_snippet"`
-	CreatedAt   time.Time      `json:"created_at"`
-	DurationMs  int64          `json:"duration_ms"`
-	ErrorType   *ExecErrorType `json:"error_type,omitempty"`
-	Id          string         `json:"id"`
-	InstanceId  string         `json:"instance_id"`
-	OutputBytes int64          `json:"output_bytes"`
-	Status      ExecStatus     `json:"status"`
-	Steps       int64          `json:"steps"`
-	UserId      string         `json:"user_id"`
-	Via         *AuthKind      `json:"via,omitempty"`
+	CodeSha256  string    `json:"code_sha256"`
+	CodeSnippet string    `json:"code_snippet"`
+	CreatedAt   time.Time `json:"created_at"`
+
+	// DisplayCount number of chart displays attached by io.display
+	DisplayCount int            `json:"display_count"`
+	DurationMs   int64          `json:"duration_ms"`
+	ErrorType    *ExecErrorType `json:"error_type,omitempty"`
+	Id           string         `json:"id"`
+	InstanceId   string         `json:"instance_id"`
+	OutputBytes  int64          `json:"output_bytes"`
+	Status       ExecStatus     `json:"status"`
+	Steps        int64          `json:"steps"`
+	UserId       string         `json:"user_id"`
+	Via          *AuthKind      `json:"via,omitempty"`
 }
 
 // ExecutionDetail defines model for ExecutionDetail.
 type ExecutionDetail struct {
 	// Code full submitted code (empty for executions recorded before this field existed)
-	Code      string    `json:"code"`
+	Code string `json:"code"`
+
+	// Displays chart specs attached via io.display ([] when none)
+	Displays  []Display `json:"displays"`
 	Error     ExecError `json:"error"`
 	Execution Execution `json:"execution"`
 
@@ -1661,6 +1702,9 @@ type NotebookResponse struct {
 // NotebookSection defines model for NotebookSection.
 type NotebookSection struct {
 	Code string `json:"code"`
+
+	// Displays last run's chart displays (include_output only)
+	Displays *[]Display `json:"displays,omitempty"`
 
 	// Error last run's error + backtrace (include_output only)
 	Error *string `json:"error,omitempty"`

@@ -27,6 +27,7 @@ import (
 	"calcside/cmd/calcside/internal/service"
 	"calcside/cmd/calcside/internal/service/access"
 	"calcside/cmd/calcside/internal/service/sandbox"
+	"calcside/internal/chart"
 	"calcside/internal/store"
 	"calcside/internal/types"
 )
@@ -152,6 +153,13 @@ func execOutcomeText(out *sandbox.ExecOutcome) string {
 	} else {
 		b.WriteString(res.Output)
 	}
+	for _, d := range res.Displays {
+		if d.Title != "" {
+			fmt.Fprintf(&b, "\ndisplayed: %q (%s)", d.Title, chart.Summary(d.Spec))
+		} else {
+			fmt.Fprintf(&b, "\ndisplayed: (%s)", chart.Summary(d.Spec))
+		}
+	}
 	if out.Section != "" {
 		fmt.Fprintf(&b, "\n[section %s → %s · notebook_rev %d]", out.Section, out.State, out.Revision)
 	} else if out.Drift > 0 {
@@ -169,6 +177,33 @@ func execOutcomeText(out *sandbox.ExecOutcome) string {
 		b.WriteString("\nupstream: " + strings.Join(parts, ", "))
 	}
 	return b.String()
+}
+
+// sectionDetailWire strips chart spec payloads from a section read: MCP
+// callers keep kind/title/redacted plus one summary line per display
+// instead of the full spec JSON (EP-0024).
+func sectionDetailWire(d *sandbox.SectionDetail) any {
+	raw, err := json.Marshal(d)
+	if err != nil || len(d.Displays) == 0 {
+		return d
+	}
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil {
+		return d
+	}
+	if ds, ok := m["displays"].([]any); ok {
+		sums := make([]string, 0, len(d.Displays))
+		for i, item := range ds {
+			if dm, ok := item.(map[string]any); ok {
+				delete(dm, "spec")
+				if i < len(d.Displays) {
+					sums = append(sums, chart.Summary(d.Displays[i].Spec))
+				}
+			}
+		}
+		m["display_summaries"] = sums
+	}
+	return m
 }
 
 // newServer builds one stateless server for the actor resolved from the
@@ -252,7 +287,7 @@ func newServerMode(sb Sandbox, a service.Actor, bound string, boundIn *store.Ins
 			if err != nil {
 				return errText(err), nil, nil
 			}
-			res, err := jsonText(d)
+			res, err := jsonText(sectionDetailWire(d))
 			return res, nil, err
 		})
 	// runSections is the canonical batch-run tool — the only run

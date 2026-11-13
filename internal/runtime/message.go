@@ -149,6 +149,16 @@ type ExecError struct {
 	Backtrace string              `json:"backtrace,omitempty"`
 }
 
+// Display is one validated chart spec produced by io.display. Spec is
+// the canonical Vega-Lite JSON; Kind is "vega-lite" for now. Redacted
+// marks specs whose tree was rewritten to scrub known secrets.
+type Display struct {
+	Kind     string          `json:"kind"`
+	Title    string          `json:"title,omitempty"`
+	Spec     json.RawMessage `json:"spec"`
+	Redacted bool            `json:"redacted,omitempty"`
+}
+
 // ExecResult is the outcome of one exec. Output and error text have
 // already been scrubbed of secret values by the node.
 type ExecResult struct {
@@ -157,6 +167,7 @@ type ExecResult struct {
 	Error      *ExecError `json:"error"`
 	DurationMs int64      `json:"duration_ms"`
 	Steps      uint64     `json:"steps"`
+	Displays   []Display  `json:"displays,omitempty"`
 }
 
 type ExecResponse struct {

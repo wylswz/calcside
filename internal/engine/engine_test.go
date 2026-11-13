@@ -45,21 +45,23 @@ func newSession(t *testing.T, hooks []capability.Hook, fsQuota int64) (*Session,
 		t.Fatal(err)
 	}
 	buf := capio.NewBuffer(fsQuota)
+	disp := capio.NewDisplays()
 	pre := starlark.StringDict{
 		"fs":    fsv,
 		"json":  starjson.Module,
-		"io":    ioModule(buf, gate),
+		"io":    ioModule(buf, disp, gate),
 		"print": capio.PrintBuiltin(buf, gate),
 	}
 	s := &Session{
 		Gate: gate, Predeclared: pre, Globals: starlark.StringDict{},
 		InstanceID: "ins_t", UserID: "u", UserEmail: "u@x",
+		Displays: disp,
 	}
 	return s, buf
 }
 
-func ioModule(buf *capio.Buffer, gate *capability.Gate) starlark.Value {
-	return capio.BindBuffer(buf, gate)
+func ioModule(buf *capio.Buffer, disp *capio.Displays, gate *capability.Gate) starlark.Value {
+	return capio.BindBuffer(buf, disp, gate)
 }
 
 func TestStepLimit(t *testing.T) {

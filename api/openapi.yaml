@@ -2593,6 +2593,25 @@ components:
             sectioned exec only — the upstream sections the dependency
             plan ran or reused before this section (ok/reused/skipped,
             each with its reason)
+        displays:
+          type: array
+          items: { $ref: '#/components/schemas/Display' }
+          description: chart specs attached via io.display (omitted when none)
+    Display:
+      type: object
+      required: [kind, spec]
+      properties:
+        kind:
+          type: string
+          enum: [vega-lite]
+        title: { type: string, description: display title (explicit arg or spec title) }
+        spec:
+          type: object
+          additionalProperties: true
+          description: canonical Vega-Lite spec JSON
+        redacted:
+          type: boolean
+          description: true when known secrets were scrubbed from the spec tree
     FileEntry:
       type: object
       required: [name, path, is_dir, size, mtime]
@@ -2664,7 +2683,7 @@ components:
         memory_max: { type: integer, format: int64, description: memory.max; 0 means unlimited }
     Execution:
       type: object
-      required: [id, instance_id, user_id, code_sha256, code_snippet, status, duration_ms, steps, output_bytes, created_at]
+      required: [id, instance_id, user_id, code_sha256, code_snippet, status, duration_ms, steps, output_bytes, display_count, created_at]
       properties:
         id: { type: string }
         instance_id: { type: string }
@@ -2676,6 +2695,9 @@ components:
         duration_ms: { type: integer, format: int64 }
         steps: { type: integer, format: int64 }
         output_bytes: { type: integer, format: int64 }
+        display_count:
+          type: integer
+          description: number of chart displays attached by io.display
         via:
           $ref: '#/components/schemas/AuthKind'
           description: how the run was authenticated (absent for executions recorded before this field existed)
@@ -2688,7 +2710,7 @@ components:
           items: { $ref: '#/components/schemas/Execution' }
     ExecutionDetail:
       type: object
-      required: [execution, code, output, output_truncated, error]
+      required: [execution, code, output, output_truncated, error, displays]
       properties:
         execution: { $ref: '#/components/schemas/Execution' }
         code: { type: string, description: full submitted code (empty for executions recorded before this field existed) }
@@ -2698,6 +2720,10 @@ components:
           $ref: '#/components/schemas/ExecError'
           nullable: true
           description: structured failure; null when the run completed without error
+        displays:
+          type: array
+          items: { $ref: '#/components/schemas/Display' }
+          description: chart specs attached via io.display ([] when none)
     NotebookSectionMeta:
       type: object
       required: [name, position, description, state, rerun, defines, uses, effects, last_incarnation, once_ran, depends_on]
@@ -2807,6 +2833,10 @@ components:
         output: { type: string, description: last run's secret-scrubbed output (include_output only) }
         error: { type: string, description: last run's error + backtrace (include_output only) }
         output_truncated: { type: boolean }
+        displays:
+          type: array
+          items: { $ref: '#/components/schemas/Display' }
+          description: last run's chart displays (include_output only)
     NotebookSectionResponse:
       type: object
       properties:

@@ -319,3 +319,11 @@
 @media (prefers-reduced-motion: reduce) {
   .ext-split-version, .ext-card-action .swap-label { transition: none; }
 }
+
+/* Chart displays (EP-0024): the box is reserved from the spec's declared
+   size before the lazy vega chunk loads; min-height can grow but never
+   shrinks below the reservation (S invariant). */
+.nb-chart { margin-top: 8px; }
+.nb-chart-host { width: 100%; }
+.nb-chart-host svg { display: block; max-width: 100%; height: auto; }
+.nb-chart-note { margin: 4px 0 0; font-size: 12px; color: rgb(var(--mute)); }

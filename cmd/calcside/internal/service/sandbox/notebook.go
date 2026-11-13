@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"calcside/cmd/calcside/internal/service"
 	"calcside/cmd/calcside/internal/service/access"
+	"calcside/internal/chart"
 	"calcside/internal/notebook"
 	"calcside/internal/runtime"
 	"calcside/internal/store"
@@ -208,13 +210,14 @@ type NotebookView struct {
 }
 
 // SectionDetail is one section with its code and, on request, the last
-// execution's output/error.
+// execution's output/error and chart displays.
 type SectionDetail struct {
 	Section     NotebookSectionMeta `json:"section"`
 	Code        string              `json:"code"`
 	Output      string              `json:"output,omitempty"`
 	Error       string              `json:"error,omitempty"`
 	OutputTrunc bool                `json:"output_truncated,omitempty"`
+	Displays    []runtime.Display   `json:"displays,omitempty"`
 }
 
 // --- helpers ---
@@ -630,6 +633,12 @@ func (s *Service) ReadSection(ctx context.Context, a service.Actor, id, name str
 	if includeOutput && st.sec.LastExecID != "" {
 		if ex, err := s.st.GetExecution(ctx, st.sec.LastExecID); err == nil && ex.InstanceID == in.ID {
 			d.Output, d.OutputTrunc = ex.Output, ex.OutputTruncated
+			if len(ex.Displays) > 0 {
+				var ds []runtime.Display
+				if json.Unmarshal(ex.Displays, &ds) == nil {
+					d.Displays = ds
+				}
+			}
 			if ex.ErrorMessage != "" {
 				d.Error = ex.ErrorMessage
 				if ex.ErrorBacktrace != "" {
@@ -1178,6 +1187,7 @@ func (s *Service) ExecSection(ctx context.Context, a service.Actor, id, code str
 		return nil, fail(err)
 	}
 	res := &resp.Result
+	sanitizeDisplays(res)
 	s.recordExecutionSection(ctx, in, a, code, res, secName, runSeq)
 
 	// Post-run bookkeeping under the lease.
@@ -1257,6 +1267,7 @@ func (s *Service) recordExecutionSection(ctx context.Context, in *store.Instance
 		errTrace, _ = capStored(res.Error.Backtrace)
 	}
 	output, outputTruncated := capStored(res.Output)
+	displays, displayCount := storedDisplays(res.Displays)
 	_ = s.st.CreateExecution(ctx, &store.Execution{
 		ID: res.ExecID, InstanceID: in.ID, UserID: a.UserID,
 		CodeSHA256: hex.EncodeToString(sum[:]), CodeSnippet: snippet, Code: code,
@@ -1264,8 +1275,67 @@ func (s *Service) recordExecutionSection(ctx context.Context, in *store.Instance
 		Steps: res.Steps, OutputBytes: int64(len(res.Output)),
 		Via: a.Kind, Output: output, OutputTruncated: outputTruncated,
 		ErrorMessage: errMsg, ErrorBacktrace: errTrace,
+		Displays: displays, DisplayCount: displayCount,
 		SectionName: section, Incarnation: in.Incarnation,
 	})
+}
+
+// sanitizeDisplays is the API tier's defense-in-depth pass over the
+// worker's exec displays: keep only known-kind entries, cap at
+// chart.MaxDisplays, and replace each spec with its canonical
+// chart.Validate output. Invalid entries are dropped with a warning.
+// It rewrites res.Displays in place so the exec response and the
+// stored execution record always agree.
+func sanitizeDisplays(res *runtime.ExecResult) {
+	if len(res.Displays) == 0 {
+		return
+	}
+	out := make([]runtime.Display, 0, len(res.Displays))
+	for _, d := range res.Displays {
+		if len(out) >= chart.MaxDisplays {
+			slog.Warn("dropping display beyond the per-exec limit", "exec_id", res.ExecID)
+			continue
+		}
+		if d.Kind != chart.Kind {
+			slog.Warn("dropping display with unsupported kind", "kind", d.Kind, "exec_id", res.ExecID)
+			continue
+		}
+		canon, err := chart.Validate(d.Spec)
+		if err != nil {
+			slog.Warn("dropping invalid display", "err", err, "exec_id", res.ExecID)
+			continue
+		}
+		d.Spec = canon
+		out = append(out, d)
+	}
+	if len(out) == 0 {
+		res.Displays = nil
+		return
+	}
+	res.Displays = out
+}
+
+// storedDisplays packs the exec's already-sanitized displays as a JSON
+// array of {kind,title,spec,redacted} for the executions row.
+func storedDisplays(in []runtime.Display) ([]byte, int) {
+	if len(in) == 0 {
+		return nil, 0
+	}
+	type stored struct {
+		Kind     string          `json:"kind"`
+		Title    string          `json:"title,omitempty"`
+		Spec     json.RawMessage `json:"spec"`
+		Redacted bool            `json:"redacted,omitempty"`
+	}
+	out := make([]stored, 0, len(in))
+	for _, d := range in {
+		out = append(out, stored{Kind: d.Kind, Title: d.Title, Spec: d.Spec, Redacted: d.Redacted})
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return nil, 0
+	}
+	return raw, len(out)
 }
 
 // execEffects extracts the distinct capability.op names observed in an
@@ -1320,6 +1390,7 @@ func (s *Service) execPlannedSection(ctx context.Context, in *store.Instance, a 
 		return resp, err
 	}
 	res := &resp.Result
+	sanitizeDisplays(res)
 	if touched, terr := s.st.TouchInstanceLive(ctx, in.ID, token, now, deadline, 0); terr != nil {
 		return resp, service.Internal(terr)
 	} else if !touched {
@@ -1532,6 +1603,7 @@ func (s *Service) RunSections(ctx context.Context, a service.Actor, id string, s
 		}
 		res := &resp.Result
 		executed = true
+		sanitizeDisplays(res)
 		// Definitive response received: NOW persist the renewed TTL
 		// and heartbeat for this section.
 		if touched, terr := s.st.TouchInstanceLive(ctx, in.ID, token, lastActive, deadline, 0); terr != nil {

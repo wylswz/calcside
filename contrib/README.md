@@ -38,11 +38,21 @@ capability ext receives all of them and scripts choose a provider/model
 per call. Provider extensions are hidden from instance creation. See
 docs/extensions.md.
 
+### Charts
+
+| Extension | Role | Ops |
+|---|---|---|
+| `charts` | spec builders (no base deps) | `line` / `area` / `bar` / `scatter` / `histogram` / `heatmap` |
+
+`charts` builds validated Vega-Lite spec dicts on the core `chart`
+module; scripts attach them with `io.display`. No secrets, no network.
+
 ## Security conventions
 
 - Auth credentials are always `type: secret` config fields — never op
   arguments — so values are injected at send time and redacted everywhere.
-- Extensions depend only on `net`; none use `fs` or `io`.
+- Network extensions depend only on `net`; none use `fs`. `charts` has
+  no base dependencies — it returns spec data for `io.display`.
 - Ops build URLs on the configured host; there are no arbitrary-URL ops
   (except `upstash-qstash.publish`, whose destination is inherent to the
   service — the instance never fetches it).

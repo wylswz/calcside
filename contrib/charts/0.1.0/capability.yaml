@@ -1,0 +1,23 @@
+name: charts
+version: 0.1.0
+description: Ready-made Vega-Lite chart specs (line, area, bar, scatter, histogram, heatmap) for io.display.
+dependencies: []
+ops:
+  - name: line
+    doc: "line chart spec; options: color, title, x_type, y_type, tooltip, zoom, legend_filter, width, height"
+    params: [data, x, y, options]
+  - name: area
+    doc: "area chart spec; same options as line"
+    params: [data, x, y, options]
+  - name: bar
+    doc: "bar chart spec; same options as line"
+    params: [data, x, y, options]
+  - name: scatter
+    doc: "scatter (point) chart spec; same options as line plus size"
+    params: [data, x, y, options]
+  - name: histogram
+    doc: "histogram spec; options: bins, color, title, tooltip, width, height"
+    params: [data, field, options]
+  - name: heatmap
+    doc: "heatmap (rect) spec; options: title, x_type, y_type, tooltip, width, height"
+    params: [data, x, y, color, options]

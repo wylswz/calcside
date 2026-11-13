@@ -1,4 +1,4 @@
-import { useEffect, Fragment, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, Fragment, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
@@ -9,6 +9,11 @@ import { CallRows } from './CallTable'
 import { EmptyRow, Loading, Notice, OutcomeBadge, RevealNew, RunByBadge, SectionTitle } from './ui'
 import { cmTheme } from './codemirror'
 import { useHeldOrder } from '../stableList'
+import { chartReservedBox } from '../chartBox'
+
+// ChartView is lazy so the vega stack lands in its own chunk; the
+// Suspense fallback reserves the same box the chart will occupy (S).
+const ChartView = lazy(() => import('./ChartView'))
 
 // firstCodeLine picks the first meaningful line of a run's code — the
 // first non-empty line that is not a comment.
@@ -58,6 +63,21 @@ function RunDetail({ execId }: { execId: string }) {
           ? <pre className="pre max-h-64">{d.output}</pre>
           : <p className="text-sm text-sec">No output.</p>}
       </div>
+      {d.displays.length > 0 && (
+        <div>
+          <div className="mb-2 text-xs font-medium text-sec">Charts</div>
+          <div className="space-y-3">
+            {d.displays.map((disp, i) => (
+              <div key={i}>
+                {disp.title && <div className="mb-1 text-xs text-mute">{disp.title}</div>}
+                <Suspense fallback={<div className="nb-chart" style={chartReservedBox(disp.spec)} />}>
+                  <ChartView display={disp} />
+                </Suspense>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {d.error && (
         <div>
           <div className={`error-head mb-1 text-xs font-medium ${denied ? 'text-danger' : 'text-warn-text'}`}>Error · {d.error.type}</div>

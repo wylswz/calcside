@@ -11,6 +11,7 @@
 package instance
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,8 @@ import (
 	"time"
 
 	"calcside/internal/capability"
+	capio "calcside/internal/capability/io"
+	"calcside/internal/chart"
 	"calcside/internal/engine"
 	"calcside/internal/policy"
 	"calcside/internal/runtime"
@@ -421,6 +424,7 @@ func (m *Manager) exec(ctx context.Context, req *runtime.ExecRequest, in *inst) 
 	}
 	in.sess.SetActor(req.Actor.UserID, req.Actor.Email)
 	in.sess.Out.Reset()
+	in.sess.Displays.Reset()
 	res := m.eng.ExecNamed(ctx, in.sess, req.ExecID, req.SourceName, req.Code, timeout, in.spec.Limits.MaxSteps, in.sess.Out.String)
 	// Defense in depth: scrub any secret value that escaped into output.
 	res.Output = in.secrets.Redact(res.Output)
@@ -430,8 +434,10 @@ func (m *Manager) exec(ctx context.Context, req *runtime.ExecRequest, in *inst) 
 	}
 	// Exec renews the sliding TTL regardless of outcome.
 	in.renew(req.RenewedExpiresAt)
+	out := execResult(&res)
+	out.Displays = execDisplays(in.sess.Displays, in.secrets)
 	return &runtime.ExecResponse{
-		Result: execResult(&res),
+		Result: out,
 		Audit:  in.sink.drain(),
 	}, nil
 }
@@ -445,6 +451,36 @@ func execResult(r *engine.Result) runtime.ExecResult {
 		out.Error = &runtime.ExecError{
 			Type: r.Error.Type, Message: r.Error.Message, Backtrace: r.Error.Backtrace,
 		}
+	}
+	return out
+}
+
+// execDisplays drains the session's display buffer into runtime
+// displays, redacting known secrets inside each spec tree (never by
+// string-replacing the JSON text — escaping would miss secrets).
+// Displays survive failed execs.
+func execDisplays(d *capio.Displays, sec *secrets.Set) []runtime.Display {
+	items := d.Take()
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]runtime.Display, 0, len(items))
+	for _, it := range items {
+		title := sec.Redact(it.Title)
+		rd := runtime.Display{Kind: chart.Kind, Title: title, Spec: it.Spec}
+		rd.Redacted = title != it.Title
+		var tree any
+		dec := json.NewDecoder(bytes.NewReader(it.Spec))
+		dec.UseNumber()
+		if err := dec.Decode(&tree); err == nil {
+			if redacted, changed := chart.MapStrings(tree, sec.Redact); changed {
+				if b, err := json.Marshal(redacted); err == nil {
+					rd.Spec = b
+					rd.Redacted = true
+				}
+			}
+		}
+		out = append(out, rd)
 	}
 	return out
 }

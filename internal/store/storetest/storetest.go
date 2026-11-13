@@ -570,7 +570,8 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 			CodeSnippet: "print(1)", Code: "print(1)\nprint(2)",
 			Status: types.ExecOK, DurationMs: 5, Steps: 10, OutputBytes: 2,
 			Via: types.AuthAPIKey, Output: "hello\n", OutputTruncated: true,
-			ErrorMessage: "boom", ErrorBacktrace: "trace\nback"}
+			ErrorMessage: "boom", ErrorBacktrace: "trace\nback",
+			DisplayCount: 1, Displays: []byte(`[{"kind":"vega-lite","title":"T","spec":{"mark":"point"}}]`)}
 		if err := s.CreateExecution(ctx, e); err != nil {
 			t.Fatal(err)
 		}
@@ -582,11 +583,14 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 			got.ErrorMessage != e.ErrorMessage || got.ErrorBacktrace != e.ErrorBacktrace {
 			t.Fatalf("detail fields: %+v", got)
 		}
+		if got.DisplayCount != 1 || string(got.Displays) != string(e.Displays) {
+			t.Fatalf("display fields: %+v", got)
+		}
 		if _, err := s.GetExecution(ctx, "exe_missing"); err == nil {
 			t.Fatal("GetExecution: expected ErrNotFound")
 		}
 		lst, err := s.ListExecutions(ctx, in.ID, 10)
-		if err != nil || len(lst) != 1 || lst[0].Steps != 10 {
+		if err != nil || len(lst) != 1 || lst[0].Steps != 10 || lst[0].DisplayCount != 1 {
 			t.Fatalf("ListExecutions: %v %+v", err, lst)
 		}
 

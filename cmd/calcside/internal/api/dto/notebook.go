@@ -112,14 +112,15 @@ func NewNotebook(v *sandbox.NotebookView) Notebook {
 	}
 }
 
-// NotebookSection is one section with code; Output/Error are only
-// populated when the caller asked for include_output.
+// NotebookSection is one section with code; Output/Error/Displays are
+// only populated when the caller asked for include_output.
 type NotebookSection struct {
 	Section         NotebookSectionMeta `json:"section"`
 	Code            string              `json:"code"`
 	Output          string              `json:"output,omitempty"`
 	Error           string              `json:"error,omitempty"`
 	OutputTruncated bool                `json:"output_truncated,omitempty"`
+	Displays        []Display           `json:"displays,omitempty"`
 }
 
 type NotebookSectionEnvelope struct {
@@ -130,6 +131,7 @@ func NewNotebookSection(d *sandbox.SectionDetail) NotebookSection {
 	return NotebookSection{
 		Section: NewNotebookSectionMeta(d.Section), Code: d.Code,
 		Output: d.Output, Error: d.Error, OutputTruncated: d.OutputTrunc,
+		Displays: NewDisplays(d.Displays),
 	}
 }
 

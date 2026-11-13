@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { Fragment, lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { api, ApiError, Instance, Notebook, NotebookSectionMeta, NotebookSectionResponse, SaveNotebookSectionResponse } from '../api'
@@ -8,6 +8,11 @@ import { Button, Confirm, Icon, Menu, MenuItem, MenuSeparator, SwapLabel } from 
 import { useStarlarkEditor } from './editor'
 import { cmTheme } from './codemirror'
 import { fmtTime, relTime } from '../format'
+import { chartReservedBox } from '../chartBox'
+
+// ChartView is lazy so the vega stack lands in its own chunk; the
+// Suspense fallback reserves the same box the chart will occupy (S).
+const ChartView = lazy(() => import('./ChartView'))
 
 // SectionValue is everything one autosave PUT carries: code, the
 // one-line description and the bulk-run mode move together so a single
@@ -471,6 +476,18 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
             <pre className="nb-output-pre">{detail.output}</pre>
           </div>
         ) : null}
+        {detail?.displays?.map((d, i) => (
+          <div className="nb-output" key={i}>
+            <div className="nb-output-head">
+              <span className="nb-output-kind">chart</span>
+              {d.title && <span className="nb-output-meta">{d.title}</span>}
+              {d.redacted && <span className="nb-output-tag">redacted</span>}
+            </div>
+            <Suspense fallback={<div className="nb-chart" style={chartReservedBox(d.spec)} />}>
+              <ChartView display={d} />
+            </Suspense>
+          </div>
+        ))}
         {detail?.error && (
           <div className="nb-output nb-output-err">
             <div className="nb-output-head">
