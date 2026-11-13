@@ -60,7 +60,7 @@ export default function Instances() {
       {isLoading && <Loading />}
       {data && all.length === 0 && (
         <div className="rounded-xl border border-line bg-surface px-6 py-10 text-center">
-          <p className="mb-4 text-sm text-sec">1 Decide what an agent may do · 2 Connect the agent · 3 Review its runs</p>
+          <p className="mb-4 text-sm text-sec">No instances yet.</p>
           {role != null && role !== 'viewer' && <Button variant="primary" onClick={() => nav('/instances/new')}>New instance</Button>}
         </div>
       )}

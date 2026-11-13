@@ -106,14 +106,14 @@ function Preview({ id, path, dev }: { id: string; path: string; dev: boolean }) 
 
     <dialog ref={confirmation} aria-labelledby="script-confirmation-title" onClose={() => { if (!confirmation.current?.open) setConfirmScripts(false) }} className="m-auto w-[min(28rem,calc(100vw-2rem))] border border-ink bg-paper p-0 text-body backdrop:bg-black/40">
       <div className="flex items-center gap-3 border-b border-line bg-warn/10 px-5 py-4"><SignalMark signal="failed" /><h2 id="script-confirmation-title" className="text-base font-semibold text-ink">Run this report’s JavaScript?</h2></div>
-      <p className="px-5 py-5 text-sm leading-relaxed">The report runs on an isolated origin without console access. Network restrictions are not a complete firewall, and browser code is outside Starlark resource limits.</p>
+      <p className="px-5 py-5 text-sm leading-relaxed">Runs on an isolated origin; network restrictions are not a complete firewall.</p>
       <div className="flex justify-end gap-2 border-t border-line px-5 py-4"><Button onClick={() => setConfirmScripts(false)}>Cancel</Button><Button variant="primary" onClick={() => { setScripts(true); setConfirmScripts(false) }}>Run interactive preview</Button></div>
     </dialog>
     {downloadError && <div role="alert" className="shrink-0"><Notice tone="warning">{downloadError}</Notice></div>}
-    {html && config.isSuccess && !config.data.html_enabled && <Notice>HTML rendering is not configured. Source and downloads are available; configure an isolated preview domain to render reports.</Notice>}
-    {preview?.redacted && <Notice>Secrets were redacted. Delivered content may differ from the generated file.</Notice>}
-    {preview?.source_truncated && !showPreview && <Notice>Source view is limited to 64 KiB. Download uses the complete redacted file within export limits.</Notice>}
-    {preview?.csv_truncated && showPreview && <Notice>Table preview is limited to 200 rows, 32 columns, 512 bytes per cell, and 256 KiB total. Download is not truncated.</Notice>}
+    {html && config.isSuccess && !config.data.html_enabled && <Notice>HTML rendering is not configured.</Notice>}
+    {preview?.redacted && <Notice>Secrets were redacted.</Notice>}
+    {preview?.source_truncated && !showPreview && <Notice>Source view is limited to 64 KiB.</Notice>}
+    {preview?.csv_truncated && showPreview && <Notice>Table preview is truncated.</Notice>}
 
     <main aria-label="Artifact content" aria-busy={loading} className={`min-h-0 flex-1 overflow-auto bg-surface ${html && showPreview ? 'p-3 sm:p-5' : ''}`}>
       {loading ? <div className="flex h-full items-center justify-center"><Loading label="Preparing preview…" /></div> : error ? <div className="flex min-h-full items-center justify-center p-8"><div className="max-w-lg border-l-4 border-warn pl-5"><h2 className="text-xl font-semibold text-ink">Preview unavailable</h2><p role="alert" className="mt-2 break-words text-sm text-sec">{error.message}</p><div className="mt-5 flex items-center gap-4"><Button onClick={refresh} disabled={preparing || !path}>Try again</Button><Link className="link text-sm" to={back}>Back to files</Link></div></div></div> : expired && showPreview ? <div className="flex h-full items-center justify-center"><div className="max-w-sm text-center"><Icon name="refresh" className="mx-auto mb-4 !h-7 !w-7 text-mute" /><h2 className="text-xl font-semibold text-ink">Preview expired</h2><p className="mt-2 text-sm text-sec">Refresh to create a new snapshot while the instance is running.</p><Button className="mt-5" onClick={refresh}>Create new preview</Button></div></div> : preview && <>
@@ -132,12 +132,7 @@ function Preview({ id, path, dev }: { id: string; path: string; dev: boolean }) 
       <span className="inline-flex items-center gap-2">{(expired || scripts && showPreview) && <SignalMark signal="failed" />}{error && <SignalMark signal="denied" />}{status}</span>
       <span className="min-w-0 flex-1 truncate font-mono" title={path}>{path}</span>
       {preview && <span className="font-mono">{fmtBytes(preview.size)}</span>}
-      <details className="relative"><summary className="cursor-pointer hover:text-ink">About this preview</summary><div className="absolute bottom-7 right-0 z-10 w-72 max-w-[85vw] border border-line-strong bg-paper p-4 text-xs leading-relaxed shadow-sm">
-        {preview?.expires_at && <p className="mb-2">Snapshot access expires {fmtTime(preview.expires_at)}.</p>}
-        <p>Refresh and download read current files, not a saved copy. Files are available only while the instance is running.</p>
-        {html && <p className="mt-2">Local JS/CSS is embedded in this preview only. Download the report directory as ZIP to keep dependent files. Static mode removes scripts and unsupported markup. Interactive mode is not a network firewall. Downloaded HTML runs outside these viewer controls.</p>}
-        {csv && <p className="mt-2">Spreadsheet exports can contain formulas. Use <code>csv.format(..., spreadsheet_safe=True)</code> when needed.</p>}
-      </div></details>
+      {preview?.expires_at && <span>expires {fmtTime(preview.expires_at)}</span>}
       {dev && <span className="inline-flex items-center gap-1.5 text-warn-text"><SignalMark signal="failed" />dev · anonymous</span>}
       {notice && <span role="status" className="w-full">{notice}</span>}
     </footer>

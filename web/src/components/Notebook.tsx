@@ -650,17 +650,15 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
             content above the cells after a click or a poll (S3/S5). */}
         <div className="nb-toolbar">
           <div className="nb-toolbar-actions">
-            {canExec && !empty && (
+            {canExec && (
               <>
-                <Button variant="ghost" size="xs" disabled={running !== null}
-                  onClick={() => void runSections('all')}
-                  title="Run every section in dependency order; once-sections that already succeeded are skipped unless something needs them">
+                <Button variant="ghost" size="xs" disabled={empty || running !== null}
+                  onClick={() => void runSections('all')}>
                   <Icon name="run-all" />
                   <SwapLabel show={running === 'all' ? 'Running…' : 'Run all'} options={['Run all', 'Running…']} />
                 </Button>
-                <Button variant="ghost" size="xs" disabled={running !== null}
-                  onClick={() => void runSections('stale')}
-                  title="Run every section that is not fresh, in dependency order">
+                <Button variant="ghost" size="xs" disabled={empty || running !== null}
+                  onClick={() => void runSections('stale')}>
                   <Icon name="play" />
                   <SwapLabel show={running === 'stale' ? 'Running…' : 'Run stale'} options={['Run stale', 'Running…']} />
                 </Button>
@@ -693,32 +691,32 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
         </div>
 
         {/* Compact section directory (C4): held shown order, click
-            deep-links and scrolls to the card. */}
-        {navNames.length > 0 && (
-          <nav className="nb-directory" aria-label="Section directory" ref={dirRef}>
-            {shown.map((m, i) => (
-              <button
-                key={m.name}
-                type="button"
-                className="nb-dir-row"
-                title={m.description || sectionStateLabel(m.state)}
-                aria-current={activeNav === m.name ? 'true' : undefined}
-                data-running={running === m.name ? 'true' : undefined}
-                onClick={() => {
-                  setParams((p) => { const n = new URLSearchParams(p); n.set('section', m.name); return n })
-                  // Code view scrolls the card; in graph view the
-                  // ?section= change makes the canvas reveal the node.
-                  if (view !== 'graph') scrollToCard(m.name)
-                }}
-              >
-                <span className="nb-dir-ord">{i + 1}.</span>
-                <span className="nb-dir-name">{m.name}</span>
-                <span className="nb-dir-dot" data-state={m.state} />
-                <span className="sr-only">{sectionStateLabel(m.state)}</span>
-              </button>
-            ))}
-          </nav>
-        )}
+            deep-links and scrolls to the card. It renders even with zero
+            sections — the row's fixed height keeps the head box constant
+            when the first section lands (S3/F1). */}
+        <nav className="nb-directory" aria-label="Section directory" ref={dirRef}>
+          {shown.map((m, i) => (
+            <button
+              key={m.name}
+              type="button"
+              className="nb-dir-row"
+              title={m.description || sectionStateLabel(m.state)}
+              aria-current={activeNav === m.name ? 'true' : undefined}
+              data-running={running === m.name ? 'true' : undefined}
+              onClick={() => {
+                setParams((p) => { const n = new URLSearchParams(p); n.set('section', m.name); return n })
+                // Code view scrolls the card; in graph view the
+                // ?section= change makes the canvas reveal the node.
+                if (view !== 'graph') scrollToCard(m.name)
+              }}
+            >
+              <span className="nb-dir-ord">{i + 1}.</span>
+              <span className="nb-dir-name">{m.name}</span>
+              <span className="nb-dir-dot" data-state={m.state} />
+              <span className="sr-only">{sectionStateLabel(m.state)}</span>
+            </button>
+          ))}
+        </nav>
       </div>
 
       {/* Code panel stays mounted while the graph view is shown —
@@ -727,7 +725,7 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
       <div className="nb-code" hidden={view === 'graph'}>
       {empty ? (
         <div className="nb-empty">
-          <p>No sections yet — the notebook is the durable record of this instance's work.</p>
+          <p>No sections yet.</p>
           {canEdit && (
             <Button variant="ghost" size="xs" disabled={adding} onClick={() => void addSection()}>
               <Icon name="plus" />Add section
@@ -802,7 +800,7 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
           action={async () => { const n = pendingOnce; setPendingOnce(null); await runSections([n], true) }}
           onClose={() => setPendingOnce(null)}
         >
-          <p className="text-sm text-body">This section is marked “once” — it already succeeded. Bulk runs skip it; running it explicitly repeats it in the current process.</p>
+          <p className="text-sm text-body">It already succeeded once.</p>
         </Confirm>
       )}
 

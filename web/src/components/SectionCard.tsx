@@ -356,7 +356,7 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
           <Button
             variant="ghost" size="xs" className="nb-icon-btn"
             aria-label="Run section" aria-busy={busy}
-            title={as?.conflict ? 'Resolve the save conflict first' : 'Run this section — upstream sections that are not fresh run first'}
+            title={as?.conflict ? 'Resolve the save conflict first' : undefined}
             disabled={runDisabled}
             onClick={startRun}
           >
@@ -372,7 +372,7 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
           <h3 className="nb-name">{name}</h3>
           <SectionStateBadge state={meta.state} />
           {meta.rerun === 'once' && (
-            <span className="nb-once" title="Skipped by bulk runs after a prior success">once</span>
+            <span className="nb-once">once</span>
           )}
           {canEdit ? (
             <input
@@ -521,7 +521,7 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
           action={async () => { setConfirmOnce(false); onRun(name, true) }}
           onClose={() => setConfirmOnce(false)}
         >
-          <p className="text-sm text-body">This section is marked “once” — it already succeeded. Bulk runs skip it; running it explicitly repeats it in the current process.</p>
+          <p className="text-sm text-body">It already succeeded once.</p>
         </Confirm>
       )}
       {confirmDelete && (
@@ -533,7 +533,7 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
           action={doDelete}
           onClose={() => setConfirmDelete(false)}
         >
-          <p className="text-sm text-body">The code is removed from the notebook; run history stays. Sections that read its definitions are marked stale.</p>
+          <p className="text-sm text-body">Sections that read its definitions become stale.</p>
         </Confirm>
       )}
     </section>

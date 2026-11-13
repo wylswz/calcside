@@ -38,7 +38,7 @@ const DEFAULT_INPUT = '{\n  "name": "world"\n}'
 
 const statusHint: Record<string, string> = {
   draft: 'Not published.',
-  preparing: 'Deploying… Invoke will be enabled when ready.',
+  preparing: 'Deploying…',
   degraded: 'Deployment unhealthy.',
   disabled: 'Deployment disabled.',
 }
@@ -594,7 +594,7 @@ function Editor({ app, role, userID, qc }: Props) {
                   </div>
                 ) : (
                   <div className="app-document-head" role="status">
-                    <p>This resource reference changed or was removed. Reopen it from Resources to browse its current version.</p>
+                    <p>This resource changed or was removed.</p>
                     <Button onClick={() => setResourceDocument(null)}>Return to main.star</Button>
                   </div>
                 )}
@@ -693,7 +693,6 @@ function Editor({ app, role, userID, qc }: Props) {
           <span className="app-card-title">Invoke</span>
           {view === 'edit' && <Button onClick={() => setKeyOpen(true)}>Create API key</Button>}
         </div>
-        <p className="app-dim">Calls the published version. Unpublished draft changes are not used.</p>
         {!ready && <p className="app-dim">{statusHint[app.status] ?? 'Not ready.'}</p>}
         <div className="app-grid">
           <div>
@@ -745,7 +744,7 @@ function Editor({ app, role, userID, qc }: Props) {
       {stopKind && (
         <Confirm tone="danger" title="Stop streaming" confirm="Stop" pending="Stopping…" onClose={() => setStopKind('')}
           action={async () => { streamCtl.current[stopKind]?.abort() }}>
-          Stopping aborts the call. Items already received stay; the run's outcome may be unknown.
+          The run's outcome may be unknown.
         </Confirm>
       )}
       {delOpen && (
@@ -767,7 +766,7 @@ function Editor({ app, role, userID, qc }: Props) {
             const fresh: Saved = { draft: draftOf(a2), version: a2.version, fp: fp(draftOf(a2)) }
             setDraft(fresh.draft); setBase(fresh); persist(scope, fresh); setReloadOpen(null); setWarn('')
           }}>
-          This draft was changed by another session. Reload the newer version? Your current edits are kept in this tab until you confirm.
+          Reload the version saved by another session?
         </Confirm>
       )}
       {keyOpen && <AppKeyModal appId={app.id} appName={app.name} workspaceId={app.workspace_id} onClose={() => setKeyOpen(false)} />}

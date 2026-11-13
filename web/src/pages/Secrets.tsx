@@ -97,9 +97,7 @@ export default function Secrets({ bare }: { bare?: boolean }) {
     <div>
       {bare && <div className="mb-4 flex items-center justify-between"><p className="text-xs text-sec" /><Button variant="primary" onClick={() => setShowNew(true)}>New secret</Button></div>}
 {!bare && <PageHeader title="Secrets"
-        actions={!disabled && <Button variant="primary" onClick={() => setShowNew(true)}>New secret</Button>}>
-        Values are write-only. Use <code className="font-mono text-ink">{'{{secrets.NAME}}'}</code> in net.get/post URL, headers or body — the server injects the value at send time and scrubs it from responses.
-      </PageHeader>}
+        actions={!disabled && <Button variant="primary" onClick={() => setShowNew(true)}>New secret</Button>} />}
       {disabled && (
         <Notice tone="warning">
           Secrets vault is disabled on this server (no <code>--secret-key</code>). Inline per-instance secrets still work.
@@ -137,7 +135,7 @@ export default function Secrets({ bare }: { bare?: boolean }) {
       {deleting && (
         <Confirm tone="danger" title={`Delete secret ${deleting.name}?`} confirm="Delete" pending="Deleting…"
           action={() => del.mutateAsync(deleting.id)} onClose={() => setDeleting(null)}>
-          <p className="text-sm text-body">The stored value of <code className="font-mono text-ink">{deleting.name}</code> is erased. This cannot be undone.</p>
+          <p className="text-sm text-body">This cannot be undone.</p>
         </Confirm>
       )}
     </div>

@@ -35,7 +35,7 @@ export default function Members({ ws }: { ws: Workspace }) {
   const setRoleM = useMutation({ mutationFn: (p: { uid: string; role: string }) => api.put(`/api/v1/workspaces/${ws.id}/members/${p.uid}`, { role: p.role }), onSuccess: bump })
   const remove = useMutation({ mutationFn: (uid: string) => api.del(`/api/v1/workspaces/${ws.id}/members/${uid}`), onSuccess: bump })
 
-  if (ws.personal) return <Notice>Personal workspaces have exactly one member — you.</Notice>
+  if (ws.personal) return <Notice>Personal workspaces have one member.</Notice>
   const err = (add.error || setRoleM.error) as Error | null
 
   return (

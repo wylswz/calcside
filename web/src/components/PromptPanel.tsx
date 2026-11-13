@@ -29,7 +29,7 @@ export function PromptPanel({ id, running }: { id: string; running: boolean }) {
           <Button onClick={copy} disabled={!data} size="sm"><SwapLabel show={copied ? 'Copied' : 'Copy'} options={['Copy', 'Copied']} /></Button>
         </>
       }>Agent prompt</SectionTitle>
-      {!running && <p className="text-xs text-mute">instance is not running — no prompt available</p>}
+      {!running && <p className="text-xs text-mute">Instance is not running.</p>}
       {error && <Notice tone="warning">{(error as Error).message}</Notice>}
       {data && <pre className="pre max-h-[32rem] p-4">{data.prompt}</pre>}
     </section>

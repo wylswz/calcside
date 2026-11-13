@@ -95,7 +95,7 @@ test('workbench resources use pinned files; views retain editor and input (C2/C3
   await resources.getByRole('button', { name: 'Configure resources' }).click()
   await page.getByRole('button', { name: 'Advanced JSON', exact: true }).click()
   await page.getByLabel('Application spec JSON').fill('{"unfinished":')
-  await expect(resourceDocument.getByText(/resource reference changed or was removed/)).toBeVisible()
+  await expect(resourceDocument.getByText(/resource changed or was removed/)).toBeVisible()
   await expect(resourceDocument.locator('.cm-content')).toHaveCount(0)
   await tabs.getByRole('tab', { name: 'Invoke', exact: true }).click()
   await tabs.getByRole('tab', { name: 'Develop', exact: true }).click()

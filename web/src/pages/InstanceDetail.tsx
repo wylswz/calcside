@@ -149,7 +149,6 @@ export default function InstanceDetail() {
           <div className="next-signal expiring" aria-hidden="true"><NextSignal kind="expiring" /></div>
           <div className="next-body">
             <h2 className="next-title">Runtime lost — code is retained.</h2>
-            <p className="next-text">The process died but the notebook survived. Running a section restores an empty process; nothing re-runs automatically.</p>
           </div>
         </div>
       )}
@@ -158,7 +157,6 @@ export default function InstanceDetail() {
           <div className="next-signal neutral" aria-hidden="true"><NextSignal kind="neutral" /></div>
           <div className="next-body">
             <h2 className="next-title">This instance expired.</h2>
-            <p className="next-text">The notebook and run history stay readable; nothing can run or be edited.</p>
           </div>
         </div>
       )}
@@ -167,7 +165,6 @@ export default function InstanceDetail() {
           <div className="next-signal neutral" aria-hidden="true"><NextSignal kind="neutral" /></div>
           <div className="next-body">
             <h2 className="next-title">This instance has ended.</h2>
-            <p className="next-text">Runs and calls stay for review; files and state are gone.</p>
           </div>
           {canCreate && <div className="next-actions"><Button size="sm" variant="primary" onClick={() => navigate(`/instances/new?from=${id}`)}>Create similar</Button></div>}
         </div>
@@ -186,7 +183,6 @@ export default function InstanceDetail() {
           <div className="next-signal denied" aria-hidden="true"><NextSignal kind="denied" /></div>
           <div className="next-body">
             <h2 className="next-title">The latest run was denied.</h2>
-            <p className="next-text">Review the blocked call before changing the boundary.</p>
           </div>
           <div className="next-actions"><Button variant="primary" onClick={() => { setFocusId(latest?.id); setView('activity') }}>Review run</Button></div>
         </div>
@@ -203,7 +199,7 @@ export default function InstanceDetail() {
 
       {ending && (
         <Confirm tone="danger" title={`End instance ${name}?`} confirm="End instance" pending="Ending…" action={end} onClose={() => setEnding(false)}>
-          <p className="text-sm text-body">Running code stops and the instance's files and variables are discarded. Its run history stays. This cannot be undone.</p>
+          <p className="text-sm text-body">Files and variables are discarded; this cannot be undone.</p>
         </Confirm>
       )}
       {share && <ShareDialog instanceId={id!} workspaceId={inst.workspace_id ?? ''} onClose={() => setShare(false)} />}
@@ -261,34 +257,36 @@ export default function InstanceDetail() {
           )}
           <section aria-label="Boundary">
             <h2>Boundary</h2>
-            <p className="side-text mb-3">Fixed at creation.</p>
-            <Allowed inst={inst} />
-            <p className="side-text mt-3">
-              {member ? 'you · workspace members' : 'Access follows workspace membership and explicit shares'}
-              {isOwner && <> · <button className="text-accent hover:underline" onClick={() => setShare(true)}>manage</button></>}
-            </p>
+            <Allowed inst={inst} extra={
+              <div className="side-kv-row">
+                <dt>Access</dt>
+                <dd>
+                  {member ? 'Workspace members' : 'Members and shares'}
+                  {isOwner && <> · <button className="text-accent hover:underline" onClick={() => setShare(true)}>manage</button></>}
+                </dd>
+              </div>
+            } />
             {canCreate && (
-              <p className="side-text mt-3">
-                <button className="text-accent hover:underline" title="New instance — no files or state copied" onClick={() => navigate(`/instances/new?from=${id}`)}>Create similar</button>
-                {' · '}
-                <button className="text-accent hover:underline" title="Draft a persistent instance contract from this instance's files" onClick={() => navigate(`/instances/${id}/build`)}>Build contract</button>
-              </p>
+              <div className="side-actions">
+                <Button size="sm" onClick={() => navigate(`/instances/new?from=${id}`)}>Create similar</Button>
+                <Button size="sm" onClick={() => navigate(`/instances/${id}/build`)}>Build contract</Button>
+              </div>
             )}
           </section>
           <section aria-label="Agent">
             <h2>Agent</h2>
-            {canManage ? (
-              hasBoundKey ? (
-                <>
-                  <p className="side-text">Key ready.</p>
-                  <p className="side-name break-all mt-1">{mUrl}</p>
-                </>
-              ) : (
-                <p className="side-text">{live ? 'No instance key yet — use the connect icon in the header.' : 'No instance key yet.'}</p>
-              )
-            ) : (
-              <p className="side-text">key availability unknown — this workspace's keys are not visible to you</p>
-            )}
+            <dl className="side-kv">
+              <div className="side-kv-row">
+                <dt>Key</dt>
+                <dd>{canManage ? (hasBoundKey ? 'Ready' : 'None') : 'Unknown'}</dd>
+              </div>
+              {hasBoundKey && (
+                <div className="side-kv-row">
+                  <dt>Endpoint</dt>
+                  <dd className="font-mono break-all">{mUrl}</dd>
+                </div>
+              )}
+            </dl>
           </section>
         </aside>
       </div>

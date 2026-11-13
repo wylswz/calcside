@@ -354,13 +354,6 @@
      head — same clearance the section cards get (S6) */
   scroll-margin-top: calc(73px + var(--nb-bar-h));
 }
-.nb-graph-head {
-  display: flex; align-items: center; gap: 10px;
-  height: 34px; flex: none; padding: 0 12px;
-  border-bottom: 1px solid var(--detail-edge);
-}
-.nb-graph-note { flex: 1; min-width: 0; font-size: 12px; color: rgb(var(--sec)); }
-
 .nb-graph-empty {
   flex: 1; display: flex; align-items: center; justify-content: center;
   font-size: 13px; color: rgb(var(--sec));
@@ -469,7 +462,6 @@
 .nb-graph-aside-h {
   margin: 0; font-size: 12px; font-weight: 600; color: rgb(var(--sec));
 }
-.nb-graph-aside-note { margin: 4px 0 0; font-size: 12px; color: rgb(var(--mute)); }
 .nb-graph-issues { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
 .nb-graph-issue { display: grid; gap: 4px; font-size: 12px; line-height: 17px; }
 .nb-graph-issue-msg { color: rgb(var(--body)); }

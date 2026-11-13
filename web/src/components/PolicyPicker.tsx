@@ -90,7 +90,7 @@ export function PolicyPicker({ entries, selected, loading, error, onRetry, onTog
           </ul>
         )}
       </div>
-      <p className="mt-3 text-xs text-sec">Write your own Rego policy in <Link to="/workspace/policies" className="underline">Workspace → Policies</Link></p>
+      <p className="mt-3 text-xs text-sec"><Link to="/workspace/policies" className="underline">Workspace → Policies</Link></p>
     </div>
   )
 }

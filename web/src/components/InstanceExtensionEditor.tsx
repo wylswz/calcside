@@ -140,7 +140,6 @@ export function InstanceExtensionEditor({ value, catalog, secretNames, vaultName
               </Field>
             )
           })}
-          {(entry.config ?? []).some((f) => f.type === 'secret') && <p className="text-xs text-sec">Choose an existing vault reference, or add a secret under Inputs. Values are never shown here.</p>}
         </>
       )}
       {entry && (

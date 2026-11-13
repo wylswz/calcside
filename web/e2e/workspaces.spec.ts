@@ -128,7 +128,7 @@ test('workspace switcher scopes the instance list', async ({ page }) => {
   await switcher.getByRole('button').click()
   await page.getByRole('menuitem', { name: /e2e team/ }).click()
   await expect(switcher.getByRole('button')).toContainText('e2e team', { timeout: 15_000 })
-  await expect(page.getByText(/Decide what an agent may do/)).toBeVisible()
+  await expect(page.getByText(/No instances yet/)).toBeVisible()
   // scoped: the personal-workspace instance row is absent
   await expect(page.locator('tbody tr', { hasText: personalId })).toHaveCount(0)
   // settings page
@@ -428,7 +428,7 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   await more.click()
   // outside click dismisses; click inert boundary text — a
   // viewport-corner click lands on the fixed sidebar's brand link
-  await page.locator('.side-col .side-text').first().click()
+  await page.getByRole('heading', { name: 'Boundary' }).click()
   await expect(menu).toHaveCount(0)
   // the menu's remaining item opens a dialog; closing it returns to More
   await more.click()

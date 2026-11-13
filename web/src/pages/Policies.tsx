@@ -128,7 +128,6 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
               </select>
             </Field>
           </div>
-          <p className="mb-4 text-xs text-mute">Validate compiles the policy; it does not execute it.</p>
           <div className="mb-2 text-xs font-medium text-sec">Input schema</div>
           <pre className="pre mb-4 max-h-64 text-sec">{editor.fields.length ? editor.fields.map((s) => `${s.name}  ${s.detail ?? ''}`).join('\n') : editor.error ? 'Schema unavailable' : 'Loading schema…'}</pre>
           <pre className="pre max-h-64 text-sec">{POLICY_DOC}</pre>
@@ -156,9 +155,7 @@ export default function Policies({ bare }: { bare?: boolean }) {
     <div>
       {bare && <div className="mb-4 flex items-center justify-between"><p className="text-xs text-sec" /><Button variant="primary" onClick={() => setShowNew(true)}>New policy</Button></div>}
 {!bare && <PageHeader title="Policies"
-        actions={<Button variant="primary" onClick={() => setShowNew(true)}>New policy</Button>}>
-        Built-in policies run native checks and are read-only. Defaults are preselected, not mandatory. Rego policies are snapshotted at creation; server policies always apply.
-      </PageHeader>}
+        actions={<Button variant="primary" onClick={() => setShowNew(true)}>New policy</Button>} />}
       <div className="tbl-wrap">
         <table className="tbl">
           <thead>
@@ -190,7 +187,7 @@ export default function Policies({ bare }: { bare?: boolean }) {
       {deleting && (
         <Confirm tone="danger" title={`Delete policy ${deleting.name}?`} confirm="Delete" pending="Deleting…"
           action={() => del.mutateAsync(deleting.id)} onClose={() => setDeleting(null)}>
-          <p className="text-sm text-body">New instances can no longer select <code className="font-mono text-ink">{deleting.name}</code>. This cannot be undone.</p>
+          <p className="text-sm text-body">This cannot be undone.</p>
         </Confirm>
       )}
     </div>

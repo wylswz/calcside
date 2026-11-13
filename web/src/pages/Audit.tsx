@@ -51,9 +51,7 @@ export default function Audit() {
 
   return (
     <div>
-      <PageHeader title="Audit">
-        Every capability call — allowed or denied — with its outcome and reason.
-      </PageHeader>
+      <PageHeader title="Audit" />
       <div className="mb-6 flex flex-wrap items-end gap-3">
         <Field label="Instance ID"><input className={inputCls + ' !w-64 font-mono'} value={instFilter} onChange={(e) => { setInstFilter(e.target.value); setPage(0); setCursors([undefined]) }} placeholder="ins_…" /></Field>
         <Field label="Exec ID"><input className={inputCls + ' !w-64 font-mono'} value={execFilter} onChange={(e) => { setExecFilter(e.target.value); setPage(0); setCursors([undefined]) }} placeholder="exe_…" /></Field>

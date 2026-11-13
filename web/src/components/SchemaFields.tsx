@@ -52,7 +52,7 @@ function NodeFields({ node, root, path, depth, onPatch }: {
   return (
     <div className="schema-node">
       {names.length === 0 && depth === 0 && (
-        <div className="dim">No fields yet. Generate from example or edit JSON.</div>
+        <div className="dim">No fields yet.</div>
       )}
       {names.map((name) => (
         <FieldRow key={JSON.stringify(path.concat('properties', name))}

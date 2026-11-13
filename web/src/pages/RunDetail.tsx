@@ -78,7 +78,7 @@ export default function RunDetail() {
 				<section className="app-card">
 					<div className="app-card-head"><span className="app-card-title">Output</span></div>
 					<div className="app-card-body">
-						<p className="app-dim">Streamed output was delivered live and is not retained. {run.stream_items ?? 0} item{(run.stream_items ?? 0) === 1 ? '' : 's'} · {run.stream_bytes ?? 0} bytes.</p>
+						<p className="app-dim">Stream not retained · {run.stream_items ?? 0} item{(run.stream_items ?? 0) === 1 ? '' : 's'} · {run.stream_bytes ?? 0} bytes</p>
 					</div>
 				</section>
 			)}
@@ -97,7 +97,7 @@ export default function RunDetail() {
 					<div className="app-card-head"><span className="app-card-title">{pending ? `Waiting on — ${interruptTitle(pending)}` : `Running — ${runningHandler ?? 'handler'}`}</span></div>
 					<div className="app-card-body">
 						{pending?.context_json && <pre className="app-out-pre mt-2">{pending.context_json}</pre>}
-						{pending?.resume_url && <p className="text-xs text-sec mt-2">External systems resume with <span className="app-mono">POST {pending.resume_url}</span> and the interrupt's resume_token.</p>}
+						{pending?.resume_url && <p className="text-xs text-sec mt-2"><span className="app-mono">POST {pending.resume_url}</span></p>}
 						{pending ? (
 							pending.can_resume ? (
 								<ResumeForm interrupt={pending}

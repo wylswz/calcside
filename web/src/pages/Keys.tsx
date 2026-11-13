@@ -5,7 +5,6 @@ import { api, APIKey, CreateKeyRequest, wsPath } from '../api'
 import { Button, Confirm, EmptyRow, Field, Modal, Notice, PageHeader, inputCls } from '../components/ui'
 import { SpecForm, type SpecFormHandle } from '../components/SpecForm'
 import { CopyBlock, MCPGuide } from '../components/MCP'
-import { mcpURL } from '../mcpSnippets'
 import { fmtTime } from '../format'
 import { allowedSummary } from '../activity'
 
@@ -63,9 +62,7 @@ export default function Keys({ bare }: { bare?: boolean }) {
     <div>
       {bare && <div className="mb-4 flex items-center justify-between"><p className="text-xs text-sec" /><Button variant="primary" onClick={startNew}>New key</Button></div>}
 {!bare && <PageHeader title="API keys"
-        actions={<Button variant="primary" onClick={startNew}>New key</Button>}>
-        Bearer tokens (<code className="font-mono text-ink">cs_…</code>) for the SDK and agents. Restricted keys create and use instances from their spec.
-      </PageHeader>}
+        actions={<Button variant="primary" onClick={startNew}>New key</Button>} />}
       <div className="tbl-wrap">
         <table className="tbl">
           <thead>
@@ -130,9 +127,6 @@ export default function Keys({ bare }: { bare?: boolean }) {
                   ))}
                 </div>
               </Field>
-              {access === 'full' && (
-                <Notice tone="warning">Full access keys are for trusted automation only.</Notice>
-              )}
               {access === 'restricted' && (
                 <>
                   <Field label="Max instances">
@@ -153,9 +147,7 @@ export default function Keys({ bare }: { bare?: boolean }) {
                 <span className="font-medium text-ink">Copy this secret now — it will never be shown again.</span>
               </Notice>
               <CopyBlock text={secret} mono />
-              {secretRestricted
-                ? <MCPGuide secret={secret} />
-                : <p className="text-xs text-sec">This is a full access key. The MCP endpoint (<code className="font-mono text-ink">{mcpURL(window.location.origin)}</code>) requires a restricted key.</p>}
+              {secretRestricted && <MCPGuide secret={secret} />}
               <div className="flex justify-end">
                 <Button onClick={() => setShowNew(false)}>Done</Button>
               </div>
@@ -166,7 +158,7 @@ export default function Keys({ bare }: { bare?: boolean }) {
       {revoking && (
         <Confirm tone="danger" title={`Revoke key ${revoking.name}?`} confirm="Revoke" pending="Revoking…"
           action={() => revoke.mutateAsync(revoking.id)} onClose={() => setRevoking(null)}>
-          <p className="text-sm text-body">Agents using this key lose access immediately. This cannot be undone.</p>
+          <p className="text-sm text-body">This cannot be undone.</p>
         </Confirm>
       )}
     </div>
