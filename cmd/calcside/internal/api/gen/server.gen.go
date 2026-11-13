@@ -1760,10 +1760,28 @@ type OkResponse struct {
 // OpDoc defines model for OpDoc.
 type OpDoc struct {
 	Doc        *string            `json:"doc,omitempty"`
+	Example    *string            `json:"example,omitempty"`
 	Name       *string            `json:"name,omitempty"`
+	ParamDocs  *[]ParamDoc        `json:"param_docs,omitempty"`
 	Params     *[]string          `json:"params,omitempty"`
 	PolicyArgs *map[string]string `json:"policy_args,omitempty"`
 	ResultMeta *map[string]string `json:"result_meta,omitempty"`
+	Returns    *string            `json:"returns,omitempty"`
+}
+
+// ParamDoc defines model for ParamDoc.
+type ParamDoc struct {
+	// Default Declared default rendered with Starlark spelling; present (possibly null) only when declared.
+	Default interface{} `json:"default,omitempty"`
+	Doc     *string     `json:"doc,omitempty"`
+
+	// Fields Documented keys of a dict parameter; one level deep.
+	Fields   *[]ParamDoc `json:"fields,omitempty"`
+	Name     string      `json:"name"`
+	Optional *bool       `json:"optional,omitempty"`
+
+	// Type Free-text parameter type, e.g. string, dict, list[dict].
+	Type *string `json:"type,omitempty"`
 }
 
 // Phase audit event phase; "" = no phase (runtime error / out of scope)

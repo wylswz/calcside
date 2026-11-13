@@ -82,6 +82,18 @@ func (s *Session) Completions(ctx context.Context, reg *capability.Registry) (*c
 			if op.Params != nil {
 				symbol.Detail = "(" + strings.Join(op.Params, ", ") + ")"
 			}
+			// Structured docs: append the Parameters/Returns block (no
+			// Example); drop it whole rather than cut it mid-entry.
+			if block := capability.OpParamsDoc(op); block != "" {
+				doc := op.Doc
+				if doc != "" {
+					doc += "\n\n"
+				}
+				doc += block
+				if len(doc) <= 4096 {
+					symbol.Doc = doc
+				}
+			}
 		}
 		if len(symbol.Detail) > 4096 || len(symbol.Params) > 64 || slices.ContainsFunc(symbol.Params, func(p string) bool { return len(p) > maxCompletionName }) {
 			symbol.Params = nil

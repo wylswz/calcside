@@ -3,6 +3,7 @@ package ext
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -193,5 +194,107 @@ func TestChartsTooltipAndTypes(t *testing.T) {
 	}
 	if _, err = callCharts(t, g, "line", data, starlark.String("x"), starlark.String("y"), eval(t, `{"y_type": "bogus"}`)); err == nil {
 		t.Fatal("bad y_type accepted")
+	}
+}
+
+// chartsOpArgs builds the positional args for an op call whose last
+// argument is the options dict (starlark.None when nil).
+func chartsOpArgs(op string, opts starlark.Value, data, hdays starlark.Value) []starlark.Value {
+	switch op {
+	case "histogram":
+		return []starlark.Value{data, starlark.String("x"), opts}
+	case "heatmap":
+		return []starlark.Value{hdays, starlark.String("d"), starlark.String("v"), starlark.String("v"), opts}
+	default:
+		return []starlark.Value{data, starlark.String("x"), starlark.String("y"), opts}
+	}
+}
+
+func sampleOption(name string) starlark.Value {
+	switch name {
+	case "bins":
+		return starlark.MakeInt(12)
+	case "width":
+		return starlark.MakeInt(500)
+	case "height":
+		return starlark.MakeInt(320)
+	case "tooltip", "zoom", "legend_filter":
+		return starlark.True
+	case "x_type", "y_type":
+		return starlark.String("quantitative")
+	case "color":
+		return starlark.String("c")
+	case "size":
+		return starlark.String("s")
+	default: // title and anything else
+		return starlark.String("sample")
+	}
+}
+
+// TestChartsManifestParamDocs keeps capability.yaml honest: every op
+// documents every param, every documented options key is accepted by
+// main.star, and undocumented keys still fail.
+func TestChartsManifestParamDocs(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "contrib", "charts", "0.1.0", "capability.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := ParseManifest(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Ops) != 6 {
+		t.Fatalf("ops: %d", len(m.Ops))
+	}
+
+	g := loadCharts(t)
+	data := eval(t, `[{"x": 1, "y": 2, "c": "a", "s": 3}, {"x": 3, "y": 5, "c": "b", "s": 7}]`)
+	hdays := eval(t, `[{"d": "2026-01-01", "v": 1}, {"d": "2026-01-03", "v": 4}]`)
+
+	for _, op := range m.Ops {
+		t.Run(op.Name, func(t *testing.T) {
+			if len(op.ParamDocs) != len(op.Params) {
+				t.Fatalf("param docs %d != params %d", len(op.ParamDocs), len(op.Params))
+			}
+			for i, pd := range op.ParamDocs {
+				if pd.Name != op.Params[i] {
+					t.Fatalf("param doc %d = %q, want %q", i, pd.Name, op.Params[i])
+				}
+			}
+			if op.Returns == "" || op.Example == "" {
+				t.Fatal("returns/example missing")
+			}
+			var options *capability.ParamDoc
+			for i := range op.ParamDocs {
+				if op.ParamDocs[i].Name == "options" {
+					options = &op.ParamDocs[i]
+				}
+			}
+			if options == nil || len(options.Fields) == 0 {
+				t.Fatal("options param docs missing")
+			}
+			for _, f := range options.Fields {
+				t.Run("option/"+f.Name, func(t *testing.T) {
+					opts := starlark.NewDict(1)
+					if err := opts.SetKey(starlark.String(f.Name), sampleOption(f.Name)); err != nil {
+						t.Fatal(err)
+					}
+					_, err := callCharts(t, g, op.Name, chartsOpArgs(op.Name, opts, data, hdays)...)
+					if err != nil && strings.Contains(err.Error(), "unknown option") {
+						t.Fatalf("documented option %q rejected: %v", f.Name, err)
+					}
+				})
+			}
+			t.Run("unknown option", func(t *testing.T) {
+				opts := starlark.NewDict(1)
+				if err := opts.SetKey(starlark.String("no_such_option"), starlark.MakeInt(1)); err != nil {
+					t.Fatal(err)
+				}
+				_, err := callCharts(t, g, op.Name, chartsOpArgs(op.Name, opts, data, hdays)...)
+				if err == nil || !strings.Contains(err.Error(), "unknown option") {
+					t.Fatalf("want unknown option error, got %v", err)
+				}
+			})
+		})
 	}
 }

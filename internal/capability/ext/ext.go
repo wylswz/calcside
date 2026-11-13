@@ -360,7 +360,7 @@ func (f factory) Help(cfgAny any) []capability.HelpEntry {
 		})
 		for _, op := range ac.mod.Manifest.Ops {
 			out = append(out, capability.OpHelpEntry(types.CapabilityName(name),
-				capability.OpInfo{Name: types.Op(op.Name), Doc: op.Doc, Params: op.Params}))
+				opInfo(op)))
 		}
 	}
 	return out
@@ -775,10 +775,25 @@ func (f factory) CompletionOps(cfg any) []capability.OpInfo {
 	var out []capability.OpInfo
 	for alias, ac := range v {
 		for _, op := range ac.mod.Manifest.Ops {
-			out = append(out, capability.OpInfo{Name: types.Op(alias + "." + op.Name), Params: op.Params, Doc: op.Doc})
+			info := opInfo(op)
+			info.Name = types.Op(alias + "." + op.Name)
+			out = append(out, info)
 		}
 	}
 	return out
+}
+
+// opInfo maps a manifest op to its OpInfo, including the structured
+// parameter docs when the manifest declares them.
+func opInfo(op OpSpec) capability.OpInfo {
+	return capability.OpInfo{
+		Name:      types.Op(op.Name),
+		Doc:       op.Doc,
+		Params:    op.Params,
+		ParamDocs: op.ParamDocs,
+		Returns:   op.Returns,
+		Example:   op.Example,
+	}
 }
 
 // ProviderInfo is the validated result of loading a provider extension

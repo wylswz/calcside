@@ -1266,10 +1266,24 @@ export interface components {
             rego: components["schemas"]["CompletionSymbol"][];
             capabilities: components["schemas"]["CapabilityDoc"][];
         };
+        ParamDoc: {
+            name: string;
+            /** @description Free-text parameter type, e.g. string, dict, list[dict]. */
+            type?: string;
+            doc?: string;
+            optional?: boolean;
+            /** @description Declared default rendered with Starlark spelling; present (possibly null) only when declared. */
+            default?: unknown;
+            /** @description Documented keys of a dict parameter; one level deep. */
+            fields?: components["schemas"]["ParamDoc"][];
+        };
         OpDoc: {
             name?: string;
             doc?: string;
             params?: string[];
+            param_docs?: components["schemas"]["ParamDoc"][];
+            returns?: string;
+            example?: string;
             policy_args?: {
                 [key: string]: string;
             };

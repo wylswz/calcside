@@ -21,12 +21,24 @@ io.display(spec, title="Latency by day")
 | `histogram` | `data, field, options` | `bins` (default 30), binned x + count y |
 | `heatmap` | `data, x, y, color, options` | rect mark, quantitative color |
 
-Shared options: `color`, `title`, `x_type`, `y_type`, `tooltip` (default
-true), `zoom` (interval param bound to scales), `legend_filter`
-(requires `color`; point param bound to legend + opacity condition),
-`width`, `height`. Types are `quantitative`/`temporal`/`ordinal`/
-`nominal` and are inferred from the first non-null value when omitted.
-Unknown option keys are errors.
+`data` is a list of flat row dicts with scalar values (at most 5,000
+rows); `x`, `y`, `field` and `color` are field names in those rows.
+`options` is an optional dict; unknown keys are errors.
+
+Shared options (per-op sets differ — see `capability.yaml`):
+
+- `color` — field name for a colour encoding (`scatter`-only `size`
+  does the same for point size).
+- `title` — chart title.
+- `x_type` / `y_type` — one of `quantitative`/`temporal`/`ordinal`/
+  `nominal`; inferred from the first non-null value when omitted (bar
+  x stays nominal unless the data looks temporal).
+- `tooltip` (default `True`) — per-point tooltips.
+- `zoom` (default `False`) — drag to pan, scroll to zoom in the console.
+- `legend_filter` (default `False`; requires `color`) — click legend
+  entries to filter.
+- `width` (default `480`) / `height` (default `280`) — spec size in px.
+- `bins` (histogram only, default `30`) — maximum x bins.
 
 No base-capability dependencies and no secrets: specs are pure data.
 Chart interactivity (zoom, legend filter) works in the console; over

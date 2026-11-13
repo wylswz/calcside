@@ -2125,6 +2125,22 @@ components:
         capabilities:
           type: array
           items: { $ref: '#/components/schemas/CapabilityDoc' }
+    ParamDoc:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        type:
+          type: string
+          description: Free-text parameter type, e.g. string, dict, list[dict].
+        doc: { type: string }
+        optional: { type: boolean }
+        default:
+          description: Declared default rendered with Starlark spelling; present (possibly null) only when declared.
+        fields:
+          type: array
+          description: Documented keys of a dict parameter; one level deep.
+          items: { $ref: '#/components/schemas/ParamDoc' }
     OpDoc:
       type: object
       properties:
@@ -2133,6 +2149,11 @@ components:
         params:
           type: array
           items: { type: string }
+        param_docs:
+          type: array
+          items: { $ref: '#/components/schemas/ParamDoc' }
+        returns: { type: string }
+        example: { type: string }
         policy_args:
           type: object
           additionalProperties: { type: string }
