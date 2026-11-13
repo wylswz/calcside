@@ -937,11 +937,12 @@ type CompletionContext struct {
 
 // CompletionSymbol defines model for CompletionSymbol.
 type CompletionSymbol struct {
-	Detail *string   `json:"detail,omitempty"`
-	Doc    *string   `json:"doc,omitempty"`
-	Kind   string    `json:"kind"`
-	Name   string    `json:"name"`
-	Params *[]string `json:"params,omitempty"`
+	Detail    *string     `json:"detail,omitempty"`
+	Doc       *string     `json:"doc,omitempty"`
+	Kind      string      `json:"kind"`
+	Name      string      `json:"name"`
+	ParamDocs *[]ParamDoc `json:"param_docs,omitempty"`
+	Params    *[]string   `json:"params,omitempty"`
 }
 
 // ContractDocument defines model for ContractDocument.

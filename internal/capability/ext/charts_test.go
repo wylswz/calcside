@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -296,5 +297,77 @@ func TestChartsManifestParamDocs(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+func TestChartsCompletionUsageDocs(t *testing.T) {
+	l := &CapabilityLoader{
+		Identifier: CapabilityIdentifier("contrib/charts@0.1.1"),
+		Options:    &Options{LocalRoots: []string{filepath.Join("..", "..", "..", "contrib")}},
+	}
+	m, err := l.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Manifest.Version != "0.1.1" {
+		t.Fatalf("version = %q, want 0.1.1", m.Manifest.Version)
+	}
+	old, err := os.ReadFile(filepath.Join("..", "..", "..", "contrib", "charts", "0.1.0", "main.star"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(old, m.Sources["main.star"]) {
+		t.Fatal("0.1.1 main.star differs from 0.1.0")
+	}
+
+	docs := map[string]map[string]string{}
+	for _, op := range m.Manifest.Ops {
+		docs[op.Name] = map[string]string{}
+		for _, p := range op.ParamDocs {
+			docs[op.Name][p.Name] = p.Doc
+		}
+	}
+	for _, op := range []string{"line", "area", "bar", "scatter", "heatmap"} {
+		for _, want := range []string{"Horizontal-axis", "each data row", `x="day"`, "key as a string"} {
+			if doc := docs[op]["x"]; !strings.Contains(doc, want) {
+				t.Fatalf("%s x doc missing %q: %q", op, want, doc)
+			}
+		}
+		for _, want := range []string{"Vertical-axis", "each data row", `y="sales"`, "key as a string"} {
+			if doc := docs[op]["y"]; !strings.Contains(doc, want) {
+				t.Fatalf("%s y doc missing %q: %q", op, want, doc)
+			}
+		}
+	}
+	for _, want := range []string{"Numeric field name", "each data row", `field="sales"`, "key as a string", "grouped into bins"} {
+		if doc := docs["histogram"]["field"]; !strings.Contains(doc, want) {
+			t.Fatalf("histogram field doc missing %q: %q", want, doc)
+		}
+	}
+	for _, want := range []string{"Numeric field name", "cell colour", `color="count"`, "key as a string"} {
+		if doc := docs["heatmap"]["color"]; !strings.Contains(doc, want) {
+			t.Fatalf("heatmap color doc missing %q: %q", want, doc)
+		}
+	}
+
+	g, err := m.init(context.Background(), nil, nil, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := eval(t, `[{"day": "2026-11-01", "sales": 120}]`)
+	v, err := callCharts(t, g, "line", data, starlark.String("day"), starlark.String("sales"), starlark.None)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := specMap(t, v)
+	enc, ok := spec["encoding"].(map[string]any)
+	if !ok {
+		t.Fatalf("encoding: %v", spec["encoding"])
+	}
+	if got := enc["x"].(map[string]any)["field"]; got != "day" {
+		t.Fatalf("x field = %v, want day", got)
+	}
+	if got := enc["y"].(map[string]any)["field"]; got != "sales" {
+		t.Fatalf("y field = %v, want sales", got)
 	}
 }

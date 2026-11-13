@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatOpDoc } from './opDoc.ts'
+import { formatOpDoc, formatParamDetail, formatParamDoc } from './opDoc.ts'
 import type { components } from './api/schema'
 
 type OpDoc = components['schemas']['OpDoc']
@@ -54,4 +54,23 @@ test('formatOpDoc omits empty parts', () => {
   // Returns without param docs still renders.
   assert.equal(formatOpDoc('x.y', { name: 'y', returns: 'int' }),
     '- `x.y()`\n  Returns: int')
+})
+
+test('formatParamDetail renders type, requirement and declared defaults', () => {
+  assert.equal(formatParamDetail({ name: 'data', type: 'list[dict]' }), 'list[dict], required')
+  assert.equal(formatParamDetail({ name: 'x', type: 'string', optional: true }), 'string, optional')
+  assert.equal(formatParamDetail({ name: 'options', type: 'dict', optional: true, default: null }), 'dict, optional, default None')
+  assert.equal(formatParamDetail({ name: 'count', type: 'int', default: 0 }), 'int, required, default 0')
+  assert.equal(formatParamDetail({ name: 'flag', type: 'bool', default: false }), 'bool, required, default False')
+  assert.equal(formatParamDetail({ name: 'label', type: 'string', default: '' }), 'string, required, default ""')
+  assert.equal(formatParamDetail({ name: 'bare' }), 'required')
+})
+
+test('formatParamDoc renders the doc and dict fields for completion info', () => {
+  assert.equal(formatParamDoc({ name: 'data', doc: 'Input rows.' }), 'Input rows.')
+  assert.equal(formatParamDoc({ name: 'options', doc: 'Chart options.', fields: [{ name: 'title', type: 'string', doc: 'Chart title' }] }),
+    'Chart options.\n\nFields:\n- `title` (string): Chart title')
+  assert.equal(formatParamDoc({ name: 'o', fields: [{ name: 'bins', type: 'int', default: 30 }, { name: 'color', type: 'string', default: null }] }),
+    'Fields:\n- `bins` (int, default 30)\n- `color` (string, default None)')
+  assert.equal(formatParamDoc({ name: 'bare' }), '')
 })

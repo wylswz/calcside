@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"maps"
 	"slices"
 	"strings"
@@ -77,6 +78,7 @@ func (s *Session) Completions(ctx context.Context, reg *capability.Registry) (*c
 		}
 		if op, ok := docs[name]; ok {
 			symbol.Params = op.Params
+			symbol.ParamDocs = op.ParamDocs
 			symbol.Doc = op.Doc
 			symbol.Detail = "(...)"
 			if op.Params != nil {
@@ -97,12 +99,20 @@ func (s *Session) Completions(ctx context.Context, reg *capability.Registry) (*c
 		}
 		if len(symbol.Detail) > 4096 || len(symbol.Params) > 64 || slices.ContainsFunc(symbol.Params, func(p string) bool { return len(p) > maxCompletionName }) {
 			symbol.Params = nil
+			symbol.ParamDocs = nil
 			symbol.Detail = value.Type()
 			out.Truncated = true
 		}
 		if len(symbol.Doc) > 4096 {
 			symbol.Doc = ""
 			out.Truncated = true
+		}
+		if len(symbol.ParamDocs) > 0 {
+			encoded, err := json.Marshal(symbol.ParamDocs)
+			if err != nil || len(encoded) > 16384 || len(symbol.ParamDocs) > 64 {
+				symbol.ParamDocs = nil
+				out.Truncated = true
+			}
 		}
 		var attrs starlark.HasAttrs
 		switch v := value.(type) {

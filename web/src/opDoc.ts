@@ -30,6 +30,21 @@ function paramLines(p: ParamDoc, indent: string): string[] {
   return lines
 }
 
+export function formatParamDetail(p: ParamDoc): string {
+  const meta = [p.type, p.optional ? 'optional' : 'required'].filter(Boolean)
+  if ('default' in p) meta.push(`default ${starlarkDefault(p.default)}`)
+  return meta.join(', ')
+}
+
+export function formatParamDoc(p: ParamDoc): string {
+  const lines = p.doc ? [p.doc] : []
+  if (p.fields?.length) {
+    if (lines.length) lines.push('')
+    lines.push('Fields:', ...p.fields.flatMap((field) => paramLines(field, '')))
+  }
+  return lines.join('\n')
+}
+
 // opParamsDoc renders the Parameters/Returns block (no Example),
 // unindented — mirrors capability.OpParamsDoc.
 function opParamsDoc(op: OpDoc): string[] {

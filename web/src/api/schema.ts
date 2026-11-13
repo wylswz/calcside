@@ -1243,6 +1243,7 @@ export interface components {
             detail?: string;
             doc?: string;
             params?: string[];
+            param_docs?: components["schemas"]["ParamDoc"][];
         };
         CompletionContext: {
             symbols: components["schemas"]["CompletionSymbol"][];

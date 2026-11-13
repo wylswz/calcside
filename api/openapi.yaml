@@ -2078,6 +2078,9 @@ components:
         params:
           type: array
           items: { type: string }
+        param_docs:
+          type: array
+          items: { $ref: '#/components/schemas/ParamDoc' }
     CompletionContext:
       type: object
       required: [symbols, env_keys, truncated]

@@ -1,6 +1,7 @@
 import type { Completion, CompletionContext, CompletionResult, CompletionSource } from '@codemirror/autocomplete'
 import type { CompletionContext as InstanceContext, CompletionSymbol, EditorMetadata, ExtensionInfo, FileEntry } from '../api.ts'
 import { findExtension } from '../builderCatalog.ts'
+import { formatParamDetail, formatParamDoc } from '../opDoc.ts'
 
 const starKeywords = 'and break continue def elif else for if in lambda load not or pass return while True False None'.split(' ')
 const regoKeywords = 'package import as default else if contains in some every not with true false null'.split(' ')
@@ -69,10 +70,17 @@ function parameterOptions(code: string, symbols: CompletionSymbol[]): Completion
   if (!/(?:^|,)\s*[A-Za-z_]*$/.test(args)) return []
   const used = new Set(Array.from(args.matchAll(/\b([A-Za-z_]\w*)\s*=/g), (m) => m[1]))
   return symbol.params.flatMap((p) => {
-    const name = p.replace(/\?$/, '')
-    return /^[A-Za-z_]\w*$/.test(name) && !used.has(name)
-      ? [{ label: name + '=', type: 'property', detail: symbol.name + (symbol.detail ?? ''), boost: 10 }]
-      : []
+    const eq = p.indexOf('=')
+    const name = (eq >= 0 ? p.slice(0, eq) : p).trim().replace(/\?$/, '')
+    if (!/^[A-Za-z_]\w*$/.test(name) || used.has(name)) return []
+    const doc = symbol.param_docs?.find((param) => param.name === name)
+    const fallback = { name, optional: eq >= 0 || p.endsWith('?') }
+    const detail = doc ? formatParamDetail(doc) : eq >= 0
+      ? `optional, default ${p.slice(eq + 1).trim()}`
+      : formatParamDetail(fallback)
+    const usage = doc?.doc?.trim().split('\n')[0]
+    const info = doc ? [detail, formatParamDoc(doc)].filter(Boolean).join('\n\n') : undefined
+    return [{ label: name + '=', type: 'property', detail: usage || detail, info, boost: 10 }]
   })
 }
 
@@ -199,7 +207,7 @@ export function applicationSymbols(spec: unknown, metadata?: EditorMetadata, cat
     if (!n || n.startsWith('*')) return ''
     return eq >= 0 ? n + '?' : n
   }).filter(Boolean)
-  const ops = (name: string, list: { name?: string; params?: string[]; doc?: string }[] | undefined) => {
+  const ops = (name: string, list: { name?: string; params?: string[]; doc?: string; param_docs?: CompletionSymbol['param_docs'] }[] | undefined) => {
     symbols.push({ name, kind: 'namespace' })
     for (const op of list ?? []) {
       if (!op.name) continue
@@ -209,6 +217,7 @@ export function applicationSymbols(spec: unknown, metadata?: EditorMetadata, cat
         ...(params.length ? { params } : {}),
         detail: op.params ? `(${op.params.join(', ')})` : '(...)',
         ...(op.doc ? { doc: op.doc } : {}),
+        ...(op.param_docs?.length ? { param_docs: op.param_docs } : {}),
       })
     }
   }
@@ -232,6 +241,7 @@ export function applicationSymbols(spec: unknown, metadata?: EditorMetadata, cat
           ...(params.length ? { params } : {}),
           detail: op.params ? `(${op.params.join(', ')})` : '(...)',
           ...(op.doc ? { doc: op.doc } : {}),
+          ...(op.param_docs?.length ? { param_docs: op.param_docs } : {}),
         })
       }
     }
