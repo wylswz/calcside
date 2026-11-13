@@ -2,7 +2,7 @@
 
 A lightweight code-execution sandbox for AI agents, built on Starlark.
 
-Inspired by [citron](https://github.com/mishudark/citron)
+Inspired by [citron](https://github.com/mishudark/citron) and [marimo](https://marimo.io/)
 
 Powered by [starlark-go](https://github.com/google/starlark-go)
 
