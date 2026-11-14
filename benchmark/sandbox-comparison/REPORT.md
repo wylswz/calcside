@@ -1,200 +1,249 @@
-# 代码执行环境对智能体行为的影响：安全边界、执行延迟与任务完成
+# How the Code Execution Environment Shapes Agent Behavior: Security Boundaries, Execution Latency, and Task Completion
 
 2026-11-14
 
-## 摘要
+## Abstract
 
-本文比较 Host Python、Calcside、Docker、E2B 和 NVIDIA OpenShell
-五种执行配置，考察效果边界、动作往返延迟及智能体任务表现。研究采用边界探针、
-无模型微基准和带模型工作流三类实验，通过独立控制通道校验持久化产物。基础
-任务中，五个后端的三类本地数据任务均通过全部九次验收；动作往返延迟中位数
-介于 0.029 ms 与 212.596 ms。原生 MCP 在较高调用上限下通过全部十二次基础
-任务验收并正常终止，但工具成功率为 81.69%。扩展实验纳入日志排查、账目核对
-和分位数统计，在六种接口条件下共运行 54 次试验。结果区分产物正确性、
-正常终止和中间调用可靠性；语言接口、状态持久性与传输路径共同影响端到端表现。
+This paper compares five execution configurations — Host Python, Calcside,
+Docker, E2B, and NVIDIA OpenShell — and examines their effect boundaries, action
+round-trip latency, and agent task performance. The study uses three classes of
+experiment: boundary probes, model-free microbenchmarks, and model-driven
+workflows, validating persisted artifacts over an independent control channel.
+On the basic tasks, the three local data tasks passed all nine validations on
+every one of the five backends, and median action round-trip latency ranged from
+0.029 ms to 212.596 ms. Native MCP, under a higher call budget, passed all twelve
+basic task validations and terminated normally, but its tool success rate was
+81.69%. The extended experiment added log triage, ledger reconciliation, and
+percentile statistics, running 54 trials across six interface conditions. The
+results separate artifact correctness, normal termination, and intermediate call
+reliability; the language interface, state persistence, and transport path
+jointly shape end-to-end performance.
 
-补充实验以 `gpt-6.1-sol` 对两个 Calcside 接口复测十八次，保留原有任务与判定器，单独记录缓存和推理 token；结果见第 4.6 节。
+A supplementary experiment re-tested the two Calcside interfaces
+eighteen times with `gpt-6.1-sol`, keeping the original tasks and
+validators and recording cache and reasoning tokens separately; see
+Section 4.6.
 
-## 1. 研究范围
+## 1. Scope
 
-CodeAct 是以可执行代码组织动作的交互方式，容器和 microVM 则约束代码运行
-的系统环境。Calcside 将动作限制在 Starlark 与显式能力接口内，OpenShell
-在代码进程之外实施权限策略。这些机制处于不同抽象层，可以组合。本文比较
-具体部署配置，不将其视为互斥技术。
+CodeAct is an interaction style that organizes actions as executable code, while
+containers and microVMs constrain the system environment in which that code
+runs. Calcside confines actions to Starlark and an explicit capability
+interface, and OpenShell enforces permission policies outside the code process.
+These mechanisms sit at different abstraction layers and can be combined. This
+paper compares concrete deployment configurations and does not treat them as
+mutually exclusive technologies.
 
-研究问题包括：各配置暴露哪些文件、网络及资源效果；动作延迟与智能体总耗时
-之间有何关系；执行接口和任务类型如何影响任务完成与错误恢复。
+The research questions are: which file, network, and resource effects each
+configuration exposes; how action latency relates to total agent time; and how
+the execution interface and task type affect task completion and error recovery.
 
-| 配置 | 语言与接口 | 执行边界 | 状态与授权 |
+| Configuration | Language and interface | Execution boundary | State and authorization |
 |---|---|---|---|
-| Host Python | Python 标准库、持久解释器 | 宿主用户权限 | 新工作目录；不向解释器注入控制器凭据 |
-| Calcside HTTP | Starlark、统一代码工具 | 每实例进程、VFS、能力门与策略 | globals/VFS 持久；私网阻断与主机白名单 |
-| Docker | Python 标准库、逐动作新进程 | 容器命名空间、共享 Docker Linux 内核 | 文件持久；bridge；无宿主挂载或特权 |
-| E2B | Python code interpreter | 托管 microVM | 持久 kernel；默认模板；公网 SDK |
-| OpenShell | Python 标准库、逐动作新进程 | mTLS gateway、Docker driver、外部策略 | 文件持久；文件策略与 GitHub GET 授权 |
-| Calcside MCP | 官方 prompt、原始七个 MCP 工具 | 与 Calcside HTTP 相同的实例边界 | Notebook section 工作流 |
+| Host Python | Python standard library, persistent interpreter | Host user permissions | Fresh working directory; no controller credentials injected into the interpreter |
+| Calcside HTTP | Starlark, uniform code tool | Per-instance process, VFS, capability gate and policy | Persistent globals/VFS; private-network blocking and host allowlist |
+| Docker | Python standard library, new process per action | Container namespaces, shared Docker Linux kernel | Persistent files; bridge; no host mounts or privileges |
+| E2B | Python code interpreter | Managed microVM | Persistent kernel; default template; public SDK |
+| OpenShell | Python standard library, new process per action | mTLS gateway, Docker driver, external policy | Persistent files; file policy and GitHub GET authorization |
+| Calcside MCP | Official prompt, the original seven MCP tools | Same instance boundary as Calcside HTTP | Notebook section workflow |
 
-评测主机为 Apple Silicon arm64 / macOS 27.2.1，Docker Engine 29.8.2
-（OrbStack），控制器 Python 3.14.6，OpenShell 0.1.7。Docker/OpenShell
-使用已缓存的 `python:3.13-slim`。E2B 的基础设施未被独立检查，其结果属于
-托管部署测量，而非本地 Firecracker 的独立开销。
+The evaluation host was Apple Silicon arm64 / macOS 27.2.1, Docker Engine 29.8.2
+(OrbStack), controller Python 3.14.6, OpenShell 0.1.7. Docker and OpenShell used
+the cached `python:3.13-slim`. E2B's infrastructure was not inspected
+independently, so its results are measurements of a managed deployment rather
+than the standalone overhead of a local Firecracker.
 
-Calcside 选择 `builtin.block_private_network`，主机白名单为
-`api.github.com`，地址策略例外集合为 `198.18.0.0/15`。OpenShell 授予
-`api.github.com:443` 上 `GET /repos/**` 的权限，工作目录为 `/sandbox`。
-资源限额补充探针采用独立配置，不与智能体实验的默认资源条件混合。
+Calcside selected `builtin.block_private_network`, with a host allowlist of
+`api.github.com` and an address-policy exemption set of `198.18.0.0/15`.
+OpenShell granted `GET /repos/**` on `api.github.com:443`, with a working
+directory of `/sandbox`. The supplementary resource-limit probe used a separate
+configuration and is not mixed with the default resource conditions of the agent
+experiments.
 
-## 2. 安全模型
+## 2. Security model
 
-### 2.1 对手、资产与可信计算基
+### 2.1 Adversary, assets, and trusted computing base
 
-对手可生成任意任务代码，并可通过代码读取的内容影响后续决策。保护对象为
-宿主文件、控制器凭据、内部网络、其他租户状态、资源配额与审计记录。控制器、
-确定性判定器、执行服务及隔离实现属于可信计算基；恶意宿主或 hypervisor
-管理员不在威胁模型内。
+The adversary can generate arbitrary task code and can influence later decisions
+through whatever the code reads. The assets to protect are host files, controller
+credentials, the internal network, other tenants' state, resource quotas, and
+audit records. The controller, the deterministic validators, the execution
+service, and the isolation implementation form the trusted computing base; a
+malicious host or hypervisor administrator is outside the threat model.
 
 ```text
-可信控制器：任务输入、模型凭据、LangChain、产物判定器
+Trusted controller: task input, model credentials, LangChain, artifact validators
     |
-    | 代码动作 / MCP 工具调用
+    | code action / MCP tool call
     v
 HTTP / pipe / CLI / SDK
     |
     v
-不可信代码 ── 文件 / HTTP / 子进程 / 系统调用
+Untrusted code -- file / HTTP / subprocess / syscall
     |                         |
     |                         v
-    |                 能力门、外部策略、OS/VM 边界
+    |                 capability gate, external policy, OS/VM boundary
     v
-持久化产物 ── 控制通道 ── 确定性验收
+persisted artifact -- control channel -- deterministic validation
 ```
 
-Host Python 不继承模型凭据，但仍具有宿主用户权限；凭据环境变量的清理不构成
-安全沙箱。
+Host Python does not inherit model credentials, but it still has host user
+permissions; scrubbing credential environment variables does not constitute a
+security sandbox.
 
-### 2.2 约束层次
+### 2.2 Layers of constraint
 
-| 层次 | 约束对象 | 保证范围 |
+| Layer | What it constrains | Scope of the guarantee |
 |---|---|---|
-| 语言 | 可表达的计算与宿主接口 | Starlark 不暴露任意 import/宿主进程；解释器及能力实现仍在可信基内 |
-| VFS 与能力接口 | 工作区路径、命名效果 | 对文件与网络操作授权；不提供完整信息流或用户意图验证 |
-| Gate 与策略 | 作用域、前后检查 | 策略错误/超时按拒绝处理；事后检查不能撤回已发生的外部效果 |
-| 进程与容器 | 地址空间、命名空间、生命周期 | 内存、CPU 和网络约束取决于具体配置 |
-| 外部策略 | 代码进程之外的权限 | 单次拒绝不证明不存在绕过；本实验 OpenShell 使用 Docker driver |
-| microVM | guest kernel 边界 | 网络白名单、secret 目的地和语义审计需单独配置 |
+| Language | Expressible computation and host interfaces | Starlark exposes no arbitrary import or host process; the interpreter and capability implementations remain inside the trusted base |
+| VFS and capability interface | Workspace paths, named effects | Authorizes file and network operations; provides no complete information-flow or user-intent verification |
+| Gate and policy | Scope, pre- and post-checks | Policy errors and timeouts are treated as denials; post-checks cannot retract external effects that already occurred |
+| Process and container | Address space, namespaces, lifetime | Memory, CPU, and network constraints depend on the concrete configuration |
+| External policy | Permissions outside the code process | A single denial does not prove the absence of a bypass; OpenShell here used the Docker driver |
+| microVM | Guest kernel boundary | Network allowlists, secret destinations, and semantic auditing must be configured separately |
 
-Calcside 的 Gate、策略、网络检查与 Notebook 实现在
-`server/internal/capability/`、`server/internal/policy/` 和
-`server/internal/notebook/`。私网阻断为可选策略。Secret placeholder 注入与
-脱敏不等同于值级信息流控制，授权目的地仍可能接收注入后的凭据。
+Calcside's gate, policy, network checks, and Notebook are implemented in
+`server/internal/capability/`, `server/internal/policy/`, and
+`server/internal/notebook/`. Private-network blocking is an optional policy.
+Secret placeholder injection and redaction are not equivalent to value-level
+information-flow control: an authorized destination can still receive the
+injected credential.
 
-### 2.3 可观测性与 Notebook
+### 2.3 Observability and the Notebook
 
-LangChain middleware 观察模型与工具边界，不直接观察代码内部的每次文件、
-HTTP 或子进程操作。Calcside audit 提供命名能力记录，但不是完整 syscall
-trace 或离线签名证明。Notebook 以定义和引用关系构造依赖图，以 fresh/stale
-表达重算关系，效果摘要来自 audit；它不完整跟踪 alias、mutation 或外部数据
-变化。原生实验保存实际 section 状态，但未设置增量重算对照。
+LangChain middleware observes the model and tool boundaries and does not
+directly observe each file, HTTP, or subprocess operation inside the code.
+Calcside audit provides named-capability records, but not a complete syscall
+trace or an offline signed proof. The Notebook builds a dependency graph from
+definitions and references, expresses recomputation in terms of fresh/stale, and
+takes effect summaries from audit; it does not fully track aliasing, mutation, or
+changes in external data. The native experiments saved actual section state but
+set up no incremental-recomputation control.
 
-## 3. 实验方法
+## 3. Method
 
-### 3.1 任务与接口条件
+### 3.1 Tasks and interface conditions
 
-任务集 A 包含四个短工作流，任务集 B 扩展到目录发现、多文件关联、异常分类
-和中等规模批处理。附录给出全部任务原文及输入构造；完整文件和参考产物见
-[TASKS.md](TASKS.md)。
+Task set A contains four short workflows, and task set B extends to directory
+discovery, multi-file correlation, anomaly classification, and medium-scale
+batch processing. The appendix gives the full task text and input construction;
+complete files and reference artifacts are in [TASKS.md](TASKS.md).
 
-| 编号 | 任务 | 输入与操作 | 产物 |
+| ID | Task | Input and operations | Artifact |
 |---|---|---|---|
-| A1 | 单列统计 | 100 个整数；读取、聚合 | result.json |
-| A2 | 关联汇总 | 三条员工、两条部门记录 | summary.json |
-| A3 | 文件生成 | 五行平方表及回读 | squares.csv |
-| A4 | HTTP 字段提取 | GitHub 仓库 API 的两个字段 | repo.json |
-| B1 | 日志排查 | 十个文件、202 条 JSONL；筛选、计数、时间并列处理 | triage.json |
-| B2 | 账目核对 | 两份各六行记录；金额差异、未结算及单侧缺失分类 | reconcile.json |
-| B3 | 分位数统计 | 5,000 行、43,350 字节 CSV；排序和条件计数 | series_stats.json |
+| A1 | Single-column statistics | 100 integers; read and aggregate | result.json |
+| A2 | Join and summarize | Three employee records, two department records | summary.json |
+| A3 | File generation | Five-row squares table and read-back | squares.csv |
+| A4 | HTTP field extraction | Two fields from the GitHub repository API | repo.json |
+| B1 | Log triage | Ten files, 202 JSONL records; filtering, counting, timestamp ties | triage.json |
+| B2 | Ledger reconciliation | Two six-row records; amount mismatches, unsettled and one-sided entries | reconcile.json |
+| B3 | Percentile statistics | 5,000-row, 43,350-byte CSV; sorting and conditional counting | series_stats.json |
 
-任务集 A 的统一接口实验为五个后端 × 四个任务 × 三次重复，共 60 次；
-原生 MCP 的两种调用上限各运行 12 次。任务集 B 对五个统一接口条件与原生
-MCP 条件各运行九次，共 54 次；六种条件交错执行。每次试验使用新实例，
-顺序按 seed 20261114 打散。
+The uniform-interface experiment on task set A was five backends × four tasks ×
+three repetitions, 60 trials in total; the two native MCP call budgets each ran
+12 trials. Task set B ran nine trials for each of the five uniform-interface
+conditions and the native MCP condition, 54 in total; the six conditions were
+interleaved. Every trial used a fresh instance, and the order was shuffled with
+seed 20261114.
 
-主实验模型为 `deepseek-flash`，temperature=0，单次生成上限 1,200 token，
-关闭供应商自动重试。A 的统一接口采用每次试验最多 8 次模型、12 次工具调用；
-原生 MCP 另外评估 64/96 上限。B 统一采用 64/96，工具顺序执行。
-输入准备属于初始化阶段，不计入 agent 工具数，也不向 agent 提供参考答案。
+The main experiment used `deepseek-flash` with temperature=0, a 1,200-token
+generation limit, and provider automatic retries disabled. The uniform interface
+on A allowed at most 8 model requests and 12 tool calls per trial; native MCP was
+additionally evaluated at a 64/96 budget. B used 64/96 throughout, with tools
+executed sequentially. Input preparation belongs to the initialization phase, is
+not counted toward the agent's tool calls, and does not give the agent reference
+answers.
 
-统一接口只暴露 `execute_code`，附加对应语言说明。原生 MCP 直接使用服务端
-`initialize.instructions`、`tools/list` 返回的原始七个工具与 schema，
-控制器只追加任务和预算约束。两种接口的结果分开标注。
+The uniform interface exposes only `execute_code`, plus the corresponding
+language notes. Native MCP uses the server's `initialize.instructions` and the
+original seven tools and schemas returned by `tools/list`, and the controller
+appends only the task and budget constraints. Results from the two interfaces are
+labeled separately.
 
-### 3.2 验收与指标
+### 3.2 Validation and metrics
 
-控制器从独立通道读取文件，校验字段集合、类型、顺序及固定结果，不采信模型
-自述或 stdout 子串。A4 的两个公开字段可以猜中，其验收只证明产物正确，
-不单独证明指定 HTTP 请求已完成。
+The controller reads files over an independent channel and checks the field set,
+types, ordering, and fixed values; it does not trust the model's own claims or
+substrings in stdout. The two public fields in A4 can be guessed, so that
+validation only proves the artifact is correct and does not by itself prove the
+specified HTTP request was made.
 
-| 指标 | 定义 |
+| Metric | Definition |
 |---|---|
-| 产物通过率 | 产物验收通过的试验数 / 全部试验数 |
-| 正常终止率 | 未发生初始化或 agent 执行异常的试验数 / 全部试验数 |
-| 工具成功率 | 无适配器错误或 MCP isError 的调用数 / 实际调用数 |
-| 错误恢复率 | 曾有工具错误且最终产物通过 / 曾有工具错误的试验数 |
-| 模型响应成功率 | 正常模型响应数 / 实际模型请求数 |
+| Artifact pass rate | Trials whose artifact passed validation / all trials |
+| Normal termination rate | Trials with no initialization or agent execution error / all trials |
+| Tool success rate | Calls without an adapter error or MCP isError / actual calls |
+| Error recovery rate | Trials with a prior tool error whose artifact finally passed / trials with a prior tool error |
+| Model response success rate | Normal model responses / actual model requests |
 
-产物可能在后续异常前已写入，因此正常终止与产物通过分别统计。安全探针的
-正确拒绝不与良性任务的调用错误合并。Wilson 95% 区间仅作描述；同一任务
-和轨迹内的观测相关，每任务三次重复不足以支持显著性排名。工具率按调用汇总，
-会赋予多调用试验更大权重。
+An artifact may be written before a later failure, so normal termination and
+artifact pass are counted separately. Correct denials in the safety probes are
+not merged with call errors in benign tasks. Wilson 95% intervals are descriptive
+only; observations within the same task and trajectory are correlated, and three
+repetitions per task cannot support a significance ranking. Tool rates aggregate
+by call, which gives more weight to trials with more calls.
 
-### 3.3 时间与上下文
+### 3.3 Time and context
 
-middleware 记录模型/工具参数、结果、错误、时间及 token usage。生命周期
-由初始化、模型调用、工具调用、编排、产物验证和清理组成。初始化包含创建、
-策略应用与输入写入，不是纯虚拟机冷启动。各阶段按单次试验求和后再取分位数，
-不对分位数直接相加。token 为供应商报告的 input/output，不扣除 prompt 基线。
+The middleware records model and tool parameters, results, errors, timings, and
+token usage. The lifecycle consists of initialization, model calls, tool calls,
+orchestration, artifact validation, and cleanup. Initialization covers instance
+creation, policy application, and input writing, and is not a pure
+virtual-machine cold start. Each stage is summed within a trial before quantiles
+are taken; quantiles are not added directly. Tokens are the input/output reported
+by the provider, without subtracting a prompt baseline.
 
-无模型微基准每后端使用一个 session，排除一次 warmup 后顺序执行三十次
-`print("ok")`，记录调用方往返时间。
+The model-free microbenchmark used one session per backend, discarded one warmup,
+then ran thirty `print("ok")` calls sequentially, recording caller-observed
+round-trip time.
 
-## 4. 结果
+## 4. Results
 
-### 4.1 效果边界与资源限额
+### 4.1 Effect boundaries and resource limits
 
-![效果边界观测](results/figures-v2/security-evidence.svg)
+![Effect-boundary observations](results/figures-v2/security-evidence.svg)
 
-图 1. 绿色表示明确拒绝或限额执行，红色表示到达宿主或外部资源，蓝色表示
-guest 文件操作，灰色表示中性或未确定结果。颜色不构成整体安全评分。
+Figure 1. Green indicates an explicit denial or an enforced limit, red indicates
+reaching a host or external resource, blue indicates an operation on guest files,
+and gray indicates a neutral or undetermined result. Colors do not constitute an
+overall security score.
 
-容器/VM 中读取 `/etc/passwd` 只证明 guest 文件可读。SSH 探针仅检查存在性，
-未读取私钥。Docker 的 guest loopback 拒绝连接，但经 `host.docker.internal`
-收到 HTTP 200，表明不同地址的结果不能互相替代；这不是容器逃逸。
+Reading `/etc/passwd` inside a container or VM only proves that guest files are
+readable. The SSH probe only checked existence and did not read private keys.
+Docker's guest loopback refused the connection, but the same request through
+`host.docker.internal` returned HTTP 200, showing that results from different
+addresses cannot substitute for one another; this is not a container escape.
 
-E2B link-local 请求收到 HTTP 401，只能证明收到了响应，不能据此确定响应源
-或凭据暴露。OpenShell 返回 EACCES；Calcside 选中私网策略后明确拒绝，
-未选中时可访问 loopback。
+The E2B link-local request received HTTP 401, which only proves that a response
+arrived; it does not establish the response's origin or any credential exposure.
+OpenShell returned EACCES; Calcside denies explicitly once the private-network
+policy is selected, and can reach loopback when it is not.
 
-一次 1 GiB 分配完成不等于没有内存上限。补充实验显式设置 256 MiB 上限，
-请求分配 768 MiB，并比较 cgroup `memory.events` 的 `oom_kill` 计数：
+A successful 1 GiB allocation does not mean there is no memory limit. The
+supplementary experiment set an explicit 256 MiB limit, requested a 768 MiB
+allocation, and compared the cgroup `memory.events` `oom_kill` counter:
 
-| 配置 | memory.max（bytes） | 分配请求（bytes） | oom_kill 增量 | 观测 |
+| Configuration | memory.max (bytes) | Allocation request (bytes) | oom_kill delta | Observation |
 |---|---|---|---|---|
 | docker | 268435456 | 805306368 | 1 | cgroup OOM enforced |
 | openshell | 268435456 | 805306368 | 1 | cgroup OOM enforced |
 
 
-此配置与智能体实验的默认资源条件分开记录。Calcside 的 excessive-repeat
-拒绝不是一般内存上界；控制器的循环超时也不证明后端内建 CPU 限额生效。
-原始边界观测与来源哈希见 `results/security-observations.json`，资源探针见
-`results/memory-limits.json`。
+This configuration is recorded separately from the default resource conditions
+of the agent experiments. Calcside's excessive-repeat denial is not a general
+memory upper bound, and the controller's loop timeout does not prove that a
+backend's built-in CPU limit took effect. Raw boundary observations and source
+hashes are in `results/security-observations.json`, and the resource probe is in
+`results/memory-limits.json`.
 
-### 4.2 动作往返时间
+### 4.2 Action round-trip time
 
-![Warm 往返延迟](results/figures-v2/warm-latency.svg)
+![Warm round-trip latency](results/figures-v2/warm-latency.svg)
 
-图 2. 每后端三十次 warm 调用的 p50/p95；全部返回预期输出。
+Figure 2. p50/p95 of thirty warm calls per backend; all returned the expected
+output.
 
-| 后端 | p50（ms） | p95（ms） |
+| Backend | p50 (ms) | p95 (ms) |
 |---|---|---|
 | Calcside HTTP | 1.049 | 2.513 |
 | Docker | 40.805 | 46.464 |
@@ -203,17 +252,19 @@ E2B link-local 请求收到 HTTP 401，只能证明收到了响应，不能据�
 | Host Python | 0.029 | 0.069 |
 
 
-Host Python 经本地 pipe，Calcside 经 HTTP；Docker/OpenShell 包含新进程和
-CLI 路径，E2B 包含公网 SDK 路径。测量描述部署配置的往返成本，不分离语言、
-CLI、网络或 hypervisor 的独立贡献。
+Host Python goes through a local pipe and Calcside through HTTP; Docker and
+OpenShell include a new process and a CLI path, and E2B includes a public-SDK
+path. The measurements describe the round-trip cost of the deployment
+configuration and do not separate the independent contributions of language,
+CLI, network, or hypervisor.
 
-### 4.3 基础任务
+### 4.3 Basic tasks
 
-![基础任务验收](results/figures-v2/task-completion.svg)
+![Basic task validation](results/figures-v2/task-completion.svg)
 
-图 3. A 的产物验收；区间为描述性 Wilson 区间。
+Figure 3. Artifact validation on A; intervals are descriptive Wilson intervals.
 
-| 统一接口条件 | 产物通过 | 工具成功 | 错误恢复 | 模型请求数 |
+| Uniform-interface condition | Artifact pass | Tool success | Error recovery | Model requests |
 |---|---|---|---|---|
 | Host Python | 12/12 | 21/21 | 0/0 | 33 |
 | Calcside HTTP | 11/12 | 29/33 | 3/3 | 45 |
@@ -222,18 +273,22 @@ CLI、网络或 hypervisor 的独立贡献。
 | OpenShell | 12/12 | 23/24 | 1/1 | 36 |
 
 
-三类本地任务在每后端均为 9/9。唯一产物失败来自 A4 的 HTTP 403 响应：
-代码正常执行，但智能体未生成结果文件。另一次 Docker 试验通过第三方代理
-取得数据后生成正确文件，说明公开字段判定不能验证指定端点的使用。
+The three local tasks were 9/9 on every backend. The only artifact failure came
+from the HTTP 403 response in A4: the code executed normally, but the agent did
+not produce a result file. Another Docker trial obtained the data through a
+third-party proxy and produced a correct file, showing that a public-field check
+cannot verify use of the specified endpoint.
 
-Calcside 的部分错误涉及将 Python assert、指数运算或 generator expression
-用于 Starlark；最终本地产物仍正确。网络恢复与语言适配均影响中间工具率。
+Some Calcside errors involved using Python `assert`, exponentiation, or generator
+expressions in Starlark; the final local artifacts were still correct. Both
+network recovery and language adaptation affect the intermediate tool rate.
 
-![智能体时间分解](results/figures-v2/agent-latency.svg)
+![Agent time decomposition](results/figures-v2/agent-latency.svg)
 
-图 4. 初始化与循环的均值，循环分为模型、工具及编排时间。
+Figure 4. Means of initialization and the loop, with the loop split into model,
+tool, and orchestration time.
 
-| 条件 | 初始化 p50（s） | 循环 p50 / p95（s） | 生命周期 p50 / p95（s） |
+| Condition | Initialization p50 (s) | Loop p50 / p95 (s) | Lifecycle p50 / p95 (s) |
 |---|---|---|---|
 | Host Python | 0.004 | 3.539 / 8.419 | 3.549 / 8.431 |
 | Calcside HTTP | 0.027 | 4.947 / 12.044 | 4.985 / 12.093 |
@@ -242,16 +297,18 @@ Calcside 的部分错误涉及将 Python assert、指数运算或 generator expr
 | OpenShell | 11.110 | 4.474 / 28.696 | 16.006 / 39.969 |
 
 
-动作低延迟没有按相同比例转化为循环耗时改善。Calcside 的模型/工具平均耗时
-分别约 5.490/0.224 秒；尾部样本还受到远程检索恢复影响。n=12 时
-nearest-rank p95 等于最大观测。初始化定义亦有差异：Host Python 的进程派生
-不包含 kernel readiness 握手，首次工具可能承担解释器初始化。
+Low action latency did not translate into loop-time improvement at the same
+ratio. Calcside's mean model/tool time was about 5.490/0.224 s; tail samples were
+also affected by remote retrieval recovery. With n=12 the nearest-rank p95
+equals the largest observation. The initialization definitions also differ: Host
+Python's process spawn does not include a kernel readiness handshake, so the
+first tool call may bear interpreter initialization.
 
-![Token 使用量](results/figures-v2/agent-tokens.svg)
+![Token usage](results/figures-v2/agent-tokens.svg)
 
-图 5. 每个统一接口条件十二次试验的观测 token。
+Figure 5. Observed tokens over twelve trials per uniform-interface condition.
 
-| 条件 | input token | output token |
+| Condition | input token | output token |
 |---|---|---|
 | Host Python | 24,065 | 5,107 |
 | Calcside HTTP | 45,483 | 6,847 |
@@ -260,36 +317,42 @@ nearest-rank p95 等于最大观测。初始化定义亦有差异：Host Python 
 | OpenShell | 31,511 | 6,410 |
 
 
-上下文包含工具 schema、重复输入和错误恢复。语言说明与交互轮数共同影响
-token，不能将差异解释为某种语言固有的固定成本。
+The context includes tool schemas, repeated input, and error recovery. Language
+notes and the number of interaction rounds both affect tokens, so the differences
+cannot be read as a fixed cost inherent to a language.
 
-### 4.4 原生 MCP 与调用上限
+### 4.4 Native MCP and call budgets
 
-| 指标 | 上限 8 次模型 / 12 次工具 | 上限 64 次模型 / 96 次工具 |
+| Metric | Limit 8 model / 12 tool calls | Limit 64 model / 96 tool calls |
 |---|---|---|
-| 产物通过 | 12/12 | 12/12 |
-| 正常终止 | 11/12 | 12/12 |
-| 工具成功 | 52/64 | 58/71 |
-| 其中 exec | 23/35 | 29/42 |
-| 模型请求数 | 64 | 76 |
-| 循环 p50 / p95（s） | 7.999 / 15.879 | 9.472 / 21.792 |
+| Artifact pass | 12/12 | 12/12 |
+| Normal termination | 11/12 | 12/12 |
+| Tool success | 52/64 | 58/71 |
+| of which exec | 23/35 | 29/42 |
+| Model requests | 64 | 76 |
+| Loop p50 / p95 (s) | 7.999 / 15.879 | 9.472 / 21.792 |
 
 
-较高上限下，单次试验最多使用九次模型请求、十次工具调用，未触及新上限。
-一个关联任务在第九次请求后正常结束。两组是独立重复运行，并非相同轨迹的
-续跑，因而不能将全部差异归因于预算。
+Under the higher budget, a single trial used at most nine model requests and ten
+tool calls and never reached the new limit. One join task finished normally after
+the ninth request. The two groups are independent repeated runs, not a
+continuation of the same trajectories, so not all of the difference can be
+attributed to the budget.
 
-原生工具错误主要涉及 CSV/JSON 签名、未定义名字引起的依赖阻断及遗漏
-instance_id。它们可通过能力文档、修正 section 或补参恢复。原生集成同时
-改变提示、工具集合、返回格式与 Notebook 语义，不构成 prompt-only 对照。
+Native tool errors mainly involved CSV/JSON signatures, dependency blocking
+caused by undefined names, and a missing `instance_id`. They were recoverable by
+consulting capability docs, fixing a section, or supplying the missing argument.
+The native integration changes the prompt, the tool set, the return format, and
+Notebook semantics at the same time, so it is not a prompt-only control.
 
-### 4.5 扩展任务
+### 4.5 Extended tasks
 
-![扩展任务产物与终止](results/figures-agentic/task-outcomes.svg)
+![Extended-task artifacts and termination](results/figures-agentic/task-outcomes.svg)
 
-图 6. B 的产物验收与正常终止；每条件九次试验，每任务三次重复。
+Figure 6. Artifact validation and normal termination on B; nine trials per
+condition, three repetitions per task.
 
-| 条件 | B1 日志 | B2 对账 | B3 分位数 | 正常终止 | 工具成功 |
+| Condition | B1 logs | B2 reconciliation | B3 percentiles | Normal termination | Tool success |
 |---|---|---|---|---|---|
 | Host Python | 3/3 | 3/3 | 3/3 | 9/9 | 29/29 |
 | Calcside HTTP | 3/3 | 3/3 | 3/3 | 9/9 | 33/46 |
@@ -299,12 +362,14 @@ instance_id。它们可通过能力文档、修正 section 或补参恢复。原
 | Calcside MCP | 3/3 | 3/3 | 3/3 | 9/9 | 72/91 |
 
 
-![扩展任务耗时与上下文](results/figures-agentic/costs.svg)
+![Extended-task time and context](results/figures-agentic/costs.svg)
 
-图 7. B 的循环耗时与上下文总量；MCP 使用原生工具集，其他条件使用统一代码工具。
-虚线下两行为 4.6 节的 Sol 复测，仅覆盖两个 Calcside 条件，其余后端未用该模型重跑。
+Figure 7. Loop time and total context on B; MCP uses the native tool set and the
+other conditions use the uniform code tool. The two rows below the dashed line
+are the Sol replication in Section 4.6, which covers only the two Calcside
+conditions; the other backends were not re-run with that model.
 
-| 条件 | 模型请求数 | 循环 p50 / p95（s） | input / output token |
+| Condition | Model requests | Loop p50 / p95 (s) | input / output token |
 |---|---|---|---|
 | Host Python | 38 | 8.630 / 12.450 | 62,291 / 12,694 |
 | Calcside HTTP | 54 | 10.389 / 26.851 | 118,791 / 17,509 |
@@ -314,134 +379,170 @@ instance_id。它们可通过能力文档、修正 section 或补参恢复。原
 | Calcside MCP | 86 | 21.368 / 53.984 | 935,136 / 32,994 |
 
 
-全部六种条件均通过九次产物验收并正常终止。中间调用仍有差异：Calcside HTTP
-的工具成功为 33/46，原生 MCP 为 72/91；后者包含文件和 Notebook 等非执行
-工具，两者分母语义不同。原生 MCP 最长日志轨迹使用十九次模型请求、二十次
-工具调用，包含语法错误、能力文档查询和依赖阻断后的修正。相比仅统计最终
-正确率，这些记录揭示了接口使用和恢复的额外成本。
+All six conditions passed nine artifact validations and terminated normally.
+Intermediate calls still differ: Calcside HTTP had 33/46 tool success and native
+MCP 72/91; the latter includes non-execution tools such as file and Notebook
+operations, so the two denominators mean different things. The longest native MCP
+log trajectory used nineteen model requests and twenty tool calls, including
+syntax errors, capability-doc lookups, and fixes after dependency blocking.
+Compared with counting only the final success rate, these records expose the
+extra cost of interface use and recovery.
 
-扩展任务容许智能体将多个步骤合并到一个代码动作中，不人为要求固定调用序列。
-其结果反映有限输入工作流的规划、接口使用和自我检查，不代表开放式长期任务能力。
-
-
-### 4.6 OpenAI 6.1 Sol 模型配置复测
-
-对任务集 B 的两个 Calcside 接口条件分别重复九次，共十八次。DeepSeek 结果
-取自主实验对应的十八次观测，不重新运行；Sol 使用相同输入、提示、工具 schema、
-判定器及 64/96 调用上限，执行次序保留主实验两条件的相对顺序。实例标识归一化
-后，官方 prompt 与工具 schema 保持一致。
-
-Sol 的配置为 `gpt-6.1-sol`、Responses API、medium reasoning，temperature
-不显式设置，每响应最多 16,384 output token（包含推理），模型请求超时为
-180 秒。主实验使用 DeepSeek Chat Completions、temperature=0、
-1,200 output token 和 90 秒超时。因此该补充实验是独立的模型与供应商配置
-复测，不是相同生成预算下、仅改变模型权重的因果对照。
+The extended tasks allow the agent to merge several steps into one code action
+and do not impose a fixed call sequence. Their results reflect planning,
+interface use, and self-checking on workflows with bounded input, and do not
+represent open-ended long-horizon capability.
 
 
-| 模型 | 接口 | 产物通过 | 正常终止 | 工具成功 | 模型请求数 |
+### 4.6 Replication with the OpenAI 6.1 Sol model configuration
+
+The two Calcside interface conditions on task set B were each repeated nine
+times, eighteen trials in total. The DeepSeek results are taken from the
+corresponding eighteen observations of the main experiment and were not re-run;
+Sol used the same inputs, prompts, tool schemas, validators, and 64/96 call
+budget, and the execution order preserved the relative order of the two
+conditions in the main experiment. After instance identifiers are normalized,
+the official prompt and tool schemas are identical.
+
+Sol was configured as `gpt-6.1-sol` with the Responses API and medium
+reasoning, no explicit temperature, at most 16,384 output tokens per response
+(including reasoning), and a 180-second model request timeout. The main
+experiment used DeepSeek Chat Completions with temperature=0, 1,200 output
+tokens, and a 90-second timeout. This supplementary experiment is therefore an
+independent replication of a model and provider configuration, not a causal
+comparison that changes only the model weights under the same generation
+budget.
+
+
+| Model | Interface | Artifact pass | Normal termination | Tool success | Model requests |
 |---|---|---|---|---|---|
-| deepseek-flash | 统一代码工具 | 9/9 | 9/9 | 33/46 | 54 |
-| deepseek-flash | 原生 MCP | 9/9 | 9/9 | 72/91 | 86 |
-| gpt-6.1-sol | 统一代码工具 | 9/9 | 9/9 | 21/23 | 32 |
-| gpt-6.1-sol | 原生 MCP | 9/9 | 9/9 | 32/32 | 41 |
+| deepseek-flash | Uniform code tool | 9/9 | 9/9 | 33/46 | 54 |
+| deepseek-flash | Native MCP | 9/9 | 9/9 | 72/91 | 86 |
+| gpt-6.1-sol | Uniform code tool | 9/9 | 9/9 | 21/23 | 32 |
+| gpt-6.1-sol | Native MCP | 9/9 | 9/9 | 32/32 | 41 |
 
 
-![模型配置的产物验收与循环耗时](results/figures-openai-sol/model-outcomes.svg)
+![Artifact validation and loop time by model configuration](results/figures-openai-sol/model-outcomes.svg)
 
-图 8. 两个模型配置在两个接口上的产物验收、正常终止、循环耗时与逐任务计数；
-每条件九次试验。图 3 至图 6 只覆盖 DeepSeek 主实验；图 7 虚线下两行及本节图 8、图 9 含 Sol 复测。
+Figure 8. Artifact validation, normal termination, loop time, and per-task
+counts for the two model configurations on both interfaces; nine trials per
+condition. Figures 3 to 6 cover only the DeepSeek main experiment; the two rows
+below the dashed line in Figure 7 and Figures 8 and 9 in this section include
+the Sol replication.
 
-Sol 的两个接口均为 9/9 产物正确且正常终止；原生 MCP 为 32/32 工具调用
-无错误，统一代码工具为 21/23。原生组总 token 为 162,448，主实验对应值为
-968,130；模型请求数从 86 次变为 41 次。循环耗时中位数方面，Sol 原生 MCP
-为 15.136 秒，DeepSeek 为 21.368 秒。此结果描述本次两种模型配置的差异，
-不将变化单独归因于模型权重。
+Sol reached 9/9 for artifact correctness and normal termination on both
+interfaces; native MCP had 32/32 error-free tool calls and the uniform code tool
+21/23. The native group's total tokens were 162,448 against 968,130 in the
+corresponding main-experiment condition, and model requests went from 86 to 41.
+For median loop time, Sol's native MCP was 15.136 s against DeepSeek's 21.368 s.
+This result describes the difference between the two model configurations in
+this run and does not attribute the change to model weights alone.
 
 
-![模型配置的 token 与请求数](results/figures-openai-sol/model-comparison.svg)
+![Tokens and model requests by model configuration](results/figures-openai-sol/model-comparison.svg)
 
-图 9. 各模型配置在两个接口上的观测 token 与模型请求数；每条件九次试验。
+Figure 9. Observed tokens and model requests for each model configuration on
+both interfaces; nine trials per condition.
 
 
-| 模型 | 接口 | input | output | 其中缓存命中 input | 其中推理 output |
+| Model | Interface | input | output | of which cache-hit input | of which reasoning output |
 |---|---|---|---|---|---|
-| deepseek-flash | 统一代码工具 | 118,791 | 17,509 | 未记录 | 未记录 |
-| deepseek-flash | 原生 MCP | 935,136 | 32,994 | 未记录 | 未记录 |
-| gpt-6.1-sol | 统一代码工具 | 33,283 | 3,622 | 11,157 | 73 |
-| gpt-6.1-sol | 原生 MCP | 157,591 | 4,857 | 117,000 | 39 |
+| deepseek-flash | Uniform code tool | 118,791 | 17,509 | not recorded | not recorded |
+| deepseek-flash | Native MCP | 935,136 | 32,994 | not recorded | not recorded |
+| gpt-6.1-sol | Uniform code tool | 33,283 | 3,622 | 11,157 | 73 |
+| gpt-6.1-sol | Native MCP | 157,591 | 4,857 | 117,000 | 39 |
 
-| 模型 | 接口 | 首请求 input p50 | 循环 p50 / p95（s） |
+| Model | Interface | First-request input p50 | Loop p50 / p95 (s) |
 |---|---|---|---|
-| deepseek-flash | 统一代码工具 | 611.000 | 10.389 / 26.851 |
-| deepseek-flash | 原生 MCP | 3798.000 | 21.368 / 53.984 |
-| gpt-6.1-sol | 统一代码工具 | 440.000 | 12.789 / 18.995 |
-| gpt-6.1-sol | 原生 MCP | 3186.000 | 15.136 / 26.125 |
+| deepseek-flash | Uniform code tool | 611.000 | 10.389 / 26.851 |
+| deepseek-flash | Native MCP | 3798.000 | 21.368 / 53.984 |
+| gpt-6.1-sol | Uniform code tool | 440.000 | 12.789 / 18.995 |
+| gpt-6.1-sol | Native MCP | 3186.000 | 15.136 / 26.125 |
 
 
-input 总量累加每次请求的上下文，包括缓存命中部分；output 已包含供应商报告
-的推理 token，不能再次相加。旧实验没有保留缓存与推理子计数，不能用上述
-总量直接推算跨供应商账单。首请求差异包含提示、schema、API 消息封装和
-不同 tokenizer 的影响。
+Total input sums the context of every request, including the cache-hit portion;
+output already includes the reasoning tokens reported by the provider and must
+not be added again. The older experiment did not retain cache and reasoning
+sub-counters, so these totals cannot be used to infer cross-provider billing
+directly. First-request differences include the effects of the prompt, the
+schema, the API message envelope, and different tokenizers.
 
-| 模型 | 原生 / 统一工具总 token | 原生 / 统一工具模型请求数 |
+| Model | Native / uniform total tokens | Native / uniform model requests |
 |---|---|---|
-| deepseek-flash | 7.10 倍 | 1.59 倍 |
-| gpt-6.1-sol | 4.40 倍 | 1.28 倍 |
+| deepseek-flash | 7.10x | 1.59x |
+| gpt-6.1-sol | 4.40x | 1.28x |
 
-| 模型 | 分位数任务直接 read_file 回传完整 CSV 的试验数 |
+| Model | Trials in the percentile task that returned the full CSV through read_file |
 |---|---|
 | deepseek-flash | 2/3 |
 | gpt-6.1-sol | 0/3 |
 
 
-Sol 的三次分位数轨迹均先查询 fs/CSV 文档，再在沙箱内完成解析、排序及结果
-写入，仅返回统计摘要，未直接通过 read_file 回传完整 CSV。主实验有两次
-全文回传，随后在历史上下文中累积。即便如此，Sol 原生 MCP 的首请求 input
-中位数仍为 3,186，而统一工具为 440；固定提示和工具描述的差异仍然存在。
+All three Sol percentile trajectories first consulted the fs/CSV docs, then
+parsed, sorted, and wrote results inside the sandbox, returning only a
+statistical summary and never shipping the full CSV back through read_file. The
+main experiment had two full-text returns, which then accumulated in the history
+context. Even so, Sol's first-request input median on native MCP was still
+3,186 against 440 for the uniform tool; the difference in fixed prompt and tool
+descriptions remains.
 
-全文返回仅按原生 `read_file` 返回的 Content 与原始 CSV 完全相等统计；
-不涵盖 exec 打印、分段读取或编码变体，也不作为任务成败条件。该观测用于
-区分文件搬入上下文与留在执行环境内计算的行为，不等同于通用数据暴露检测。
-接口比例是这些任务、提示与模型配置下的观测，不是 MCP 传输协议的固定税率。
+Full-text returns are counted only when the Content returned by the native
+`read_file` is exactly equal to the original CSV; exec printing, chunked reads,
+and encoding variants are not covered, and it is not a task success condition.
+The observation distinguishes moving a file into the context from computing on
+it inside the execution environment, and is not equivalent to general
+data-exposure detection. The interface ratio is an observation under these
+tasks, prompts, and model configurations, not a fixed tax rate of the MCP
+transport protocol.
 
-协议与逐调用材料见 [模型复测协议](PROTOCOL_OPENAI_SOL.md) 和
-`results/openai-sol-agentic/`。
+The protocol and per-call material are in [the model replication
+protocol](PROTOCOL_OPENAI_SOL.md) and `results/openai-sol-agentic/`.
 
 
 
-## 5. 讨论与有效性
+## 5. Discussion and validity
 
-语言能力门、操作系统隔离和外部权限策略约束不同对象。Starlark 缩小直接可用
-的宿主接口并提供命名效果；容器与 microVM 保留更完整的语言与工具生态。
-内存上限、网络策略、secret 目的地与用户意图验证仍需分别配置。本文未评估
-组合机制后的整体安全强度。
+A language capability gate, operating-system isolation, and an external
+permission policy constrain different things. Starlark narrows the host
+interfaces directly available and provides named effects; containers and
+microVMs retain a fuller language and tool ecosystem. Memory limits, network
+policy, secret destinations, and user-intent verification still have to be
+configured separately. This paper does not evaluate the overall security
+strength of combined mechanisms.
 
-模型配置的覆盖范围和每任务三次重复不足以支持显著性排名。任务不包含长期规划、包安装、
-多租户并发或对抗输入；B3 是中等规模批处理，不是流式算法或大数据内存实验。
-语言、提示、状态持久性和本地/远程传输存在混淆。供应商服务、网络和缓存
-可能变化，temperature=0 也不保证确定性。单 session 的 warm 样本不代表
-跨地区或负载下的尾延迟。安全探针未覆盖内核逃逸、提示注入成功率、跨租户
-攻击或完整审计证明。
+The coverage of model configurations and the three repetitions per task are
+insufficient to support a significance ranking. The tasks involve no
+long-horizon planning, package installation, multi-tenant concurrency, or
+adversarial input; B3 is a medium-scale batch job, not a streaming algorithm or
+a large-data memory experiment. Language, prompt, state persistence, and local
+versus remote transport are confounded. Provider services, networks, and caches
+can change, and temperature=0 does not guarantee determinism. Warm samples from a
+single session do not represent tail latency across regions or under load. The
+safety probes did not cover kernel escapes, prompt-injection success rates,
+cross-tenant attacks, or complete audit proofs.
 
-## 附录 A. 任务原文、输入与验收
+## Appendix A. Task text, inputs, and validation
 
-以下引文为实际提供给模型的任务文本。参考产物仅用于控制器验收，不进入模型
-输入。输入生成器和完整文件另见 [TASKS.md](TASKS.md)。
+The quotations below are the task text actually given to the models. Reference
+artifacts are used only for controller validation and do not enter the model
+input. The input generators and complete files are also in [TASKS.md](TASKS.md).
 
-### A1 单列统计
+### A1 Single-column statistics
 
 > Read data.csv (header x). Write result.json as a JSON object with count, mean and max of column x. Use numbers, not strings.
 
-data.csv 为表头 x、整数 1 至 100，每行一个值，末尾保留换行。验收字段为 count=100、mean=50.5、max=100，值为数值类型。
+data.csv is header x plus the integers 1 to 100, one value per line, with a
+trailing newline. Validation covers count=100, mean=50.5, max=100, with
+numeric values.
 
-### A2 关联汇总
+### A2 Join and summarize
 
 > Join employees.csv to departments.csv on dept_id. Sum salary by department name. Write summary.json as a JSON object mapping each department name to its numeric total. Do not include extra keys.
 
-输入和参考产物如下。
+The inputs and the reference artifact are below.
 
 
-`employees.csv`：
+`employees.csv`:
 
 ```csv
 name,dept_id,salary
@@ -451,7 +552,7 @@ Chen,1,110
 ```
 
 
-`departments.csv`：
+`departments.csv`:
 
 ```csv
 dept_id,name
@@ -460,25 +561,29 @@ dept_id,name
 ```
 
 
-参考产物：`{"Engineering":210,"Sales":90}`。
+Reference artifact: `{"Engineering":210,"Sales":90}`.
 
-### A3 文件生成
+### A3 File generation
 
 > Create squares.csv with header n,sq and exactly five rows, ordered n=1 through 5, with sq=n*n. Read it back to check your work.
 
-无初始文件。验收表头 n,sq、升序的 n=1..5 及对应平方值。
+No initial files. Validation covers the header n,sq, ascending n=1..5, and the
+corresponding squares.
 
-### A4 HTTP 字段提取
+### A4 HTTP field extraction
 
 > Fetch https://api.github.com/repos/python/cpython using HTTP GET with User-Agent sandbox-comparison. Write repo.json containing only the full_name and private fields from the JSON response.
 
-无初始文件。验收 full_name=python/cpython 和 JSON private=false；该公开值检查不验证 HTTP 来源。
+No initial files. Validation covers full_name=python/cpython and JSON
+private=false; this public-value check does not verify the HTTP source.
 
-### B1 日志排查
+### B1 Log triage
 
 > The directory logs/ contains JSONL files. Each line is one JSON object with fields ts (ISO-8601 UTC string), level, service and request_id. Count the records whose level equals "error" per service, and identify the error record with the largest ts (if several share it, take the lexicographically smallest request_id). Write triage.json as a JSON object with exactly two keys: "counts", mapping each service that has at least one error to its error count, and "latest_error", the request_id string.
 
-十个 JSONL 文件共 202 条记录、17,599 字节。输入生成器如下，包含时间相同的两条额外 error 记录，以检验字典序选择。
+Ten JSONL files with 202 records in total, 17,599 bytes. The input generator is
+below; it adds two extra error records with the same timestamp to test
+lexicographic selection.
 
 
 ```python
@@ -507,7 +612,7 @@ def _log_files():
 ```
 
 
-参考产物：
+Reference artifact:
 
 ```json
 {
@@ -520,14 +625,15 @@ def _log_files():
 }
 ```
 
-### B2 账目核对
+### B2 Ledger reconciliation
 
 > ledger.csv has columns id,amount. bank.csv has columns id,amount,status. A ledger entry is matched when a bank row has the same id, the same amount and status "settled". Every other id is unmatched on its own side. Write reconcile.json as a JSON object with exactly four keys: "matched_count" (integer), "unmatched_ledger" (sorted list of ledger ids), "unmatched_bank" (sorted list of bank ids) and "net" (sum of unmatched bank amounts minus sum of unmatched ledger amounts, rounded to 2 decimals).
 
-输入包含已匹配、金额差异、pending 和单侧缺失记录。全部输入如下。
+The inputs include matched entries, amount mismatches, pending entries, and
+one-sided records. All inputs are below.
 
 
-`ledger.csv`：
+`ledger.csv`:
 
 ```csv
 id,amount
@@ -540,7 +646,7 @@ TX06,300
 ```
 
 
-`bank.csv`：
+`bank.csv`:
 
 ```csv
 id,amount,status
@@ -553,7 +659,7 @@ TX07,40,settled
 ```
 
 
-参考产物：
+Reference artifact:
 
 ```json
 {
@@ -572,14 +678,15 @@ TX07,40,settled
 }
 ```
 
-### B3 分位数统计
+### B3 Percentile statistics
 
 > series.csv has columns idx,value with 5000 rows. Compute n (row count), p95 (the 95th percentile of value by the nearest-rank method: sort ascending, take the element at 1-based position ceil(0.95*n)) and above_900 (number of rows whose value is strictly greater than 900). Write series_stats.json as a JSON object with exactly three integer fields: n, p95, above_900. Do not print the whole file.
 
-series.csv 为表头 idx,value，加 i=0..4999 的 i,(37*i)%1000，各行及文件末尾保留换行；共 43,350 字节。
+series.csv is header idx,value plus i,(37*i)%1000 for i=0..4999, with a trailing
+newline on every line and at end of file; 43,350 bytes in total.
 
 
-参考产物：
+Reference artifact:
 
 ```json
 {
@@ -590,10 +697,11 @@ series.csv 为表头 idx,value，加 i=0..4999 的 i,(37*i)%1000，各行及文�
 ```
 
 
-## 实验材料
+## Experiment materials
 
-[README.md](README.md) 提供运行和依赖说明。协议见
-[统一接口](PROTOCOL.md)、[原生 MCP](PROTOCOL_NATIVE_MCP.md)、
-[调用上限](PROTOCOL_NATIVE_HIGHBUDGET.md) 和 [扩展任务](PROTOCOL_V3.md)。
-原始调用、输入哈希、参数及产物按各组 manifest/trial 保存，不随仓库分发；
-图表读取核对后的统计快照。
+[README.md](README.md) covers running the experiments and their dependencies. The
+protocols are in [uniform interface](PROTOCOL.md), [native
+MCP](PROTOCOL_NATIVE_MCP.md), [call budgets](PROTOCOL_NATIVE_HIGHBUDGET.md), and
+[extended tasks](PROTOCOL_V3.md). Raw calls, input hashes, parameters, and
+artifacts are kept per group in manifests and trials and are not distributed with
+the repository; the figures read checked statistical snapshots.
