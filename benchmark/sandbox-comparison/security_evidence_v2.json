@@ -1,0 +1,179 @@
+{
+  "scope": "Boundary observations; allocation-cap row uses a separate explicit 256 MiB configuration.",
+  "columns": [
+    "Host Python",
+    "Calcside: no policy",
+    "Calcside: private block",
+    "Docker",
+    "E2B",
+    "OpenShell"
+  ],
+  "rows": [
+    {
+      "probe": "Read /etc/passwd",
+      "labels": [
+        "host file read",
+        "VFS rejected",
+        "VFS rejected",
+        "guest file read",
+        "guest file read",
+        "guest file read"
+      ],
+      "sources": [
+        "results/security-observations.json:observations/obs_000/record",
+        "results/security-observations.json:observations/obs_001/record",
+        "results/security-observations.json:observations/obs_002/record",
+        "results/security-observations.json:observations/obs_003/record",
+        "results/security-observations.json:observations/obs_004/record",
+        "results/security-observations.json:observations/obs_005/record"
+      ]
+    },
+    {
+      "probe": "SSH key existence only",
+      "labels": [
+        "exists; not read",
+        "VFS rejected",
+        "VFS rejected",
+        "absent; not denied",
+        "absent; not denied",
+        "absent; not denied"
+      ],
+      "sources": [
+        "results/security-observations.json:observations/obs_006/record",
+        "results/security-observations.json:observations/obs_007/record",
+        "results/security-observations.json:observations/obs_008/record",
+        "results/security-observations.json:observations/obs_009/record",
+        "results/security-observations.json:observations/obs_010/record",
+        "results/security-observations.json:observations/obs_011/record"
+      ]
+    },
+    {
+      "probe": "127.0.0.1:18787",
+      "labels": [
+        "HTTP 200",
+        "HTTP 200",
+        "policy denied",
+        "refused (guest)",
+        "refused (guest)",
+        "refused (guest)"
+      ],
+      "sources": [
+        "results/security-observations.json:observations/obs_012/record",
+        "results/security-observations.json:observations/obs_013/record",
+        "results/security-observations.json:observations/obs_014/record",
+        "results/security-observations.json:observations/obs_015/record",
+        "results/security-observations.json:observations/obs_016/record",
+        "results/security-observations.json:observations/obs_017/record"
+      ]
+    },
+    {
+      "probe": "169.254.169.254 HTTP",
+      "labels": [
+        "host down",
+        "host down",
+        "policy denied",
+        "timeout; unknown",
+        "HTTP 401; no data",
+        "EACCES"
+      ],
+      "sources": [
+        "results/security-observations.json:observations/obs_018/record",
+        "results/security-observations.json:observations/obs_019/record",
+        "results/security-observations.json:observations/obs_020/record",
+        "results/security-observations.json:observations/obs_021/record",
+        "results/security-observations.json:observations/obs_022/record",
+        "results/security-observations.json:observations/obs_023/record"
+      ]
+    },
+    {
+      "probe": "Write /tmp",
+      "labels": [
+        "host write",
+        "VFS rejected",
+        "VFS rejected",
+        "guest write",
+        "guest write",
+        "guest write"
+      ],
+      "sources": [
+        "results/security-observations.json:observations/obs_024/record",
+        "results/security-observations.json:observations/obs_025/record",
+        "results/security-observations.json:observations/obs_026/record",
+        "results/security-observations.json:observations/obs_027/record",
+        "results/security-observations.json:observations/obs_028/record",
+        "results/security-observations.json:observations/obs_029/record"
+      ]
+    },
+    {
+      "probe": "Infinite loop",
+      "labels": [
+        "harness timeout",
+        "step limit",
+        "step limit",
+        "harness timeout",
+        "SDK timeout; unknown",
+        "harness timeout"
+      ],
+      "sources": [
+        "results/security-observations.json:observations/obs_030/record",
+        "results/security-observations.json:observations/obs_031/record",
+        "results/security-observations.json:observations/obs_032/record",
+        "results/security-observations.json:observations/obs_033/record",
+        "results/security-observations.json:observations/obs_034/record",
+        "results/security-observations.json:observations/obs_035/record"
+      ]
+    },
+    {
+      "probe": "Large allocation",
+      "labels": [
+        "1 GiB succeeded",
+        "repeat rejected",
+        "repeat rejected",
+        "1 GiB succeeded",
+        "timeout; unknown",
+        "1 GiB succeeded"
+      ],
+      "sources": [
+        "results/security-observations.json:observations/obs_036/record",
+        "results/security-observations.json:observations/obs_037/record",
+        "results/security-observations.json:observations/obs_038/record",
+        "results/security-observations.json:observations/obs_039/record",
+        "results/security-observations.json:observations/obs_040/record",
+        "results/security-observations.json:observations/obs_041/record"
+      ]
+    },
+    {
+      "probe": "256 MiB cap / 768 MiB request",
+      "labels": [
+        "not tested",
+        "not tested",
+        "not tested",
+        "OOM enforced",
+        "not tested",
+        "OOM enforced"
+      ],
+      "sources": [
+        null,
+        null,
+        null,
+        "results/memory-limits.json:observations/0",
+        null,
+        "results/memory-limits.json:observations/1"
+      ]
+    }
+  ],
+  "additional_observation": {
+    "label": "Docker host.docker.internal:18787 returned HTTP 200",
+    "source": "results/security-observations.json:observations/obs_042/record",
+    "limitation": "Different destination from container loopback. Not a container escape."
+  },
+  "not_tested": [
+    "Kernel or interpreter escapes",
+    "Cross-tenant access",
+    "Prompt injection attack success rate",
+    "Secret exfiltration and encoded/redirection variants",
+    "Signed or complete audit evidence",
+    "Effect-level HTTP success for all backends",
+    "General memory bounds beyond the explicit capped probe"
+  ]
+}
