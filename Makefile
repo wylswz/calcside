@@ -3,7 +3,7 @@ SHELL := /bin/bash
 BINARIES := bin/calcside bin/calcside-worker
 WIRE_PACKAGES := ./internal/node ./cmd/calcside ./cmd/calcside-worker
 
-.PHONY: build test test-cgroup test-cgroup-host lint web dev serve-dev tidy gen gen-check wire wire-check migrate-new migrate-hash migrate-validate migrate-apply migrate-status test-postgres sdk-test sdk-lint docker-env benchmark benchmark-smoke helm-lint
+.PHONY: build test test-cgroup test-cgroup-host lint web dev serve-dev tidy gen gen-check wire wire-check migrate-new migrate-hash migrate-validate migrate-apply migrate-status test-postgres sdk-test sdk-lint docker-env benchmark benchmark-smoke helm-lint render-test
 
 # First-run compose setup: generate docker/.env from .env.example
 # with random secrets, or copy docker/.env.example to fill in yourself.
@@ -82,6 +82,26 @@ helm-lint:
 	  --set worker.enabled=false 2>/dev/null
 	! helm template calcside charts/calcside --namespace calcside \
 	  --set worker.replicaCount=0 2>/dev/null
+	# Renderer: enabled by default — the chart must emit the render
+	# Deployment + NetworkPolicy; disabled must emit neither, and no
+	# CALCSIDE_RENDER_* env vars may leak into the API.
+	helm template calcside charts/calcside --namespace calcside --set render.enabled=false >/dev/null
+	@out=$$(helm template calcside charts/calcside --namespace calcside); \
+	  echo "$$out" | grep -q "name: calcside-render" && \
+	  echo "$$out" | grep -q "kind: NetworkPolicy" && \
+	  echo "$$out" | grep -q "CALCSIDE_RENDER_URL" || \
+	    { echo "helm-lint: enabled render missing render Deployment/NetworkPolicy/env" >&2; exit 1; }; \
+	  dis=$$(helm template calcside charts/calcside --namespace calcside --set render.enabled=false); \
+	  echo "$$dis" | grep -q "calcside-render" && \
+	    { echo "helm-lint: disabled render still emits render resources" >&2; exit 1; }; \
+	  echo "$$dis" | grep -q "CALCSIDE_RENDER" && \
+	    { echo "helm-lint: disabled render leaks CALCSIDE_RENDER_* env" >&2; exit 1; }; \
+	  echo "helm-lint: render on/off ok"
+
+# calcside-render unit tests (Node built-in runner).
+render-test:
+	pnpm -C render install --frozen-lockfile
+	pnpm -C render test
 
 wire:
 	go tool wire $(WIRE_PACKAGES)
@@ -151,6 +171,9 @@ DEV_WORKER_PORT ?= 8090
 DEV_WORKER_ID ?= dev-w1
 # DEV ONLY — fixed throwaway key for the API↔worker shared secret.
 DEV_WORKER_KEY ?= dev-worker-key-not-secret
+DEV_RENDER_PORT ?= 8091
+# DEV ONLY — fixed throwaway key for the API→render shared secret.
+DEV_RENDER_KEY ?= dev-render-key-not-secret
 DEV_DSN ?= calcside-dev.db
 DEV_EXT_ROOTS ?= $(CURDIR)/contrib
 DEV_NET_ALLOW_CIDRS ?= 198.18.0.0/15
@@ -164,7 +187,24 @@ dev:
 	@ATLAS_DB_URL="sqlite://$(abspath $(DEV_DSN))" atlas migrate apply --env sqlite
 	@go build -o bin/calcside-dev ./cmd/calcside
 	@go build -o bin/calcside-worker-dev ./cmd/calcside-worker
+	@if [ ! -d render/node_modules ]; then pnpm -C render install --frozen-lockfile; fi
 	@trap 'kill 0' INT TERM EXIT; \
+	( RENDER_ADDR=127.0.0.1:$(DEV_RENDER_PORT) CALCSIDE_RENDER_KEY=$(DEV_RENDER_KEY) \
+	    exec node render/src/server.js ) & \
+	render_pid=$$!; \
+	healthy=0; \
+	for i in $$(seq 1 240); do \
+	  if ! kill -0 $$render_pid 2>/dev/null; then \
+	    echo "make dev: render exited before becoming healthy" >&2; exit 1; \
+	  fi; \
+	  if curl -sf http://127.0.0.1:$(DEV_RENDER_PORT)/healthz >/dev/null 2>&1; then \
+	    healthy=1; break; \
+	  fi; \
+	  sleep 0.25; \
+	done; \
+	if [ $$healthy -ne 1 ]; then \
+	  echo "make dev: render did not answer /healthz within 60s" >&2; exit 1; \
+	fi; \
 	( bin/calcside-worker-dev serve --listen 127.0.0.1:$(DEV_WORKER_PORT) \
 	    --node-id $(DEV_WORKER_ID) --shared-key $(DEV_WORKER_KEY) \
 	    --api-addr http://127.0.0.1:$(DEV_API_PORT) \
@@ -189,7 +229,9 @@ dev:
 	    --dsn $(DEV_DSN) --ext-local-roots $(DEV_EXT_ROOTS) \
 	    --net-allow-cidrs=$(DEV_NET_ALLOW_CIDRS) \
 	    --workers $(DEV_WORKER_ID)=127.0.0.1:$(DEV_WORKER_PORT) \
-	    --worker-key $(DEV_WORKER_KEY) ) & \
+	    --worker-key $(DEV_WORKER_KEY) \
+	    --render-url http://127.0.0.1:$(DEV_RENDER_PORT) \
+	    --render-key $(DEV_RENDER_KEY) ) & \
 	backend_pid=$$!; \
 	healthy=0; \
 	for i in $$(seq 1 240); do \
@@ -213,9 +255,26 @@ serve-dev:
 	@ATLAS_DB_URL="sqlite://$(abspath $(DEV_DSN))" atlas migrate apply --env sqlite
 	@go build -o bin/calcside-dev ./cmd/calcside
 	@go build -o bin/calcside-worker-dev ./cmd/calcside-worker
-	@api_pid=""; worker_pid=""; \
-	cleanup() { [ -n "$$api_pid" ] && kill "$$api_pid" 2>/dev/null || true; [ -n "$$worker_pid" ] && kill "$$worker_pid" 2>/dev/null || true; }; \
+	@if [ ! -d render/node_modules ]; then pnpm -C render install --frozen-lockfile; fi
+	@api_pid=""; worker_pid=""; render_pid=""; \
+	cleanup() { [ -n "$$api_pid" ] && kill "$$api_pid" 2>/dev/null || true; [ -n "$$worker_pid" ] && kill "$$worker_pid" 2>/dev/null || true; [ -n "$$render_pid" ] && kill "$$render_pid" 2>/dev/null || true; }; \
 	trap cleanup INT TERM EXIT; \
+	( RENDER_ADDR=127.0.0.1:$(DEV_RENDER_PORT) CALCSIDE_RENDER_KEY=$(DEV_RENDER_KEY) \
+	    exec node render/src/server.js ) & \
+	render_pid=$$!; \
+	healthy=0; \
+	for i in $$(seq 1 240); do \
+	  if ! kill -0 $$render_pid 2>/dev/null; then \
+	    echo "make serve-dev: render exited before becoming healthy" >&2; exit 1; \
+	  fi; \
+	  if curl -sf http://127.0.0.1:$(DEV_RENDER_PORT)/healthz >/dev/null 2>&1; then \
+	    healthy=1; break; \
+	  fi; \
+	  sleep 0.25; \
+	done; \
+	if [ $$healthy -ne 1 ]; then \
+	  echo "make serve-dev: render did not answer /healthz within 60s" >&2; exit 1; \
+	fi; \
 	( bin/calcside-worker-dev serve --listen 127.0.0.1:$(DEV_WORKER_PORT) \
 	    --node-id $(DEV_WORKER_ID) --shared-key $(DEV_WORKER_KEY) \
 	    --api-addr http://127.0.0.1:$(DEV_API_PORT) \
@@ -240,7 +299,9 @@ serve-dev:
 	  --dsn $(DEV_DSN) --ext-local-roots $(DEV_EXT_ROOTS) \
 	  --net-allow-cidrs=$(DEV_NET_ALLOW_CIDRS) \
 	  --workers $(DEV_WORKER_ID)=127.0.0.1:$(DEV_WORKER_PORT) \
-	  --worker-key $(DEV_WORKER_KEY) & \
+	  --worker-key $(DEV_WORKER_KEY) \
+	  --render-url http://127.0.0.1:$(DEV_RENDER_PORT) \
+	  --render-key $(DEV_RENDER_KEY) & \
 	api_pid=$$!; \
 	wait $$api_pid
 

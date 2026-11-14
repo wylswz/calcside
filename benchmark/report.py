@@ -21,6 +21,14 @@ OPERATIONS = {
     "read": ("me", "capabilities", "listInstances", "getInstance", "keepalive",
              "listFiles", "readFile", "inspect", "prompt", "listExecutions",
              "getExecution", "listAudit"),
+    "chart": ("mcpChart",),
+}
+
+# chart is an integration contract only (EP-0024); the timed gate keeps the
+# three original scenarios.
+STAGES = {
+    "integration": ("lifecycle", "exec", "read", "chart"),
+    "performance": ("lifecycle", "exec", "read"),
 }
 
 
@@ -52,10 +60,9 @@ def valid_summary(summary, run, p95_limit):
 def render(directory):
     directory = pathlib.Path(directory)
     data = json.loads((directory / "runs.json").read_text())
-    expected = {(stage, case) for stage in ("integration", "performance")
-                for case in ("lifecycle", "exec", "read")}
+    expected = {(stage, case) for stage, cases in STAGES.items() for case in cases}
     observed = {(run["stage"], run["scenario"]) for run in data["runs"]}
-    passed = observed == expected and len(data["runs"]) == 6
+    passed = observed == expected and len(data["runs"]) == 7
     passed = passed and all(run["exit_code"] == 0 for run in data["runs"])
     lines = [
         f"# Release Validation: {data['backend']}",

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -38,7 +39,11 @@ func (b bearerRT) RoundTrip(r *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(r2)
 }
 
-func newEnv(t *testing.T) (*httptest.Server, store.Store, *audit.Recorder, string, string, *sandbox.Service, *store.APIKey, *store.APIKey) {
+func newEnv(t *testing.T, ren ...Renderer) (*httptest.Server, store.Store, *audit.Recorder, string, string, *sandbox.Service, *store.APIKey, *store.APIKey) {
+	var renderer Renderer
+	if len(ren) > 0 {
+		renderer = ren[0]
+	}
 	st, err := store.Open(context.Background(), "sqlite", storetest.SQLite(t))
 	if err != nil {
 		t.Fatal(err)
@@ -63,10 +68,10 @@ func newEnv(t *testing.T) (*httptest.Server, store.Store, *audit.Recorder, strin
 			r = r.WithContext(auth.WithPrincipal(r.Context(), p))
 		}
 		if strings.HasPrefix(r.URL.Path, "/mcp/instances/") {
-			InstanceHandler(sbx, ac, strings.TrimPrefix(r.URL.Path, "/mcp/instances/")).ServeHTTP(w, r)
+			InstanceHandler(sbx, ac, strings.TrimPrefix(r.URL.Path, "/mcp/instances/"), renderer).ServeHTTP(w, r)
 			return
 		}
-		Handler(sbx).ServeHTTP(w, r)
+		Handler(sbx, renderer).ServeHTTP(w, r)
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -658,4 +663,221 @@ func postInitialize(t *testing.T, url, tok string) int {
 		t.Fatal(err)
 	}
 	return resp.StatusCode
+}
+
+// stubRenderer is a fixed Renderer for image tests: it records calls
+// and returns canned bytes or an error.
+type stubRenderer struct {
+	png   []byte
+	err   error
+	calls int
+	spec  []byte
+}
+
+func (s *stubRenderer) Render(_ context.Context, spec []byte) ([]byte, error) {
+	s.calls++
+	s.spec = spec
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.png, nil
+}
+
+var fakePNG = []byte("\x89PNG\r\n\x1a\nfake-png-bytes")
+
+func imageContents(res *sdkmcp.CallToolResult) []*sdkmcp.ImageContent {
+	var out []*sdkmcp.ImageContent
+	for _, c := range res.Content {
+		if ic, ok := c.(*sdkmcp.ImageContent); ok {
+			out = append(out, ic)
+		}
+	}
+	return out
+}
+
+const chartCode = `data = [{"x": 1, "y": 2}, {"x": 3, "y": 5}]
+io.display(chart.spec("point", data=data, encoding={"x": chart.field("x", "quantitative"), "y": chart.field("y", "quantitative")}), title="pts")`
+
+func createChartedInstance(t *testing.T, cs *sdkmcp.ClientSession) string {
+	t.Helper()
+	res, err := cs.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: "create_instance", Arguments: map[string]any{}})
+	if err != nil || res.IsError {
+		t.Fatalf("create_instance: %v %+v", err, res)
+	}
+	var created struct {
+		InstanceID string `json:"instance_id"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, res)), &created); err != nil {
+		t.Fatal(err)
+	}
+	return created.InstanceID
+}
+
+func TestMCPChartImages(t *testing.T) {
+	stub := &stubRenderer{png: fakePNG}
+	srv, _, _, secret, _, _, _, _ := newEnv(t, stub)
+	ctx := context.Background()
+	cs := connect(t, srv.URL, secret)
+	id := createChartedInstance(t, cs)
+
+	// exec images=true returns the text summary plus an ImageContent.
+	res, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "exec", Arguments: map[string]any{
+		"instance_id": id, "code": chartCode, "images": true,
+		"section": map[string]any{"name": "chart", "description": "chart section"},
+	}})
+	if err != nil || res.IsError {
+		t.Fatalf("exec images: %v %+v", err, res)
+	}
+	out := toolText(t, res)
+	if !strings.Contains(out, `displayed: "pts" (`) || !strings.Contains(out, " [image 1]") {
+		t.Fatalf("exec image suffix: %q", out)
+	}
+	imgs := imageContents(res)
+	if len(imgs) != 1 || imgs[0].MIMEType != "image/png" || string(imgs[0].Data) != string(fakePNG) {
+		t.Fatalf("exec images: %+v", imgs)
+	}
+	if stub.calls != 1 {
+		t.Fatalf("renderer calls %d", stub.calls)
+	}
+	var sentSpec map[string]any
+	if err := json.Unmarshal(stub.spec, &sentSpec); err != nil || sentSpec["mark"] != "point" {
+		t.Fatalf("renderer got spec: %s", stub.spec)
+	}
+
+	// images=false (default) is byte-identical text with no image block.
+	res, err = cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "exec", Arguments: map[string]any{
+		"instance_id": id, "code": chartCode,
+		"section": map[string]any{"name": "chart", "description": "chart section", "rerun": "safe"},
+	}})
+	if err != nil || res.IsError {
+		t.Fatalf("exec plain: %v %+v", err, res)
+	}
+	out = toolText(t, res)
+	if !strings.Contains(out, `displayed: "pts" (`) || strings.Contains(out, "[image") {
+		t.Fatalf("plain exec output changed: %q", out)
+	}
+	if len(imageContents(res)) != 0 || len(res.Content) != 1 {
+		t.Fatalf("plain exec content: %+v", res.Content)
+	}
+
+	// read_section images=true implies include_output and attaches.
+	res, err = cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "read_section", Arguments: map[string]any{
+		"instance_id": id, "name": "chart", "images": true,
+	}})
+	if err != nil || res.IsError {
+		t.Fatalf("read_section images: %v %+v", err, res)
+	}
+	var secOut struct {
+		Displays         []map[string]any `json:"displays"`
+		DisplaySummaries []string         `json:"display_summaries"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, res)), &secOut); err != nil {
+		t.Fatal(err)
+	}
+	if len(secOut.DisplaySummaries) != 1 || !strings.Contains(secOut.DisplaySummaries[0], " [image 1]") {
+		t.Fatalf("display_summaries: %v", secOut.DisplaySummaries)
+	}
+	if len(imageContents(res)) != 1 {
+		t.Fatalf("read_section images: %+v", res.Content)
+	}
+
+	// run_sections on the single (fresh → reused) section attaches too.
+	res, err = cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "run_sections", Arguments: map[string]any{
+		"instance_id": id, "sections": "chart", "images": true,
+	}})
+	if err != nil || res.IsError {
+		t.Fatalf("run_sections images: %v %+v", err, res)
+	}
+	out = toolText(t, res)
+	if !strings.Contains(out, "chart: ok") || !strings.Contains(out, `displayed: "pts" (`) || !strings.Contains(out, " [image 1]") {
+		t.Fatalf("run_sections image output: %q", out)
+	}
+	if len(imageContents(res)) != 1 {
+		t.Fatalf("run_sections images: %+v", res.Content)
+	}
+
+	// Bulk selections get the guidance line instead of images.
+	res, err = cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "run_sections", Arguments: map[string]any{
+		"instance_id": id, "sections": "all", "images": true,
+	}})
+	if err != nil || res.IsError {
+		t.Fatalf("run_sections all: %v %+v", err, res)
+	}
+	if out = toolText(t, res); !strings.Contains(out, "images: pass a single section name to get images") {
+		t.Fatalf("run_sections all guidance: %q", out)
+	}
+	if len(imageContents(res)) != 0 {
+		t.Fatalf("run_sections all attached images: %+v", res.Content)
+	}
+}
+
+func TestMCPChartImagesFallback(t *testing.T) {
+	ctx := context.Background()
+
+	// Renderer error → text suffix, no image, no IsError.
+	stub := &stubRenderer{err: errRenderBoom}
+	srv, _, _, secret, _, _, _, _ := newEnv(t, stub)
+	cs := connect(t, srv.URL, secret)
+	id := createChartedInstance(t, cs)
+	res, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "exec", Arguments: map[string]any{
+		"instance_id": id, "code": chartCode, "images": true,
+		"section": map[string]any{"name": "chart", "description": "chart section"},
+	}})
+	if err != nil || res.IsError {
+		t.Fatalf("exec render-error: %v %+v", err, res)
+	}
+	if out := toolText(t, res); !strings.Contains(out, " [image unavailable: render failed]") {
+		t.Fatalf("render-failed suffix: %q", out)
+	}
+	if len(imageContents(res)) != 0 {
+		t.Fatalf("render-failed attached images: %+v", res.Content)
+	}
+
+	// No renderer configured → the other unavailable suffix.
+	srv2, _, _, secret2, _, _, _, _ := newEnv(t)
+	cs2 := connect(t, srv2.URL, secret2)
+	id2 := createChartedInstance(t, cs2)
+	res, err = cs2.CallTool(ctx, &sdkmcp.CallToolParams{Name: "exec", Arguments: map[string]any{
+		"instance_id": id2, "code": chartCode, "images": true,
+		"section": map[string]any{"name": "chart", "description": "chart section"},
+	}})
+	if err != nil || res.IsError {
+		t.Fatalf("exec no-renderer: %v %+v", err, res)
+	}
+	if out := toolText(t, res); !strings.Contains(out, " [image unavailable: no renderer configured]") {
+		t.Fatalf("no-renderer suffix: %q", out)
+	}
+	if len(imageContents(res)) != 0 {
+		t.Fatalf("no-renderer attached images: %+v", res.Content)
+	}
+}
+
+var errRenderBoom = errors.New("render boom")
+
+func TestMCPChartImagesFailedExec(t *testing.T) {
+	stub := &stubRenderer{png: fakePNG}
+	srv, _, _, secret, _, _, _, _ := newEnv(t, stub)
+	ctx := context.Background()
+	cs := connect(t, srv.URL, secret)
+	id := createChartedInstance(t, cs)
+
+	// A failed exec still attaches images for the displays it produced.
+	res, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "exec", Arguments: map[string]any{
+		"instance_id": id,
+		"code":        chartCode + "\nfail('boom')",
+		"images":      true,
+		"section":     map[string]any{"name": "chartfail", "description": "fails after display"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatal("expected exec error result")
+	}
+	if out := toolText(t, res); !strings.Contains(out, " [image 1]") {
+		t.Fatalf("failed exec image suffix: %q", out)
+	}
+	if len(imageContents(res)) != 1 {
+		t.Fatalf("failed exec images: %+v", res.Content)
+	}
 }

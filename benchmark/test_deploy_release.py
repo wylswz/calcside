@@ -253,7 +253,7 @@ class DsnEncoding(unittest.TestCase):
             "pg_user": "u@ser", "pg_db": "db/name",
             "pg_sslmode": "disable", "pg_password": "p@ss:wo/rd?x",
             "admin_user": "admin", "admin_password": "a",
-            "worker_key": "w", "vault_key": "v",
+            "worker_key": "w", "vault_key": "v", "render_key": "r",
             "console_origin": "http://localhost:8080",
             "api_replicas": 1, "persistence": False,
             "service_type": "ClusterIP", "image_tag": "test",

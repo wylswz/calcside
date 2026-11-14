@@ -43,7 +43,8 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		wire.Bind(new(llmprovidersvc.ExtPinner), new(*extensions.Repository)),
 		workspacesvc.New, auditsvc.New, provideExtCatalog, catalog.New,
 		provideAuth, provideBasic, provideAnonymous, provideGoogle, provideWeb, provideArtifacts,
-		wire.Struct(new(api.Deps), "IAM", "Vault", "Policy", "Audit", "Catalog", "Sandbox", "Workspace", "Access", "LLMProvider", "Auth", "Basic", "Web", "Anonymous", "Previews", "Application", "Run", "Module"),
+		provideRenderClient,
+		wire.Struct(new(api.Deps), "IAM", "Vault", "Policy", "Audit", "Catalog", "Sandbox", "Workspace", "Access", "LLMProvider", "Auth", "Basic", "Web", "Anonymous", "Previews", "Application", "Run", "Module", "Render"),
 		provideApplicationService, provideRunService, provideServingService, provideModuleService, provideServer, wire.Struct(new(application), "*"),
 	)
 	return nil, nil, nil

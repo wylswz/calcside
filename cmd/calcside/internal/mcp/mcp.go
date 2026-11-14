@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -28,6 +29,7 @@ import (
 	"calcside/cmd/calcside/internal/service/access"
 	"calcside/cmd/calcside/internal/service/sandbox"
 	"calcside/internal/chart"
+	"calcside/internal/runtime"
 	"calcside/internal/store"
 	"calcside/internal/types"
 )
@@ -44,6 +46,14 @@ type Sandbox interface {
 	Browse(ctx context.Context, a service.Actor, id, path string, listOnly bool) (*sandbox.FileView, error)
 	Delete(ctx context.Context, a service.Actor, id string) error
 	Prompt(ctx context.Context, a service.Actor, id, toolPrefix string) (*sandbox.PromptView, error)
+}
+
+// Renderer renders one stored chart spec to PNG bytes (EP-0024).
+// Implemented by cmd/calcside/internal/render.Client; a nil Renderer
+// means the server has no renderer configured and images=true calls
+// degrade to text.
+type Renderer interface {
+	Render(ctx context.Context, spec []byte) ([]byte, error)
 }
 
 const instructions = "Calcside runs Starlark in capability-gated instances with durable notebook sections — the notebook is a dependency graph: a section reads names other sections define, and running a section first runs every upstream section that is not fresh, in dependency order. Call create_instance first, follow the returned prompt, then exec on the returned instance_id — exec requires section={name, description}: every execution belongs to a section. notebook shows the outline (states, defines, reads name ← provider, blocked diagnostics); run_sections executes sections in dependency order; add_section writes code without running it. Denied or policy_denied results mean the boundary refused the call — do not retry the same action."
@@ -87,6 +97,7 @@ type execArgs struct {
 	InstanceID string           `json:"instance_id"`
 	Code       string           `json:"code"`
 	Section    *execSectionArgs `json:"section,omitempty"`
+	Images     bool             `json:"images,omitempty"`
 }
 
 type instanceOnlyArgs struct {
@@ -97,6 +108,7 @@ type readSectionArgs struct {
 	InstanceID    string `json:"instance_id"`
 	Name          string `json:"name"`
 	IncludeOutput bool   `json:"include_output,omitempty"`
+	Images        bool   `json:"images,omitempty"`
 }
 
 type addSectionArgs struct {
@@ -115,6 +127,7 @@ type runArgs struct {
 	Sections any    `json:"sections"`
 	Revision *int64 `json:"revision,omitempty"`
 	DryRun   bool   `json:"dry_run,omitempty"`
+	Images   bool   `json:"images,omitempty"`
 }
 
 type pathArgs struct {
@@ -135,10 +148,60 @@ func effID(arg, bound string) string {
 	return arg
 }
 
+// displayLine formats one display's summary line; suffix carries the
+// image marker appended by an images=true request ("" otherwise).
+func displayLine(d runtime.Display, suffix string) string {
+	if d.Title != "" {
+		return fmt.Sprintf("displayed: %q (%s)%s", d.Title, chart.Summary(d.Spec), suffix)
+	}
+	return fmt.Sprintf("displayed: (%s)%s", chart.Summary(d.Spec), suffix)
+}
+
+// displaySuffix returns suffixes[i] when present.
+func displaySuffix(suffixes []string, i int) string {
+	if i < len(suffixes) {
+		return suffixes[i]
+	}
+	return ""
+}
+
+// displayImages renders each display's stored spec for an images=true
+// request. It returns one suffix per display — appended to the
+// displayed:/display_summaries line — plus the PNG contents to attach
+// after the text block. Rendering problems degrade to a text suffix:
+// they never set IsError and never fail the tool call.
+func displayImages(ctx context.Context, r Renderer, displays []runtime.Display) ([]string, []mcp.Content) {
+	suffixes := make([]string, len(displays))
+	if len(displays) == 0 {
+		return suffixes, nil
+	}
+	if r == nil {
+		for i := range suffixes {
+			suffixes[i] = " [image unavailable: no renderer configured]"
+		}
+		return suffixes, nil
+	}
+	images := make([]mcp.Content, 0, len(displays))
+	n := 0
+	for i, d := range displays {
+		png, err := r.Render(ctx, d.Spec)
+		if err != nil {
+			slog.Warn("mcp: chart render failed", "err", err)
+			suffixes[i] = " [image unavailable: render failed]"
+			continue
+		}
+		n++
+		suffixes[i] = fmt.Sprintf(" [image %d]", n)
+		images = append(images, &mcp.ImageContent{MIMEType: "image/png", Data: png})
+	}
+	return suffixes, images
+}
+
 // execOutcomeText formats an exec result like the pre-notebook tool did,
 // plus a compact notebook trailer when the call was sectioned or drift
-// changed.
-func execOutcomeText(out *sandbox.ExecOutcome) string {
+// changed. imgSuffixes is parallel to res.Displays (nil/empty leaves
+// the output byte-for-byte identical to the text-only form).
+func execOutcomeText(out *sandbox.ExecOutcome, imgSuffixes []string) string {
 	res := out.View
 	var b strings.Builder
 	if res.Error != nil {
@@ -153,12 +216,8 @@ func execOutcomeText(out *sandbox.ExecOutcome) string {
 	} else {
 		b.WriteString(res.Output)
 	}
-	for _, d := range res.Displays {
-		if d.Title != "" {
-			fmt.Fprintf(&b, "\ndisplayed: %q (%s)", d.Title, chart.Summary(d.Spec))
-		} else {
-			fmt.Fprintf(&b, "\ndisplayed: (%s)", chart.Summary(d.Spec))
-		}
+	for i, d := range res.Displays {
+		b.WriteString("\n" + displayLine(d, displaySuffix(imgSuffixes, i)))
 	}
 	if out.Section != "" {
 		fmt.Fprintf(&b, "\n[section %s → %s · notebook_rev %d]", out.Section, out.State, out.Revision)
@@ -181,8 +240,9 @@ func execOutcomeText(out *sandbox.ExecOutcome) string {
 
 // sectionDetailWire strips chart spec payloads from a section read: MCP
 // callers keep kind/title/redacted plus one summary line per display
-// instead of the full spec JSON (EP-0024).
-func sectionDetailWire(d *sandbox.SectionDetail) any {
+// instead of the full spec JSON (EP-0024). imgSuffixes is parallel to
+// d.Displays and appends the image marker to each summary entry.
+func sectionDetailWire(d *sandbox.SectionDetail, imgSuffixes []string) any {
 	raw, err := json.Marshal(d)
 	if err != nil || len(d.Displays) == 0 {
 		return d
@@ -197,7 +257,7 @@ func sectionDetailWire(d *sandbox.SectionDetail) any {
 			if dm, ok := item.(map[string]any); ok {
 				delete(dm, "spec")
 				if i < len(d.Displays) {
-					sums = append(sums, chart.Summary(d.Displays[i].Spec))
+					sums = append(sums, chart.Summary(d.Displays[i].Spec)+displaySuffix(imgSuffixes, i))
 				}
 			}
 		}
@@ -208,12 +268,15 @@ func sectionDetailWire(d *sandbox.SectionDetail) any {
 
 // newServer builds one stateless server for the actor resolved from the
 // request; fs tools are registered only when the key's spec grants fs.
-func newServer(sb Sandbox, a service.Actor) *mcp.Server { return newServerMode(sb, a, "", nil, "") }
+// r is the optional chart renderer (nil = images unavailable).
+func newServer(sb Sandbox, a service.Actor, r Renderer) *mcp.Server {
+	return newServerMode(sb, a, "", nil, "", r)
+}
 
 // newServerMode builds one stateless server; when bound is non-empty
 // the server is pinned to that instance: no create/delete tools and
 // instance_id arguments default to the bound instance.
-func newServerMode(sb Sandbox, a service.Actor, bound string, boundIn *store.Instance, prompt string) *mcp.Server {
+func newServerMode(sb Sandbox, a service.Actor, bound string, boundIn *store.Instance, prompt string, ren Renderer) *mcp.Server {
 	inst := instructions
 	if prompt != "" {
 		inst = prompt
@@ -237,7 +300,7 @@ func newServerMode(sb Sandbox, a service.Actor, bound string, boundIn *store.Ins
 			})
 	}
 	mcp.AddTool(srv, &mcp.Tool{Name: "exec",
-		Description: "Run Starlark code on an instance AS a notebook section — section {name, description?, rerun?, after?} is required: the section is saved BEFORE running (failed code is preserved as a failed section) and every upstream section that is not fresh runs first, in dependency order. There is no scratch exec over MCP."},
+		Description: "Run Starlark code on an instance AS a notebook section — section {name, description?, rerun?, after?} is required: the section is saved BEFORE running (failed code is preserved as a failed section) and every upstream section that is not fresh runs first, in dependency order. There is no scratch exec over MCP. Set images=true to also get a PNG snapshot of each chart the run displays (requires a server-side renderer; otherwise the summary says the image is unavailable)."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in execArgs) (*mcp.CallToolResult, any, error) {
 			if in.Section == nil {
 				return errText(service.BadRequest("exec requires section={name, description}: every execution belongs to a notebook section so its inputs and outputs stay visible. For a throwaway probe reuse one section, e.g. name \"probe\".")), nil, nil
@@ -250,11 +313,17 @@ func newServerMode(sb Sandbox, a service.Actor, bound string, boundIn *store.Ins
 			if err != nil {
 				return errText(err), nil, nil
 			}
-			t := execOutcomeText(out)
-			if out.View.Error != nil {
-				return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: t}}}, nil, nil
+			var suffixes []string
+			var images []mcp.Content
+			if in.Images {
+				suffixes, images = displayImages(ctx, ren, out.View.Displays)
 			}
-			return text(t), nil, nil
+			t := execOutcomeText(out, suffixes)
+			content := append([]mcp.Content{&mcp.TextContent{Text: t}}, images...)
+			if out.View.Error != nil {
+				return &mcp.CallToolResult{IsError: true, Content: content}, nil, nil
+			}
+			return &mcp.CallToolResult{Content: content}, nil, nil
 		})
 	mcp.AddTool(srv, &mcp.Tool{Name: "notebook",
 		Description: "Read the instance's notebook outline: every section's state (not_run/fresh/stale/failed), defines and reads (name ← provider), effects, blocked diagnostics, plus guidance. Read-only — never restores a lost instance."},
@@ -281,14 +350,26 @@ func newServerMode(sb Sandbox, a service.Actor, bound string, boundIn *store.Ins
 			return text(b.String()), nil, nil
 		})
 	mcp.AddTool(srv, &mcp.Tool{Name: "read_section",
-		Description: "Read one notebook section: metadata plus its code; include_output adds the last run's output/error."},
+		Description: "Read one notebook section: metadata plus its code; include_output adds the last run's output/error. Set images=true to also get a PNG snapshot of each chart in the last run's output (implies include_output; requires a server-side renderer)."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in readSectionArgs) (*mcp.CallToolResult, any, error) {
-			d, err := sb.ReadSection(ctx, a, effID(in.InstanceID, bound), in.Name, in.IncludeOutput)
+			// Displays only come with output, so images implies it.
+			includeOutput := in.IncludeOutput || in.Images
+			d, err := sb.ReadSection(ctx, a, effID(in.InstanceID, bound), in.Name, includeOutput)
 			if err != nil {
 				return errText(err), nil, nil
 			}
-			res, err := jsonText(sectionDetailWire(d))
-			return res, nil, err
+			var suffixes []string
+			var images []mcp.Content
+			if in.Images {
+				suffixes, images = displayImages(ctx, ren, d.Displays)
+			}
+			res, err := jsonText(sectionDetailWire(d, suffixes))
+			if err != nil {
+				return res, nil, err
+			}
+			// Image blocks follow the JSON text block.
+			res.Content = append(res.Content, images...)
+			return res, nil, nil
 		})
 	// runSections is the canonical batch-run tool — the only run
 	// surface agents get (no alias, no fine-grained authoring tools).
@@ -320,18 +401,33 @@ func newServerMode(sb Sandbox, a service.Actor, bound string, boundIn *store.Ins
 		for _, w := range rep.Warnings {
 			b.WriteString("\nwarning: " + w)
 		}
+		var images []mcp.Content
+		if in.Images {
+			if name, ok := sectionImageTarget(sel, rep, in.DryRun); ok {
+				if d, err := sb.ReadSection(ctx, a, effID(in.InstanceID, bound), name, true); err == nil && len(d.Displays) > 0 {
+					suffixes, imgs := displayImages(ctx, ren, d.Displays)
+					for i, disp := range d.Displays {
+						b.WriteString("\n" + displayLine(disp, displaySuffix(suffixes, i)))
+					}
+					images = imgs
+				}
+			} else if sel.All || sel.Stale || len(sel.Names) != 1 {
+				b.WriteString("\nimages: pass a single section name to get images")
+			}
+		}
 		failed := rep.Restored
 		for _, r := range rep.Results {
 			if r.Status == "error" {
 				failed = true
 			}
 		}
+		content := append([]mcp.Content{&mcp.TextContent{Text: b.String()}}, images...)
 		if failed {
-			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: b.String()}}}, nil, nil
+			return &mcp.CallToolResult{IsError: true, Content: content}, nil, nil
 		}
-		return text(b.String()), nil, nil
+		return &mcp.CallToolResult{Content: content}, nil, nil
 	}
-	runDesc := "Run notebook sections in dependency order: sections is \"all\", \"stale\", one name, or a list of names. A run first executes every upstream section that is not fresh; bulk selections skip once-sections that already succeeded unless needed upstream; execution stops at the first failure and reports the rest not_run. Set dry_run to preview planned/reused/skipped without executing. On a lost instance the first run restores an EMPTY process and returns instance_restored without executing — call it again afterwards."
+	runDesc := "Run notebook sections in dependency order: sections is \"all\", \"stale\", one name, or a list of names. A run first executes every upstream section that is not fresh; bulk selections skip once-sections that already succeeded unless needed upstream; execution stops at the first failure and reports the rest not_run. Set dry_run to preview planned/reused/skipped without executing. Set images=true with a single section name to also get a PNG snapshot of that section's charts (requires a server-side renderer). On a lost instance the first run restores an EMPTY process and returns instance_restored without executing — call it again afterwards."
 	mcp.AddTool(srv, &mcp.Tool{Name: "run_sections", Description: runDesc}, runSections)
 	mcp.AddTool(srv, &mcp.Tool{Name: "add_section",
 		Description: "Create a NEW notebook section WITHOUT running it — fails if the name already exists (edit via exec with section metadata instead). Args: name ([a-z][a-z0-9_]{0,47}), description (required, one line), code (may be empty), optional rerun (safe|once) and after_section to insert after a named section. The current notebook revision is fetched server-side."},
@@ -387,6 +483,27 @@ func newServerMode(sb Sandbox, a service.Actor, bound string, boundIn *store.Ins
 	return srv
 }
 
+// sectionImageTarget reports whether a run_sections images=true request
+// can attach renders: the selection must be exactly one section name,
+// not a dry run, and that section's result must have produced output
+// (ok, error, or reused — the last two still carry last-run displays).
+func sectionImageTarget(sel sandbox.SectionSelector, rep *sandbox.RunReport, dryRun bool) (string, bool) {
+	if dryRun || sel.All || sel.Stale || len(sel.Names) != 1 {
+		return "", false
+	}
+	name := sel.Names[0]
+	for _, r := range rep.Results {
+		if r.Name == name {
+			switch r.Status {
+			case "ok", "error", "reused":
+				return name, true
+			}
+			return "", false
+		}
+	}
+	return "", false
+}
+
 // parseSections normalizes the run tool's sections argument: "all",
 // "stale", a single name, or a list of names.
 func parseSections(raw json.RawMessage) (sandbox.SectionSelector, error) {
@@ -430,13 +547,14 @@ func firstLine(s string) string {
 
 // Handler returns the /mcp handler. It requires a restricted API key:
 // the api layer resolves the principal; anything else is rejected.
-func Handler(sb Sandbox) http.Handler {
+// r is the optional chart renderer for images=true tool arguments.
+func Handler(sb Sandbox, ren Renderer) http.Handler {
 	h := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		p := auth.FromContext(r.Context())
 		if p == nil {
 			return nil
 		}
-		return newServer(sb, p.Actor())
+		return newServer(sb, p.Actor(), ren)
 	}, &mcp.StreamableHTTPOptions{Stateless: true, MaxRequestBodyBytes: sandbox.MaxCodeBytes + 64<<10})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := auth.FromContext(r.Context())
@@ -454,8 +572,9 @@ func Handler(sb Sandbox) http.Handler {
 }
 
 // InstanceHandler pins the session to one instance; any key with Run
-// on it (bound, restricted, full) may use it.
-func InstanceHandler(sb Sandbox, ac *access.Checker, instanceID string) http.Handler {
+// on it (bound, restricted, full) may use it. ren is the optional chart
+// renderer for images=true tool arguments.
+func InstanceHandler(sb Sandbox, ac *access.Checker, instanceID string, ren Renderer) http.Handler {
 	h := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		p := auth.FromContext(r.Context())
 		if p == nil {
@@ -471,7 +590,7 @@ func InstanceHandler(sb Sandbox, ac *access.Checker, instanceID string) http.Han
 		if pv != nil {
 			prompt = pv.Prompt
 		}
-		return newServerMode(sb, a, instanceID, in, prompt)
+		return newServerMode(sb, a, instanceID, in, prompt, ren)
 	}, &mcp.StreamableHTTPOptions{Stateless: true, MaxRequestBodyBytes: sandbox.MaxCodeBytes + 64<<10})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := auth.FromContext(r.Context())

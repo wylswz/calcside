@@ -132,6 +132,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		cleanup()
 		return nil, nil, err
 	}
+	renderer := provideRenderClient(cfg)
 	deps := api.Deps{
 		IAM:         iamService,
 		Vault:       service,
@@ -150,6 +151,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		Application: applicationService,
 		Run:         runService,
 		Module:      moduleService,
+		Render:      renderer,
 	}
 	googleFlow, err := provideGoogle(ctx, cfg)
 	if err != nil {

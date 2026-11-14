@@ -92,9 +92,11 @@ jobs:
           short="${SHA:0:12}"
           api="ghcr.io/${REPOSITORY}:${VERSION}"$'\n'"ghcr.io/${REPOSITORY}:sha-${short}"
           migrate="ghcr.io/${REPOSITORY}-migrate:${VERSION}"$'\n'"ghcr.io/${REPOSITORY}-migrate:sha-${short}"
+          render="ghcr.io/${REPOSITORY}-render:${VERSION}"$'\n'"ghcr.io/${REPOSITORY}-render:sha-${short}"
           if [[ "$VERSION" != *-* ]]; then
             api+=$'\n'"ghcr.io/${REPOSITORY}:latest"
             migrate+=$'\n'"ghcr.io/${REPOSITORY}-migrate:latest"
+            render+=$'\n'"ghcr.io/${REPOSITORY}-render:latest"
           fi
           {
             echo "api<<EOF"
@@ -102,6 +104,9 @@ jobs:
             echo "EOF"
             echo "migrate<<EOF"
             echo "$migrate"
+            echo "EOF"
+            echo "render<<EOF"
+            echo "$render"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
@@ -149,6 +154,25 @@ jobs:
           cache-to: type=gha,mode=max,scope=calcside-migrate
           provenance: true
           sbom: true
+      - name: Build and push render image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: render
+          file: docker/Dockerfile.render
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.render }}
+          labels: |
+            org.opencontainers.image.title=calcside-render
+            org.opencontainers.image.description=Vega-Lite to PNG renderer for calcside chart images
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha,scope=calcside-render
+          cache-to: type=gha,mode=max,scope=calcside-render
+          provenance: true
+          sbom: true
       - name: Write release summary
         env:
           VERSION: ${{ steps.meta.outputs.version }}
@@ -159,6 +183,7 @@ jobs:
             echo
             echo "- \`ghcr.io/${REPOSITORY}:${VERSION}\`"
             echo "- \`ghcr.io/${REPOSITORY}-migrate:${VERSION}\`"
+            echo "- \`ghcr.io/${REPOSITORY}-render:${VERSION}\`"
             echo "- platforms: linux/amd64, linux/arm64"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -224,5 +249,5 @@ jobs:
             echo "helm install calcside oci://ghcr.io/${OWNER}/charts/calcside --version ${VERSION}"
             echo "\`\`\`"
             echo
-            echo "Images: \`ghcr.io/${REPOSITORY}:${VERSION}\` and \`ghcr.io/${REPOSITORY}-migrate:${VERSION}\`."
+            echo "Images: \`ghcr.io/${REPOSITORY}:${VERSION}\`, \`ghcr.io/${REPOSITORY}-migrate:${VERSION}\` and \`ghcr.io/${REPOSITORY}-render:${VERSION}\`."
           } >> "$GITHUB_STEP_SUMMARY"

@@ -55,6 +55,9 @@ type Deps struct {
 	Workspace   *workspacesvc.Service
 	Access      *access.Checker
 	Previews    *ArtifactPreviews
+	// Render is the optional calcside-render client for MCP images
+	// (EP-0024); nil disables image output.
+	Render mcpapi.Renderer
 
 	Auth          *auth.Service
 	Basic         *auth.BasicLogin
@@ -242,10 +245,10 @@ func Handler(d Deps) http.Handler {
 	// Empty and single-slash cover the workspace endpoint; deeper paths
 	// 404 — streamable HTTP has no subpaths.
 	mcpGroup.Any("/instances/:id", func(c *gin.Context) {
-		mcpapi.InstanceHandler(d.Sandbox, d.Access, c.Param("id")).ServeHTTP(c.Writer, c.Request)
+		mcpapi.InstanceHandler(d.Sandbox, d.Access, c.Param("id"), d.Render).ServeHTTP(c.Writer, c.Request)
 	})
-	mcpGroup.Any("", gin.WrapH(mcpapi.Handler(d.Sandbox)))
-	mcpGroup.Any("/", gin.WrapH(mcpapi.Handler(d.Sandbox)))
+	mcpGroup.Any("", gin.WrapH(mcpapi.Handler(d.Sandbox, d.Render)))
+	mcpGroup.Any("/", gin.WrapH(mcpapi.Handler(d.Sandbox, d.Render)))
 
 	r.NoRoute(d.noRoute())
 	return d.Previews.Wrap(r)

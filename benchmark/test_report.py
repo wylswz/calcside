@@ -4,7 +4,7 @@ import pathlib
 import tempfile
 import unittest
 
-from report import OPERATIONS, render, valid_summary
+from report import OPERATIONS, STAGES, render, valid_summary
 
 
 def summary(scenario, modern=False):
@@ -63,7 +63,7 @@ class ReportTests(unittest.TestCase):
                 "p95_limit_ms": "2000", "runs": [],
             }
             for stage in ("integration", "performance"):
-                for scenario in OPERATIONS:
+                for scenario in STAGES[stage]:
                     filename = f"{stage}-{scenario}.json"
                     (root / filename).write_text(json.dumps(summary(scenario)))
                     data["runs"].append({

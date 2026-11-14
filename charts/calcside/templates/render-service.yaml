@@ -1,0 +1,17 @@
+{{- if .Values.render.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "calcside.fullname" . }}-render
+  labels:
+    {{- include "calcside.render.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8091
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "calcside.render.selectorLabels" . | nindent 4 }}
+{{- end }}
