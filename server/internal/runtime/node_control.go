@@ -50,11 +50,14 @@ type NodeIdentity struct {
 	Incarnation int64  `json:"incarnation"`
 }
 
-// NodeRegisterRequest announces a fresh worker boot.
+// NodeRegisterRequest announces a fresh worker boot. Addr is the
+// endpoint the worker advertises for itself; the API shape-validates
+// and persists it — the shared HMAC key is the enrollment boundary.
 type NodeRegisterRequest struct {
 	NodeID   string `json:"node_id"`
 	BootID   string `json:"boot_id"`
 	Capacity int    `json:"capacity"`
+	Addr     string `json:"addr,omitempty"`
 }
 
 // NodeRegisterResponse returns the assigned incarnation and server
@@ -166,12 +169,13 @@ func (r NodePrepareResponse) LogValue() slog.Value {
 }
 
 func (r NodeRegisterRequest) String() string {
-	return fmt.Sprintf("NodeRegister{node=%s boot=%s capacity=%d}", r.NodeID, r.BootID, r.Capacity)
+	return fmt.Sprintf("NodeRegister{node=%s boot=%s capacity=%d addr=%s}", r.NodeID, r.BootID, r.Capacity, r.Addr)
 }
 
 func (r NodeRegisterRequest) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.String("node_id", r.NodeID),
 		slog.String("boot_id", r.BootID),
-		slog.Int("capacity", r.Capacity))
+		slog.Int("capacity", r.Capacity),
+		slog.String("addr", r.Addr))
 }

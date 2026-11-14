@@ -117,11 +117,11 @@ export async function startApplicationRuntime(opts: { secretKey?: string; secret
   const apiArgs = ['serve', '--dev', '--store', 'sqlite', '--dsn', db,
     '--addr', `127.0.0.1:${apiPort}`, '--console-origin', viteURL,
     '--max-instances-per-user', '100',
-    '--workers', `w1=${workerAddr}`, '--worker-key', key,
+    '--worker-key', key,
     '--ext-local-roots', extRoot, '--ext-cache-dir', join(dir, 'apicache')]
   if (opts.secretKey) apiArgs.push('--secret-key', opts.secretKey)
   const workerArgs = ['serve', '--listen', workerAddr, '--api-addr', proxyURL,
-    '--shared-key', key, '--node-id', 'w1',
+    '--shared-key', key, '--node-id', 'w1', '--advertise-addr', workerAddr,
     '--ext-cache-dir', join(dir, 'workercache'),
     '--instance-memory-max', '0']
   if (opts.secretsAllowHTTP) { apiArgs.push('-secrets-allow-http'); workerArgs.push('-secrets-allow-http') }
@@ -146,7 +146,9 @@ export async function startApplicationRuntime(opts: { secretKey?: string; secret
     }
   }
   await wait200(`${apiURL}/healthz`, 'api')
-  await wait200(`http://${workerAddr}/healthz`, 'worker')
+  // readyz = registered with the API, not merely alive — placement
+  // only sees self-registered workers.
+  await wait200(`http://${workerAddr}/readyz`, 'worker')
   {
     const c = await request.newContext({ baseURL: viteURL })
     const t0 = Date.now()
@@ -168,12 +170,15 @@ export async function startApplicationRuntime(opts: { secretKey?: string; secret
       await stop(worker)
       if (emptyCache) await rm(join(dir, 'workercache'), { recursive: true, force: true })
       worker = start(workerBin, workerArgs, 'worker2')
-      await wait200(`http://${workerAddr}/healthz`, 'worker-restart')
+      await wait200(`http://${workerAddr}/readyz`, 'worker-restart')
     },
     async restartAPI() {
       await stop(api)
       api = start(apiBin, apiArgs, 'api2')
       await wait200(`${apiURL}/healthz`, 'api-restart')
+      // The surviving worker must re-confirm its heartbeat before
+      // bound instances are safe to call again.
+      await wait200(`http://${workerAddr}/readyz`, 'worker-after-api-restart')
     },
     async close() {
       proxy.closeAllConnections?.()

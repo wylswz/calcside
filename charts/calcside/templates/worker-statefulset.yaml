@@ -22,7 +22,9 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       annotations:
-        checksum/config: {{ toYaml (dict "limits" .Values.limits "worker" .Values.worker "config" .Values.config "secrets" .Values.secrets) | sha256sum }}
+        # replicaCount is omitted: scaling the StatefulSet must not
+        # roll existing worker pods — membership is self-registration.
+        checksum/config: {{ toYaml (dict "limits" .Values.limits "worker" (omit .Values.worker "replicaCount") "config" .Values.config "secrets" .Values.secrets) | sha256sum }}
         {{- with .Values.worker.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -73,6 +75,16 @@ spec:
                   key: worker-shared-key
             - name: CALCSIDE_API_ADDR
               value: {{ printf "http://%s:%v" (include "calcside.fullname" .) .Values.service.port | quote }}
+            # Self-registration: the pod advertises its own IP:port to
+            # the API over the signed control channel — no static
+            # worker list and no DNS discovery. CALCSIDE_POD_IP must
+            # precede the advertise var that expands it.
+            - name: CALCSIDE_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: CALCSIDE_WORKER_ADVERTISE_ADDR
+              value: "[$(CALCSIDE_POD_IP)]:8090"
             - name: CALCSIDE_INSTANCE_MEMORY_MAX
               value: {{ .Values.worker.instanceMemoryMax | int64 | quote }}
             {{- with .Values.worker.instanceCgroupParent }}
@@ -124,8 +136,10 @@ spec:
             periodSeconds: 2
             failureThreshold: 30
           readinessProbe:
+            # readyz = registered + heartbeating with the API; a pod
+            # that is merely alive is not schedulable.
             httpGet:
-              path: /healthz
+              path: /readyz
               port: worker
             periodSeconds: 10
             timeoutSeconds: 3

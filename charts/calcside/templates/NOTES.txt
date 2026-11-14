@@ -26,9 +26,13 @@ WARNING: multiple API replicas share one data volume. Use a ReadWriteMany
 storage class, or set persistence.enabled=false when you only need the database.
 {{- end }}
 
-Workers are addressed by stable StatefulSet pod name. Scaling the StatefulSet
-down deletes the instances bound to the removed pod; their TTL will clean up
-the database records. Scaling up changes the API worker list and rolls the API.
+Workers are a StatefulSet; each pod's name is its node ID and it
+self-registers with the API over the signed control channel, advertising
+its pod IP. Scaling the StatefulSet needs no API change: new pods register
+on boot and the shared database is the membership authority for every API
+replica. Scaling down deletes the instances bound to the removed pod; their
+TTL will clean up the database records. Worker loss orphans in-memory state —
+bound instances are not migrated to another worker.
 
 {{- if not .Values.config.adminUsername }}
 

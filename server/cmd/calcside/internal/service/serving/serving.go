@@ -22,6 +22,7 @@ import (
 	"unicode/utf8"
 
 	"calcside/cmd/calcside/internal/scheduler"
+	"calcside/internal/placement"
 	"calcside/internal/runtime"
 	"calcside/internal/store"
 )
@@ -53,7 +54,8 @@ type Options struct {
 	// Secrets resolves release vault refs at prepare time; may be nil
 	// only when no release can carry secrets.
 	Secrets SecretResolver
-	// Scheduler owns the node allowlist, placement and replica claims.
+	// Scheduler owns placement and replica claims over the shared
+	// registered-node membership.
 	Scheduler *scheduler.Scheduler
 	// GlobalPolicies are the server's own policy modules, applied
 	// alongside (never instead of) the release's.
@@ -104,16 +106,19 @@ func validID(s string) bool { return s != "" && len(s) <= maxIDLen }
 
 // RegisterNode announces a worker boot. The same boot re-registers
 // idempotently with the same incarnation; a new boot bumps it; an old
-// boot is rejected forever. The configured address wins — the request
-// never carries one.
+// boot is rejected forever. Workers self-register: the advertised addr
+// is shape-validated and persisted — the shared HMAC key is the
+// enrollment boundary, so any syntactically valid host:port a trusted
+// member advertises (pod IP, service name, port mapping) becomes the
+// endpoint every API dials.
 func (s *Service) RegisterNode(ctx context.Context, req *runtime.NodeRegisterRequest) (*runtime.NodeRegisterResponse, error) {
 	if req == nil || !validID(req.NodeID) || !validID(req.BootID) ||
 		req.Capacity < 1 || req.Capacity > maxCapacity {
 		return nil, bad("invalid node registration")
 	}
-	addr, ok := s.o.Scheduler.Addr(req.NodeID)
-	if !ok {
-		return nil, bad("unknown node")
+	addr, err := placement.NormalizeNodeAddr(req.Addr)
+	if err != nil {
+		return nil, bad("invalid advertised address")
 	}
 	now := s.o.Now()
 	n, err := s.o.Store.RegisterServingNode(ctx, &store.ServingNode{
@@ -188,9 +193,9 @@ func (s *Service) SyncNode(ctx context.Context, req *runtime.NodeSyncRequest) (*
 		len(req.Inventory) > maxCapacity || len(req.Reports) > maxReports {
 		return nil, bad("invalid sync")
 	}
-	if !s.o.Scheduler.Known(req.Node.NodeID) {
-		return nil, bad("unknown node")
-	}
+	// There is no allowlist: the exact stored node/boot/incarnation
+	// fence in HeartbeatServingNode below is the admission check, so
+	// an unknown or superseded tuple can never enroll via sync.
 	if req.Capacity < 1 || req.Capacity > maxCapacity {
 		return nil, bad("invalid capacity")
 	}
@@ -398,8 +403,8 @@ func (s *Service) SyncNode(ctx context.Context, req *runtime.NodeSyncRequest) (*
 	}, nil
 }
 
-// Reconcile runs one scheduler pass over persistent instances. The
-// scheduler serializes passes and claims at most one replica.
+// Reconcile runs one scheduler pass over persistent instances: every
+// enabled instance is topped up to one prepared replica per live node.
 func (s *Service) Reconcile(ctx context.Context) error {
 	if err := s.o.Scheduler.Reconcile(ctx); err != nil {
 		return ctxErr(ctx, errInternal)
@@ -414,9 +419,6 @@ func (s *Service) PrepareReplica(ctx context.Context, req *runtime.NodePrepareRe
 	if req == nil || !validID(req.Node.NodeID) || !validID(req.Node.BootID) ||
 		req.Node.Incarnation <= 0 || !validID(req.Assignment.ReplicaID) {
 		return nil, bad("invalid prepare request")
-	}
-	if !s.o.Scheduler.Known(req.Node.NodeID) {
-		return nil, bad("unknown node")
 	}
 	now := s.o.Now()
 	// Current node must be live.

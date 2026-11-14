@@ -106,20 +106,6 @@ app.kubernetes.io/component: render
 {{- end -}}
 
 {{/*
-API -> worker address list. Worker node IDs are StatefulSet pod names.
-*/}}
-{{- define "calcside.workerNodes" -}}
-{{- $fullname := include "calcside.fullname" . -}}
-{{- $service := printf "%s-worker" $fullname -}}
-{{- $nodes := list -}}
-{{- range $i := until (int .Values.worker.replicaCount) -}}
-{{- $pod := printf "%s-%d" $service $i -}}
-{{- $nodes = append $nodes (printf "%s=%s.%s.%s.svc:8090" $pod $pod $service $.Release.Namespace) -}}
-{{- end -}}
-{{- join "," $nodes -}}
-{{- end -}}
-
-{{/*
 Fail early on combinations that cannot work.
 */}}
 {{- define "calcside.validate" -}}

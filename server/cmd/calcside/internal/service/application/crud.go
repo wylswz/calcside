@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"calcside/cmd/calcside/internal/service"
@@ -38,6 +39,10 @@ type Service struct {
 	o Options
 	// testSlots bounds concurrent ephemeral Test admissions.
 	testSlots chan struct{}
+	// rr round-robins invoke selection across each pin's ready replica
+	// pool — keyed by pin id so interleaved apps never alias workers.
+	// Process-local only; bindings/leases stay the shared authority.
+	rr sync.Map
 }
 
 func New(o Options) (*Service, error) {
@@ -278,6 +283,9 @@ func (s *Service) Delete(ctx context.Context, a service.Actor, id string, versio
 				_, _ = s.o.Store.CancelRun(ctx, r.ID, s.o.Now().UTC())
 			}
 		}
+	}
+	if app.PersistentInstanceID != "" {
+		s.rr.Delete(app.PersistentInstanceID)
 	}
 	return nil
 }

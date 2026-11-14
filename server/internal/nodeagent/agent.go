@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"calcside/internal/placement"
 	"calcside/internal/runtime"
 )
 
@@ -34,8 +35,12 @@ type Options struct {
 	Runtime runtime.Runtime
 	// NodeID and BootID are fixed for this process — the agent never
 	// mints a new boot.
-	NodeID, BootID        string
-	Capacity              int
+	NodeID, BootID string
+	Capacity       int
+	// AdvertiseAddr is the endpoint sent in the signed registration,
+	// canonicalized host:port. Empty disables advertisement — a unit
+	// seam only; the worker config requires it.
+	AdvertiseAddr         string
 	PollInterval          time.Duration
 	CallTimeout           time.Duration
 	MaxConcurrentPrepares int
@@ -63,6 +68,7 @@ type Agent struct {
 	retired map[string]struct{}
 	slots   int
 	closing bool
+	ready   atomic.Bool // API contact confirmed: registered + last sync ok
 
 	wg   sync.WaitGroup
 	sem  chan struct{}
@@ -79,6 +85,13 @@ func New(o Options) (*Agent, error) {
 	}
 	if o.Capacity < 1 || o.Capacity > 128 {
 		return nil, errors.New("nodeagent: capacity out of range")
+	}
+	if o.AdvertiseAddr != "" {
+		addr, err := placement.NormalizeNodeAddr(o.AdvertiseAddr)
+		if err != nil {
+			return nil, fmt.Errorf("nodeagent: invalid advertise addr: %w", err)
+		}
+		o.AdvertiseAddr = addr
 	}
 	if o.PollInterval <= 0 {
 		o.PollInterval = 5 * time.Second
@@ -123,6 +136,12 @@ func terminal(err error) bool {
 		errors.Is(err, runtime.ErrNotFound)
 }
 
+// Ready reports whether the node has confirmed API contact: it
+// registered and the most recent sync heartbeat succeeded. It is
+// cleared on terminal failure, shutdown, or any sync error — an
+// orchestrator readiness probe must never perform I/O itself.
+func (a *Agent) Ready() bool { return a.ready.Load() }
+
 // Run registers the boot once, then syncs every PollInterval. Terminal
 // fence errors cancel all owned contexts and return; transient errors
 // never act as an authoritative empty set — owned contexts live until
@@ -132,6 +151,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		return errors.New("nodeagent: already running")
 	}
 	defer a.shutdown()
+	defer a.ready.Store(false)
 
 	// Register once: transient failures retry on the poll cadence;
 	// terminal fence errors end the run without re-registering.
@@ -141,7 +161,8 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 		cctx, cancel := context.WithTimeout(ctx, a.o.CallTimeout)
 		resp, err := a.o.Control.RegisterNode(cctx, &runtime.NodeRegisterRequest{
-			NodeID: a.o.NodeID, BootID: a.o.BootID, Capacity: a.o.Capacity})
+			NodeID: a.o.NodeID, BootID: a.o.BootID, Capacity: a.o.Capacity,
+			Addr: a.o.AdvertiseAddr})
 		cancel()
 		if err == nil && (resp == nil || resp.Node.NodeID != a.o.NodeID ||
 			resp.Node.BootID != a.o.BootID || resp.Node.Incarnation <= 0 || resp.ServerNow.IsZero()) {
@@ -149,6 +170,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 		if err == nil {
 			a.ident = resp.Node
+			a.ready.Store(true)
 			slog.Info("nodeagent registered", "node", a.ident.NodeID,
 				"incarnation", a.ident.Incarnation)
 			break
@@ -170,7 +192,12 @@ func (a *Agent) Run(ctx context.Context) error {
 	tick := time.NewTicker(a.o.PollInterval)
 	defer tick.Stop()
 	for {
-		if err := a.sync(ctx); err != nil {
+		err := a.sync(ctx)
+		// Any sync failure means the heartbeat went unconfirmed —
+		// readiness drops until the next successful sync, even for
+		// transient errors that the retry loop will absorb.
+		a.ready.Store(err == nil)
+		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}

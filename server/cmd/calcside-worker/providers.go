@@ -33,6 +33,9 @@ func provideNodeID(cfg config.WorkerConfig) (string, error) {
 	if cfg.APIAddr == "" {
 		return "", fmt.Errorf("--api-addr is required: the worker only reports back over node control")
 	}
+	if cfg.AdvertiseAddr == "" {
+		return "", fmt.Errorf("--advertise-addr is required: the API learns worker endpoints from registration")
+	}
 	id, err := nodeID(cfg)
 	if err != nil {
 		return "", err
@@ -125,7 +128,7 @@ func provideExtCache(cfg config.WorkerConfig, nodeID string) (*extcache.Cache, e
 }
 
 // provideServingAgent runs the node agent against the API's control
-// plane; without --api-addr the worker keeps legacy execution only.
+// plane; --api-addr is required, so every worker self-registers.
 func provideServingAgent(cfg config.WorkerConfig, nodeID string, rt runtime.Runtime) (*nodeagent.Agent, error) {
 	ctl, err := controlclient.New(cfg.APIAddr, nodeID, []byte(cfg.SharedKey), nil)
 	if err != nil {
@@ -139,16 +142,25 @@ func provideServingAgent(cfg config.WorkerConfig, nodeID string, rt runtime.Runt
 	slog.Info("serving node boot", "node_id", nodeID, "boot_id", boot)
 	return nodeagent.New(nodeagent.Options{
 		Control: ctl, Runtime: rt, NodeID: nodeID, BootID: boot,
-		Capacity: cap,
+		Capacity: cap, AdvertiseAddr: cfg.AdvertiseAddr,
 	})
 }
 
-func provideServer(cfg config.WorkerConfig, rt runtime.Runtime) *http.Server {
-	// /healthz is operational, not protocol: it lives outside the
-	// authenticated handler so orchestrators can probe without a key.
+func provideServer(cfg config.WorkerConfig, rt runtime.Runtime, agent *nodeagent.Agent) *http.Server {
+	// /healthz is liveness — the process is up. /readyz is readiness —
+	// the node agent has confirmed API registration/heartbeat, which is
+	// what placement actually needs; a merely-alive worker that never
+	// registered must not look ready. Neither endpoint calls the API.
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		if agent != nil && agent.Ready() {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
 	})
 	mux.Handle("/", remote.NewHandler(rt, []byte(cfg.SharedKey)))
 

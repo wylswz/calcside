@@ -315,8 +315,13 @@ func clonePolicies(p runtime.PolicyBundle) runtime.PolicyBundle {
 }
 
 // PersistentInstance is the desired logical instance the scheduler
-// reconciles. Generation bumps on enable/disable; LastEpoch fences
-// replica claims; ActiveReplicaID points at the ready replica.
+// reconciles. Generation bumps on enable/disable. LastEpoch is the
+// monotonic claim-allocation high-water mark — every issued replica
+// epoch is ≤ it, but it fences nothing by itself: several nodes may
+// hold simultaneous live replicas under distinct epochs. The runtime
+// must never treat it as an equality fence for replica eligibility.
+// ActiveReplicaID is a legacy diagnostic pointer to the most recent
+// ready report — never a routing or eligibility authority.
 type PersistentInstance struct {
 	ID              string            `json:"id"`
 	WorkspaceID     string            `json:"workspace_id"`
@@ -420,9 +425,16 @@ type ServingStore interface {
 	ClaimServingReplica(ctx context.Context, c ServingReplicaClaim) (*ServingReplica, error)
 	GetServingReplica(ctx context.Context, id string) (*ServingReplica, error)
 	// GetCurrentServingReplica returns the replica claimed at the
-	// instance's current last_epoch — the scheduler's unlocked
-	// snapshot; Claim remains the CAS authority.
+	// instance's last-allocated epoch — a diagnostic snapshot only,
+	// NOT scheduler or routing authority: the replica pool spans
+	// nodes, so eligibility comes from ListInstanceServingReplicas.
 	GetCurrentServingReplica(ctx context.Context, instanceID string) (*ServingReplica, error)
+	// ListInstanceServingReplicas returns the instance's live
+	// non-terminal replicas (preparing/ready, lease unexpired) across
+	// ALL generations, boots, incarnations and releases, sorted by id.
+	// Old-generation rows are included on purpose: their leases still
+	// block their node until expiry, and callers filter what they need.
+	ListInstanceServingReplicas(ctx context.Context, instanceID string, now time.Time) ([]*ServingReplica, error)
 	// InsertServingAuditEvents is the report path: identical
 	// validation to InsertAuditEvents but ON CONFLICT(id) DO NOTHING
 	// per event so deterministic ids dedup report retries.

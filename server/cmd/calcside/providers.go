@@ -103,39 +103,32 @@ func provideRegistry(repo *extensions.Repository) *capability.Registry {
 	return reg
 }
 
-// provideScheduler builds the deploy-time placement authority used by
-// fresh instance placement and persistent reconcile passes.
+// provideScheduler builds the placement authority used by fresh
+// instance placement and persistent reconcile passes. Membership is
+// always the store's self-registered serving_nodes — there is no
+// static worker list.
 func provideScheduler(cfg config.Config, st store.Store) (*scheduler.Scheduler, error) {
-	refs, err := config.ParseWorkers(cfg.Workers)
-	if err != nil {
-		return nil, err
-	}
-	nodes := map[string]string{}
-	for _, r := range refs {
-		nodes[r.NodeID] = r.Addr
-	}
-	slog.Info("remote execution tier", "workers", len(nodes))
+	slog.Info("remote execution tier", "membership", "self-registered")
 	return scheduler.New(scheduler.Options{
-		Store: st, Nodes: nodes,
+		Store:         st,
 		LeaseDuration: 30 * time.Second, NodeTTL: 45 * time.Second,
 	})
 }
 
 func provideRuntime(cfg config.Config, st store.Store, sch *scheduler.Scheduler) (runtime.Runtime, func(), error) {
 	// The API tier never executes code — every call forwards to a
-	// remote worker node; --workers/--worker-key are required.
+	// remote worker node; --worker-key is required and workers
+	// self-register their endpoints. Node membership always comes from
+	// the scheduler so a new worker is eligible without any API
+	// config reload.
 	if cfg.WorkerKey == "" {
 		return nil, nil, fmt.Errorf("--worker-key is required")
-	}
-	refs, err := config.ParseWorkers(cfg.Workers)
-	if err != nil {
-		return nil, nil, err
 	}
 	client := worker.NewClient(
 		[]byte(cfg.WorkerKey),
 		"api",
 		sch,
-		func(context.Context) ([]placement.NodeRef, error) { return refs, nil },
+		sch.Nodes,
 		func(ctx context.Context, id string) (*placement.Binding, error) {
 			if strings.HasPrefix(id, string(store.PrefixServingReplica)) {
 				// Persistent replica: route only to the node that
@@ -152,11 +145,14 @@ func provideRuntime(cfg config.Config, st store.Store, sch *scheduler.Scheduler)
 				if err != nil {
 					return nil, err
 				}
+				// Any ready replica of the current generation on a
+				// live node boot is eligible — the pool has no single
+				// active pointer; epochs only need to be allocated.
 				current := rep.State == store.ServingReplicaReady &&
+					rep.Epoch > 0 && rep.Epoch <= inst.LastEpoch &&
 					rep.LeaseUntil.After(time.Now()) &&
 					inst.Enabled && inst.Generation == rep.Generation &&
-					inst.ReleaseID == rep.ReleaseID &&
-					inst.ActiveReplicaID == rep.ID
+					inst.ReleaseID == rep.ReleaseID
 				for _, n := range live {
 					if n.NodeID == rep.NodeID && n.BootID == rep.BootID &&
 						n.Incarnation == rep.NodeIncarnation && current {
@@ -286,14 +282,13 @@ func provideServer(cfg config.Config, st store.Store, deps api.Deps, flow *auth.
 	deps.GoogleEnabled = flow != nil
 	svc := deps.Auth
 	mux := api.Handler(deps)
-	if cfg.Workers != "" {
-		// The api-callback surface (ext tree + node control) is signed
-		// with the same shared key as the runtime protocol.
-		mux2 := http.NewServeMux()
-		mux2.Handle("/internal/v1/", extensions.WithControl(st, []byte(cfg.WorkerKey), sctl))
-		mux2.Handle("/", mux)
-		mux = mux2
-	}
+	// The api-callback surface (ext tree + node control) is signed
+	// with the same shared key as the runtime protocol — always
+	// mounted because workers self-register through it.
+	mux2 := http.NewServeMux()
+	mux2.Handle("/internal/v1/", extensions.WithControl(st, []byte(cfg.WorkerKey), sctl))
+	mux2.Handle("/", mux)
+	mux = mux2
 	if flow != nil {
 		flow.Bind(svc)
 		mux2 := http.NewServeMux()

@@ -1,0 +1,135 @@
+{
+  "expansion_observations": [
+    {
+      "workers": 2,
+      "first_full_pool_sample_after_request_s": 3.227,
+      "sample_at": "2026-11-14T13:59:07.029847+00:00"
+    },
+    {
+      "workers": 3,
+      "first_full_pool_sample_after_request_s": 1.751,
+      "sample_at": "2026-11-14T14:06:54.415136+00:00"
+    }
+  ],
+  "pool_growth": [
+    {
+      "workers": 2,
+      "old_count": 2,
+      "new_count": 4,
+      "all_existing_replica_ids_preserved": true
+    },
+    {
+      "workers": 3,
+      "old_count": 4,
+      "new_count": 6,
+      "all_existing_replica_ids_preserved": true
+    }
+  ],
+  "fault": {
+    "paused_s": 59.714,
+    "first_two_replica_pool_sample_after_pause_s": 30.691,
+    "first_three_replica_pool_sample_after_resume_s": 1.824,
+    "sample_interval_s": 5,
+    "cases": [
+      {
+        "name": "pause-w3-io-v12-verified",
+        "latency_all_ms": {
+          "min": 110,
+          "med": 435,
+          "max": 15004,
+          "p(95)": 684.7999999999998,
+          "p(99)": 3019.079999999698,
+          "avg": 604.8012578616352
+        },
+        "completed_rps": 19.58329534456049
+      },
+      {
+        "name": "recovery-w3-io-v12-verified",
+        "latency_all_ms": {
+          "avg": 413.56849315068496,
+          "min": 120,
+          "med": 415,
+          "max": 539,
+          "p(95)": 518,
+          "p(99)": 526.25
+        },
+        "completed_rps": 28.7675007632747
+      }
+    ]
+  },
+  "existing_pods": [
+    {
+      "pod": "calcside-786cf4567c-86t4v",
+      "uid_unchanged": true,
+      "restart_delta": 0
+    },
+    {
+      "pod": "calcside-786cf4567c-jxvhl",
+      "uid_unchanged": true,
+      "restart_delta": 0
+    },
+    {
+      "pod": "calcside-render-75f9fd7fcc-bzzn9",
+      "uid_unchanged": true,
+      "restart_delta": 0
+    },
+    {
+      "pod": "calcside-worker-0",
+      "uid_unchanged": true,
+      "restart_delta": 0
+    },
+    {
+      "pod": "postgres-8bdbddcb4-nxffn",
+      "uid_unchanged": true,
+      "restart_delta": 0
+    },
+    {
+      "pod": "scalability-delay-669f9c88d4-th4hq",
+      "uid_unchanged": true,
+      "restart_delta": 0
+    },
+    {
+      "pod": "scalability-proxy-64d48b7fff-2wn67",
+      "uid_unchanged": true,
+      "restart_delta": 0
+    }
+  ],
+  "io_v24_worker_counts": [
+    {
+      "workers": 1,
+      "worker_counts": [
+        616,
+        0,
+        0
+      ],
+      "api_counts": [
+        310,
+        306
+      ]
+    },
+    {
+      "workers": 2,
+      "worker_counts": [
+        595,
+        595,
+        0
+      ],
+      "api_counts": [
+        596,
+        594
+      ]
+    },
+    {
+      "workers": 3,
+      "worker_counts": [
+        588,
+        589,
+        588
+      ],
+      "api_counts": [
+        882,
+        883
+      ]
+    }
+  ]
+}

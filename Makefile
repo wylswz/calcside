@@ -98,6 +98,30 @@ helm-lint:
 	  echo "$$dis" | grep -q "CALCSIDE_RENDER" && \
 	    { echo "helm-lint: disabled render leaks CALCSIDE_RENDER_* env" >&2; exit 1; }; \
 	  echo "helm-lint: render on/off ok"
+	# Worker self-registration: scaling worker.replicaCount must not
+	# change the pod template (the checksum omits replicaCount) and the
+	# API carries no static worker list — it only holds the shared key.
+	# -s scopes the render so chart-generated Secrets can't diff.
+	@w1=$$(helm template calcside charts/calcside --namespace calcside -s templates/worker-statefulset.yaml --set worker.replicaCount=1); \
+	  w3=$$(helm template calcside charts/calcside --namespace calcside -s templates/worker-statefulset.yaml --set worker.replicaCount=3); \
+	  d1=$$(printf '%s\n' "$$w1" | grep -v 'replicas:'); \
+	  d3=$$(printf '%s\n' "$$w3" | grep -v 'replicas:'); \
+	  [ "$$d1" = "$$d3" ] || \
+	    { echo "helm-lint: worker.replicaCount changed pod templates" >&2; exit 1; }; \
+	  a1=$$(helm template calcside charts/calcside --namespace calcside -s templates/api-deployment.yaml --set worker.replicaCount=1); \
+	  a3=$$(helm template calcside charts/calcside --namespace calcside -s templates/api-deployment.yaml --set worker.replicaCount=3); \
+	  [ "$$a1" = "$$a3" ] || \
+	    { echo "helm-lint: worker.replicaCount changed the API deployment" >&2; exit 1; }; \
+	  api=$$(helm template calcside charts/calcside --namespace calcside -s templates/api-deployment.yaml); \
+	  printf '%s\n' "$$api" | grep -q 'CALCSIDE_WORKERS' && \
+	    { echo "helm-lint: static CALCSIDE_WORKERS still rendered" >&2; exit 1; }; \
+	  printf '%s\n' "$$api" | grep -q 'CALCSIDE_WORKER_DISCOVERY' && \
+	    { echo "helm-lint: CALCSIDE_WORKER_DISCOVERY still rendered" >&2; exit 1; }; \
+	  printf '%s\n' "$$w1" | grep -q 'CALCSIDE_WORKER_ADVERTISE_ADDR' && \
+	  printf '%s\n' "$$w1" | grep -q 'status.podIP' && \
+	  printf '%s\n' "$$w1" | grep -q '/readyz' || \
+	    { echo "helm-lint: worker registration env or /readyz probe missing" >&2; exit 1; }; \
+	  echo "helm-lint: worker registration ok"
 
 # calcside-render unit tests (Node built-in runner).
 render-test:
@@ -210,6 +234,7 @@ dev:
 	( bin/calcside-worker-dev serve --listen 127.0.0.1:$(DEV_WORKER_PORT) \
 	    --node-id $(DEV_WORKER_ID) --shared-key $(DEV_WORKER_KEY) \
 	    --api-addr http://127.0.0.1:$(DEV_API_PORT) \
+	    --advertise-addr 127.0.0.1:$(DEV_WORKER_PORT) \
 	    --net-allow-cidrs=$(DEV_NET_ALLOW_CIDRS) ) & \
 	worker_pid=$$!; \
 	healthy=0; \
@@ -230,7 +255,6 @@ dev:
 	    --policy-dir server/policies/examples --secret-key $(CALCSIDE_SECRET_KEY) \
 	    --dsn $(DEV_DSN) --ext-local-roots $(DEV_EXT_ROOTS) \
 	    --net-allow-cidrs=$(DEV_NET_ALLOW_CIDRS) \
-	    --workers $(DEV_WORKER_ID)=127.0.0.1:$(DEV_WORKER_PORT) \
 	    --worker-key $(DEV_WORKER_KEY) \
 	    --render-url http://127.0.0.1:$(DEV_RENDER_PORT) \
 	    --render-key $(DEV_RENDER_KEY) ) & \
@@ -247,6 +271,19 @@ dev:
 	done; \
 	if [ $$healthy -ne 1 ]; then \
 	  echo "make dev: backend did not answer /healthz within 60s" >&2; exit 1; \
+	fi; \
+	ready=0; \
+	for i in $$(seq 1 240); do \
+	  if ! kill -0 $$worker_pid 2>/dev/null; then \
+	    echo "make dev: worker exited before registering" >&2; exit 1; \
+	  fi; \
+	  if curl -sf http://127.0.0.1:$(DEV_WORKER_PORT)/readyz >/dev/null 2>&1; then \
+	    ready=1; break; \
+	  fi; \
+	  sleep 0.25; \
+	done; \
+	if [ $$ready -ne 1 ]; then \
+	  echo "make dev: worker did not register with the API within 60s" >&2; exit 1; \
 	fi; \
 	( if [ ! -d web/node_modules ]; then pnpm -C web install --frozen-lockfile; fi; \
 	  pnpm -C web dev ) & \
@@ -280,6 +317,7 @@ serve-dev:
 	( bin/calcside-worker-dev serve --listen 127.0.0.1:$(DEV_WORKER_PORT) \
 	    --node-id $(DEV_WORKER_ID) --shared-key $(DEV_WORKER_KEY) \
 	    --api-addr http://127.0.0.1:$(DEV_API_PORT) \
+	    --advertise-addr 127.0.0.1:$(DEV_WORKER_PORT) \
 	    --net-allow-cidrs=$(DEV_NET_ALLOW_CIDRS) ) & \
 	worker_pid=$$!; \
 	healthy=0; \
@@ -300,11 +338,23 @@ serve-dev:
 	  --policy-dir server/policies/examples --secret-key $(CALCSIDE_SECRET_KEY) \
 	  --dsn $(DEV_DSN) --ext-local-roots $(DEV_EXT_ROOTS) \
 	  --net-allow-cidrs=$(DEV_NET_ALLOW_CIDRS) \
-	  --workers $(DEV_WORKER_ID)=127.0.0.1:$(DEV_WORKER_PORT) \
 	  --worker-key $(DEV_WORKER_KEY) \
 	  --render-url http://127.0.0.1:$(DEV_RENDER_PORT) \
 	  --render-key $(DEV_RENDER_KEY) & \
 	api_pid=$$!; \
+	ready=0; \
+	for i in $$(seq 1 240); do \
+	  if ! kill -0 $$api_pid 2>/dev/null; then \
+	    echo "make serve-dev: backend exited before the worker registered" >&2; exit 1; \
+	  fi; \
+	  if curl -sf http://127.0.0.1:$(DEV_WORKER_PORT)/readyz >/dev/null 2>&1; then \
+	    ready=1; break; \
+	  fi; \
+	  sleep 0.25; \
+	done; \
+	if [ $$ready -ne 1 ]; then \
+	  echo "make serve-dev: worker did not register with the API within 60s" >&2; exit 1; \
+	fi; \
 	wait $$api_pid
 
 tidy:

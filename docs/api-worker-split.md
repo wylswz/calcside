@@ -10,6 +10,15 @@ store; `service/sandbox` owns all persistence, vault resolution, policy
 compilation, audit batch writes, and TTL expiry. This document covers what
 remains to put a network boundary between them.
 
+> **Status note:** this plan predates the shipped topology. Membership is
+> implemented as worker self-registration — each worker advertises a validated
+> `host:port` in its signed `NodeRegisterRequest` and the shared
+> `serving_nodes` table (boot/incarnation fences + 45s heartbeat TTL) is the
+> authority every API replica reads. There is no `--workers` static list and
+> no DNS discovery; the API requires only `--worker-key`, and each worker
+> requires `--api-addr` + `--shared-key` + `--advertise-addr`. See
+> `docs/execution-routing.md` for the current design.
+
 ## Decisions already made
 
 - No standalone gateway. API nodes are stateless peers and forward only

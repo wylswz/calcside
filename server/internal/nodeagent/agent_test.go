@@ -136,12 +136,15 @@ type fakeCtl struct {
 	onSync   func()
 	lastInv  []runtime.ReplicaAssignment
 	lastReq  *runtime.NodeSyncRequest
+	lastReg  *runtime.NodeRegisterRequest
 }
 
 func (f *fakeCtl) RegisterNode(ctx context.Context, r *runtime.NodeRegisterRequest) (*runtime.NodeRegisterResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.regs++
+	cp := *r
+	f.lastReg = &cp
 	if f.regErr != nil {
 		return nil, f.regErr
 	}
