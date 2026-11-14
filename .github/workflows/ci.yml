@@ -49,6 +49,22 @@ jobs:
           version: v3.19.0
       - run: make helm-lint
 
+  render:
+    name: Renderer tests (Node 22)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No Node action is pinned in this repo; run the suite in the same
+      # base image the release Dockerfile uses instead.
+      - name: Install deps and run render tests
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w node:22-alpine \
+            sh -c 'corepack enable && corepack prepare pnpm@10.33.0 --activate \
+              && pnpm -C render install --frozen-lockfile \
+              && pnpm -C render test'
+
   integration-cgroup:
     name: Integration (cgroup v2 memory limit)
     runs-on: ubuntu-24.04

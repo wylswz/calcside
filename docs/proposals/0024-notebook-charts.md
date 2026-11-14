@@ -1,8 +1,8 @@
 # EP-0024: Notebook charts — interactive console views and image snapshots for agents
 
-- **Status:** Phase 1 implemented (core constructors, `contrib/charts`,
-  `io.display`, storage, REST/MCP text, console); Phase 2 (renderer,
-  MCP images) not started
+- **Status:** Implemented (Phase 1: core constructors, `contrib/charts`,
+  `io.display`, storage, REST/MCP text, console; Phase 2: `calcside-render`,
+  MCP images, Compose/Helm/release wiring, release-gate case)
 - **Created:** 2026-11-13
 - **Area:** new pure `chart` stdlib module (spec constructors),
   `contrib/charts` extension (chart types), `io` capability (`io.display`),
@@ -212,7 +212,9 @@ agent.
 **Service.** A stateless Node 22 HTTP service in `render/`, with pinned
 `vega`, `vega-lite`, `vega-interpreter` and `@resvg/resvg-js`:
 
-- `POST /render` takes `{spec, scale}` and returns `image/png`. It
+- `POST /render` takes `{spec, scale?, max_side?}` and returns
+  `image/png`. `scale` defaults to 1 (clamped to [0.25, 4]); `max_side`
+  fits the longest side when the scaled result exceeds it. It
   compiles with Vega-Lite, renders with `view.toSVG()` (no
   node-canvas, interpreter expressions, deny-all loader), then
   rasterizes with resvg using only embedded fonts and no system font
@@ -239,15 +241,16 @@ falls back to text.
   `read_section(include_output)` append one `ImageContent` (PNG) per
   display after the text block. The text gets a line such as
   `displayed: "p95 latency" (line, 365 rows) [image 1]`.
-- New optional tool argument `images` (default set by the pre-Phase-2
-  measurement, see *Decisions*). `images=false` returns only the text line, for
-  token-sensitive loops.
+- New optional tool argument `images` (default `false` pending the
+  pre-Phase-2 measurement, see *Decisions*). `images=false` returns only
+  the text line, for token-sensitive loops.
 - Renderer failure or no renderer: the text line plus a compact
   summary per display (mark, fields, row count, per-field min/max
   computed from `values`). The result is never `IsError`, because the
   exec itself succeeded.
 - The scale is chosen so the longest side is ≤ 1,024 px, which keeps
-  image token cost predictable.
+  image token cost predictable. The API sends `scale: 2,
+  max_side: 1024` — 2× rasterization for legibility, then the side cap.
 
 **Deployment.**
 
@@ -339,10 +342,10 @@ MCP instructions golden is updated.
 - **Inline rendering on the console origin.** Validated specs carry no
   URLs, expressions or HTML, so they are data rendered by a reviewed
   library — not agent markup — and need no preview-origin iframe.
-- **`images` default is decided by measurement.** Before Phase 2 ships,
-  run a small task set (anomaly detection, checking a report chart,
-  distribution shape) with and without images; the default follows the
-  result.
+- **`images` defaults to `false` until measured.** Phase 2 shipped with
+  the conservative default (text-only) so token cost never grows
+  silently; the task-set measurement can flip the default later without
+  an API change.
 
 ## Open questions
 

@@ -17,7 +17,7 @@ and the TEST_PG_* variables to target an existing database instead:
   TEST_PG_PASSWORD (generated; reused from the postgres-test Secret on rerun)
   TEST_PG_SSLMODE (default "disable")
   TEST_ADMIN_USERNAME (default "admin")    TEST_ADMIN_PASSWORD (generated)
-  TEST_WORKER_KEY / TEST_VAULT_KEY (generated; reused from the live release)
+  TEST_WORKER_KEY / TEST_VAULT_KEY / TEST_RENDER_KEY (generated; reused from the live release)
   TEST_CONSOLE_ORIGIN (default "http://localhost:8080")
   TEST_API_REPLICAS (default 1)            TEST_PERSISTENCE (default "true")
   TEST_SERVICE_TYPE (default "ClusterIP", e.g. "LoadBalancer")
@@ -178,12 +178,14 @@ def gen_values(cfg):
         "config": {"consoleOrigin": cfg["console_origin"],
                    "adminUsername": cfg["admin_user"]},
         "secrets": {"workerSharedKey": cfg["worker_key"],
+                    "renderKey": cfg["render_key"],
                     "secretKey": cfg["vault_key"],
                     "adminPassword": cfg["admin_password"]},
     }
     if cfg["image_tag"]:
         values["image"] = {"tag": cfg["image_tag"]}
         values["migrations"] = {"image": {"tag": cfg["image_tag"]}}
+        values["render"] = {"image": {"tag": cfg["image_tag"]}}
     return json.dumps(values, indent=2) + "\n"
 
 
@@ -226,6 +228,7 @@ def main():
         "admin_password": env.get("TEST_ADMIN_PASSWORD", ""),
         "worker_key": env.get("TEST_WORKER_KEY", ""),
         "vault_key": env.get("TEST_VAULT_KEY", ""),
+        "render_key": env.get("TEST_RENDER_KEY", ""),
     }
 
     # Reuse the running test database's password so redeploys keep working.
@@ -246,8 +249,11 @@ def main():
             cfg["namespace"], chart_secrets, "secret-key")
         cfg["admin_password"] = cfg["admin_password"] or read_secret(
             cfg["namespace"], chart_secrets, "admin-password")
+        cfg["render_key"] = cfg["render_key"] or read_secret(
+            cfg["namespace"], chart_secrets, "render-key")
     cfg["worker_key"] = cfg["worker_key"] or base64.b64encode(secrets.token_bytes(32)).decode()
     cfg["vault_key"] = cfg["vault_key"] or base64.b64encode(secrets.token_bytes(32)).decode()
+    cfg["render_key"] = cfg["render_key"] or base64.b64encode(secrets.token_bytes(32)).decode()
     cfg["admin_password"] = cfg["admin_password"] or secrets.token_hex(24)
 
     if args.uninstall:

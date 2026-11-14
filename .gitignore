@@ -1,6 +1,7 @@
 calcside.db*
 bin/
 web/node_modules
+render/node_modules
 web/dist/*
 !web/dist/README.txt
 calcside-dev.db*

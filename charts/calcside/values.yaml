@@ -212,13 +212,58 @@ worker:
   extraVolumeMounts: []
   extraEnv: []
 
+# Stateless Vega-Lite → PNG renderer for MCP chart images (EP-0024). The
+# API renders stored validated specs on demand; a renderer failure never
+# fails an exec — images=true calls degrade to a text summary.
+render:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/wylswz/calcside-render
+    tag: ""
+    pullPolicy: IfNotPresent
+  # Worker-thread render slots inside each pod.
+  concurrency: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  podAnnotations: {}
+  podLabels: {}
+  podSecurityContext:
+    fsGroup: 10001
+    fsGroupChangePolicy: OnRootMismatch
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+    runAsGroup: 10001
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  networkPolicy:
+    enabled: true
+  extraEnv: []
+
 secrets:
   # Use an existing Secret instead of chart-managed secrets. It must contain
-  # worker-shared-key, and any of secret-key, admin-password and
-  # google-client-secret that are in use.
+  # worker-shared-key, render-key (when render.enabled), and any of
+  # secret-key, admin-password and google-client-secret that are in use.
   existingSecret: ""
   # Generated (and preserved across upgrades) when left empty.
   workerSharedKey: ""
+  # Generated (and preserved across upgrades) when left empty; only used
+  # when render.enabled.
+  renderKey: ""
   # Base64-encoded 32-byte vault key. Enables the secrets vault when set.
   secretKey: ""
   # Bootstrap administrator password. Requires config.adminUsername.

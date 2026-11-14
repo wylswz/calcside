@@ -33,11 +33,20 @@ services:
       # shared HMAC key both sides must carry.
       CALCSIDE_WORKERS: ${CALCSIDE_WORKERS:-worker-1=worker:8090}
       CALCSIDE_WORKER_SHARED_KEY: ${CALCSIDE_WORKER_SHARED_KEY:?run `make docker-env` first, or set CALCSIDE_WORKER_SHARED_KEY}
+      # MCP chart images: the API renders stored validated specs on
+      # demand through the private render service (EP-0024).
+      CALCSIDE_RENDER_URL: http://render:8091
+      CALCSIDE_RENDER_KEY: ${CALCSIDE_RENDER_KEY:?run `make docker-env` first, or set CALCSIDE_RENDER_KEY}
     depends_on:
       migrate:
         condition: service_completed_successfully
       worker:
         condition: service_healthy
+      render:
+        condition: service_healthy
+    networks:
+      - default
+      - render-internal
     volumes:
       # Bind mount (host dir docker/data) holds the sqlite db plus all
       # mutable config — copy things straight in:
@@ -98,3 +107,32 @@ services:
       retries: 3
       start_period: 5s
     restart: unless-stopped
+
+  # Stateless Vega-Lite → PNG renderer for MCP chart images (EP-0024).
+  # Private only — no published port; it sits on a dedicated internal
+  # network with no egress and is reachable only from the API.
+  render:
+    build:
+      context: ../render
+      dockerfile: ../docker/Dockerfile.render
+    image: calcside-render:latest
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      CALCSIDE_RENDER_KEY: ${CALCSIDE_RENDER_KEY:?run `make docker-env` first, or set CALCSIDE_RENDER_KEY}
+    networks:
+      - render-internal
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+networks:
+  render-internal:
+    internal: true

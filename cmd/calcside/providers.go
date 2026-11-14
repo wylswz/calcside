@@ -16,6 +16,8 @@ import (
 	"calcside/cmd/calcside/internal/config"
 	"calcside/cmd/calcside/internal/extensions"
 	_ "calcside/cmd/calcside/internal/gormstore"
+	mcpapi "calcside/cmd/calcside/internal/mcp"
+	"calcside/cmd/calcside/internal/render"
 	"calcside/cmd/calcside/internal/scheduler"
 	"calcside/cmd/calcside/internal/service/access"
 	appsvc "calcside/cmd/calcside/internal/service/application"
@@ -315,6 +317,17 @@ func provideArtifacts(cfg config.Config, sbx *sandbox.Service) (*api.ArtifactPre
 		return nil, nil, err
 	}
 	return previews, previews.Close, nil
+}
+
+// provideRenderClient builds the MCP chart-image renderer client
+// (EP-0024). The return type is the interface so an unconfigured
+// renderer is a true nil — a typed-nil *render.Client would defeat the
+// mcp layer's nil check.
+func provideRenderClient(cfg config.Config) mcpapi.Renderer {
+	if cfg.RenderURL == "" {
+		return nil
+	}
+	return render.New(cfg.RenderURL, cfg.RenderKey)
 }
 
 func provideExtCatalog(repo *extensions.Repository) capext.CatalogProvider {

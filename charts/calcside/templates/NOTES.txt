@@ -12,6 +12,7 @@ Database:        {{ .Values.database.driver }}
 Migrations:      {{ if .Values.migrations.enabled }}Atlas init container on the API pod{{ else }}disabled (apply them yourself before rollout){{ end }}
 API replicas:    {{ .Values.replicaCount }}
 Worker replicas: {{ .Values.worker.replicaCount }} (StatefulSet)
+Renderer:        {{ if .Values.render.enabled }}Deployment {{ include "calcside.fullname" . }}-render (Service :8091){{ else }}disabled{{ end }}
 Data volume:     {{ if .Values.persistence.enabled }}{{ default (printf "%s-data" (include "calcside.fullname" .)) .Values.persistence.existingClaim }}{{ else }}emptyDir (data is lost when the API pod is replaced){{ end }}
 
 {{- if and (eq .Values.database.driver "sqlite") (not .Values.persistence.enabled) }}

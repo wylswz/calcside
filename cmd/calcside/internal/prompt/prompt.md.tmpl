@@ -24,7 +24,7 @@ These modules are available without capability grants, including inside extensio
 Call `print(help("module"))` for signatures before first use; `print(help("module.function"))` for details.
 
 ### Charts
-Build Vega-Lite specs with `chart.spec(mark, data=..., encoding=...)`, `chart.field(name, type, ...)` for channels, and `chart.layer`/`hconcat`/`vconcat` to combine specs; attach the result with `io.display(spec, title?)`. Charts show the shape of your data — use `stats` for the numbers. When the `charts` extension is granted, `ext.charts.line(...)`, `area`, `bar`, `scatter`, `histogram` and `heatmap` build ready-made specs. Over MCP, charts appear as a one-line summary for now.
+Build Vega-Lite specs with `chart.spec(mark, data=..., encoding=...)`, `chart.field(name, type, ...)` for channels, and `chart.layer`/`hconcat`/`vconcat` to combine specs; attach the result with `io.display(spec, title?)`. Charts show the shape of your data — use `stats` for the numbers. When the `charts` extension is granted, `ext.charts.line(...)`, `area`, `bar`, `scatter`, `histogram` and `heatmap` build ready-made specs. Over MCP each display returns a one-line summary; pass `images=true` to `exec`, `run_sections` (single section) or `read_section` to also get a PNG snapshot when you need a visual check (requires a server-side renderer; otherwise the summary says the image is unavailable).
 
 ### Notebook tools
 - `{{.Prefix}}notebook()` — the outline: every section's state (`not_run`/`fresh`/`stale`/`failed`), `defines`/`reads name ← provider`, observed effects, `blocked:` diagnostics, and next-step guidance. Read it before running or editing code you did not write this session.

@@ -14,7 +14,12 @@ from report import render
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SCENARIOS = ("lifecycle", "exec", "read")
+# chart (EP-0024 MCP image output) is an integration contract only — it is
+# not part of the timed performance gate.
+SCENARIOS = {
+    "integration": ("lifecycle", "exec", "read", "chart"),
+    "performance": ("lifecycle", "exec", "read"),
+}
 
 
 def run_case(stage, scenario, out, environment):
@@ -80,7 +85,7 @@ def run(args):
     manifest = out / "runs.json"
     manifest.write_text(json.dumps(metadata, indent=2) + "\n")
     for stage in ("integration", "performance"):
-        for scenario in SCENARIOS:
+        for scenario in SCENARIOS[stage]:
             metadata["runs"].append(run_case(stage, scenario, out, env))
             manifest.write_text(json.dumps(metadata, indent=2) + "\n")
         if any(case["exit_code"] != 0 for case in metadata["runs"]):

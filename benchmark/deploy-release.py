@@ -160,6 +160,7 @@ def write_credentials(state, image_tag, creds):
             ("TEST_ADMIN_PASSWORD", creds["admin_password"]),
             ("TEST_WORKER_KEY", creds["worker_key"]),
             ("TEST_VAULT_KEY", creds["vault_key"]),
+            ("TEST_RENDER_KEY", creds["render_key"]),
         ]))
     write_json_private(state / "credentials.json", {
         "admin_username": "admin",
@@ -167,6 +168,7 @@ def write_credentials(state, image_tag, creds):
         "pg_password": creds["pg_password"],
         "worker_key": creds["worker_key"],
         "vault_key": creds["vault_key"],
+        "render_key": creds["render_key"],
     })
 
 
@@ -176,6 +178,7 @@ def generate_credentials(state, image_tag):
         "admin_password": secrets.token_hex(24),
         "worker_key": secrets.token_hex(32),
         "vault_key": base64.b64encode(secrets.token_bytes(32)).decode(),
+        "render_key": secrets.token_hex(32),
     }
     # Mask before any subprocess runs so failure output can never echo them.
     for value in creds.values():
@@ -226,6 +229,7 @@ def deploy_kind(state, image_tag):
     run(["kind", "load", "docker-image",
          f"ghcr.io/wylswz/calcside:{image_tag}",
          f"ghcr.io/wylswz/calcside-migrate:{image_tag}",
+         f"ghcr.io/wylswz/calcside-render:{image_tag}",
          "--name", cluster], env=env)
 
     deploy_env = dict(
@@ -239,6 +243,7 @@ def deploy_kind(state, image_tag):
         TEST_PG_PASSWORD=creds["pg_password"],
         TEST_WORKER_KEY=creds["worker_key"],
         TEST_VAULT_KEY=creds["vault_key"],
+        TEST_RENDER_KEY=creds["render_key"],
     )
     with open(state / "deploy.log", "wb") as log:
         result = subprocess.run(deploy_test_script(), env=deploy_env,

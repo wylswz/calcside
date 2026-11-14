@@ -1,0 +1,21 @@
+# calcside-render — stateless Vega-Lite → PNG service (EP-0024).
+# Build context is render/:
+#   docker build -f docker/Dockerfile.render render
+# Multi-arch: resvg-js ships musl prebuilds for linux/amd64 + linux/arm64.
+FROM node:22-alpine
+
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+
+WORKDIR /app
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --prod
+
+COPY src ./src
+
+ENV NODE_ENV=production \
+    RENDER_ADDR=:8091
+
+USER node
+EXPOSE 8091
+
+CMD ["node", "src/server.js"]

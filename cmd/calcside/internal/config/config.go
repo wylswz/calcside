@@ -53,6 +53,8 @@ type Config struct {
 	MaxNetResponseBytes    int64
 	SecretKey              string
 	SecretsAllowHTTP       bool
+	RenderURL              string
+	RenderKey              string
 	ExtAllowSources        []string
 	ExtLocalRoots          []string
 	ExtCacheDir            string
@@ -99,6 +101,8 @@ func Parse(args []string) (Config, error) {
 	fs.Int64Var(&c.MaxNetResponseBytes, "max-net-response-bytes", int64(common.EnvInt("MAX_NET_RESPONSE_BYTES", 32<<20)), "clamp for net.max_response_bytes")
 	fs.StringVar(&c.SecretKey, "secret-key", common.EnvOr("SECRET_KEY", ""), "base64-encoded 32-byte key encrypting vault secrets")
 	fs.BoolVar(&c.SecretsAllowHTTP, "secrets-allow-http", common.EnvBool("SECRETS_ALLOW_HTTP", false), "allow secret injection into http:// URLs (INSECURE)")
+	fs.StringVar(&c.RenderURL, "render-url", common.EnvOr("RENDER_URL", ""), "calcside-render base URL for MCP chart images (empty disables image output)")
+	fs.StringVar(&c.RenderKey, "render-key", common.EnvOr("RENDER_KEY", ""), "shared bearer key authenticating API→render calls (required with --render-url)")
 	var extSources, extRoots string
 	fs.StringVar(&extSources, "ext-allow-sources", common.EnvOr("EXT_ALLOW_SOURCES", ""), "comma-separated allowed remote ext source prefixes (empty disables remote ext)")
 	fs.StringVar(&extRoots, "ext-local-roots", common.EnvOr("EXT_LOCAL_ROOTS", ""), "comma-separated local extension roots (sources use root-name/extension) (empty disables local ext)")
@@ -167,6 +171,15 @@ func Parse(args []string) (Config, error) {
 	}
 	if c.WorkerKey == "" {
 		return c, fmt.Errorf("--worker-key is required")
+	}
+	if (c.RenderURL == "") != (c.RenderKey == "") {
+		return c, fmt.Errorf("--render-url and --render-key must be set together")
+	}
+	if c.RenderURL != "" {
+		u, err := url.Parse(c.RenderURL)
+		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
+			return c, fmt.Errorf("--render-url must be an http(s) URL without credentials")
+		}
 	}
 	return c, nil
 }
