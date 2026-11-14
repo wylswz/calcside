@@ -8,8 +8,9 @@ Extensions run *inside* the instance's Gate: every op call is a gated `ext` op, 
 
 Community extensions live under `contrib/`; Tavily is bundled in `contrib/tavily/0.1.0`.
 Development uses this root by default. Container images include it at
-`/opt/calcside/contrib`, alongside operator-managed `/data/ext`; Compose mounts
-`contrib` read-only on the API, while workers resolve local trees through the API.
+`/opt/calcside/contrib`, alongside operator-managed `/data/ext`; the dev
+Compose file uses the same baked-in image tree (no host mount), while workers
+resolve local trees through the API.
 
 An optional `icon: icon.png` manifest field refers to a regular PNG within the
 extension tree (32 KiB, at most 256 by 256 pixels). External URLs and traversal

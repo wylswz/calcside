@@ -1,14 +1,17 @@
 services:
+  # Migration runner image: pinned Atlas + the hand-written migrations,
+  # baked in by docker/Dockerfile.migrate (same image CI/release publish).
   migrate:
-    image: arigaio/atlas:1.2.2@sha256:dce85fd3f83c9c28f343c73236c8917f802d526f1fe921e150b720077a83c5ae
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.migrate
+    image: calcside-migrate:latest
     user: "10001:10001"
-    working_dir: /workspace
-    command: ["migrate", "apply", "--env", "${CALCSIDE_STORE:-sqlite}"]
     environment:
+      HOME: /tmp
       ATLAS_DB_URL: ${ATLAS_DB_URL:-sqlite:///data/calcside.db}
+    command: ["migrate", "apply", "--env", "${CALCSIDE_STORE:-sqlite}"]
     volumes:
-      - ../atlas.hcl:/workspace/atlas.hcl:ro
-      - ../cmd/calcside/internal/gormstore/migrations:/workspace/cmd/calcside/internal/gormstore/migrations:ro
       - ./data:/data
 
   calcside:
@@ -53,9 +56,9 @@ services:
       #   data/policies  global .rego files (CALCSIDE_POLICY_DIR)
       #   data/ext       local ext capability dirs (CALCSIDE_EXT_LOCAL_ROOTS)
       #   data/ext-cache remote ext fetch cache
-      # e.g.: cp -r contrib/tavily docker/data/ext/
+      # The image already bundles the community extensions at
+      # /opt/calcside/contrib (baked in, read-only).
       - ./data:/data
-      - ../contrib:/opt/calcside/contrib:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
       interval: 30s

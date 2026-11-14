@@ -4,7 +4,7 @@ Goal: run the API (control plane) and the execution tier (workers) as separate
 processes that scale independently, without coupling core business logic to any
 transport or job framework.
 
-Phase 1 (done) separated the domain: `internal/runtime` is a pure, serializable
+Phase 1 (done) separated the domain: `server/internal/runtime` is a pure, serializable
 message contract; `*instance.Manager` satisfies `runtime.Runtime` and touches no
 store; `service/sandbox` owns all persistence, vault resolution, policy
 compilation, audit batch writes, and TTL expiry. This document covers what
@@ -39,7 +39,7 @@ Additive; no behaviour change yet.
    `storetest` conformance updates (AGENTS.md: interface, gormstore, suite).
 2. `MarkRunningAsLost` → `MarkRunningAsLostForNode(nodeID)`; the global variant
    dies. Startup recovery becomes per-node.
-3. `internal/placement` port:
+3. `server/internal/placement` port:
 
    ```go
    type Registry interface {
@@ -61,12 +61,12 @@ Additive; no behaviour change yet.
 
 ## Phase 3 — transport  ✅ landed (static node list; Redis liveness in P5)
 
-1. `internal/runtime/worker`: `worker.Client` — a `Runtime` that resolves
+1. `server/internal/runtime/worker`: `worker.Client` — a `Runtime` that resolves
    placement and calls the owning node over HTTP/JSON. The protocol is
    defined in `api/worker.openapi.yaml`; gin routes and the typed client
-   are generated (`internal/runtime/remote/gen`), message bodies map via
+   are generated (`server/internal/runtime/remote/gen`), message bodies map via
    `x-go-type` straight onto the contract types so the two never drift.
-2. `cmd/calcside-worker`: flags `--node-id` (or `--node-id-file` — generate
+2. `server/cmd/calcside-worker`: flags `--node-id` (or `--node-id-file` — generate
    once on first boot, persist, reuse), `--listen`, `--placement`,
    `--heartbeat-interval`. Resolution order: flag/env → persisted file →
    generate-and-persist. In k8s map this to the StatefulSet pod name; a
@@ -135,11 +135,11 @@ security event, not just a correctness bug.
 
 ## Phase 6 — async jobs & caching
 
-1. `internal/jobs` port (`Dispatcher`/`Handler`) + `jobs/asynq` adapter; asynq
+1. `server/internal/jobs` port (`Dispatcher`/`Handler`) + `jobs/asynq` adapter; asynq
    types appear only inside the adapter.
 2. First jobs: audit batch flush, `TouchAPIKey` throttle→batch, node-death
    reconciler, session/API-key GC.
-3. `internal/cache` port + `cache/redis`: `auth.Resolve` caches
+3. `server/internal/cache` port + `cache/redis`: `auth.Resolve` caches
    `hash(token)→Principal` for ~30–60s with a revocation set for deletes;
    session lookups same. This removes the per-request write (`TouchAPIKey`)
    from the hot path — the single biggest DB win before any worker exists.
@@ -152,7 +152,7 @@ security event, not just a correctness bug.
 - Fencing: stale-epoch request rejected; zombie node cannot exec.
 - Idempotency: duplicated `exec_id` returns the same result; create/delete
   retries safe.
-- Full gate: `make lint`, `make build`, `go test -race ./...`, web checks.
+- Full gate: `make lint`, `make build`, `make test`, web checks.
 
 ## Open questions
 

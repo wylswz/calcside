@@ -15,6 +15,9 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
+    // Outside the Vite root: the Go module embeds the output from
+    // server/webdist (see server/webdist/embed.go).
+    outDir: '../server/webdist/dist',
+    emptyOutDir: true,
   },
 })

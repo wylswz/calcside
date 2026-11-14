@@ -13,6 +13,10 @@ calcside-dev.db*
 # Frontend deps/artifacts (dist is rebuilt inside the image)
 web/node_modules
 web/dist
+server/webdist/dist
+
+# calcside-render builds from its own context (docker/Dockerfile.render)
+render
 
 # Local env / secrets
 .env

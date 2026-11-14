@@ -25,8 +25,8 @@ Calcside's opportunity is ad hoc composition and investigation across sources.
 As inspected during this research:
 
 - Base capabilities are `fs`, `net`, `io`, and `ext`; the predeclared pure modules
-  are `json` and `math`. See [node registry](../internal/node/node.go) and
-  [engine session construction](../internal/engine/engine.go).
+  are `json` and `math`. See [node registry](../server/internal/node/node.go) and
+  [engine session construction](../server/internal/engine/engine.go).
 - `net` supports HTTP, host/method restrictions, response-size and timeout limits,
   and send-time secret substitution. This is not a provider connection manager
   with OAuth refresh or request signing. HTTP error statuses can be inspected;
@@ -37,7 +37,7 @@ As inspected during this research:
 - Files live in the instance's in-memory VFS. Public file access supports browsing
   and redacted text reads, not direct upload. There is no requirement to replace
   memory storage to run these scenarios.
-- [ExecResult](../internal/runtime/message.go) returns printed output, an execution
+- [ExecResult](../server/internal/runtime/message.go) returns printed output, an execution
   error, and execution statistics. A domain-specific structured result contract
   can initially be built with `print(json.encode(...))` and SDK conventions.
 - [EP-0001](proposals/0001-record-replay.md) through
@@ -226,9 +226,9 @@ rather than spin inside the execution step/time budget.
 
 ### G06: policy metadata is not business authorization by itself
 
-[EditorSymbols](../internal/policy/editor.go) describes the editor's policy input;
-[inputFor](../internal/policy/policy.go) constructs the actual input. The current
-[net operation metadata](../internal/capability/net/net.go) is primarily HTTP
+[EditorSymbols](../server/internal/policy/editor.go) describes the editor's policy input;
+[inputFor](../server/internal/policy/policy.go) constructs the actual input. The current
+[net operation metadata](../server/internal/capability/net/net.go) is primarily HTTP
 method/URL/host/scheme/secret-reference information, not the full request body.
 
 Consequences:
