@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+SERVER_ROOT = REPO_ROOT / "server"
 SECRET_KEY = base64.b64encode(bytes(range(32))).decode()
 
 
@@ -39,13 +40,13 @@ def server(tmp_path_factory):
     ]:
         subprocess.run(
             ["go", "build", "-o", str(target), package],
-            cwd=REPO_ROOT,
+            cwd=SERVER_ROOT,
             env=env,
             check=True,
         )
     subprocess.run(
         ["atlas", "migrate", "apply", "--env", "sqlite"],
-        cwd=REPO_ROOT,
+        cwd=SERVER_ROOT,
         env={**env, "ATLAS_DB_URL": f"sqlite://{tmp / 't.db'}"},
         check=True,
     )

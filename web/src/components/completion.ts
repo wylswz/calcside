@@ -184,7 +184,7 @@ export function docSymbols(doc: string): CompletionSymbol[] {
 
 // applicationSymbols builds the instance-style completion context for a
 // spec without a live session: universe + utilities + granted
-// capabilities (io is always granted — internal/engine/engine.go;
+// capabilities (io is always granted — server/internal/engine/engine.go;
 // interrupt is granted to application programs automatically) +
 // ext aliases resolved against the catalog + the document's own
 // definitions.

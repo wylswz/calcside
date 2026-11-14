@@ -22,7 +22,7 @@ in-memory Manager   engine.Session (gate, bindings, globals, VFS) ──► engi
 ```
 
 Every hop implements the same interface, `runtime.Runtime`
-(`internal/runtime/runtime.go`), and every network hop speaks the same
+(`server/internal/runtime/runtime.go`), and every network hop speaks the same
 generated protocol. A hop is therefore a thin router: it adds placement or
 process management, and forwards the request otherwise unchanged. Ownership
 (`Owner.UserID`) and fencing (`Epoch`) checks happen at the innermost layer,
@@ -30,7 +30,7 @@ the `Manager`, which trusts no caller.
 
 ### Hop 1: API tier → worker
 
-- **Code:** `remote.Client` (`internal/runtime/remote/client.go`), enabled by
+- **Code:** `remote.Client` (`server/internal/runtime/remote/client.go`), enabled by
   `calcside serve --workers=…`.
 - **Routing:** `Create` picks a live node and the API persists the binding
   (`instances.node_id`, `lease_epoch`). Every other call resolves the binding
@@ -43,8 +43,8 @@ the `Manager`, which trusts no caller.
 
 ### Hop 2: worker → instance process
 
-- **Code:** `subproc.Supervisor` (`internal/runtime/subproc/supervisor.go`),
-  served by `remote.NewHandler` in `cmd/calcside-worker`.
+- **Code:** `subproc.Supervisor` (`server/internal/runtime/subproc/supervisor.go`),
+  served by `remote.NewHandler` in `server/cmd/calcside-worker`.
 - **Create:** spawns a child, which is the worker binary re-executed as
   `calcside-worker __instance`. Its config (`subproc.ChildConfig`: node
   limits, ext policy, socket path, a freshly minted HMAC key) is sent as JSON
@@ -63,7 +63,7 @@ the `Manager`, which trusts no caller.
 
 ### Hop 3: instance process → in-memory Manager
 
-- **Code:** `subproc.RunChild` (`internal/runtime/subproc/child.go`).
+- **Code:** `subproc.RunChild` (`server/internal/runtime/subproc/child.go`).
 - **Setup:** builds a normal execution node (`node.Build`: capability
   registry, engine, `instance.Manager`) and serves it with
   `remote.NewHandler`. Its Manager is capped at one instance and runs no
@@ -133,7 +133,7 @@ The API tier never executes code: `calcside serve` requires `--workers` +
 Only `calcside-worker` understands the hidden `__instance` subcommand: the
 Supervisor re-executes its own binary as each instance's process. There is no
 second binary to deploy and no version skew between parent and child.
-`cmd/calcside-exec` runs the same entrypoint standalone.
+`server/cmd/calcside-exec` runs the same entrypoint standalone.
 
 ## Why this shape
 

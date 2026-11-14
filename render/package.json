@@ -1,0 +1,17 @@
+{
+  "name": "calcside-render",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@expo-google-fonts/ibm-plex-sans": "0.4.1",
+    "@resvg/resvg-js": "2.6.2",
+    "vega": "6.4.0",
+    "vega-interpreter": "2.3.2",
+    "vega-lite": "6.5.0"
+  }
+}

@@ -59,6 +59,20 @@ app.kubernetes.io/component: worker
 app.kubernetes.io/component: worker
 {{- end -}}
 
+{{- define "calcside.render.selectorLabels" -}}
+{{ include "calcside.selectorLabels" . }}
+app.kubernetes.io/component: render
+{{- end -}}
+
+{{- define "calcside.render.labels" -}}
+{{ include "calcside.labels" . }}
+app.kubernetes.io/component: render
+{{- end -}}
+
+{{- define "calcside.renderImage" -}}
+{{- printf "%s:%s" .Values.render.image.repository (default .Chart.AppVersion .Values.render.image.tag) -}}
+{{- end -}}
+
 {{- define "calcside.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
 {{- default (include "calcside.fullname" .) .Values.serviceAccount.name -}}

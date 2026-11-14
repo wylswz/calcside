@@ -29,8 +29,8 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
         if: matrix.backend == 'kind'
         with:
@@ -60,10 +60,11 @@ jobs:
           echo "$RUNNER_TEMP/test-bin" >> "$GITHUB_PATH"
       - name: Test deployment helpers and performance report validation
         run: python3 -m unittest discover -s benchmark -p 'test_*.py' -v
-      - name: Build candidate API/worker and migration images
+      - name: Build candidate API/worker, migration and render images
         run: |
           docker build -f docker/Dockerfile -t ghcr.io/wylswz/calcside:test .
           docker build -f docker/Dockerfile.migrate -t ghcr.io/wylswz/calcside-migrate:test .
+          docker build -f docker/Dockerfile.render -t ghcr.io/wylswz/calcside-render:test render
       - name: Deploy isolated PostgreSQL stack
         env:
           BACKEND: ${{ matrix.backend }}

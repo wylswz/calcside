@@ -86,13 +86,18 @@ worker shared key plus any configured optional keys:
 | Key | Used for |
 | --- | --- |
 | `worker-shared-key` | API ↔ worker HMAC |
+| `render-key` | API → renderer bearer key (only when `render.enabled`) |
 | `secret-key` | Base64-encoded 32-byte vault key |
 | `admin-password` | Bootstrap administrator password |
 | `google-client-secret` | Google OAuth client secret |
 
 Set `secrets.existingSecret` to use your own Secret instead. The generated worker
-key is preserved across `helm upgrade` via `lookup`; for GitOps, manage the
-Secret yourself.
+and render keys are preserved across `helm upgrade` via `lookup`; for GitOps,
+manage the Secret yourself. When `render.enabled` is true the Secret must
+contain `render-key` (the chart generates and preserves it otherwise). Set
+`render.enabled=false` to drop the renderer entirely — the chart then emits no
+renderer resources and no `CALCSIDE_RENDER_*` environment variables, and MCP
+`images=true` calls report the image as unavailable.
 
 Bootstrap administrator:
 
@@ -107,6 +112,15 @@ Workers are a StatefulSet; each pod's name is its node ID and is pre-registered
 in the API's `--workers` list. The headless Service is
 `<release>-calcside-worker`. Scaling the StatefulSet updates the API worker list
 and rolls the API.
+
+## Renderer
+
+`render.enabled` (default true) deploys the stateless `calcside-render`
+Deployment + ClusterIP Service on :8091 plus a NetworkPolicy that admits only
+API pods on 8091 and denies all egress. The API calls it with
+`CALCSIDE_RENDER_URL`/`CALCSIDE_RENDER_KEY`; the key lives in the chart Secret
+as `render-key`. Tune `render.replicaCount`, `render.concurrency`, and
+`render.resources`; `render.networkPolicy.enabled=false` drops the policy.
 
 Workers run with process-per-instance isolation. Per-instance cgroup memory caps
 require a writable cgroup v2 subtree, which unprivileged Kubernetes pods usually

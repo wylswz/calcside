@@ -1,8 +1,9 @@
 calcside.db*
 bin/
 web/node_modules
-web/dist/*
-!web/dist/README.txt
+render/node_modules
+server/webdist/dist/*
+!server/webdist/dist/README.txt
 calcside-dev.db*
 docker/data/
 docker/worker-cache/

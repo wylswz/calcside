@@ -1,0 +1,97 @@
+{{- if .Values.render.enabled }}
+{{- include "calcside.validate" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "calcside.fullname" . }}-render
+  labels:
+    {{- include "calcside.render.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.render.replicaCount }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  selector:
+    matchLabels:
+      {{- include "calcside.render.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "calcside.render.labels" . | nindent 8 }}
+        {{- with .Values.render.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- with .Values.render.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.render.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: render
+          image: {{ include "calcside.renderImage" . }}
+          imagePullPolicy: {{ .Values.render.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.render.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8091
+              protocol: TCP
+          env:
+            - name: RENDER_ADDR
+              value: ":8091"
+            - name: RENDER_CONCURRENCY
+              value: {{ .Values.render.concurrency | int | quote }}
+            - name: CALCSIDE_RENDER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "calcside.secretName" . }}
+                  key: render-key
+            {{- with .Values.render.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.render.resources | nindent 12 }}
+      {{- with .Values.render.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.render.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.render.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.render.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

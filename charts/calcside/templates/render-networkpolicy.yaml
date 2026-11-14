@@ -1,0 +1,25 @@
+{{- if and .Values.render.enabled .Values.render.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "calcside.fullname" . }}-render
+  labels:
+    {{- include "calcside.render.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "calcside.render.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "calcside.api.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 8091
+          protocol: TCP
+  # No egress rules: the renderer only answers requests and needs no
+  # outbound connections (it loads no remote resources by design).
+{{- end }}

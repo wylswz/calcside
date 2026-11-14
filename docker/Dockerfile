@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-# ---- Stage 1: build the web console (web/dist is embedded into the Go binary) ----
+# ---- Stage 1: build the web console (server/webdist/dist is embedded into the Go binary) ----
 # Build-only stages run on the native build platform; Go is cross-compiled
 # below from TARGETOS/TARGETARCH so multi-arch publishes do not run pnpm or
 # the full Go toolchain under QEMU.
@@ -18,11 +18,11 @@ FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /src
-COPY go.mod go.sum ./
+COPY server/go.mod server/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
-COPY . .
-# Real console assets overwrite the committed web/dist placeholder.
-COPY --from=web /src/web/dist ./web/dist
+COPY server/ ./
+# Real console assets overwrite the committed webdist/dist placeholder.
+COPY --from=web /src/server/webdist/dist ./webdist/dist
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/calcside ./cmd/calcside && \
@@ -49,7 +49,7 @@ USER calcside
 VOLUME /data
 EXPOSE 8080
 
-# All flags also read from CALCSIDE_* env vars (see cmd/calcside/internal/config).
+# All flags also read from CALCSIDE_* env vars (see server/cmd/calcside/internal/config).
 ENV CALCSIDE_ADDR=":8080" \
     CALCSIDE_DSN="/data/calcside.db" \
     CALCSIDE_POLICY_DIR="/data/policies" \

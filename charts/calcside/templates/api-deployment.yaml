@@ -142,6 +142,15 @@ spec:
                   key: worker-shared-key
             - name: CALCSIDE_WORKERS
               value: {{ include "calcside.workerNodes" . | quote }}
+            {{- if .Values.render.enabled }}
+            - name: CALCSIDE_RENDER_URL
+              value: {{ printf "http://%s-render:8091" (include "calcside.fullname" .) | quote }}
+            - name: CALCSIDE_RENDER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "calcside.secretName" . }}
+                  key: render-key
+            {{- end }}
             - name: CALCSIDE_MAX_INSTANCES_PER_USER
               value: {{ .Values.limits.maxInstancesPerUser | int64 | quote }}
             - name: CALCSIDE_MAX_INSTANCES_PER_NODE

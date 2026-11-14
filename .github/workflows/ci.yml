@@ -22,8 +22,8 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
       - name: Install Atlas 1.2.2
         run: |
           curl -fsSL --retry 3 https://release.ariga.io/atlas/atlas-linux-amd64-v1.2.2 -o "$RUNNER_TEMP/atlas"
@@ -32,10 +32,14 @@ jobs:
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - run: make wire-check
       - run: go build ./...
+        working-directory: server
       - run: go vet ./...
+        working-directory: server
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+        working-directory: server
       - run: go test -race ./...
+        working-directory: server
 
   helm:
     name: Helm chart
@@ -49,6 +53,22 @@ jobs:
           version: v3.19.0
       - run: make helm-lint
 
+  render:
+    name: Renderer tests (Node 22)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No Node action is pinned in this repo; run the suite in the same
+      # base image the release Dockerfile uses instead.
+      - name: Install deps and run render tests
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w node:22-alpine \
+            sh -c 'corepack enable && corepack prepare pnpm@10.33.0 --activate \
+              && pnpm -C render install --frozen-lockfile \
+              && pnpm -C render test'
+
   integration-cgroup:
     name: Integration (cgroup v2 memory limit)
     runs-on: ubuntu-24.04
@@ -58,8 +78,8 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
       - name: cgroup environment
         run: |
           stat -fc %T /sys/fs/cgroup
@@ -80,8 +100,8 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
       - name: Install Atlas 1.2.2
         run: |
           curl -fsSL --retry 3 https://release.ariga.io/atlas/atlas-linux-amd64-v1.2.2 -o "$RUNNER_TEMP/atlas"
@@ -99,8 +119,8 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true

@@ -29,8 +29,13 @@ const operations = {
     'listFiles', 'readFile', 'inspect', 'prompt', 'listExecutions', 'getExecution', 'listAudit',
   ],
 };
-if (!Object.hasOwn(operations, scenario)) {
-  throw new Error('BENCH_SCENARIO must be exec, lifecycle, or read');
+// chart is an integration-only MCP check (EP-0024): it is not a timed
+// operations workload, so it has no entry in `operations`. Its single
+// request is still thresholded like the other operations.
+const isChart = scenario === 'chart';
+const benchOps = isChart ? ['mcpChart'] : (operations[scenario] || []);
+if (!isChart && !Object.hasOwn(operations, scenario)) {
+  throw new Error('BENCH_SCENARIO must be exec, lifecycle, read, or chart');
 }
 
 const completed = new Counter('benchmark_iterations');
@@ -44,7 +49,7 @@ const thresholds = {
   'http_reqs{phase:benchmark}': ['count>0'],
   'http_req_duration{phase:benchmark}': [],
 };
-for (const name of operations[scenario]) {
+for (const name of benchOps) {
   thresholds[`http_req_duration{phase:benchmark,name:${name}}`] = __ENV.BENCH_P95_MS === undefined
     ? [] : [`p(95)<${positiveInteger('BENCH_P95_MS')}`];
 }
@@ -76,6 +81,15 @@ const spec = {
   labels: { benchmark: 'k6', scenario },
   capabilities: { fs: {} },
 };
+// chart instances only need io (io.display); chart.* spec builders are stdlib.
+const chartInstanceSpec = {
+  ttl_seconds: ttl,
+  labels: { benchmark: 'k6', scenario },
+  capabilities: { io: {} },
+};
+const chartCode = `data = [{"x": 1, "y": 2, "s": "a"}, {"x": 2, "y": 4, "s": "a"}, {"x": 3, "y": 3, "s": "a"}, {"x": 1, "y": 5, "s": "b"}, {"x": 2, "y": 3, "s": "b"}, {"x": 3, "y": 6, "s": "b"}]
+spec = chart.spec("line", data=data, encoding={"x": chart.field("x", "quantitative"), "y": chart.field("y", "quantitative"), "color": chart.field("s", "nominal")}, title="release gate")
+io.display(spec)`;
 
 function request(name, method, path, payload, status, validate, phase = 'benchmark') {
   const tags = { name, phase };
@@ -105,6 +119,11 @@ function createInstance(phase) {
     (b) => typeof b.instance?.id === 'string' && b.instance.id.length > 0 && b.instance.status === 'running', phase);
 }
 
+function createChartInstance(phase) {
+  return request('createInstance', 'POST', '/api/v1/instances', chartInstanceSpec, 201,
+    (b) => typeof b.instance?.id === 'string' && b.instance.id.length > 0 && b.instance.status === 'running', phase);
+}
+
 function deleteInstance(id, phase) {
   return request('deleteInstance', 'DELETE', instancePath(id), null, 200, (b) => b.ok === true, phase);
 }
@@ -121,16 +140,74 @@ function cleanup(fixtures) {
   for (const fixture of fixtures) deleteInstance(fixture.id, 'teardown');
 }
 
+// POST a JSON-RPC tools/call to the per-instance MCP endpoint and require a
+// PNG image content item (EP-0024). The stateless handler may answer as JSON
+// or SSE, so both framings are parsed.
+function chartImage(id) {
+  const payload = {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: {
+      name: 'exec',
+      arguments: {
+        instance_id: id,
+        code: chartCode,
+        images: true,
+        section: { name: 'chart', description: 'release gate chart image' },
+      },
+    },
+  };
+  const response = http.request('POST', `${baseURL}/mcp/instances/${encodeURIComponent(id)}`,
+    JSON.stringify(payload), {
+      headers: { ...headers, Accept: 'application/json, text/event-stream' },
+      tags: { name: 'mcpChart', phase: 'benchmark' },
+      timeout: requestTimeout,
+      redirects: 0,
+      responseType: 'text',
+    });
+  const text = response.body || '';
+  let rpc = null;
+  try {
+    rpc = JSON.parse(text);
+  } catch {
+    rpc = null;
+  }
+  if (rpc === null) {
+    for (const line of text.split('\n')) {
+      if (!line.startsWith('data:')) continue;
+      try {
+        rpc = JSON.parse(line.slice(5).trim());
+        break;
+      } catch {
+        // keep scanning data: lines
+      }
+    }
+  }
+  const result = rpc !== null && rpc.result !== null && typeof rpc.result === 'object' ? rpc.result : null;
+  const content = result !== null && Array.isArray(result.content) ? result.content : [];
+  const image = content.find((item) => item !== null && typeof item === 'object' && item.type === 'image');
+  return check(response, {
+    'mcpChart: HTTP 200': (r) => r.status === 200,
+    'mcpChart: tools/call result': () => result !== null && result.isError !== true,
+    'mcpChart: PNG image': () => image !== undefined
+      && image.mimeType === 'image/png'
+      && typeof image.data === 'string'
+      && image.data.startsWith('iVBORw0KGgo'),
+  }, { name: 'mcpChart', phase: 'benchmark' });
+}
+
 export function setup() {
   const auth = request('me', 'GET', '/api/v1/me', null, 200, (b) => typeof b.user?.id === 'string', 'setup');
   if (!auth.ok) fail('Preflight failed: check CALCSIDE_BASE_URL and CALCSIDE_API_KEY (or use a --dev server).');
   const fixtures = [];
   try {
     for (let i = 0; scenario !== 'lifecycle' && i < vus; i++) {
-      const created = createInstance('setup');
+      const created = isChart ? createChartInstance('setup') : createInstance('setup');
       const id = created.body?.instance?.id;
       if (typeof id === 'string' && id) fixtures.push({ id });
       if (!created.ok) fail('Instance setup failed: check server capacity, policy, and --max-instances-per-user.');
+      if (isChart) continue;
       const seeded = execute(id, 'setup');
       if (!seeded.ok) fail('Workload setup failed: expected successful Starlark computation and fs read/write.');
       fixtures[fixtures.length - 1].execID = seeded.body.exec_id;
@@ -183,7 +260,9 @@ export default function (fixtures) {
     } else {
       const fixture = fixtures[execution.vu.idInTest - 1];
       if (!fixture) execution.test.abort('No fixture for this VU; use BENCH_VUS, not k6 --vus or distributed execution.');
-      ok = scenario === 'exec' ? execute(fixture.id).ok : read(fixture);
+      ok = scenario === 'exec' ? execute(fixture.id).ok
+        : isChart ? chartImage(fixture.id)
+        : read(fixture);
     }
   } finally {
     success.add(ok);

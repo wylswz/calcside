@@ -26,6 +26,7 @@ export interface ApplicationRuntime {
 }
 
 const repo = join(import.meta.dirname, '..', '..')
+const server = join(repo, 'server')
 
 async function freePort(): Promise<number> {
   const l = tcpServer()
@@ -43,10 +44,10 @@ export async function startApplicationRuntime(opts: { secretKey?: string; secret
   const workerBin = join(dir, 'calcside-worker')
   const db = join(dir, 'app.db')
   const key = randomBytes(32).toString('hex')
-  execFileSync('go', ['build', '-o', apiBin, './cmd/calcside'], { cwd: repo, env, stdio: 'pipe' })
-  execFileSync('go', ['build', '-o', workerBin, './cmd/calcside-worker'], { cwd: repo, env, stdio: 'pipe' })
+  execFileSync('go', ['build', '-o', apiBin, './cmd/calcside'], { cwd: server, env, stdio: 'pipe' })
+  execFileSync('go', ['build', '-o', workerBin, './cmd/calcside-worker'], { cwd: server, env, stdio: 'pipe' })
   execFileSync('atlas', ['migrate', 'apply', '--env', 'sqlite'], {
-    cwd: repo, env: { ...env, ATLAS_DB_URL: `sqlite://${db}` }, stdio: 'pipe',
+    cwd: server, env: { ...env, ATLAS_DB_URL: `sqlite://${db}` }, stdio: 'pipe',
   })
 
   const extRoot = join(dir, 'fixture')
