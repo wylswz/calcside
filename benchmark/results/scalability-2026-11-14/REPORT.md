@@ -27,6 +27,10 @@ Date: 2026-11-14 UTC. Local kind; two API replicas; PostgreSQL; one to three wor
 
 Implementation and invariants: [technical design](../../../docs/scalability.md).
 
+![Normalized throughput speedup at 24 VUs for CPU and I/O workloads](charts/speedup.svg)
+
+*Figure 1. Ratios use median successful throughput at 24 VUs. The dashed line is an ideal reference, not an additional measurement.*
+
 ## Environment and Isolation
 
 | Component | Configuration |
@@ -90,6 +94,10 @@ open-loop arrival-rate capacity or queue-stability benchmark.
 
 No errors in any row. Throughput is successful invokes/s; p95 is milliseconds.
 Parenthesized throughput values are the two-replicate minimum and maximum.
+
+![Successful invocation throughput versus worker count, split into CPU and fixed-latency I/O panels](charts/throughput.svg)
+
+*Figure 2. Each line shows a fixed client concurrency. Bands show the observed range of two runs, not confidence intervals; the two panels use independent y-axes.*
 
 ### CPU
 
@@ -184,6 +192,10 @@ overlap, third-worker addition with old replica IDs intact, new-generation
 output after republishing, and disabled-pool rejection through both API handlers.
 
 ## Verified Worker Failure and Recovery
+
+![Verified worker stall timeline showing per-worker successes and timed-out requests](charts/worker-stall.svg)
+
+*Figure 3. Counts belong to five-second request-start cohorts, not completion-rate windows. Empty bins indicate no new starts; red caps mark the 24 timed-out requests.*
 
 The accepted fault experiment is `verified-fault/`, not the original full-run
 pause case. It signals the worker-2 process from the parent kind-node PID
@@ -287,6 +299,7 @@ typecheck/lint. No new browser-suite or cgroup-specific stress run is claimed.
 - `environment-facts.json`: sanitized runtime/image/resource configuration.
 - `raw-results.tar.gz`: original summaries, traces, samples, source hashes,
   fixture code/IDs, notebook checks and the overload diagnostic.
+- `charts/*.svg`: embedded vector figures generated only from captured results.
 - `SHA256SUMS`: integrity checks for packaged data.
 
 Reproduction commands and credentials handling are in

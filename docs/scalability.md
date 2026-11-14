@@ -219,3 +219,17 @@ pooled percentile. Two repeats do not establish statistical significance.
 source hashes, and before/after pod inventories are the source artifacts.
 The analyzer reads only that captured data and does not rerun the experiment.
 Keep credentials outside the repository and review artifacts before committing.
+
+### Rendering Report Figures
+
+The report embeds self-contained SVG figures for throughput, normalized speedup,
+and the verified worker-stall timeline. Regenerate them from the committed,
+frozen result captures without querying a server or rerunning the experiment:
+
+```sh
+python3 benchmark/plot-scalability.py benchmark/results/scalability-2026-11-14
+```
+
+The renderer uses only Python's standard library. Throughput bands represent the
+observed two-run range, not confidence intervals. Timeline bars count requests
+by their start cohort rather than completion time.

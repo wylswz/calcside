@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="430" viewBox="0 0 1120 430" role="img" aria-labelledby="title desc">
+<title id="title">Scale-out gains depend on the workload</title>
+<desc id="desc">24 concurrent clients | Speedup relative to each workload&#x27;s one-worker median throughput</desc>
+<rect width="1120" height="100%" fill="#ffffff"/>
+<style>text{font-family:"IBM Plex Sans","Helvetica Neue",sans-serif;fill:#203343} .title{font-family:Georgia,serif;font-size:29px}.note{font-size:13px;fill:#647583}.tick{font-size:14px;fill:#647583}.label{font-size:15px}.value{font-size:15px;font-weight:600}</style>
+<text x="42.00" y="44.00" class="title" text-anchor="start">Scale-out gains depend on the workload</text>
+<text x="42.00" y="72.00" class="note" text-anchor="start">24 concurrent clients | Speedup relative to each workload&#x27;s one-worker median throughput</text>
+<line x1="90.00" y1="344.00" x2="710.00" y2="344.00" stroke="#e3e9ec" stroke-width="1"/>
+<text x="78.00" y="349.00" class="tick" text-anchor="end">0x</text>
+<line x1="90.00" y1="279.88" x2="710.00" y2="279.88" stroke="#e3e9ec" stroke-width="1"/>
+<text x="78.00" y="284.88" class="tick" text-anchor="end">1x</text>
+<line x1="90.00" y1="215.76" x2="710.00" y2="215.76" stroke="#e3e9ec" stroke-width="1"/>
+<text x="78.00" y="220.76" class="tick" text-anchor="end">2x</text>
+<line x1="90.00" y1="151.65" x2="710.00" y2="151.65" stroke="#e3e9ec" stroke-width="1"/>
+<text x="78.00" y="156.65" class="tick" text-anchor="end">3x</text>
+<text x="115.00" y="369.00" class="tick" text-anchor="middle">1</text>
+<text x="400.00" y="369.00" class="tick" text-anchor="middle">2</text>
+<text x="685.00" y="369.00" class="tick" text-anchor="middle">3</text>
+<text x="400.00" y="393.00" class="tick" text-anchor="middle">Registered workers</text>
+<line x1="115.00" y1="279.88" x2="685.00" y2="151.65" stroke="#8a98a4" stroke-width="2" stroke-dasharray="6 5"/>
+<rect x="90.00" y="95.00" width="13.00" height="13.00" fill="#8a98a4" opacity="1"/>
+<text x="111.00" y="106.00" class="tick" text-anchor="start">Ideal linear reference (not measured)</text>
+<circle cx="115.00" cy="279.88" r="4.5" fill="#2375ae" stroke="white" stroke-width="1.5"/>
+<line x1="115.00" y1="279.88" x2="400.00" y2="236.92" stroke="#2375ae" stroke-width="2.8"/>
+<circle cx="400.00" cy="236.92" r="4.5" fill="#2375ae" stroke="white" stroke-width="1.5"/>
+<line x1="400.00" y1="236.92" x2="685.00" y2="216.84" stroke="#2375ae" stroke-width="2.8"/>
+<circle cx="685.00" cy="216.84" r="4.5" fill="#2375ae" stroke="white" stroke-width="1.5"/>
+<text x="800.00" y="273.00" class="title" text-anchor="start" style="fill:#2375ae">1.98x</text>
+<text x="800.00" y="300.00" class="tick" text-anchor="start">CPU: three workers vs one</text>
+<circle cx="115.00" cy="279.88" r="4.5" fill="#d97830" stroke="white" stroke-width="1.5"/>
+<line x1="115.00" y1="279.88" x2="400.00" y2="215.09" stroke="#d97830" stroke-width="2.8"/>
+<circle cx="400.00" cy="215.09" r="4.5" fill="#d97830" stroke="white" stroke-width="1.5"/>
+<line x1="400.00" y1="215.09" x2="685.00" y2="150.64" stroke="#d97830" stroke-width="2.8"/>
+<circle cx="685.00" cy="150.64" r="4.5" fill="#d97830" stroke="white" stroke-width="1.5"/>
+<text x="800.00" y="170.00" class="title" text-anchor="start" style="fill:#d97830">3.02x</text>
+<text x="800.00" y="197.00" class="tick" text-anchor="start">I/O: three workers vs one</text>
+<text x="42.00" y="415.00" class="note" text-anchor="start">Ratios use median throughput; two replicates do not establish statistical significance or superlinear scaling.</text>
+</svg>
