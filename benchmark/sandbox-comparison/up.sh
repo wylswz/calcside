@@ -57,7 +57,8 @@ DSN="$STATE_DIR/bench.db"
 cd "$ROOT"
 nohup bin/calcside-worker-dev serve \
   --listen "$WORKER_ADDR" --node-id bench-w1 --shared-key "$WORKER_KEY" \
-  --api-addr "http://$API_ADDR" --net-allow-cidrs="$NET_ALLOW_CIDRS" \
+  --api-addr "http://$API_ADDR" --advertise-addr "$WORKER_ADDR" \
+  --net-allow-cidrs="$NET_ALLOW_CIDRS" \
   >"$STATE_DIR/worker.log" 2>&1 &
 echo $! >"$STATE_DIR/worker.pid"
 
@@ -65,23 +66,26 @@ nohup bin/calcside-dev serve --dev \
   --addr "$API_ADDR" --console-origin "http://localhost:$API_PORT" \
   --policy-dir server/policies/examples --secret-key "$SECRET_KEY" \
   --dsn "$DSN" --ext-local-roots contrib --net-allow-cidrs="$NET_ALLOW_CIDRS" \
-  --workers "bench-w1=$WORKER_ADDR" --worker-key "$WORKER_KEY" \
+  --worker-key "$WORKER_KEY" \
   >"$STATE_DIR/api.log" 2>&1 &
 echo $! >"$STATE_DIR/api.pid"
 
 wait_health() {
-  local url=$1 name=$2
+  local url=$1 name=$2 path=${3:-/healthz}
   for _ in $(seq 1 240); do
-    if curl -sf "$url/healthz" >/dev/null 2>&1; then return 0; fi
+    if curl -sf "$url$path" >/dev/null 2>&1; then return 0; fi
     sleep 0.25
   done
-  echo "sandbox-comparison: $name did not become healthy" >&2
+  echo "sandbox-comparison: $name did not become ready on $path" >&2
   tail -20 "$STATE_DIR/$name.log" >&2 || true
   return 1
 }
 
+# healthz proves the process is alive; the worker can only register
+# (readyz) once the API is up, so readiness is checked last.
 wait_health "http://$WORKER_ADDR" worker
 wait_health "http://$API_ADDR" api
+wait_health "http://$WORKER_ADDR" worker /readyz
 
 API_PID=$(cat "$STATE_DIR/api.pid")
 WORKER_PID=$(cat "$STATE_DIR/worker.pid")

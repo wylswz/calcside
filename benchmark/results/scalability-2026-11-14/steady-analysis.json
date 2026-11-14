@@ -1,0 +1,4195 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "name": "warm-w1-cpu-r1",
+      "workload": "cpu",
+      "vus": 8,
+      "duration_s": 5,
+      "wall_s": 5.283799250028096,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "warm-w1-cpu-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0
+      },
+      "measured_s": 5.05166,
+      "attempts": 509,
+      "completed": 509,
+      "success_rate": 1.0,
+      "completed_rps": 100.75895844138363,
+      "attempted_rps": 100.75895844138363,
+      "latency_all_ms": {
+        "avg": 78.89194499017681,
+        "min": 37,
+        "med": 77,
+        "max": 242,
+        "p(95)": 92,
+        "p(99)": 180.67999999999998
+      },
+      "latency_success_ms": {
+        "med": 77,
+        "max": 242,
+        "p(95)": 92,
+        "p(99)": 180.67999999999998,
+        "avg": 78.89194499017681,
+        "min": 37
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        254,
+        255
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "steady-w1-cpu-v1-r1",
+      "workload": "cpu",
+      "vus": 1,
+      "duration_s": 30,
+      "wall_s": 30.060344917001203,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w1-cpu-v1-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0
+      },
+      "measured_s": 30.000487,
+      "attempts": 1968,
+      "completed": 1968,
+      "success_rate": 1.0,
+      "completed_rps": 65.59893511062003,
+      "attempted_rps": 65.59893511062003,
+      "latency_all_ms": {
+        "min": 11,
+        "med": 14,
+        "max": 107,
+        "p(95)": 20,
+        "p(99)": 26,
+        "avg": 15.119918699186991
+      },
+      "latency_success_ms": {
+        "p(95)": 20,
+        "p(99)": 26,
+        "avg": 15.119918699186991,
+        "min": 11,
+        "med": 14,
+        "max": 107
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        985,
+        983
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "steady-w1-cpu-v8-r1",
+      "workload": "cpu",
+      "vus": 8,
+      "duration_s": 30,
+      "wall_s": 30.238500334031414,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w1-cpu-v8-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0
+      },
+      "measured_s": 30.067113000000003,
+      "attempts": 2844,
+      "completed": 2844,
+      "success_rate": 1.0,
+      "completed_rps": 94.5883962986403,
+      "attempted_rps": 94.5883962986403,
+      "latency_all_ms": {
+        "med": 83,
+        "max": 207,
+        "p(95)": 100,
+        "p(99)": 181,
+        "avg": 84.35900140646976,
+        "min": 31
+      },
+      "latency_success_ms": {
+        "avg": 84.35900140646976,
+        "min": 31,
+        "med": 83,
+        "max": 207,
+        "p(95)": 100,
+        "p(99)": 181
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        1421,
+        1423
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "steady-w1-cpu-v24-r1",
+      "workload": "cpu",
+      "vus": 24,
+      "duration_s": 30,
+      "wall_s": 30.445105457969476,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w1-cpu-v24-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0
+      },
+      "measured_s": 30.246114000000002,
+      "attempts": 2971,
+      "completed": 2971,
+      "success_rate": 1.0,
+      "completed_rps": 98.22749461302698,
+      "attempted_rps": 98.22749461302698,
+      "latency_all_ms": {
+        "min": 48,
+        "med": 235,
+        "max": 624,
+        "p(95)": 291.4999999999999,
+        "p(99)": 421.0999999999998,
+        "avg": 243.20498148771458
+      },
+      "latency_success_ms": {
+        "avg": 243.20498148771458,
+        "min": 48,
+        "med": 235,
+        "max": 624,
+        "p(95)": 291.4999999999999,
+        "p(99)": 421.0999999999998
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        1485,
+        1486
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "warm-w1-io-r1",
+      "workload": "io",
+      "vus": 8,
+      "duration_s": 5,
+      "wall_s": 5.9062312910100445,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "warm-w1-io-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0
+      },
+      "measured_s": 5.773757,
+      "attempts": 55,
+      "completed": 55,
+      "success_rate": 1.0,
+      "completed_rps": 9.525859851739517,
+      "attempted_rps": 9.525859851739517,
+      "latency_all_ms": {
+        "max": 864,
+        "p(95)": 844,
+        "p(99)": 854.8199999999999,
+        "avg": 785.7818181818182,
+        "min": 128,
+        "med": 834
+      },
+      "latency_success_ms": {
+        "max": 864,
+        "p(95)": 844,
+        "p(99)": 854.8199999999999,
+        "avg": 785.7818181818182,
+        "min": 128,
+        "med": 834
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        28,
+        27
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        55,
+        0,
+        0
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "steady-w1-io-v1-r1",
+      "workload": "io",
+      "vus": 1,
+      "duration_s": 30,
+      "wall_s": 30.111663624993525,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w1-io-v1-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0
+      },
+      "measured_s": 30.054738,
+      "attempts": 260,
+      "completed": 260,
+      "success_rate": 1.0,
+      "completed_rps": 8.650882266882514,
+      "attempted_rps": 8.650882266882514,
+      "latency_all_ms": {
+        "min": 108,
+        "med": 114,
+        "max": 135,
+        "p(95)": 126.04999999999998,
+        "p(99)": 133.41,
+        "avg": 115.48461538461538
+      },
+      "latency_success_ms": {
+        "avg": 115.48461538461538,
+        "min": 108,
+        "med": 114,
+        "max": 135,
+        "p(95)": 126.04999999999998,
+        "p(99)": 133.41
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        130,
+        130
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        260,
+        0,
+        0
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "steady-w1-io-v8-r1",
+      "workload": "io",
+      "vus": 8,
+      "duration_s": 30,
+      "wall_s": 30.8952352500055,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w1-io-v8-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0
+      },
+      "measured_s": 30.770836,
+      "attempts": 293,
+      "completed": 293,
+      "success_rate": 1.0,
+      "completed_rps": 9.522003237091122,
+      "attempted_rps": 9.522003237091122,
+      "latency_all_ms": {
+        "p(95)": 852.4,
+        "p(99)": 856.08,
+        "avg": 829.8839590443686,
+        "min": 117,
+        "med": 839,
+        "max": 860
+      },
+      "latency_success_ms": {
+        "min": 117,
+        "med": 839,
+        "max": 860,
+        "p(95)": 852.4,
+        "p(99)": 856.08,
+        "avg": 829.8839590443686
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        145,
+        148
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        293,
+        0,
+        0
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "steady-w1-io-v24-r1",
+      "workload": "io",
+      "vus": 24,
+      "duration_s": 30,
+      "wall_s": 32.56642216700129,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w1-io-v24-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0
+      },
+      "measured_s": 32.532428,
+      "attempts": 309,
+      "completed": 309,
+      "success_rate": 1.0,
+      "completed_rps": 9.498215134757233,
+      "attempted_rps": 9.498215134757233,
+      "latency_all_ms": {
+        "min": 150,
+        "med": 2520,
+        "max": 2580,
+        "p(95)": 2552.6,
+        "p(99)": 2561,
+        "avg": 2433.4077669902913
+      },
+      "latency_success_ms": {
+        "p(99)": 2561,
+        "avg": 2433.4077669902913,
+        "min": 150,
+        "med": 2520,
+        "max": 2580,
+        "p(95)": 2552.6
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        154,
+        155
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        309,
+        0,
+        0
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "warm-w1-io-r2",
+      "workload": "io",
+      "vus": 8,
+      "duration_s": 5,
+      "wall_s": 5.903465332987253,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "warm-w1-io-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0
+      },
+      "measured_s": 5.78563,
+      "attempts": 55,
+      "completed": 55,
+      "success_rate": 1.0,
+      "completed_rps": 9.506311326510682,
+      "attempted_rps": 9.506311326510682,
+      "latency_all_ms": {
+        "avg": 788.3090909090909,
+        "min": 123,
+        "med": 839,
+        "max": 860,
+        "p(95)": 853.8,
+        "p(99)": 859.46
+      },
+      "latency_success_ms": {
+        "avg": 788.3090909090909,
+        "min": 123,
+        "med": 839,
+        "max": 860,
+        "p(95)": 853.8,
+        "p(99)": 859.46
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        28,
+        27
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        55,
+        0,
+        0
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "steady-w1-io-v24-r2",
+      "workload": "io",
+      "vus": 24,
+      "duration_s": 30,
+      "wall_s": 32.55632708297344,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w1-io-v24-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0
+      },
+      "measured_s": 32.461305,
+      "attempts": 307,
+      "completed": 307,
+      "success_rate": 1.0,
+      "completed_rps": 9.457413988747525,
+      "attempted_rps": 9.457413988747525,
+      "latency_all_ms": {
+        "avg": 2443.3322475570035,
+        "min": 127,
+        "med": 2534,
+        "max": 2567,
+        "p(95)": 2555,
+        "p(99)": 2561.94
+      },
+      "latency_success_ms": {
+        "p(95)": 2555,
+        "p(99)": 2561.94,
+        "avg": 2443.3322475570035,
+        "min": 127,
+        "med": 2534,
+        "max": 2567
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        156,
+        151
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        307,
+        0,
+        0
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "steady-w1-io-v8-r2",
+      "workload": "io",
+      "vus": 8,
+      "duration_s": 30,
+      "wall_s": 30.927292292006314,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w1-io-v8-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0
+      },
+      "measured_s": 30.820056,
+      "attempts": 293,
+      "completed": 293,
+      "success_rate": 1.0,
+      "completed_rps": 9.506796483432735,
+      "attempted_rps": 9.506796483432735,
+      "latency_all_ms": {
+        "med": 840,
+        "max": 865,
+        "p(95)": 853,
+        "p(99)": 860.16,
+        "avg": 831.1843003412969,
+        "min": 132
+      },
+      "latency_success_ms": {
+        "avg": 831.1843003412969,
+        "min": 132,
+        "med": 840,
+        "max": 865,
+        "p(95)": 853,
+        "p(99)": 860.16
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        146,
+        147
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        293,
+        0,
+        0
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "steady-w1-io-v1-r2",
+      "workload": "io",
+      "vus": 1,
+      "duration_s": 30,
+      "wall_s": 30.130926207988523,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w1-io-v1-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0
+      },
+      "measured_s": 30.096574,
+      "attempts": 246,
+      "completed": 246,
+      "success_rate": 1.0,
+      "completed_rps": 8.17368780911741,
+      "attempted_rps": 8.17368780911741,
+      "latency_all_ms": {
+        "p(99)": 137.75,
+        "avg": 122.17479674796748,
+        "min": 109,
+        "med": 122,
+        "max": 149,
+        "p(95)": 130
+      },
+      "latency_success_ms": {
+        "min": 109,
+        "med": 122,
+        "max": 149,
+        "p(95)": 130,
+        "p(99)": 137.75,
+        "avg": 122.17479674796748
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        123,
+        123
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        246,
+        0,
+        0
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "warm-w1-cpu-r2",
+      "workload": "cpu",
+      "vus": 8,
+      "duration_s": 5,
+      "wall_s": 5.263916791998781,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "warm-w1-cpu-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0
+      },
+      "measured_s": 5.070667,
+      "attempts": 490,
+      "completed": 490,
+      "success_rate": 1.0,
+      "completed_rps": 96.63422977687156,
+      "attempted_rps": 96.63422977687156,
+      "latency_all_ms": {
+        "p(99)": 185.76999999999998,
+        "avg": 82.14897959183673,
+        "min": 45,
+        "med": 80,
+        "max": 217,
+        "p(95)": 106.54999999999998
+      },
+      "latency_success_ms": {
+        "med": 80,
+        "max": 217,
+        "p(95)": 106.54999999999998,
+        "p(99)": 185.76999999999998,
+        "avg": 82.14897959183673,
+        "min": 45
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        245,
+        245
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "steady-w1-cpu-v24-r2",
+      "workload": "cpu",
+      "vus": 24,
+      "duration_s": 30,
+      "wall_s": 30.43383808300132,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w1-cpu-v24-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0
+      },
+      "measured_s": 30.215871,
+      "attempts": 3104,
+      "completed": 3104,
+      "success_rate": 1.0,
+      "completed_rps": 102.72747060642402,
+      "attempted_rps": 102.72747060642402,
+      "latency_all_ms": {
+        "p(99)": 288.96999999999997,
+        "avg": 232.7319587628866,
+        "min": 44,
+        "med": 230.5,
+        "max": 400,
+        "p(95)": 254
+      },
+      "latency_success_ms": {
+        "min": 44,
+        "med": 230.5,
+        "max": 400,
+        "p(95)": 254,
+        "p(99)": 288.96999999999997,
+        "avg": 232.7319587628866
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        1553,
+        1551
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "steady-w1-cpu-v8-r2",
+      "workload": "cpu",
+      "vus": 8,
+      "duration_s": 30,
+      "wall_s": 30.226147209003102,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w1-cpu-v8-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0
+      },
+      "measured_s": 30.078305,
+      "attempts": 2828,
+      "completed": 2828,
+      "success_rate": 1.0,
+      "completed_rps": 94.02125551955139,
+      "attempted_rps": 94.02125551955139,
+      "latency_all_ms": {
+        "max": 262,
+        "p(95)": 101,
+        "p(99)": 175.9199999999999,
+        "avg": 84.90629420084866,
+        "min": 26,
+        "med": 84
+      },
+      "latency_success_ms": {
+        "avg": 84.90629420084866,
+        "min": 26,
+        "med": 84,
+        "max": 262,
+        "p(95)": 101,
+        "p(99)": 175.9199999999999
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        1414,
+        1414
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "steady-w1-cpu-v1-r2",
+      "workload": "cpu",
+      "vus": 1,
+      "duration_s": 30,
+      "wall_s": 30.05264737503603,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w1-cpu-v1-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0
+      },
+      "measured_s": 30.015409,
+      "attempts": 1840,
+      "completed": 1840,
+      "success_rate": 1.0,
+      "completed_rps": 61.30184666149311,
+      "attempted_rps": 61.30184666149311,
+      "latency_all_ms": {
+        "max": 113,
+        "p(95)": 21,
+        "p(99)": 29,
+        "avg": 16.207608695652173,
+        "min": 11,
+        "med": 15
+      },
+      "latency_success_ms": {
+        "max": 113,
+        "p(95)": 21,
+        "p(99)": 29,
+        "avg": 16.207608695652173,
+        "min": 11,
+        "med": 15
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        921,
+        919
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "expand-w1-to-2",
+      "workload": "io",
+      "vus": 12,
+      "duration_s": 80,
+      "wall_s": 81.21208387502702,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "expand-w1-to-2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0
+      },
+      "measured_s": 81.09989900000001,
+      "attempts": 1336,
+      "completed": 1336,
+      "success_rate": 1.0,
+      "completed_rps": 16.473510034827537,
+      "attempted_rps": 16.473510034827537,
+      "latency_all_ms": {
+        "max": 1290,
+        "p(95)": 1268,
+        "p(99)": 1275,
+        "avg": 723.0785928143713,
+        "min": 111,
+        "med": 1042
+      },
+      "latency_success_ms": {
+        "med": 1042,
+        "max": 1290,
+        "p(95)": 1268,
+        "p(99)": 1275,
+        "avg": 723.0785928143713,
+        "min": 111
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        671,
+        665
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        774,
+        0,
+        0
+      ],
+      "worker_unknown": 562
+    },
+    {
+      "name": "warm-w2-cpu-r1",
+      "workload": "cpu",
+      "vus": 8,
+      "duration_s": 5,
+      "wall_s": 5.074947165965568,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "warm-w2-cpu-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1
+      },
+      "measured_s": 5.039390999999999,
+      "attempts": 786,
+      "completed": 786,
+      "success_rate": 1.0,
+      "completed_rps": 155.97122747570094,
+      "attempted_rps": 155.97122747570094,
+      "latency_all_ms": {
+        "p(99)": 131.29999999999998,
+        "avg": 51.025445292620866,
+        "min": 14,
+        "med": 48,
+        "max": 198,
+        "p(95)": 76.74999999999997
+      },
+      "latency_success_ms": {
+        "avg": 51.025445292620866,
+        "min": 14,
+        "med": 48,
+        "max": 198,
+        "p(95)": 76.74999999999997,
+        "p(99)": 131.29999999999998
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        393,
+        393
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "steady-w2-cpu-v1-r1",
+      "workload": "cpu",
+      "vus": 1,
+      "duration_s": 30,
+      "wall_s": 30.046215999987908,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w2-cpu-v1-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1
+      },
+      "measured_s": 30.003879,
+      "attempts": 1785,
+      "completed": 1785,
+      "success_rate": 1.0,
+      "completed_rps": 59.49230764462155,
+      "attempted_rps": 59.49230764462155,
+      "latency_all_ms": {
+        "max": 179,
+        "p(95)": 21,
+        "p(99)": 26.159999999999982,
+        "avg": 16.70700280112045,
+        "min": 11,
+        "med": 16
+      },
+      "latency_success_ms": {
+        "med": 16,
+        "max": 179,
+        "p(95)": 21,
+        "p(99)": 26.159999999999982,
+        "avg": 16.70700280112045,
+        "min": 11
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        893,
+        892
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "steady-w2-cpu-v8-r1",
+      "workload": "cpu",
+      "vus": 8,
+      "duration_s": 30,
+      "wall_s": 30.225362707977183,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w2-cpu-v8-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1
+      },
+      "measured_s": 30.125387999999997,
+      "attempts": 4926,
+      "completed": 4926,
+      "success_rate": 1.0,
+      "completed_rps": 163.51656616007736,
+      "attempted_rps": 163.51656616007736,
+      "latency_all_ms": {
+        "max": 262,
+        "p(95)": 72,
+        "p(99)": 148.74999999999994,
+        "avg": 48.63702801461632,
+        "min": 14,
+        "med": 45
+      },
+      "latency_success_ms": {
+        "max": 262,
+        "p(95)": 72,
+        "p(99)": 148.74999999999994,
+        "avg": 48.63702801461632,
+        "min": 14,
+        "med": 45
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        2464,
+        2462
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "steady-w2-cpu-v24-r1",
+      "workload": "cpu",
+      "vus": 24,
+      "duration_s": 30,
+      "wall_s": 30.21796350000659,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w2-cpu-v24-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1
+      },
+      "measured_s": 30.123725,
+      "attempts": 4840,
+      "completed": 4840,
+      "success_rate": 1.0,
+      "completed_rps": 160.67070058566793,
+      "attempted_rps": 160.67070058566793,
+      "latency_all_ms": {
+        "avg": 148.94896694214876,
+        "min": 13,
+        "med": 141,
+        "max": 419,
+        "p(95)": 278.0499999999998,
+        "p(99)": 377
+      },
+      "latency_success_ms": {
+        "min": 13,
+        "med": 141,
+        "max": 419,
+        "p(95)": 278.0499999999998,
+        "p(99)": 377,
+        "avg": 148.94896694214876
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        2421,
+        2419
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "warm-w2-io-r1",
+      "workload": "io",
+      "vus": 8,
+      "duration_s": 5,
+      "wall_s": 5.499760334030725,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "warm-w2-io-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1
+      },
+      "measured_s": 5.410165,
+      "attempts": 102,
+      "completed": 102,
+      "success_rate": 1.0,
+      "completed_rps": 18.853399110748008,
+      "attempted_rps": 18.853399110748008,
+      "latency_all_ms": {
+        "min": 125,
+        "med": 421,
+        "max": 444,
+        "p(95)": 437.95,
+        "p(99)": 443.96999999999997,
+        "avg": 411.19607843137254
+      },
+      "latency_success_ms": {
+        "p(95)": 437.95,
+        "p(99)": 443.96999999999997,
+        "avg": 411.19607843137254,
+        "min": 125,
+        "med": 421,
+        "max": 444
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        50,
+        52
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        51,
+        51,
+        0
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "steady-w2-io-v1-r1",
+      "workload": "io",
+      "vus": 1,
+      "duration_s": 30,
+      "wall_s": 30.12622941698646,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w2-io-v1-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1
+      },
+      "measured_s": 30.101961,
+      "attempts": 245,
+      "completed": 245,
+      "success_rate": 1.0,
+      "completed_rps": 8.139004631625163,
+      "attempted_rps": 8.139004631625163,
+      "latency_all_ms": {
+        "max": 142,
+        "p(95)": 134,
+        "p(99)": 140,
+        "avg": 122.71836734693878,
+        "min": 110,
+        "med": 123
+      },
+      "latency_success_ms": {
+        "p(99)": 140,
+        "avg": 122.71836734693878,
+        "min": 110,
+        "med": 123,
+        "max": 142,
+        "p(95)": 134
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        122,
+        123
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        122,
+        123,
+        0
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "steady-w2-io-v8-r1",
+      "workload": "io",
+      "vus": 8,
+      "duration_s": 30,
+      "wall_s": 30.49806675000582,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w2-io-v8-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1
+      },
+      "measured_s": 30.347666,
+      "attempts": 578,
+      "completed": 578,
+      "success_rate": 1.0,
+      "completed_rps": 19.04594574093441,
+      "attempted_rps": 19.04594574093441,
+      "latency_all_ms": {
+        "p(99)": 440,
+        "avg": 417.64359861591697,
+        "min": 123,
+        "med": 420,
+        "max": 451,
+        "p(95)": 435
+      },
+      "latency_success_ms": {
+        "p(95)": 435,
+        "p(99)": 440,
+        "avg": 417.64359861591697,
+        "min": 123,
+        "med": 420,
+        "max": 451
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        288,
+        290
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        289,
+        289,
+        0
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "steady-w2-io-v24-r1",
+      "workload": "io",
+      "vus": 24,
+      "duration_s": 30,
+      "wall_s": 31.304856000002474,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w2-io-v24-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1
+      },
+      "measured_s": 31.239436,
+      "attempts": 596,
+      "completed": 596,
+      "success_rate": 1.0,
+      "completed_rps": 19.078449431673477,
+      "attempted_rps": 19.078449431673477,
+      "latency_all_ms": {
+        "max": 1288,
+        "p(95)": 1278,
+        "p(99)": 1285,
+        "avg": 1234.489932885906,
+        "min": 121,
+        "med": 1256
+      },
+      "latency_success_ms": {
+        "med": 1256,
+        "max": 1288,
+        "p(95)": 1278,
+        "p(99)": 1285,
+        "avg": 1234.489932885906,
+        "min": 121
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        300,
+        296
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        298,
+        298,
+        0
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "warm-w2-io-r2",
+      "workload": "io",
+      "vus": 8,
+      "duration_s": 5,
+      "wall_s": 5.508245166041888,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "warm-w2-io-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1
+      },
+      "measured_s": 5.369904,
+      "attempts": 102,
+      "completed": 102,
+      "success_rate": 1.0,
+      "completed_rps": 18.994752978824202,
+      "attempted_rps": 18.994752978824202,
+      "latency_all_ms": {
+        "avg": 408.77450980392155,
+        "min": 120,
+        "med": 419,
+        "max": 443,
+        "p(95)": 434.95,
+        "p(99)": 442.96999999999997
+      },
+      "latency_success_ms": {
+        "min": 120,
+        "med": 419,
+        "max": 443,
+        "p(95)": 434.95,
+        "p(99)": 442.96999999999997,
+        "avg": 408.77450980392155
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        51,
+        51
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        51,
+        51,
+        0
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "steady-w2-io-v24-r2",
+      "workload": "io",
+      "vus": 24,
+      "duration_s": 30,
+      "wall_s": 31.325194375007413,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w2-io-v24-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1
+      },
+      "measured_s": 31.208372999999998,
+      "attempts": 594,
+      "completed": 594,
+      "success_rate": 1.0,
+      "completed_rps": 19.033353645190026,
+      "attempted_rps": 19.033353645190026,
+      "latency_all_ms": {
+        "avg": 1237.1026936026935,
+        "min": 138,
+        "med": 1258.5,
+        "max": 1301,
+        "p(95)": 1273,
+        "p(99)": 1281.07
+      },
+      "latency_success_ms": {
+        "avg": 1237.1026936026935,
+        "min": 138,
+        "med": 1258.5,
+        "max": 1301,
+        "p(95)": 1273,
+        "p(99)": 1281.07
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        296,
+        298
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        297,
+        297,
+        0
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "steady-w2-io-v8-r2",
+      "workload": "io",
+      "vus": 8,
+      "duration_s": 30,
+      "wall_s": 30.515849749965128,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w2-io-v8-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1
+      },
+      "measured_s": 30.331394,
+      "attempts": 578,
+      "completed": 578,
+      "success_rate": 1.0,
+      "completed_rps": 19.05616339295187,
+      "attempted_rps": 19.05616339295187,
+      "latency_all_ms": {
+        "med": 419,
+        "max": 450,
+        "p(95)": 434,
+        "p(99)": 443,
+        "avg": 417.4878892733564,
+        "min": 135
+      },
+      "latency_success_ms": {
+        "avg": 417.4878892733564,
+        "min": 135,
+        "med": 419,
+        "max": 450,
+        "p(95)": 434,
+        "p(99)": 443
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        290,
+        288
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        289,
+        289,
+        0
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "steady-w2-io-v1-r2",
+      "workload": "io",
+      "vus": 1,
+      "duration_s": 30,
+      "wall_s": 30.323685709037818,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w2-io-v1-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1
+      },
+      "measured_s": 30.120186,
+      "attempts": 248,
+      "completed": 248,
+      "success_rate": 1.0,
+      "completed_rps": 8.23368089426805,
+      "attempted_rps": 8.23368089426805,
+      "latency_all_ms": {
+        "p(99)": 134,
+        "avg": 121.30645161290323,
+        "min": 110,
+        "med": 121,
+        "max": 135,
+        "p(95)": 131
+      },
+      "latency_success_ms": {
+        "med": 121,
+        "max": 135,
+        "p(95)": 131,
+        "p(99)": 134,
+        "avg": 121.30645161290323,
+        "min": 110
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        125,
+        123
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        124,
+        124,
+        0
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "warm-w2-cpu-r2",
+      "workload": "cpu",
+      "vus": 8,
+      "duration_s": 5,
+      "wall_s": 5.077076916990336,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "warm-w2-cpu-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1
+      },
+      "measured_s": 5.050458,
+      "attempts": 928,
+      "completed": 928,
+      "success_rate": 1.0,
+      "completed_rps": 183.7457117750509,
+      "attempted_rps": 183.7457117750509,
+      "latency_all_ms": {
+        "max": 120,
+        "p(95)": 65,
+        "p(99)": 76.72999999999999,
+        "avg": 43.23599137931034,
+        "min": 13,
+        "med": 43
+      },
+      "latency_success_ms": {
+        "p(99)": 76.72999999999999,
+        "avg": 43.23599137931034,
+        "min": 13,
+        "med": 43,
+        "max": 120,
+        "p(95)": 65
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        463,
+        465
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "steady-w2-cpu-v24-r2",
+      "workload": "cpu",
+      "vus": 24,
+      "duration_s": 30,
+      "wall_s": 30.223462000023574,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w2-cpu-v24-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1
+      },
+      "measured_s": 30.155684,
+      "attempts": 5275,
+      "completed": 5275,
+      "success_rate": 1.0,
+      "completed_rps": 174.92556295522925,
+      "attempted_rps": 174.92556295522925,
+      "latency_all_ms": {
+        "avg": 136.72568720379147,
+        "min": 44,
+        "med": 136,
+        "max": 268,
+        "p(95)": 205,
+        "p(99)": 233
+      },
+      "latency_success_ms": {
+        "avg": 136.72568720379147,
+        "min": 44,
+        "med": 136,
+        "max": 268,
+        "p(95)": 205,
+        "p(99)": 233
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        2638,
+        2637
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "steady-w2-cpu-v8-r2",
+      "workload": "cpu",
+      "vus": 8,
+      "duration_s": 30,
+      "wall_s": 30.273473125009332,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w2-cpu-v8-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1
+      },
+      "measured_s": 30.042627,
+      "attempts": 4540,
+      "completed": 4540,
+      "success_rate": 1.0,
+      "completed_rps": 151.11860890194455,
+      "attempted_rps": 151.11860890194455,
+      "latency_all_ms": {
+        "avg": 52.78854625550661,
+        "min": 13,
+        "med": 46,
+        "max": 296,
+        "p(95)": 83.0499999999998,
+        "p(99)": 244
+      },
+      "latency_success_ms": {
+        "min": 13,
+        "med": 46,
+        "max": 296,
+        "p(95)": 83.0499999999998,
+        "p(99)": 244,
+        "avg": 52.78854625550661
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        2269,
+        2271
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "steady-w2-cpu-v1-r2",
+      "workload": "cpu",
+      "vus": 1,
+      "duration_s": 30,
+      "wall_s": 30.078845540992916,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w2-cpu-v1-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1
+      },
+      "measured_s": 30.012473999999997,
+      "attempts": 1741,
+      "completed": 1741,
+      "success_rate": 1.0,
+      "completed_rps": 58.00921310252531,
+      "attempted_rps": 58.00921310252531,
+      "latency_all_ms": {
+        "avg": 17.135554279149915,
+        "min": 12,
+        "med": 17,
+        "max": 67,
+        "p(95)": 22,
+        "p(99)": 29
+      },
+      "latency_success_ms": {
+        "p(99)": 29,
+        "avg": 17.135554279149915,
+        "min": 12,
+        "med": 17,
+        "max": 67,
+        "p(95)": 22
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        871,
+        870
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "expand-w2-to-3",
+      "workload": "io",
+      "vus": 12,
+      "duration_s": 80,
+      "wall_s": 80.62653408304323,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "expand-w2-to-3.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1
+      },
+      "measured_s": 80.523673,
+      "attempts": 2115,
+      "completed": 2115,
+      "success_rate": 1.0,
+      "completed_rps": 26.265567890823856,
+      "attempted_rps": 26.265567890823856,
+      "latency_all_ms": {
+        "p(95)": 636,
+        "p(99)": 646,
+        "avg": 455.08794326241133,
+        "min": 109,
+        "med": 519,
+        "max": 687
+      },
+      "latency_success_ms": {
+        "avg": 455.08794326241133,
+        "min": 109,
+        "med": 519,
+        "max": 687,
+        "p(95)": 636,
+        "p(99)": 646
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        1057,
+        1058
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        772,
+        773,
+        0
+      ],
+      "worker_unknown": 570
+    },
+    {
+      "name": "warm-w3-cpu-r1",
+      "workload": "cpu",
+      "vus": 8,
+      "duration_s": 5,
+      "wall_s": 5.080442584003322,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "warm-w3-cpu-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 5.033322,
+      "attempts": 960,
+      "completed": 960,
+      "success_rate": 1.0,
+      "completed_rps": 190.7289062770075,
+      "attempted_rps": 190.7289062770075,
+      "latency_all_ms": {
+        "avg": 41.67916666666667,
+        "min": 13,
+        "med": 39,
+        "max": 183,
+        "p(95)": 64.04999999999995,
+        "p(99)": 89.81999999999998
+      },
+      "latency_success_ms": {
+        "p(99)": 89.81999999999998,
+        "avg": 41.67916666666667,
+        "min": 13,
+        "med": 39,
+        "max": 183,
+        "p(95)": 64.04999999999995
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        480,
+        480
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "steady-w3-cpu-v1-r1",
+      "workload": "cpu",
+      "vus": 1,
+      "duration_s": 30,
+      "wall_s": 30.08121958299307,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w3-cpu-v1-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 30.006978,
+      "attempts": 1677,
+      "completed": 1677,
+      "success_rate": 1.0,
+      "completed_rps": 55.887000683640984,
+      "attempted_rps": 55.887000683640984,
+      "latency_all_ms": {
+        "p(99)": 30,
+        "avg": 17.788312462731067,
+        "min": 12,
+        "med": 17,
+        "max": 54,
+        "p(95)": 23
+      },
+      "latency_success_ms": {
+        "avg": 17.788312462731067,
+        "min": 12,
+        "med": 17,
+        "max": 54,
+        "p(95)": 23,
+        "p(99)": 30
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        839,
+        838
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "steady-w3-cpu-v8-r1",
+      "workload": "cpu",
+      "vus": 8,
+      "duration_s": 30,
+      "wall_s": 30.184975833981298,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w3-cpu-v8-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 30.022413,
+      "attempts": 5709,
+      "completed": 5709,
+      "success_rate": 1.0,
+      "completed_rps": 190.15793300824953,
+      "attempted_rps": 190.15793300824953,
+      "latency_all_ms": {
+        "avg": 41.94832720266246,
+        "min": 14,
+        "med": 40,
+        "max": 235,
+        "p(95)": 63,
+        "p(99)": 77
+      },
+      "latency_success_ms": {
+        "avg": 41.94832720266246,
+        "min": 14,
+        "med": 40,
+        "max": 235,
+        "p(95)": 63,
+        "p(99)": 77
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        2854,
+        2855
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "steady-w3-cpu-v24-r1",
+      "workload": "cpu",
+      "vus": 24,
+      "duration_s": 30,
+      "wall_s": 30.180571332981344,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w3-cpu-v24-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 30.123343000000002,
+      "attempts": 5993,
+      "completed": 5993,
+      "success_rate": 1.0,
+      "completed_rps": 198.94870234024157,
+      "attempted_rps": 198.94870234024157,
+      "latency_all_ms": {
+        "min": 19,
+        "med": 115,
+        "max": 432,
+        "p(95)": 192,
+        "p(99)": 250,
+        "avg": 120.2426163857834
+      },
+      "latency_success_ms": {
+        "med": 115,
+        "max": 432,
+        "p(95)": 192,
+        "p(99)": 250,
+        "avg": 120.2426163857834,
+        "min": 19
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        2997,
+        2996
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "warm-w3-io-r1",
+      "workload": "io",
+      "vus": 8,
+      "duration_s": 5,
+      "wall_s": 5.276228374976199,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "warm-w3-io-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 5.245071,
+      "attempts": 149,
+      "completed": 149,
+      "success_rate": 1.0,
+      "completed_rps": 28.407623080793375,
+      "attempted_rps": 28.407623080793375,
+      "latency_all_ms": {
+        "p(99)": 332.04,
+        "avg": 274.79194630872485,
+        "min": 123,
+        "med": 306,
+        "max": 335,
+        "p(95)": 325.59999999999997
+      },
+      "latency_success_ms": {
+        "avg": 274.79194630872485,
+        "min": 123,
+        "med": 306,
+        "max": 335,
+        "p(95)": 325.59999999999997,
+        "p(99)": 332.04
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        75,
+        74
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        50,
+        49,
+        50
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "steady-w3-io-v1-r1",
+      "workload": "io",
+      "vus": 1,
+      "duration_s": 30,
+      "wall_s": 30.118306041986216,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w3-io-v1-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 30.058602999999998,
+      "attempts": 243,
+      "completed": 243,
+      "success_rate": 1.0,
+      "completed_rps": 8.084208038543908,
+      "attempted_rps": 8.084208038543908,
+      "latency_all_ms": {
+        "min": 109,
+        "med": 123,
+        "max": 153,
+        "p(95)": 137,
+        "p(99)": 143.16,
+        "avg": 123.48559670781893
+      },
+      "latency_success_ms": {
+        "avg": 123.48559670781893,
+        "min": 109,
+        "med": 123,
+        "max": 153,
+        "p(95)": 137,
+        "p(99)": 143.16
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        121,
+        122
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        81,
+        82,
+        80
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "steady-w3-io-v8-r1",
+      "workload": "io",
+      "vus": 8,
+      "duration_s": 30,
+      "wall_s": 30.31282441597432,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w3-io-v8-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 30.231058,
+      "attempts": 866,
+      "completed": 866,
+      "success_rate": 1.0,
+      "completed_rps": 28.646036800961447,
+      "attempted_rps": 28.646036800961447,
+      "latency_all_ms": {
+        "min": 150,
+        "med": 306,
+        "max": 356,
+        "p(95)": 325,
+        "p(99)": 331.34999999999997,
+        "avg": 278.0623556581986
+      },
+      "latency_success_ms": {
+        "avg": 278.0623556581986,
+        "min": 150,
+        "med": 306,
+        "max": 356,
+        "p(95)": 325,
+        "p(99)": 331.34999999999997
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        433,
+        433
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        289,
+        288,
+        289
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "steady-w3-io-v24-r1",
+      "workload": "io",
+      "vus": 24,
+      "duration_s": 30,
+      "wall_s": 31.10326033300953,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w3-io-v24-r1.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 30.916483,
+      "attempts": 882,
+      "completed": 882,
+      "success_rate": 1.0,
+      "completed_rps": 28.528471365905364,
+      "attempted_rps": 28.528471365905364,
+      "latency_all_ms": {
+        "med": 837,
+        "max": 978,
+        "p(95)": 940,
+        "p(99)": 954,
+        "avg": 828.2993197278912,
+        "min": 134
+      },
+      "latency_success_ms": {
+        "avg": 828.2993197278912,
+        "min": 134,
+        "med": 837,
+        "max": 978,
+        "p(95)": 940,
+        "p(99)": 954
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        440,
+        442
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        293,
+        295,
+        294
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "warm-w3-io-r2",
+      "workload": "io",
+      "vus": 8,
+      "duration_s": 5,
+      "wall_s": 5.292834708001465,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "warm-w3-io-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 5.258006999999999,
+      "attempts": 149,
+      "completed": 149,
+      "success_rate": 1.0,
+      "completed_rps": 28.33773328943838,
+      "attempted_rps": 28.33773328943838,
+      "latency_all_ms": {
+        "p(95)": 406,
+        "p(99)": 416.2,
+        "avg": 275.18120805369125,
+        "min": 125,
+        "med": 249,
+        "max": 432
+      },
+      "latency_success_ms": {
+        "p(95)": 406,
+        "p(99)": 416.2,
+        "avg": 275.18120805369125,
+        "min": 125,
+        "med": 249,
+        "max": 432
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        75,
+        74
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        50,
+        49,
+        50
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "steady-w3-io-v24-r2",
+      "workload": "io",
+      "vus": 24,
+      "duration_s": 30,
+      "wall_s": 30.907673292036634,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w3-io-v24-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 30.834035,
+      "attempts": 883,
+      "completed": 883,
+      "success_rate": 1.0,
+      "completed_rps": 28.637186148358463,
+      "attempted_rps": 28.637186148358463,
+      "latency_all_ms": {
+        "avg": 827.8335220838052,
+        "min": 141,
+        "med": 835,
+        "max": 1009,
+        "p(95)": 924.9,
+        "p(99)": 959.18
+      },
+      "latency_success_ms": {
+        "avg": 827.8335220838052,
+        "min": 141,
+        "med": 835,
+        "max": 1009,
+        "p(95)": 924.9,
+        "p(99)": 959.18
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        442,
+        441
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        295,
+        294,
+        294
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "steady-w3-io-v8-r2",
+      "workload": "io",
+      "vus": 8,
+      "duration_s": 30,
+      "wall_s": 30.480537790979724,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w3-io-v8-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 30.310574,
+      "attempts": 871,
+      "completed": 871,
+      "success_rate": 1.0,
+      "completed_rps": 28.735846440915306,
+      "attempted_rps": 28.735846440915306,
+      "latency_all_ms": {
+        "p(99)": 330,
+        "avg": 276.8289322617681,
+        "min": 118,
+        "med": 306,
+        "max": 344,
+        "p(95)": 322
+      },
+      "latency_success_ms": {
+        "med": 306,
+        "max": 344,
+        "p(95)": 322,
+        "p(99)": 330,
+        "avg": 276.8289322617681,
+        "min": 118
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        435,
+        436
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        290,
+        291,
+        290
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "steady-w3-io-v1-r2",
+      "workload": "io",
+      "vus": 1,
+      "duration_s": 30,
+      "wall_s": 30.11704604199622,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w3-io-v1-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 30.078939,
+      "attempts": 248,
+      "completed": 248,
+      "success_rate": 1.0,
+      "completed_rps": 8.244971672704281,
+      "attempted_rps": 8.244971672704281,
+      "latency_all_ms": {
+        "min": 109,
+        "med": 120.5,
+        "max": 148,
+        "p(95)": 132,
+        "p(99)": 138.53,
+        "avg": 121.14516129032258
+      },
+      "latency_success_ms": {
+        "max": 148,
+        "p(95)": 132,
+        "p(99)": 138.53,
+        "avg": 121.14516129032258,
+        "min": 109,
+        "med": 120.5
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        124,
+        124
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        83,
+        82,
+        83
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "warm-w3-cpu-r2",
+      "workload": "cpu",
+      "vus": 8,
+      "duration_s": 5,
+      "wall_s": 5.075558333017398,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "warm-w3-cpu-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 5.034796,
+      "attempts": 937,
+      "completed": 937,
+      "success_rate": 1.0,
+      "completed_rps": 186.10485906479627,
+      "attempted_rps": 186.10485906479627,
+      "latency_all_ms": {
+        "max": 142,
+        "p(95)": 71,
+        "p(99)": 98.63999999999999,
+        "avg": 42.76093916755603,
+        "min": 17,
+        "med": 40
+      },
+      "latency_success_ms": {
+        "p(99)": 98.63999999999999,
+        "avg": 42.76093916755603,
+        "min": 17,
+        "med": 40,
+        "max": 142,
+        "p(95)": 71
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        469,
+        468
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "steady-w3-cpu-v24-r2",
+      "workload": "cpu",
+      "vus": 24,
+      "duration_s": 30,
+      "wall_s": 30.142835750011727,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w3-cpu-v24-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 30.099267,
+      "attempts": 6008,
+      "completed": 6008,
+      "success_rate": 1.0,
+      "completed_rps": 199.60618974541805,
+      "attempted_rps": 199.60618974541805,
+      "latency_all_ms": {
+        "p(99)": 247,
+        "avg": 119.94207723035952,
+        "min": 31,
+        "med": 116,
+        "max": 585,
+        "p(95)": 184
+      },
+      "latency_success_ms": {
+        "med": 116,
+        "max": 585,
+        "p(95)": 184,
+        "p(99)": 247,
+        "avg": 119.94207723035952,
+        "min": 31
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        3003,
+        3005
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "steady-w3-cpu-v8-r2",
+      "workload": "cpu",
+      "vus": 8,
+      "duration_s": 30,
+      "wall_s": 30.198466665984597,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w3-cpu-v8-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 30.039864,
+      "attempts": 5366,
+      "completed": 5366,
+      "success_rate": 1.0,
+      "completed_rps": 178.62930404744841,
+      "attempted_rps": 178.62930404744841,
+      "latency_all_ms": {
+        "p(95)": 67,
+        "p(99)": 148.6999999999999,
+        "avg": 44.65747297800969,
+        "min": 16,
+        "med": 42,
+        "max": 261
+      },
+      "latency_success_ms": {
+        "p(95)": 67,
+        "p(99)": 148.6999999999999,
+        "avg": 44.65747297800969,
+        "min": 16,
+        "med": 42,
+        "max": 261
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        2683,
+        2683
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "steady-w3-cpu-v1-r2",
+      "workload": "cpu",
+      "vus": 1,
+      "duration_s": 30,
+      "wall_s": 30.097583124996163,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "steady-w3-cpu-v1-r2.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 30.010772,
+      "attempts": 1692,
+      "completed": 1692,
+      "success_rate": 1.0,
+      "completed_rps": 56.37975590897828,
+      "attempted_rps": 56.37975590897828,
+      "latency_all_ms": {
+        "p(95)": 23,
+        "p(99)": 32,
+        "avg": 17.640070921985817,
+        "min": 12,
+        "med": 17,
+        "max": 52
+      },
+      "latency_success_ms": {
+        "avg": 17.640070921985817,
+        "min": 12,
+        "med": 17,
+        "max": 52,
+        "p(95)": 23,
+        "p(99)": 32
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        846,
+        846
+      ],
+      "api_unknown": 0,
+      "worker_counts": null,
+      "worker_unknown": null
+    },
+    {
+      "name": "overload-w3-io-v120",
+      "workload": "io",
+      "vus": 120,
+      "duration_s": 30,
+      "wall_s": 33.699436541006435,
+      "exit_code": 0,
+      "allow_failures": true,
+      "summary": "overload-w3-io-v120.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 33.52086,
+      "attempts": 6934,
+      "completed": 960,
+      "success_rate": 0.13844822613210267,
+      "completed_rps": 28.638883369937407,
+      "attempted_rps": 206.85626800744373,
+      "latency_all_ms": {
+        "max": 4260,
+        "p(95)": 3500,
+        "p(99)": 3672.67,
+        "avg": 545.0715315835016,
+        "min": 2,
+        "med": 73
+      },
+      "latency_success_ms": {
+        "min": 317,
+        "med": 3468,
+        "max": 4260,
+        "p(95)": 3731.05,
+        "p(99)": 3941.41,
+        "avg": 3369.1229166666667
+      },
+      "errors": {
+        "transport": 0,
+        "http": 210,
+        "runtime": 0,
+        "invalid_output": 5764
+      },
+      "api_counts": [
+        3467,
+        3467
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        319,
+        320,
+        321
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "pause-w3-io-v12",
+      "workload": "io",
+      "vus": 12,
+      "duration_s": 120,
+      "wall_s": 120.5300274589681,
+      "exit_code": 0,
+      "allow_failures": true,
+      "summary": "pause-w3-io-v12.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 120.38679499999999,
+      "attempts": 3446,
+      "completed": 3446,
+      "success_rate": 1.0,
+      "completed_rps": 28.624401870653674,
+      "attempted_rps": 28.624401870653674,
+      "latency_all_ms": {
+        "avg": 418.44254207777135,
+        "min": 125,
+        "med": 418,
+        "max": 634,
+        "p(95)": 523,
+        "p(99)": 539
+      },
+      "latency_success_ms": {
+        "max": 634,
+        "p(95)": 523,
+        "p(99)": 539,
+        "avg": 418.44254207777135,
+        "min": 125,
+        "med": 418
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        1725,
+        1721
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        1148,
+        1149,
+        1149
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "recovery-w3-io-v12",
+      "workload": "io",
+      "vus": 12,
+      "duration_s": 30,
+      "wall_s": 30.541611459048,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "recovery-w3-io-v12.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 30.359541,
+      "attempts": 870,
+      "completed": 870,
+      "success_rate": 1.0,
+      "completed_rps": 28.656559728620405,
+      "attempted_rps": 28.656559728620405,
+      "latency_all_ms": {
+        "avg": 416.348275862069,
+        "min": 126,
+        "med": 418,
+        "max": 540,
+        "p(95)": 436,
+        "p(99)": 450.62
+      },
+      "latency_success_ms": {
+        "p(95)": 436,
+        "p(99)": 450.62,
+        "avg": 416.348275862069,
+        "min": 126,
+        "med": 418,
+        "max": 540
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        435,
+        435
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        290,
+        290,
+        290
+      ],
+      "worker_unknown": 0
+    }
+  ],
+  "steady": [
+    {
+      "workers": 1,
+      "workload": "cpu",
+      "vus": 1,
+      "runs": [
+        "steady-w1-cpu-v1-r1",
+        "steady-w1-cpu-v1-r2"
+      ],
+      "replicates": 2,
+      "attempts": 3808,
+      "completed": 3808,
+      "errors": 0,
+      "rps_median": 63.45039088605657,
+      "rps_min": 61.30184666149311,
+      "rps_max": 65.59893511062003,
+      "p95_min_ms": 20,
+      "p95_max_ms": 21,
+      "api_counts": [
+        1906,
+        1902
+      ],
+      "worker_counts": null,
+      "speedup_vs_1": 1.0,
+      "efficiency_vs_1": 1.0
+    },
+    {
+      "workers": 1,
+      "workload": "cpu",
+      "vus": 8,
+      "runs": [
+        "steady-w1-cpu-v8-r1",
+        "steady-w1-cpu-v8-r2"
+      ],
+      "replicates": 2,
+      "attempts": 5672,
+      "completed": 5672,
+      "errors": 0,
+      "rps_median": 94.30482590909585,
+      "rps_min": 94.02125551955139,
+      "rps_max": 94.5883962986403,
+      "p95_min_ms": 100,
+      "p95_max_ms": 101,
+      "api_counts": [
+        2835,
+        2837
+      ],
+      "worker_counts": null,
+      "speedup_vs_1": 1.0,
+      "efficiency_vs_1": 1.0
+    },
+    {
+      "workers": 1,
+      "workload": "cpu",
+      "vus": 24,
+      "runs": [
+        "steady-w1-cpu-v24-r1",
+        "steady-w1-cpu-v24-r2"
+      ],
+      "replicates": 2,
+      "attempts": 6075,
+      "completed": 6075,
+      "errors": 0,
+      "rps_median": 100.4774826097255,
+      "rps_min": 98.22749461302698,
+      "rps_max": 102.72747060642402,
+      "p95_min_ms": 254,
+      "p95_max_ms": 291.4999999999999,
+      "api_counts": [
+        3038,
+        3037
+      ],
+      "worker_counts": null,
+      "speedup_vs_1": 1.0,
+      "efficiency_vs_1": 1.0
+    },
+    {
+      "workers": 1,
+      "workload": "io",
+      "vus": 1,
+      "runs": [
+        "steady-w1-io-v1-r1",
+        "steady-w1-io-v1-r2"
+      ],
+      "replicates": 2,
+      "attempts": 506,
+      "completed": 506,
+      "errors": 0,
+      "rps_median": 8.412285037999961,
+      "rps_min": 8.17368780911741,
+      "rps_max": 8.650882266882514,
+      "p95_min_ms": 126.04999999999998,
+      "p95_max_ms": 130,
+      "api_counts": [
+        253,
+        253
+      ],
+      "worker_counts": [
+        506,
+        0,
+        0
+      ],
+      "speedup_vs_1": 1.0,
+      "efficiency_vs_1": 1.0
+    },
+    {
+      "workers": 1,
+      "workload": "io",
+      "vus": 8,
+      "runs": [
+        "steady-w1-io-v8-r1",
+        "steady-w1-io-v8-r2"
+      ],
+      "replicates": 2,
+      "attempts": 586,
+      "completed": 586,
+      "errors": 0,
+      "rps_median": 9.514399860261928,
+      "rps_min": 9.506796483432735,
+      "rps_max": 9.522003237091122,
+      "p95_min_ms": 852.4,
+      "p95_max_ms": 853,
+      "api_counts": [
+        291,
+        295
+      ],
+      "worker_counts": [
+        586,
+        0,
+        0
+      ],
+      "speedup_vs_1": 1.0,
+      "efficiency_vs_1": 1.0
+    },
+    {
+      "workers": 1,
+      "workload": "io",
+      "vus": 24,
+      "runs": [
+        "steady-w1-io-v24-r1",
+        "steady-w1-io-v24-r2"
+      ],
+      "replicates": 2,
+      "attempts": 616,
+      "completed": 616,
+      "errors": 0,
+      "rps_median": 9.477814561752378,
+      "rps_min": 9.457413988747525,
+      "rps_max": 9.498215134757233,
+      "p95_min_ms": 2552.6,
+      "p95_max_ms": 2555,
+      "api_counts": [
+        310,
+        306
+      ],
+      "worker_counts": [
+        616,
+        0,
+        0
+      ],
+      "speedup_vs_1": 1.0,
+      "efficiency_vs_1": 1.0
+    },
+    {
+      "workers": 2,
+      "workload": "cpu",
+      "vus": 1,
+      "runs": [
+        "steady-w2-cpu-v1-r1",
+        "steady-w2-cpu-v1-r2"
+      ],
+      "replicates": 2,
+      "attempts": 3526,
+      "completed": 3526,
+      "errors": 0,
+      "rps_median": 58.75076037357343,
+      "rps_min": 58.00921310252531,
+      "rps_max": 59.49230764462155,
+      "p95_min_ms": 21,
+      "p95_max_ms": 22,
+      "api_counts": [
+        1764,
+        1762
+      ],
+      "worker_counts": null,
+      "speedup_vs_1": 0.9259322055096133,
+      "efficiency_vs_1": 0.46296610275480665
+    },
+    {
+      "workers": 2,
+      "workload": "cpu",
+      "vus": 8,
+      "runs": [
+        "steady-w2-cpu-v8-r1",
+        "steady-w2-cpu-v8-r2"
+      ],
+      "replicates": 2,
+      "attempts": 9466,
+      "completed": 9466,
+      "errors": 0,
+      "rps_median": 157.31758753101096,
+      "rps_min": 151.11860890194455,
+      "rps_max": 163.51656616007736,
+      "p95_min_ms": 72,
+      "p95_max_ms": 83.0499999999998,
+      "api_counts": [
+        4733,
+        4733
+      ],
+      "worker_counts": null,
+      "speedup_vs_1": 1.6681817289250456,
+      "efficiency_vs_1": 0.8340908644625228
+    },
+    {
+      "workers": 2,
+      "workload": "cpu",
+      "vus": 24,
+      "runs": [
+        "steady-w2-cpu-v24-r1",
+        "steady-w2-cpu-v24-r2"
+      ],
+      "replicates": 2,
+      "attempts": 10115,
+      "completed": 10115,
+      "errors": 0,
+      "rps_median": 167.7981317704486,
+      "rps_min": 160.67070058566793,
+      "rps_max": 174.92556295522925,
+      "p95_min_ms": 205,
+      "p95_max_ms": 278.0499999999998,
+      "api_counts": [
+        5059,
+        5056
+      ],
+      "worker_counts": null,
+      "speedup_vs_1": 1.6700073231552772,
+      "efficiency_vs_1": 0.8350036615776386
+    },
+    {
+      "workers": 2,
+      "workload": "io",
+      "vus": 1,
+      "runs": [
+        "steady-w2-io-v1-r1",
+        "steady-w2-io-v1-r2"
+      ],
+      "replicates": 2,
+      "attempts": 493,
+      "completed": 493,
+      "errors": 0,
+      "rps_median": 8.186342762946605,
+      "rps_min": 8.139004631625163,
+      "rps_max": 8.23368089426805,
+      "p95_min_ms": 131,
+      "p95_max_ms": 134,
+      "api_counts": [
+        247,
+        246
+      ],
+      "worker_counts": [
+        246,
+        247,
+        0
+      ],
+      "speedup_vs_1": 0.9731413909499346,
+      "efficiency_vs_1": 0.4865706954749673
+    },
+    {
+      "workers": 2,
+      "workload": "io",
+      "vus": 8,
+      "runs": [
+        "steady-w2-io-v8-r1",
+        "steady-w2-io-v8-r2"
+      ],
+      "replicates": 2,
+      "attempts": 1156,
+      "completed": 1156,
+      "errors": 0,
+      "rps_median": 19.05105456694314,
+      "rps_min": 19.04594574093441,
+      "rps_max": 19.05616339295187,
+      "p95_min_ms": 434,
+      "p95_max_ms": 435,
+      "api_counts": [
+        578,
+        578
+      ],
+      "worker_counts": [
+        578,
+        578,
+        0
+      ],
+      "speedup_vs_1": 2.0023390699094152,
+      "efficiency_vs_1": 1.0011695349547076
+    },
+    {
+      "workers": 2,
+      "workload": "io",
+      "vus": 24,
+      "runs": [
+        "steady-w2-io-v24-r1",
+        "steady-w2-io-v24-r2"
+      ],
+      "replicates": 2,
+      "attempts": 1190,
+      "completed": 1190,
+      "errors": 0,
+      "rps_median": 19.05590153843175,
+      "rps_min": 19.033353645190026,
+      "rps_max": 19.078449431673477,
+      "p95_min_ms": 1273,
+      "p95_max_ms": 1278,
+      "api_counts": [
+        596,
+        594
+      ],
+      "worker_counts": [
+        595,
+        595,
+        0
+      ],
+      "speedup_vs_1": 2.010579697911757,
+      "efficiency_vs_1": 1.0052898489558786
+    },
+    {
+      "workers": 3,
+      "workload": "cpu",
+      "vus": 1,
+      "runs": [
+        "steady-w3-cpu-v1-r1",
+        "steady-w3-cpu-v1-r2"
+      ],
+      "replicates": 2,
+      "attempts": 3369,
+      "completed": 3369,
+      "errors": 0,
+      "rps_median": 56.13337829630963,
+      "rps_min": 55.887000683640984,
+      "rps_max": 56.37975590897828,
+      "p95_min_ms": 23,
+      "p95_max_ms": 23,
+      "api_counts": [
+        1685,
+        1684
+      ],
+      "worker_counts": null,
+      "speedup_vs_1": 0.8846813630685627,
+      "efficiency_vs_1": 0.2948937876895209
+    },
+    {
+      "workers": 3,
+      "workload": "cpu",
+      "vus": 8,
+      "runs": [
+        "steady-w3-cpu-v8-r1",
+        "steady-w3-cpu-v8-r2"
+      ],
+      "replicates": 2,
+      "attempts": 11075,
+      "completed": 11075,
+      "errors": 0,
+      "rps_median": 184.39361852784896,
+      "rps_min": 178.62930404744841,
+      "rps_max": 190.15793300824953,
+      "p95_min_ms": 63,
+      "p95_max_ms": 67,
+      "api_counts": [
+        5537,
+        5538
+      ],
+      "worker_counts": null,
+      "speedup_vs_1": 1.9552935573582761,
+      "efficiency_vs_1": 0.6517645191194253
+    },
+    {
+      "workers": 3,
+      "workload": "cpu",
+      "vus": 24,
+      "runs": [
+        "steady-w3-cpu-v24-r1",
+        "steady-w3-cpu-v24-r2"
+      ],
+      "replicates": 2,
+      "attempts": 12001,
+      "completed": 12001,
+      "errors": 0,
+      "rps_median": 199.2774460428298,
+      "rps_min": 198.94870234024157,
+      "rps_max": 199.60618974541805,
+      "p95_min_ms": 184,
+      "p95_max_ms": 192,
+      "api_counts": [
+        6000,
+        6001
+      ],
+      "worker_counts": null,
+      "speedup_vs_1": 1.9833045262177098,
+      "efficiency_vs_1": 0.6611015087392366
+    },
+    {
+      "workers": 3,
+      "workload": "io",
+      "vus": 1,
+      "runs": [
+        "steady-w3-io-v1-r1",
+        "steady-w3-io-v1-r2"
+      ],
+      "replicates": 2,
+      "attempts": 491,
+      "completed": 491,
+      "errors": 0,
+      "rps_median": 8.164589855624094,
+      "rps_min": 8.084208038543908,
+      "rps_max": 8.244971672704281,
+      "p95_min_ms": 132,
+      "p95_max_ms": 137,
+      "api_counts": [
+        245,
+        246
+      ],
+      "worker_counts": [
+        164,
+        164,
+        163
+      ],
+      "speedup_vs_1": 0.9705555409431588,
+      "efficiency_vs_1": 0.3235185136477196
+    },
+    {
+      "workers": 3,
+      "workload": "io",
+      "vus": 8,
+      "runs": [
+        "steady-w3-io-v8-r1",
+        "steady-w3-io-v8-r2"
+      ],
+      "replicates": 2,
+      "attempts": 1737,
+      "completed": 1737,
+      "errors": 0,
+      "rps_median": 28.690941620938375,
+      "rps_min": 28.646036800961447,
+      "rps_max": 28.735846440915306,
+      "p95_min_ms": 322,
+      "p95_max_ms": 325,
+      "api_counts": [
+        868,
+        869
+      ],
+      "worker_counts": [
+        579,
+        579,
+        579
+      ],
+      "speedup_vs_1": 3.015528256361145,
+      "efficiency_vs_1": 1.005176085453715
+    },
+    {
+      "workers": 3,
+      "workload": "io",
+      "vus": 24,
+      "runs": [
+        "steady-w3-io-v24-r1",
+        "steady-w3-io-v24-r2"
+      ],
+      "replicates": 2,
+      "attempts": 1765,
+      "completed": 1765,
+      "errors": 0,
+      "rps_median": 28.582828757131914,
+      "rps_min": 28.528471365905364,
+      "rps_max": 28.637186148358463,
+      "p95_min_ms": 924.9,
+      "p95_max_ms": 940,
+      "api_counts": [
+        882,
+        883
+      ],
+      "worker_counts": [
+        588,
+        589,
+        588
+      ],
+      "speedup_vs_1": 3.015761552507856,
+      "efficiency_vs_1": 1.0052538508359519
+    }
+  ],
+  "traces": {
+    "expand-w1-to-2": {
+      "requests": 1336,
+      "started_ms": 1794664723675,
+      "bins_5s": [
+        {
+          "start_s": 0,
+          "attempts": 59,
+          "completed": 59,
+          "status_counts": {
+            "200": 59
+          },
+          "worker_counts": {
+            "10.244.0.19": 59
+          }
+        },
+        {
+          "start_s": 5,
+          "attempts": 47,
+          "completed": 47,
+          "status_counts": {
+            "200": 47
+          },
+          "worker_counts": {
+            "10.244.0.19": 47
+          }
+        },
+        {
+          "start_s": 10,
+          "attempts": 48,
+          "completed": 48,
+          "status_counts": {
+            "200": 48
+          },
+          "worker_counts": {
+            "10.244.0.19": 48
+          }
+        },
+        {
+          "start_s": 15,
+          "attempts": 47,
+          "completed": 47,
+          "status_counts": {
+            "200": 47
+          },
+          "worker_counts": {
+            "10.244.0.19": 47
+          }
+        },
+        {
+          "start_s": 20,
+          "attempts": 83,
+          "completed": 83,
+          "status_counts": {
+            "200": 83
+          },
+          "worker_counts": {
+            "10.244.0.19": 47,
+            "10.244.0.21": 36
+          }
+        },
+        {
+          "start_s": 25,
+          "attempts": 96,
+          "completed": 96,
+          "status_counts": {
+            "200": 96
+          },
+          "worker_counts": {
+            "10.244.0.21": 49,
+            "10.244.0.19": 47
+          }
+        },
+        {
+          "start_s": 30,
+          "attempts": 96,
+          "completed": 96,
+          "status_counts": {
+            "200": 96
+          },
+          "worker_counts": {
+            "10.244.0.21": 47,
+            "10.244.0.19": 49
+          }
+        },
+        {
+          "start_s": 35,
+          "attempts": 95,
+          "completed": 95,
+          "status_counts": {
+            "200": 95
+          },
+          "worker_counts": {
+            "10.244.0.21": 48,
+            "10.244.0.19": 47
+          }
+        },
+        {
+          "start_s": 40,
+          "attempts": 97,
+          "completed": 97,
+          "status_counts": {
+            "200": 97
+          },
+          "worker_counts": {
+            "10.244.0.21": 48,
+            "10.244.0.19": 49
+          }
+        },
+        {
+          "start_s": 45,
+          "attempts": 94,
+          "completed": 94,
+          "status_counts": {
+            "200": 94
+          },
+          "worker_counts": {
+            "10.244.0.21": 47,
+            "10.244.0.19": 47
+          }
+        },
+        {
+          "start_s": 50,
+          "attempts": 96,
+          "completed": 96,
+          "status_counts": {
+            "200": 96
+          },
+          "worker_counts": {
+            "10.244.0.21": 48,
+            "10.244.0.19": 48
+          }
+        },
+        {
+          "start_s": 55,
+          "attempts": 94,
+          "completed": 94,
+          "status_counts": {
+            "200": 94
+          },
+          "worker_counts": {
+            "10.244.0.21": 48,
+            "10.244.0.19": 46
+          }
+        },
+        {
+          "start_s": 60,
+          "attempts": 96,
+          "completed": 96,
+          "status_counts": {
+            "200": 96
+          },
+          "worker_counts": {
+            "10.244.0.21": 48,
+            "10.244.0.19": 48
+          }
+        },
+        {
+          "start_s": 65,
+          "attempts": 96,
+          "completed": 96,
+          "status_counts": {
+            "200": 96
+          },
+          "worker_counts": {
+            "10.244.0.21": 47,
+            "10.244.0.19": 49
+          }
+        },
+        {
+          "start_s": 70,
+          "attempts": 96,
+          "completed": 96,
+          "status_counts": {
+            "200": 96
+          },
+          "worker_counts": {
+            "10.244.0.21": 48,
+            "10.244.0.19": 48
+          }
+        },
+        {
+          "start_s": 75,
+          "attempts": 96,
+          "completed": 96,
+          "status_counts": {
+            "200": 96
+          },
+          "worker_counts": {
+            "10.244.0.21": 48,
+            "10.244.0.19": 48
+          }
+        }
+      ]
+    },
+    "expand-w2-to-3": {
+      "requests": 2115,
+      "started_ms": 1794665192543,
+      "bins_5s": [
+        {
+          "start_s": 0,
+          "attempts": 106,
+          "completed": 106,
+          "status_counts": {
+            "200": 106
+          },
+          "worker_counts": {
+            "10.244.0.19": 53,
+            "10.244.0.21": 53
+          }
+        },
+        {
+          "start_s": 5,
+          "attempts": 96,
+          "completed": 96,
+          "status_counts": {
+            "200": 96
+          },
+          "worker_counts": {
+            "10.244.0.19": 48,
+            "10.244.0.21": 48
+          }
+        },
+        {
+          "start_s": 10,
+          "attempts": 94,
+          "completed": 94,
+          "status_counts": {
+            "200": 94
+          },
+          "worker_counts": {
+            "10.244.0.19": 47,
+            "10.244.0.21": 47
+          }
+        },
+        {
+          "start_s": 15,
+          "attempts": 96,
+          "completed": 96,
+          "status_counts": {
+            "200": 96
+          },
+          "worker_counts": {
+            "10.244.0.19": 48,
+            "10.244.0.21": 48
+          }
+        },
+        {
+          "start_s": 20,
+          "attempts": 135,
+          "completed": 135,
+          "status_counts": {
+            "200": 135
+          },
+          "worker_counts": {
+            "10.244.0.19": 47,
+            "10.244.0.21": 48,
+            "10.244.0.22": 40
+          }
+        },
+        {
+          "start_s": 25,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 48,
+            "10.244.0.19": 48,
+            "10.244.0.21": 48
+          }
+        },
+        {
+          "start_s": 30,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 49,
+            "10.244.0.19": 48,
+            "10.244.0.21": 47
+          }
+        },
+        {
+          "start_s": 35,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 47,
+            "10.244.0.21": 49,
+            "10.244.0.19": 48
+          }
+        },
+        {
+          "start_s": 40,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 48,
+            "10.244.0.19": 48,
+            "10.244.0.21": 48
+          }
+        },
+        {
+          "start_s": 45,
+          "attempts": 146,
+          "completed": 146,
+          "status_counts": {
+            "200": 146
+          },
+          "worker_counts": {
+            "10.244.0.22": 49,
+            "10.244.0.19": 49,
+            "10.244.0.21": 48
+          }
+        },
+        {
+          "start_s": 50,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 48,
+            "10.244.0.19": 48,
+            "10.244.0.21": 48
+          }
+        },
+        {
+          "start_s": 55,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 48,
+            "10.244.0.21": 48,
+            "10.244.0.19": 48
+          }
+        },
+        {
+          "start_s": 60,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 48,
+            "10.244.0.19": 48,
+            "10.244.0.21": 48
+          }
+        },
+        {
+          "start_s": 65,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 48,
+            "10.244.0.19": 47,
+            "10.244.0.21": 49
+          }
+        },
+        {
+          "start_s": 70,
+          "attempts": 145,
+          "completed": 145,
+          "status_counts": {
+            "200": 145
+          },
+          "worker_counts": {
+            "10.244.0.22": 48,
+            "10.244.0.19": 49,
+            "10.244.0.21": 48
+          }
+        },
+        {
+          "start_s": 75,
+          "attempts": 145,
+          "completed": 145,
+          "status_counts": {
+            "200": 145
+          },
+          "worker_counts": {
+            "10.244.0.22": 49,
+            "10.244.0.19": 48,
+            "10.244.0.21": 48
+          }
+        }
+      ]
+    },
+    "pause-w3-io-v12": {
+      "requests": 3446,
+      "started_ms": 1794665692884,
+      "bins_5s": [
+        {
+          "start_s": 0,
+          "attempts": 153,
+          "completed": 153,
+          "status_counts": {
+            "200": 153
+          },
+          "worker_counts": {
+            "10.244.0.19": 51,
+            "10.244.0.21": 51,
+            "10.244.0.22": 51
+          }
+        },
+        {
+          "start_s": 5,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.21": 49,
+            "10.244.0.22": 48,
+            "10.244.0.19": 47
+          }
+        },
+        {
+          "start_s": 10,
+          "attempts": 141,
+          "completed": 141,
+          "status_counts": {
+            "200": 141
+          },
+          "worker_counts": {
+            "10.244.0.19": 48,
+            "10.244.0.22": 47,
+            "10.244.0.21": 46
+          }
+        },
+        {
+          "start_s": 15,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.21": 48,
+            "10.244.0.19": 48,
+            "10.244.0.22": 48
+          }
+        },
+        {
+          "start_s": 20,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 48,
+            "10.244.0.19": 47,
+            "10.244.0.21": 49
+          }
+        },
+        {
+          "start_s": 25,
+          "attempts": 142,
+          "completed": 142,
+          "status_counts": {
+            "200": 142
+          },
+          "worker_counts": {
+            "10.244.0.19": 48,
+            "10.244.0.22": 47,
+            "10.244.0.21": 47
+          }
+        },
+        {
+          "start_s": 30,
+          "attempts": 146,
+          "completed": 146,
+          "status_counts": {
+            "200": 146
+          },
+          "worker_counts": {
+            "10.244.0.19": 49,
+            "10.244.0.22": 49,
+            "10.244.0.21": 48
+          }
+        },
+        {
+          "start_s": 35,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.21": 48,
+            "10.244.0.19": 48,
+            "10.244.0.22": 48
+          }
+        },
+        {
+          "start_s": 40,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.21": 49,
+            "10.244.0.19": 47,
+            "10.244.0.22": 48
+          }
+        },
+        {
+          "start_s": 45,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.19": 48,
+            "10.244.0.22": 48,
+            "10.244.0.21": 48
+          }
+        },
+        {
+          "start_s": 50,
+          "attempts": 142,
+          "completed": 142,
+          "status_counts": {
+            "200": 142
+          },
+          "worker_counts": {
+            "10.244.0.19": 48,
+            "10.244.0.22": 48,
+            "10.244.0.21": 46
+          }
+        },
+        {
+          "start_s": 55,
+          "attempts": 143,
+          "completed": 143,
+          "status_counts": {
+            "200": 143
+          },
+          "worker_counts": {
+            "10.244.0.19": 48,
+            "10.244.0.21": 48,
+            "10.244.0.22": 47
+          }
+        },
+        {
+          "start_s": 60,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.19": 48,
+            "10.244.0.21": 48,
+            "10.244.0.22": 48
+          }
+        },
+        {
+          "start_s": 65,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.21": 49,
+            "10.244.0.22": 48,
+            "10.244.0.19": 47
+          }
+        },
+        {
+          "start_s": 70,
+          "attempts": 142,
+          "completed": 142,
+          "status_counts": {
+            "200": 142
+          },
+          "worker_counts": {
+            "10.244.0.19": 48,
+            "10.244.0.22": 48,
+            "10.244.0.21": 46
+          }
+        },
+        {
+          "start_s": 75,
+          "attempts": 143,
+          "completed": 143,
+          "status_counts": {
+            "200": 143
+          },
+          "worker_counts": {
+            "10.244.0.19": 47,
+            "10.244.0.21": 49,
+            "10.244.0.22": 47
+          }
+        },
+        {
+          "start_s": 80,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.19": 49,
+            "10.244.0.22": 48,
+            "10.244.0.21": 47
+          }
+        },
+        {
+          "start_s": 85,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 48,
+            "10.244.0.19": 47,
+            "10.244.0.21": 49
+          }
+        },
+        {
+          "start_s": 90,
+          "attempts": 141,
+          "completed": 141,
+          "status_counts": {
+            "200": 141
+          },
+          "worker_counts": {
+            "10.244.0.19": 48,
+            "10.244.0.22": 47,
+            "10.244.0.21": 46
+          }
+        },
+        {
+          "start_s": 95,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.21": 48,
+            "10.244.0.22": 48,
+            "10.244.0.19": 48
+          }
+        },
+        {
+          "start_s": 100,
+          "attempts": 140,
+          "completed": 140,
+          "status_counts": {
+            "200": 140
+          },
+          "worker_counts": {
+            "10.244.0.19": 46,
+            "10.244.0.22": 47,
+            "10.244.0.21": 47
+          }
+        },
+        {
+          "start_s": 105,
+          "attempts": 141,
+          "completed": 141,
+          "status_counts": {
+            "200": 141
+          },
+          "worker_counts": {
+            "10.244.0.22": 46,
+            "10.244.0.21": 47,
+            "10.244.0.19": 48
+          }
+        },
+        {
+          "start_s": 110,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 48,
+            "10.244.0.21": 48,
+            "10.244.0.19": 48
+          }
+        },
+        {
+          "start_s": 115,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 49,
+            "10.244.0.21": 48,
+            "10.244.0.19": 47
+          }
+        }
+      ]
+    }
+  },
+  "resources": {
+    "samples": 296,
+    "sample_errors": 0,
+    "containers": {
+      "calcside-786cf4567c-86t4v/calcside": {
+        "interval_cpu_cores_median": 0.042573454545454546,
+        "interval_cpu_cores_max": 0.33852519999999997,
+        "working_set_bytes_max": 33910784
+      },
+      "calcside-786cf4567c-jxvhl/calcside": {
+        "interval_cpu_cores_median": 0.04241226666666667,
+        "interval_cpu_cores_max": 0.32235476470588237,
+        "working_set_bytes_max": 32681984
+      },
+      "calcside-render-75f9fd7fcc-bzzn9/render": {
+        "interval_cpu_cores_median": 0.00028909954751131224,
+        "interval_cpu_cores_max": 0.0029966666666666666,
+        "working_set_bytes_max": 70135808
+      },
+      "calcside-worker-0/calcside-worker": {
+        "interval_cpu_cores_median": 0.028239315789473685,
+        "interval_cpu_cores_max": 1.0200140555555555,
+        "working_set_bytes_max": 60903424
+      },
+      "calcside-worker-1/calcside-worker": {
+        "interval_cpu_cores_median": 0.022947139204545455,
+        "interval_cpu_cores_max": 1.0322449090909092,
+        "working_set_bytes_max": 49364992
+      },
+      "calcside-worker-2/calcside-worker": {
+        "interval_cpu_cores_median": 0.020846882352941177,
+        "interval_cpu_cores_max": 0.8784024,
+        "working_set_bytes_max": 48504832
+      },
+      "postgres-8bdbddcb4-nxffn/postgres": {
+        "interval_cpu_cores_median": 0.098537,
+        "interval_cpu_cores_max": 1.8654323333333334,
+        "working_set_bytes_max": 210075648
+      },
+      "scalability-delay-669f9c88d4-th4hq/delay": {
+        "interval_cpu_cores_median": 0.01148135294117647,
+        "interval_cpu_cores_max": 0.030030636363636364,
+        "working_set_bytes_max": 17432576
+      },
+      "scalability-proxy-64d48b7fff-2wn67/nginx": {
+        "interval_cpu_cores_median": 0.003728916666666667,
+        "interval_cpu_cores_max": 0.020445571428571428,
+        "working_set_bytes_max": 6098944
+      }
+    }
+  }
+}

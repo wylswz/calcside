@@ -9,7 +9,7 @@ the Starlark interpreter that runs it, and why the path has the shape it has.
 client
   │ HTTPS (public API, api/openapi.yaml)
   ▼
-API tier            service/sandbox ──► runtime.Runtime = remote.Client
+API tier            service/sandbox ──► runtime.Runtime = worker.Client
   │ HTTP/JSON + HMAC (api/worker.openapi.yaml), routed by instance → node binding
   ▼
 worker              remote.NewHandler ──► runtime.Runtime = subproc.Supervisor
@@ -30,11 +30,13 @@ the `Manager`, which trusts no caller.
 
 ### Hop 1: API tier → worker
 
-- **Code:** `remote.Client` (`server/internal/runtime/remote/client.go`), enabled by
-  `calcside serve --workers=…`.
-- **Routing:** `Create` picks a live node and the API persists the binding
-  (`instances.node_id`, `lease_epoch`). Every other call resolves the binding
-  (with a route cache in front) and goes to that node.
+- **Code:** `worker.Client` (`server/internal/runtime/worker/client.go`), used by
+  every `calcside serve` — workers self-register, there is no static list.
+- **Routing:** `Create` picks a live registered node and the API persists the
+  binding (`instances.node_id`, `lease_epoch`). Every other call resolves the
+  binding (with a route cache in front) and goes to that node. The binding —
+  not placement — fixes routing: adding or removing workers never moves an
+  existing instance.
 - **Transport:** HTTP/JSON, HMAC-signed with the shared worker key.
 - **Retries:** only `Keepalive`, `Browse`, `Prompt` and `Inspect` are retried
   on a stale route. `Create`, `Exec` and `Delete` have external side effects
@@ -82,7 +84,17 @@ the `Manager`, which trusts no caller.
 
 ### Persistent Replicas (EP-0014)
 
-Persistent serving adds a control path without giving workers database access:
+Persistent serving adds a control path without giving workers database access.
+Replicas are pre-scheduled: the scheduler keeps one prepared replica per live
+registered worker for every enabled instance, subject to node capacity, and
+the worker prepares each replica context before any invoke runs. This is not
+the notebook model — there is no single immutable owner and no hash routing.
+Invokes select among the currently healthy ready replicas (request-level
+round robin); each replica still serializes its own invokes, so more workers
+yield real parallelism, and every invoke builds fresh globals, so no user
+state crosses calls. Placement is not unlimited: node capacity, the
+instance's global failure backoff and the per-pass claim budget all bound how
+fast a pool fills:
 
 ```
 API store -> serving.Service scheduler -> durable replica assignment
@@ -91,11 +103,17 @@ worker nodeagent -> local Runtime.Prepare/Keepalive/Delete
 caller -> Runtime.Invoke -> fresh globals, modules and /work
 ```
 
-The API scans at most 200 desired instances per scheduler pass. Claims use
-database CAS and a complete node/boot/incarnation/instance/release/generation/
-replica/epoch fence. One unexpired nonterminal replica blocks a replacement,
-even after the node boots again. New boot registration never shortens the
-old replica's lease; historical boot IDs cannot register again.
+The API scans at most 200 desired instances per scheduler pass with a bounded
+claim-attempt budget; skipped nodes fill on later passes. Each pass rotates
+the deterministic candidate preference by one round so a budget-limited pass
+cannot starve the tail of the candidate order when prefix nodes stay full or
+conflicting. Claims use database
+CAS and a complete node/boot/incarnation/instance/release/generation/
+replica/epoch fence. One unexpired nonterminal replica blocks a replacement
+on the SAME node — across generations, boots and releases — while other
+nodes may hold simultaneous replicas under distinct epochs. New boot
+registration never shortens the old replica's lease; historical boot IDs
+cannot register again.
 
 The default replica lease is 30 seconds and node heartbeat TTL is 45 seconds.
 Nodes poll every five seconds; preparing replicas are not renewed until the
@@ -111,23 +129,27 @@ the database lease. Report IDs stay fixed until acknowledgement so network
 replays do not duplicate stored audit events. Shutdown flushes reports only:
 it never applies new assignments or starts replacement replicas.
 
-Remote workers require `--api-addr` (or `CALCSIDE_API_ADDR`) in addition to
-their stable node ID and shared key. The API's `--workers` list is the node
-allowlist and trusted address source. Without `--api-addr`, a worker still
-serves legacy execution but does not restore persistent replicas. Local API
-topologies run the same agent directly against the control service.
+Remote workers require `--api-addr` (or `CALCSIDE_API_ADDR`), a stable node ID,
+`--shared-key`, and `--advertise-addr` — the `host:port` endpoint the worker
+registers with the API. There is no API-side worker list: on boot the nodeagent
+posts a signed `NodeRegisterRequest` carrying the advertised address, and the
+API shape-validates and persists it in `serving_nodes`. Every API replica reads
+that shared table, so a worker that registers through one API is placeable on
+all of them; heartbeats keep it live for the 45s node TTL and expiry is a
+shared DB deadline every API replica honors within its own read and clock
+skew — bounded by the TTL, not simultaneous observation. The shared HMAC key
+is the enrollment boundary — syntactic address validation is not protection
+against a compromised key. Local API topologies run the same agent directly
+against the control service. `/healthz` is process liveness; `/readyz`
+reports registration confirmed — orchestrators should gate on it.
 
-Release publishing, public persistent-instance invoke routes and the build
-schema editor remain separate follow-up work; database rows alone are not a
-public deployment API.
-
-The API tier never executes code: `calcside serve` requires `--workers` +
-`--worker-key`, and `calcside-worker serve` requires `--api-addr` +
-`--shared-key`. Every instance call is API → worker → instance process.
+The API tier never executes code: `calcside serve` requires `--worker-key`,
+and `calcside-worker serve` requires `--api-addr` + `--shared-key` +
+`--advertise-addr`. Every instance call is API → worker → instance process.
 
 | Component | Path |
 |---|---|
-| `calcside serve --workers=…` | API → signed remote client → worker |
+| `calcside serve` | API → signed remote client → worker (workers self-register) |
 | `calcside-worker serve` | worker → Supervisor → instance process → Manager |
 
 Only `calcside-worker` understands the hidden `__instance` subcommand: the
@@ -141,9 +163,14 @@ second binary to deploy and no version skew between parent and child.
 
 - **The API tier is stateless.** It holds no Starlark state, so API nodes
   scale horizontally and any of them can serve any request.
-- **Workers scale independently of the API.** Instances are pinned to one
-  worker for life (their state is not serializable), and placement spreads new
-  instances across live workers.
+- **Workers scale independently of the API.** Ordinary instances are stateful
+  and pinned to one worker for life — globals, VFS and secrets live in the
+  instance process's memory and cannot be serialized — while persistent
+  application replicas are pre-scheduled one per live worker but run every
+  invoke with fresh globals, carrying no user state between calls. New
+  workers automatically gain a prepared replica on the next reconcile pass;
+  existing bindings and replica assignments never move, and invokes never
+  transparently retry onto another worker.
 - **The contract is the only coupling.** Each tier depends only on
   `runtime.Runtime` and its serializable messages. Adding the process hop
   needed no new protocol: the supervisor is one more `Runtime` in front of the

@@ -71,8 +71,6 @@ def server(tmp_path_factory):
                     "--secret-key",
                     SECRET_KEY,
                     "--secrets-allow-http",
-                    "--workers",
-                    f"sdk-worker=127.0.0.1:{worker_port}",
                     "--worker-key",
                     shared_key,
                 ],
@@ -93,6 +91,8 @@ def server(tmp_path_factory):
                     shared_key,
                     "--node-id",
                     "sdk-worker",
+                    "--advertise-addr",
+                    f"127.0.0.1:{worker_port}",
                     "--ext-cache-dir",
                     str(tmp / "worker-cache"),
                     "--instance-memory-max",
@@ -103,18 +103,23 @@ def server(tmp_path_factory):
                 env=env,
             )
         )
-        for endpoint in [url, f"http://127.0.0.1:{worker_port}"]:
+        # API liveness is /healthz; the worker must be /readyz —
+        # registered with the API — before tests place instances.
+        for endpoint, path in [
+            (url, "/healthz"),
+            (f"http://127.0.0.1:{worker_port}", "/readyz"),
+        ]:
             deadline = time.monotonic() + 30
             while time.monotonic() < deadline:
                 if any(proc.poll() is not None for proc in processes):
                     raise RuntimeError("API or worker exited during startup")
                 try:
-                    with urllib.request.urlopen(endpoint + "/healthz", timeout=1):
+                    with urllib.request.urlopen(endpoint + path, timeout=1):
                         break
                 except OSError:
                     time.sleep(0.2)
             else:
-                raise RuntimeError("API or worker did not become healthy")
+                raise RuntimeError("API or worker did not become ready")
         yield url
     finally:
         for proc in processes:

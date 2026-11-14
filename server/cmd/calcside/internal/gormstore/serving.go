@@ -519,10 +519,13 @@ func (d *sqlDB) ClaimServingReplica(ctx context.Context, c store.ServingReplicaC
 		if inst.LastEpoch != c.ExpectedEpoch {
 			return store.ErrConflict
 		}
-		// Any unexpired non-terminal replica blocks a new claim.
+		// One unexpired non-terminal lease per instance per stable
+		// node — across any generation, release, boot or incarnation:
+		// a rebooted node still waits out the old boot's lease, while
+		// other nodes may hold simultaneous replicas.
 		block, err := gorm.G[servingReplicaRow](tx).
-			Where("instance_id = ? AND lease_until > ? AND state IN (?, ?)",
-				c.InstanceID, c.Now.UTC(), store.ServingReplicaPreparing, store.ServingReplicaReady).
+			Where("instance_id = ? AND node_id = ? AND lease_until > ? AND state IN (?, ?)",
+				c.InstanceID, c.NodeID, c.Now.UTC(), store.ServingReplicaPreparing, store.ServingReplicaReady).
 			Count(ctx, "*")
 		if err != nil {
 			return err
@@ -752,6 +755,12 @@ func (d *sqlDB) ReportServingReplica(ctx context.Context, f store.ServingReplica
 		if row.State != store.ServingReplicaPreparing && row.State != store.ServingReplicaReady {
 			return nil // terminal rows never change
 		}
+		if state == store.ServingReplicaReady && row.State == store.ServingReplicaReady {
+			// Replayed ready report: no logical change — the instance's
+			// failure backoff must not be reset by a duplicate.
+			ok = true
+			return nil
+		}
 		upd := servingReplicaRow{State: state, ErrorCode: errorCode, UpdatedAt: now.UTC()}
 		if state != store.ServingReplicaReady {
 			// Truthful terminal report shortens the lease to now.
@@ -815,9 +824,28 @@ func (d *sqlDB) ReportServingReplica(ctx context.Context, f store.ServingReplica
 	return ok, err
 }
 
+// ListInstanceServingReplicas is the pool view shared by the
+// scheduler's blocked-node check and the application's ready-replica
+// selection: every live non-terminal row for the instance, any
+// generation or boot, sorted by id.
+func (d *sqlDB) ListInstanceServingReplicas(ctx context.Context, instanceID string, now time.Time) ([]*store.ServingReplica, error) {
+	rows, err := gorm.G[servingReplicaRow](d.g).
+		Where("instance_id = ? AND lease_until > ? AND state IN (?, ?)",
+			instanceID, now.UTC(), store.ServingReplicaPreparing, store.ServingReplicaReady).
+		Order("id ASC").Find(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*store.ServingReplica, 0, len(rows))
+	for i := range rows {
+		out = append(out, rows[i].toDomain())
+	}
+	return out, nil
+}
+
 // GetCurrentServingReplica returns the replica claimed at the
-// instance's current last_epoch — an unlocked snapshot for the
-// scheduler; Claim remains the CAS authority.
+// instance's last-allocated epoch — a diagnostic snapshot for status
+// surfaces; the replica pool makes it unsuitable as authority.
 func (d *sqlDB) GetCurrentServingReplica(ctx context.Context, instanceID string) (*store.ServingReplica, error) {
 	var row servingReplicaRow
 	err := d.g.WithContext(ctx).Raw(

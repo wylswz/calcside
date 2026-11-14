@@ -135,11 +135,14 @@ type fakeCtl struct {
 	syncs, regs, preps int
 	syncErr            error
 	ctx                context.Context
+	lastReg            *runtime.NodeRegisterRequest
 }
 
 func (f *fakeCtl) RegisterNode(ctx context.Context, r *runtime.NodeRegisterRequest) (*runtime.NodeRegisterResponse, error) {
 	f.regs++
 	f.ctx = ctx
+	cp := *r
+	f.lastReg = &cp
 	return &runtime.NodeRegisterResponse{}, f.syncErr
 }
 func (f *fakeCtl) SyncNode(ctx context.Context, r *runtime.NodeSyncRequest) (*runtime.NodeSyncResponse, error) {
@@ -208,6 +211,15 @@ func TestCallbackNodeControl(t *testing.T) {
 	}
 	if _, isGin := ctl.ctx.(*gin.Context); isGin {
 		t.Fatal("pooled gin ctx leaked to control")
+	}
+
+	// Registration carries the worker's advertised endpoint through
+	// the signed surface unchanged.
+	resp = cbReq(t, srv, key, "n1", "/internal/v1/nodes/register",
+		`{"node_id":"n1","boot_id":"b1","capacity":4,"addr":"10.1.2.3:8090"}`)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || ctl.lastReg == nil || ctl.lastReg.Addr != "10.1.2.3:8090" {
+		t.Fatalf("register addr: %d %+v", resp.StatusCode, ctl.lastReg)
 	}
 
 	// nil control -> 503, no panic.

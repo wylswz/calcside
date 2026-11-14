@@ -28,14 +28,14 @@ func TestCheckDevAddr(t *testing.T) {
 }
 
 func TestParseDevFlags(t *testing.T) {
-	c, err := Parse([]string{"--dev", "--workers=w1=127.0.0.1:1", "--worker-key=k"})
+	c, err := Parse([]string{"--dev", "--worker-key=k"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !c.Dev || c.DevAllowRemote || c.AddrExplicit {
 		t.Fatalf("cfg: %+v", c)
 	}
-	c, err = Parse([]string{"--dev", "--addr", "0.0.0.0:9000", "--dev-allow-remote", "--workers=w1=127.0.0.1:1", "--worker-key=k"})
+	c, err = Parse([]string{"--dev", "--addr", "0.0.0.0:9000", "--dev-allow-remote", "--worker-key=k"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,14 +45,14 @@ func TestParseDevFlags(t *testing.T) {
 }
 
 func TestParseNetAllowCIDRs(t *testing.T) {
-	c, err := Parse([]string{"--net-allow-cidrs", "198.18.0.0/15, 10.0.0.0/8", "--workers=w1=127.0.0.1:1", "--worker-key=k"})
+	c, err := Parse([]string{"--net-allow-cidrs", "198.18.0.0/15, 10.0.0.0/8", "--worker-key=k"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(c.NetAllowCIDRs) != 2 || c.NetAllowCIDRs[0].String() != "198.18.0.0/15" {
 		t.Fatalf("cidrs: %v", c.NetAllowCIDRs)
 	}
-	c, err = Parse([]string{"--net-allow-cidrs=", "--workers=w1=127.0.0.1:1", "--worker-key=k"})
+	c, err = Parse([]string{"--net-allow-cidrs=", "--worker-key=k"})
 	if err != nil || len(c.NetAllowCIDRs) != 0 {
 		t.Fatalf("empty flag: %v %+v", err, c.NetAllowCIDRs)
 	}
@@ -64,7 +64,6 @@ func TestParseNetAllowCIDRs(t *testing.T) {
 func TestParseAdminCredentials(t *testing.T) {
 	t.Setenv("CALCSIDE_ADMIN_USERNAME", "")
 	t.Setenv("CALCSIDE_ADMIN_PASSWORD", "")
-	t.Setenv("CALCSIDE_WORKERS", "w1=127.0.0.1:1")
 	t.Setenv("CALCSIDE_WORKER_SHARED_KEY", "k")
 	for _, tc := range []struct {
 		name  string
@@ -90,7 +89,7 @@ func TestParseAdminCredentials(t *testing.T) {
 	if err != nil || cfg.AdminUsername != "env-user" || cfg.AdminPassword != "env-password" {
 		t.Fatalf("environment not applied: %v", err)
 	}
-	cfg, err = Parse([]string{"--admin-username=flag-user", "--admin-password=flag-password", "--workers=w1=127.0.0.1:1", "--worker-key=k"})
+	cfg, err = Parse([]string{"--admin-username=flag-user", "--admin-password=flag-password", "--worker-key=k"})
 	if err != nil || cfg.AdminUsername != "flag-user" || cfg.AdminPassword != "flag-password" {
 		t.Fatalf("flags did not override environment: %v", err)
 	}
@@ -121,7 +120,7 @@ func TestAdminPasswordNotInHelp(t *testing.T) {
 }
 
 func TestPublicOriginFlags(t *testing.T) {
-	_, err := Parse([]string{"--console-origin=https://console.example.com", "--artifact-preview-base-url=https://reports.example.net", "--workers=w1=127.0.0.1:1", "--worker-key=k"})
+	_, err := Parse([]string{"--console-origin=https://console.example.com", "--artifact-preview-base-url=https://reports.example.net", "--worker-key=k"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +143,6 @@ func TestPublicOriginConfiguration(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("CALCSIDE_WORKERS", "w1=127.0.0.1:1")
 	t.Setenv("CALCSIDE_WORKER_SHARED_KEY", "k")
 	cfg, err := Parse(nil)
 	if err != nil || cfg.ConsoleOrigin != "http://localhost:8080" || cfg.ArtifactPreviewBaseURL != "" {
@@ -156,7 +154,7 @@ func TestPublicOriginConfiguration(t *testing.T) {
 	if err != nil || cfg.ConsoleOrigin != "https://console.example.com" || cfg.ArtifactPreviewBaseURL != "https://reports.example.net" {
 		t.Fatalf("public origin environment not applied: %v", err)
 	}
-	cfg, err = Parse([]string{"--console-origin=https://OTHER.example.com:8443/", "--artifact-preview-base-url=https://other.example.net", "--workers=w1=127.0.0.1:1", "--worker-key=k"})
+	cfg, err = Parse([]string{"--console-origin=https://OTHER.example.com:8443/", "--artifact-preview-base-url=https://other.example.net", "--worker-key=k"})
 	if err != nil || cfg.ConsoleOrigin != "https://other.example.com:8443" || cfg.ArtifactPreviewBaseURL != "https://other.example.net" {
 		t.Fatalf("public origin flags not applied: %v", err)
 	}
@@ -166,7 +164,7 @@ func TestRemovedPublicOriginEnvironment(t *testing.T) {
 	for _, name := range []string{"CALCSIDE_BASE_URL", "CALCSIDE_ARTIFACT_CONSOLE_ORIGIN"} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv(name, "https://obsolete.example.com")
-			_, err := Parse([]string{"--console-origin=https://console.example.com", "--workers=w1=127.0.0.1:1", "--worker-key=k"})
+			_, err := Parse([]string{"--console-origin=https://console.example.com", "--worker-key=k"})
 			if err == nil || !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), "CALCSIDE_CONSOLE_ORIGIN") {
 				t.Fatalf("expected explicit migration error: %v", err)
 			}
@@ -183,30 +181,41 @@ func TestConsoleOriginValidation(t *testing.T) {
 }
 
 func TestRemoteExecutionRequired(t *testing.T) {
-	t.Setenv("CALCSIDE_WORKERS", "")
 	t.Setenv("CALCSIDE_WORKER_SHARED_KEY", "")
+	if _, err := Parse(nil); err == nil || !strings.Contains(err.Error(), "--worker-key is required") {
+		t.Fatalf("missing key: %v", err)
+	}
+	// Registration is the only membership mechanism: the removed
+	// static-list and discovery flags/env must fail loudly.
 	for _, tc := range []struct {
-		name, want string
-		args       []string
+		name string
+		env  string
+		args []string
 	}{
-		{"workers missing", "--workers", []string{"--worker-key=k"}},
-		{"key missing", "--worker-key", []string{"--workers=w=127.0.0.1:1"}},
-		{"workers empty", "--workers", []string{"--workers=", "--worker-key=k"}},
-		{"workers whitespace", "--workers", []string{"--workers=  ", "--worker-key=k"}},
-		{"workers commas", "--workers", []string{"--workers=, ,", "--worker-key=k"}},
+		{"workers env", "CALCSIDE_WORKERS", nil},
+		{"discovery env", "CALCSIDE_WORKER_DISCOVERY", nil},
+		{"workers flag", "", []string{"--workers=w=127.0.0.1:1", "--worker-key=k"}},
+		{"discovery flag", "", []string{"--worker-discovery", "--worker-key=k"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := Parse(tc.args); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("expected %s error, got %v", tc.want, err)
+			if tc.env != "" {
+				t.Setenv(tc.env, "w=127.0.0.1:1")
+			}
+			if _, err := Parse(tc.args); err == nil {
+				t.Fatal("removed worker configuration accepted")
 			}
 		})
+	}
+	// The shared key alone is sufficient — workers self-register.
+	if _, err := Parse([]string{"--worker-key=k"}); err != nil {
+		t.Fatalf("key-only config: %v", err)
 	}
 	for _, arg := range []string{
 		"--node-id=local", "--instance-isolation=inproc", "--instance-isolation=process",
 		"--instance-memory-max=0", "--instance-cgroup-parent=/test",
 	} {
 		t.Run(arg, func(t *testing.T) {
-			args := []string{"--workers=w=127.0.0.1:1", "--worker-key=k", arg}
+			args := []string{"--worker-key=k", arg}
 			if _, err := Parse(args); err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
 				t.Fatalf("retired flag %s: %v", arg, err)
 			}

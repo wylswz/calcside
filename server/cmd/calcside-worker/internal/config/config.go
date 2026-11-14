@@ -9,6 +9,7 @@ import (
 
 	"calcside/internal/capability"
 	common "calcside/internal/config"
+	"calcside/internal/placement"
 )
 
 // WorkerConfig is calcside-worker's configuration — a separate shape
@@ -20,6 +21,7 @@ type WorkerConfig struct {
 	NodeIDFile           string
 	SharedKey            string
 	APIAddr              string
+	AdvertiseAddr        string
 	MaxInstances         int
 	ReaperInterval       time.Duration
 	PolicyEvalTimeout    time.Duration
@@ -50,6 +52,7 @@ func ParseWorker(args []string) (WorkerConfig, error) {
 	fs.StringVar(&c.NodeIDFile, "node-id-file", common.EnvOr("NODE_ID_FILE", ""), "file holding the stable node id; created on first boot")
 	fs.StringVar(&c.SharedKey, "shared-key", common.EnvOr("WORKER_SHARED_KEY", ""), "shared HMAC secret authenticating API-worker calls (required)")
 	fs.StringVar(&c.APIAddr, "api-addr", common.EnvOr("API_ADDR", ""), "API tier address (http://host:port) for node control and local ext resolution; empty disables both")
+	fs.StringVar(&c.AdvertiseAddr, "advertise-addr", common.EnvOr("WORKER_ADVERTISE_ADDR", ""), "endpoint this worker registers with the API (host:port, required — the API has no static worker list)")
 	fs.IntVar(&c.MaxInstances, "max-instances-per-node", common.EnvInt("MAX_INSTANCES_PER_NODE", 0), "max live instances on this node (0 = unlimited)")
 	fs.DurationVar(&c.ReaperInterval, "reaper-interval", common.EnvDur("REAPER_INTERVAL", 10*time.Second), "local memory-reclaim sweep interval")
 	fs.DurationVar(&c.PolicyEvalTimeout, "policy-eval-timeout", common.EnvDur("POLICY_EVAL_TIMEOUT", 100*time.Millisecond), "per-policy eval timeout")
@@ -86,6 +89,14 @@ func ParseWorker(args []string) (WorkerConfig, error) {
 	if c.SharedKey == "" {
 		return c, fmt.Errorf("--shared-key is required")
 	}
+	if c.AdvertiseAddr == "" {
+		return c, fmt.Errorf("--advertise-addr is required: the API learns worker endpoints from registration")
+	}
+	addr, err := placement.NormalizeNodeAddr(c.AdvertiseAddr)
+	if err != nil {
+		return c, fmt.Errorf("--advertise-addr: %w", err)
+	}
+	c.AdvertiseAddr = addr
 	return c, nil
 }
 

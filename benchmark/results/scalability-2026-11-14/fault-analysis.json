@@ -1,0 +1,436 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "name": "pause-w3-io-v12-verified",
+      "workload": "io",
+      "vus": 12,
+      "duration_s": 120,
+      "wall_s": 120.87389158294536,
+      "exit_code": 0,
+      "allow_failures": true,
+      "summary": "pause-w3-io-v12-verified.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 120.561936,
+      "attempts": 2385,
+      "completed": 2361,
+      "success_rate": 0.989937106918239,
+      "completed_rps": 19.58329534456049,
+      "attempted_rps": 19.78236314984192,
+      "latency_all_ms": {
+        "min": 110,
+        "med": 435,
+        "max": 15004,
+        "p(95)": 684.7999999999998,
+        "p(99)": 3019.079999999698,
+        "avg": 604.8012578616352
+      },
+      "latency_success_ms": {
+        "max": 737,
+        "p(95)": 677,
+        "p(99)": 722,
+        "avg": 458.4612452350699,
+        "min": 110,
+        "med": 433
+      },
+      "errors": {
+        "transport": 24,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        1182,
+        1179
+      ],
+      "api_unknown": 24,
+      "worker_counts": [
+        893,
+        892,
+        576
+      ],
+      "worker_unknown": 0
+    },
+    {
+      "name": "recovery-w3-io-v12-verified",
+      "workload": "io",
+      "vus": 12,
+      "duration_s": 30,
+      "wall_s": 30.67911212501349,
+      "exit_code": 0,
+      "allow_failures": false,
+      "summary": "recovery-w3-io-v12-verified.json",
+      "api_ips": {
+        "10.244.0.17:8080": 0,
+        "10.244.0.18:8080": 1
+      },
+      "worker_ips": {
+        "10.244.0.19": 0,
+        "10.244.0.21": 1,
+        "10.244.0.22": 2
+      },
+      "measured_s": 30.451029,
+      "attempts": 876,
+      "completed": 876,
+      "success_rate": 1.0,
+      "completed_rps": 28.7675007632747,
+      "attempted_rps": 28.7675007632747,
+      "latency_all_ms": {
+        "avg": 413.56849315068496,
+        "min": 120,
+        "med": 415,
+        "max": 539,
+        "p(95)": 518,
+        "p(99)": 526.25
+      },
+      "latency_success_ms": {
+        "med": 415,
+        "max": 539,
+        "p(95)": 518,
+        "p(99)": 526.25,
+        "avg": 413.56849315068496,
+        "min": 120
+      },
+      "errors": {
+        "transport": 0,
+        "http": 0,
+        "runtime": 0,
+        "invalid_output": 0
+      },
+      "api_counts": [
+        437,
+        439
+      ],
+      "api_unknown": 0,
+      "worker_counts": [
+        293,
+        292,
+        291
+      ],
+      "worker_unknown": 0
+    }
+  ],
+  "steady": [],
+  "traces": {
+    "pause-w3-io-v12-verified": {
+      "requests": 2385,
+      "started_ms": 1794665921015,
+      "bins_5s": [
+        {
+          "start_s": 0,
+          "attempts": 153,
+          "completed": 153,
+          "status_counts": {
+            "200": 153
+          },
+          "worker_counts": {
+            "10.244.0.22": 51,
+            "10.244.0.21": 51,
+            "10.244.0.19": 51
+          }
+        },
+        {
+          "start_s": 5,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.21": 48,
+            "10.244.0.19": 48,
+            "10.244.0.22": 48
+          }
+        },
+        {
+          "start_s": 10,
+          "attempts": 141,
+          "completed": 141,
+          "status_counts": {
+            "200": 141
+          },
+          "worker_counts": {
+            "10.244.0.22": 46,
+            "10.244.0.19": 48,
+            "10.244.0.21": 47
+          }
+        },
+        {
+          "start_s": 15,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 48,
+            "10.244.0.21": 48,
+            "10.244.0.19": 48
+          }
+        },
+        {
+          "start_s": 20,
+          "attempts": 43,
+          "completed": 31,
+          "status_counts": {
+            "200": 31,
+            "0": 12
+          },
+          "worker_counts": {
+            "10.244.0.22": 3,
+            "10.244.0.21": 14,
+            "10.244.0.19": 14
+          }
+        },
+        {
+          "start_s": 35,
+          "attempts": 36,
+          "completed": 24,
+          "status_counts": {
+            "200": 24,
+            "0": 12
+          },
+          "worker_counts": {
+            "10.244.0.21": 12,
+            "10.244.0.19": 12
+          }
+        },
+        {
+          "start_s": 50,
+          "attempts": 98,
+          "completed": 98,
+          "status_counts": {
+            "200": 98
+          },
+          "worker_counts": {
+            "10.244.0.19": 50,
+            "10.244.0.21": 48
+          }
+        },
+        {
+          "start_s": 55,
+          "attempts": 96,
+          "completed": 96,
+          "status_counts": {
+            "200": 96
+          },
+          "worker_counts": {
+            "10.244.0.21": 49,
+            "10.244.0.19": 47
+          }
+        },
+        {
+          "start_s": 60,
+          "attempts": 96,
+          "completed": 96,
+          "status_counts": {
+            "200": 96
+          },
+          "worker_counts": {
+            "10.244.0.19": 48,
+            "10.244.0.21": 48
+          }
+        },
+        {
+          "start_s": 65,
+          "attempts": 96,
+          "completed": 96,
+          "status_counts": {
+            "200": 96
+          },
+          "worker_counts": {
+            "10.244.0.19": 49,
+            "10.244.0.21": 47
+          }
+        },
+        {
+          "start_s": 70,
+          "attempts": 96,
+          "completed": 96,
+          "status_counts": {
+            "200": 96
+          },
+          "worker_counts": {
+            "10.244.0.21": 48,
+            "10.244.0.19": 48
+          }
+        },
+        {
+          "start_s": 75,
+          "attempts": 96,
+          "completed": 96,
+          "status_counts": {
+            "200": 96
+          },
+          "worker_counts": {
+            "10.244.0.21": 49,
+            "10.244.0.19": 47
+          }
+        },
+        {
+          "start_s": 80,
+          "attempts": 138,
+          "completed": 138,
+          "status_counts": {
+            "200": 138
+          },
+          "worker_counts": {
+            "10.244.0.19": 47,
+            "10.244.0.22": 44,
+            "10.244.0.21": 47
+          }
+        },
+        {
+          "start_s": 85,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 48,
+            "10.244.0.19": 48,
+            "10.244.0.21": 48
+          }
+        },
+        {
+          "start_s": 90,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 48,
+            "10.244.0.19": 48,
+            "10.244.0.21": 48
+          }
+        },
+        {
+          "start_s": 95,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 47,
+            "10.244.0.19": 49,
+            "10.244.0.21": 48
+          }
+        },
+        {
+          "start_s": 100,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 48,
+            "10.244.0.19": 48,
+            "10.244.0.21": 48
+          }
+        },
+        {
+          "start_s": 105,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 48,
+            "10.244.0.19": 48,
+            "10.244.0.21": 48
+          }
+        },
+        {
+          "start_s": 110,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 48,
+            "10.244.0.19": 48,
+            "10.244.0.21": 48
+          }
+        },
+        {
+          "start_s": 115,
+          "attempts": 144,
+          "completed": 144,
+          "status_counts": {
+            "200": 144
+          },
+          "worker_counts": {
+            "10.244.0.22": 49,
+            "10.244.0.19": 47,
+            "10.244.0.21": 48
+          }
+        }
+      ]
+    }
+  },
+  "resources": {
+    "samples": 30,
+    "sample_errors": 0,
+    "containers": {
+      "calcside-786cf4567c-86t4v/calcside": {
+        "interval_cpu_cores_median": 0.03482721052631579,
+        "interval_cpu_cores_max": 0.04020807692307692,
+        "working_set_bytes_max": 24715264
+      },
+      "calcside-786cf4567c-jxvhl/calcside": {
+        "interval_cpu_cores_median": 0.03469559808612441,
+        "interval_cpu_cores_max": 0.04177954545454546,
+        "working_set_bytes_max": 23207936
+      },
+      "calcside-render-75f9fd7fcc-bzzn9/render": {
+        "interval_cpu_cores_median": 0.0004594551083591331,
+        "interval_cpu_cores_max": 0.002734230769230769,
+        "working_set_bytes_max": 66220032
+      },
+      "calcside-worker-0/calcside-worker": {
+        "interval_cpu_cores_median": 0.018395714285714286,
+        "interval_cpu_cores_max": 0.024590166666666666,
+        "working_set_bytes_max": 52121600
+      },
+      "calcside-worker-1/calcside-worker": {
+        "interval_cpu_cores_median": 0.016485631578947366,
+        "interval_cpu_cores_max": 0.021428533333333333,
+        "working_set_bytes_max": 39354368
+      },
+      "calcside-worker-2/calcside-worker": {
+        "interval_cpu_cores_median": 0.0143594,
+        "interval_cpu_cores_max": 0.02395553846153846,
+        "working_set_bytes_max": 40554496
+      },
+      "postgres-8bdbddcb4-nxffn/postgres": {
+        "interval_cpu_cores_median": 0.076265625,
+        "interval_cpu_cores_max": 0.09422208333333333,
+        "working_set_bytes_max": 167878656
+      },
+      "scalability-delay-669f9c88d4-th4hq/delay": {
+        "interval_cpu_cores_median": 0.01844825,
+        "interval_cpu_cores_max": 0.023959166666666667,
+        "working_set_bytes_max": 17031168
+      },
+      "scalability-proxy-64d48b7fff-2wn67/nginx": {
+        "interval_cpu_cores_median": 0.0030492307692307694,
+        "interval_cpu_cores_max": 0.0038041333333333335,
+        "working_set_bytes_max": 6111232
+      }
+    }
+  }
+}

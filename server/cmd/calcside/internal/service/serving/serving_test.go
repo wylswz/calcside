@@ -43,8 +43,7 @@ func newSvc(t *testing.T, clock *fakeNow) (*Service, store.Store, *fakeSecrets) 
 	t.Cleanup(func() { st.Close() })
 	sec := &fakeSecrets{}
 	sch, err := scheduler.New(scheduler.Options{
-		Store: st, Nodes: map[string]string{"n1": "addr1", "n2": "addr2"},
-		Now: clock.Now, LeaseDuration: 10 * time.Second, NodeTTL: 30 * time.Second,
+		Store: st, Now: clock.Now, LeaseDuration: 10 * time.Second, NodeTTL: 30 * time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -101,8 +100,9 @@ func seedInst(t *testing.T, st store.Store, rel *store.ServingRelease, u *store.
 }
 
 func reg(t *testing.T, svc *Service, node, boot string, cap int) *runtime.NodeIdentity {
+	t.Helper()
 	r, err := svc.RegisterNode(context.Background(), &runtime.NodeRegisterRequest{
-		NodeID: node, BootID: boot, Capacity: cap})
+		NodeID: node, BootID: boot, Capacity: cap, Addr: "10.0.0.1:8090"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,13 +134,78 @@ func TestRegisterAndReconcile(t *testing.T) {
 	// Old boot rejected after a new one takes over.
 	reg(t, svc, "n1", "b2", 4)
 	if _, err := svc.RegisterNode(context.Background(), &runtime.NodeRegisterRequest{
-		NodeID: "n1", BootID: "b1", Capacity: 4}); !errors.Is(err, runtime.ErrStaleEpoch) {
+		NodeID: "n1", BootID: "b1", Capacity: 4, Addr: "10.0.0.1:8090"}); !errors.Is(err, runtime.ErrStaleEpoch) {
 		t.Fatalf("old boot: %v", err)
 	}
-	// Unknown node rejected.
-	if _, err := svc.RegisterNode(context.Background(), &runtime.NodeRegisterRequest{
-		NodeID: "ghost", BootID: "b", Capacity: 4}); err == nil {
-		t.Fatal("unknown node accepted")
+	// Invalid advertised endpoints are rejected before persistence —
+	// there is no allowlist, but the addr must still be a valid
+	// host:port.
+	for _, addr := range []string{"", "http://evil:8090", "0.0.0.0:8090", "host:0"} {
+		if _, err := svc.RegisterNode(context.Background(), &runtime.NodeRegisterRequest{
+			NodeID: "ghost", BootID: "b", Capacity: 4, Addr: addr}); !errors.Is(err, runtime.ErrBadSpec) {
+			t.Fatalf("addr %q: %v", addr, err)
+		}
+	}
+	if nodes, _ := st.ListServingNodes(context.Background(), clk.Now()); len(nodes) != 1 || nodes[0].NodeID != "n1" {
+		t.Fatalf("rejected registrations persisted: %+v", nodes)
+	}
+}
+
+// TestRegistrationSharedAcrossServices proves the shared store is the
+// membership authority: a worker that registers through one API
+// service is visible to a second service over the same database, an
+// expired-but-current boot renews through sync, and a tuple that never
+// registered cannot enroll via heartbeat.
+func TestRegistrationSharedAcrossServices(t *testing.T) {
+	clk := &fakeNow{}
+	clk.t.Store(t0.UnixNano())
+	svcA, st, _ := newSvc(t, clk)
+
+	// Second API process: own scheduler + service, same store.
+	schB, err := scheduler.New(scheduler.Options{
+		Store: st, Now: clk.Now, LeaseDuration: 10 * time.Second, NodeTTL: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svcB, err := New(Options{Store: st, Secrets: &fakeSecrets{}, Scheduler: schB, Now: clk.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	id := reg(t, svcA, "n1", "b1", 4)
+	refs, err := schB.Nodes(context.Background())
+	if err != nil || len(refs) != 1 || refs[0].NodeID != "n1" || refs[0].Addr != "10.0.0.1:8090" {
+		t.Fatalf("service B membership: %v %+v", err, refs)
+	}
+	if _, err := svcB.SyncNode(context.Background(), &runtime.NodeSyncRequest{
+		Node: *id, Capacity: 4}); err != nil {
+		t.Fatalf("service B sync of A-registered boot: %v", err)
+	}
+
+	// Let the heartbeat lapse past the node TTL, then sync again:
+	// the current boot renews — expiry alone never retires a boot.
+	clk.Advance(31 * time.Second)
+	if refs, _ := schB.Nodes(context.Background()); len(refs) != 0 {
+		t.Fatalf("expired node still live: %+v", refs)
+	}
+	if _, err := svcB.SyncNode(context.Background(), &runtime.NodeSyncRequest{
+		Node: *id, Capacity: 4}); err != nil {
+		t.Fatalf("renew after expiry: %v", err)
+	}
+	if refs, _ := schB.Nodes(context.Background()); len(refs) != 1 {
+		t.Fatalf("node did not rejoin after renewal: %+v", refs)
+	}
+
+	// A tuple that never registered cannot heartbeat-enroll.
+	if _, err := svcB.SyncNode(context.Background(), &runtime.NodeSyncRequest{
+		Node:     runtime.NodeIdentity{NodeID: "ghost", BootID: "b", Incarnation: 1},
+		Capacity: 4}); !errors.Is(err, runtime.ErrStaleEpoch) {
+		t.Fatalf("unknown tuple sync: %v", err)
+	}
+	nodes, _ := st.ListServingNodes(context.Background(), clk.Now())
+	if len(nodes) != 1 || nodes[0].NodeID != "n1" {
+		t.Fatalf("sync enrolled an unknown node: %+v", nodes)
 	}
 }
 

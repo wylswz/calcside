@@ -140,8 +140,6 @@ spec:
                 secretKeyRef:
                   name: {{ include "calcside.secretName" . }}
                   key: worker-shared-key
-            - name: CALCSIDE_WORKERS
-              value: {{ include "calcside.workerNodes" . | quote }}
             {{- if .Values.render.enabled }}
             - name: CALCSIDE_RENDER_URL
               value: {{ printf "http://%s-render:8091" (include "calcside.fullname" .) | quote }}

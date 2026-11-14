@@ -1,0 +1,23 @@
+# Non-secret overlay for the local kind experiment, not production sizing.
+replicaCount: 2
+persistence:
+  enabled: false
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "2"
+    memory: 1Gi
+worker:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+limits:
+  maxInstancesPerUser: 100
+  maxSteps: 100000000

@@ -215,7 +215,7 @@ func TestServingRestart(t *testing.T) {
 			newSvc := func(st store.Store) *serving.Service {
 				now := func() time.Time { return time.Now().Add(2 * time.Hour) }
 				sch, err := scheduler.New(scheduler.Options{
-					Store: st, Nodes: map[string]string{"worker-test": "configured-worker"},
+					Store:         st,
 					LeaseDuration: lease, NodeTTL: ttl, Now: now,
 				})
 				if err != nil {
@@ -258,7 +258,8 @@ func TestServingRestart(t *testing.T) {
 			ctl := &testControl{base: apiSrv.URL, hc: apiSrv.Client(), nodeID: "worker-test"}
 			agent, err := nodeagent.New(nodeagent.Options{
 				Control: ctl, Runtime: rt, NodeID: "worker-test", BootID: "boot1",
-				Capacity: 2, PollInterval: 20 * time.Millisecond, CallTimeout: 2 * time.Second,
+				AdvertiseAddr: "127.0.0.1:8090",
+				Capacity:      2, PollInterval: 20 * time.Millisecond, CallTimeout: 2 * time.Second,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -339,7 +340,8 @@ func TestServingRestart(t *testing.T) {
 			swap.set(extensions.WithControl(st, cbKey, svc))
 			agent2, err := nodeagent.New(nodeagent.Options{
 				Control: ctl2, Runtime: rt2, NodeID: "worker-test", BootID: "boot2",
-				Capacity: 2, PollInterval: 20 * time.Millisecond, CallTimeout: 2 * time.Second,
+				AdvertiseAddr: "127.0.0.1:8090",
+				Capacity:      2, PollInterval: 20 * time.Millisecond, CallTimeout: 2 * time.Second,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -362,7 +364,7 @@ func TestServingRestart(t *testing.T) {
 			// boot1 is now the stale historical boot — re-registering
 			// it is rejected forever, and the current node stays boot2.
 			_, rerr := ctl2.RegisterNode(context.Background(), &runtime.NodeRegisterRequest{
-				NodeID: "worker-test", BootID: "boot1", Capacity: 2})
+				NodeID: "worker-test", BootID: "boot1", Capacity: 2, Addr: "127.0.0.1:8090"})
 			if !errors.Is(rerr, runtime.ErrStaleEpoch) {
 				t.Fatalf("old boot re-register: %v", rerr)
 			}

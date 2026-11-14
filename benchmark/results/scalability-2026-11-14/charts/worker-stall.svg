@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="510" viewBox="0 0 1120 510" role="img" aria-labelledby="title desc">
+<title id="title">Worker stall: detection, contraction, recovery</title>
+<desc id="desc">5-second request-start cohorts | 12 closed-loop clients | Empty bins mean no new requests started</desc>
+<rect width="1120" height="100%" fill="#ffffff"/>
+<style>text{font-family:"IBM Plex Sans","Helvetica Neue",sans-serif;fill:#203343} .title{font-family:Georgia,serif;font-size:29px}.note{font-size:13px;fill:#647583}.tick{font-size:14px;fill:#647583}.label{font-size:15px}.value{font-size:15px;font-weight:600}</style>
+<text x="42.00" y="44.00" class="title" text-anchor="start">Worker stall: detection, contraction, recovery</text>
+<text x="42.00" y="72.00" class="note" text-anchor="start">5-second request-start cohorts | 12 closed-loop clients | Empty bins mean no new requests started</text>
+<rect x="410.00" y="100.00" width="13.00" height="13.00" fill="#2375ae" opacity="1"/>
+<text x="431.00" y="111.00" class="tick" text-anchor="start">Worker 0</text>
+<rect x="555.00" y="100.00" width="13.00" height="13.00" fill="#158577" opacity="1"/>
+<text x="576.00" y="111.00" class="tick" text-anchor="start">Worker 1</text>
+<rect x="700.00" y="100.00" width="13.00" height="13.00" fill="#d97830" opacity="1"/>
+<text x="721.00" y="111.00" class="tick" text-anchor="start">Worker 2</text>
+<rect x="845.00" y="100.00" width="13.00" height="13.00" fill="#c74949" opacity="1"/>
+<text x="866.00" y="111.00" class="tick" text-anchor="start">Timed out</text>
+<rect x="254.94" y="163.00" width="477.71" height="227.00" fill="#fff2e7" opacity="1"/>
+<text x="90.00" y="139.00" class="note" text-anchor="start">Invocations per start cohort</text>
+<line x1="90.00" y1="390.00" x2="1050.00" y2="390.00" stroke="#e3e9ec" stroke-width="1"/>
+<text x="78.00" y="395.00" class="tick" text-anchor="end">0</text>
+<line x1="90.00" y1="326.94" x2="1050.00" y2="326.94" stroke="#e3e9ec" stroke-width="1"/>
+<text x="78.00" y="331.94" class="tick" text-anchor="end">50</text>
+<line x1="90.00" y1="263.89" x2="1050.00" y2="263.89" stroke="#e3e9ec" stroke-width="1"/>
+<text x="78.00" y="268.89" class="tick" text-anchor="end">100</text>
+<line x1="90.00" y1="200.83" x2="1050.00" y2="200.83" stroke="#e3e9ec" stroke-width="1"/>
+<text x="78.00" y="205.83" class="tick" text-anchor="end">150</text>
+<rect x="93.00" y="325.68" width="34.00" height="64.32" fill="#2375ae" opacity="1"/>
+<rect x="93.00" y="261.37" width="34.00" height="64.32" fill="#158577" opacity="1"/>
+<rect x="93.00" y="197.05" width="34.00" height="64.32" fill="#d97830" opacity="1"/>
+<rect x="93.00" y="197.05" width="34.00" height="0.00" fill="#c74949" opacity="1"/>
+<rect x="133.00" y="329.47" width="34.00" height="60.53" fill="#2375ae" opacity="1"/>
+<rect x="133.00" y="268.93" width="34.00" height="60.53" fill="#158577" opacity="1"/>
+<rect x="133.00" y="208.40" width="34.00" height="60.53" fill="#d97830" opacity="1"/>
+<rect x="133.00" y="208.40" width="34.00" height="0.00" fill="#c74949" opacity="1"/>
+<rect x="173.00" y="329.47" width="34.00" height="60.53" fill="#2375ae" opacity="1"/>
+<rect x="173.00" y="270.19" width="34.00" height="59.27" fill="#158577" opacity="1"/>
+<rect x="173.00" y="212.18" width="34.00" height="58.01" fill="#d97830" opacity="1"/>
+<rect x="173.00" y="212.18" width="34.00" height="0.00" fill="#c74949" opacity="1"/>
+<rect x="213.00" y="329.47" width="34.00" height="60.53" fill="#2375ae" opacity="1"/>
+<rect x="213.00" y="268.93" width="34.00" height="60.53" fill="#158577" opacity="1"/>
+<rect x="213.00" y="208.40" width="34.00" height="60.53" fill="#d97830" opacity="1"/>
+<rect x="213.00" y="208.40" width="34.00" height="0.00" fill="#c74949" opacity="1"/>
+<rect x="253.00" y="372.34" width="34.00" height="17.66" fill="#2375ae" opacity="1"/>
+<rect x="253.00" y="354.69" width="34.00" height="17.66" fill="#158577" opacity="1"/>
+<rect x="253.00" y="350.91" width="34.00" height="3.78" fill="#d97830" opacity="1"/>
+<rect x="253.00" y="335.77" width="34.00" height="15.13" fill="#c74949" opacity="1"/>
+<rect x="373.00" y="374.87" width="34.00" height="15.13" fill="#2375ae" opacity="1"/>
+<rect x="373.00" y="359.73" width="34.00" height="15.13" fill="#158577" opacity="1"/>
+<rect x="373.00" y="359.73" width="34.00" height="0.00" fill="#d97830" opacity="1"/>
+<rect x="373.00" y="344.60" width="34.00" height="15.13" fill="#c74949" opacity="1"/>
+<rect x="493.00" y="326.94" width="34.00" height="63.06" fill="#2375ae" opacity="1"/>
+<rect x="493.00" y="266.41" width="34.00" height="60.53" fill="#158577" opacity="1"/>
+<rect x="493.00" y="266.41" width="34.00" height="0.00" fill="#d97830" opacity="1"/>
+<rect x="493.00" y="266.41" width="34.00" height="0.00" fill="#c74949" opacity="1"/>
+<rect x="533.00" y="330.73" width="34.00" height="59.27" fill="#2375ae" opacity="1"/>
+<rect x="533.00" y="268.93" width="34.00" height="61.79" fill="#158577" opacity="1"/>
+<rect x="533.00" y="268.93" width="34.00" height="0.00" fill="#d97830" opacity="1"/>
+<rect x="533.00" y="268.93" width="34.00" height="0.00" fill="#c74949" opacity="1"/>
+<rect x="573.00" y="329.47" width="34.00" height="60.53" fill="#2375ae" opacity="1"/>
+<rect x="573.00" y="268.93" width="34.00" height="60.53" fill="#158577" opacity="1"/>
+<rect x="573.00" y="268.93" width="34.00" height="0.00" fill="#d97830" opacity="1"/>
+<rect x="573.00" y="268.93" width="34.00" height="0.00" fill="#c74949" opacity="1"/>
+<rect x="613.00" y="328.21" width="34.00" height="61.79" fill="#2375ae" opacity="1"/>
+<rect x="613.00" y="268.93" width="34.00" height="59.27" fill="#158577" opacity="1"/>
+<rect x="613.00" y="268.93" width="34.00" height="0.00" fill="#d97830" opacity="1"/>
+<rect x="613.00" y="268.93" width="34.00" height="0.00" fill="#c74949" opacity="1"/>
+<rect x="653.00" y="329.47" width="34.00" height="60.53" fill="#2375ae" opacity="1"/>
+<rect x="653.00" y="268.93" width="34.00" height="60.53" fill="#158577" opacity="1"/>
+<rect x="653.00" y="268.93" width="34.00" height="0.00" fill="#d97830" opacity="1"/>
+<rect x="653.00" y="268.93" width="34.00" height="0.00" fill="#c74949" opacity="1"/>
+<rect x="693.00" y="330.73" width="34.00" height="59.27" fill="#2375ae" opacity="1"/>
+<rect x="693.00" y="268.93" width="34.00" height="61.79" fill="#158577" opacity="1"/>
+<rect x="693.00" y="268.93" width="34.00" height="0.00" fill="#d97830" opacity="1"/>
+<rect x="693.00" y="268.93" width="34.00" height="0.00" fill="#c74949" opacity="1"/>
+<rect x="733.00" y="330.73" width="34.00" height="59.27" fill="#2375ae" opacity="1"/>
+<rect x="733.00" y="271.46" width="34.00" height="59.27" fill="#158577" opacity="1"/>
+<rect x="733.00" y="215.97" width="34.00" height="55.49" fill="#d97830" opacity="1"/>
+<rect x="733.00" y="215.97" width="34.00" height="0.00" fill="#c74949" opacity="1"/>
+<rect x="773.00" y="329.47" width="34.00" height="60.53" fill="#2375ae" opacity="1"/>
+<rect x="773.00" y="268.93" width="34.00" height="60.53" fill="#158577" opacity="1"/>
+<rect x="773.00" y="208.40" width="34.00" height="60.53" fill="#d97830" opacity="1"/>
+<rect x="773.00" y="208.40" width="34.00" height="0.00" fill="#c74949" opacity="1"/>
+<rect x="813.00" y="329.47" width="34.00" height="60.53" fill="#2375ae" opacity="1"/>
+<rect x="813.00" y="268.93" width="34.00" height="60.53" fill="#158577" opacity="1"/>
+<rect x="813.00" y="208.40" width="34.00" height="60.53" fill="#d97830" opacity="1"/>
+<rect x="813.00" y="208.40" width="34.00" height="0.00" fill="#c74949" opacity="1"/>
+<rect x="853.00" y="328.21" width="34.00" height="61.79" fill="#2375ae" opacity="1"/>
+<rect x="853.00" y="267.67" width="34.00" height="60.53" fill="#158577" opacity="1"/>
+<rect x="853.00" y="208.40" width="34.00" height="59.27" fill="#d97830" opacity="1"/>
+<rect x="853.00" y="208.40" width="34.00" height="0.00" fill="#c74949" opacity="1"/>
+<rect x="893.00" y="329.47" width="34.00" height="60.53" fill="#2375ae" opacity="1"/>
+<rect x="893.00" y="268.93" width="34.00" height="60.53" fill="#158577" opacity="1"/>
+<rect x="893.00" y="208.40" width="34.00" height="60.53" fill="#d97830" opacity="1"/>
+<rect x="893.00" y="208.40" width="34.00" height="0.00" fill="#c74949" opacity="1"/>
+<rect x="933.00" y="329.47" width="34.00" height="60.53" fill="#2375ae" opacity="1"/>
+<rect x="933.00" y="268.93" width="34.00" height="60.53" fill="#158577" opacity="1"/>
+<rect x="933.00" y="208.40" width="34.00" height="60.53" fill="#d97830" opacity="1"/>
+<rect x="933.00" y="208.40" width="34.00" height="0.00" fill="#c74949" opacity="1"/>
+<rect x="973.00" y="329.47" width="34.00" height="60.53" fill="#2375ae" opacity="1"/>
+<rect x="973.00" y="268.93" width="34.00" height="60.53" fill="#158577" opacity="1"/>
+<rect x="973.00" y="208.40" width="34.00" height="60.53" fill="#d97830" opacity="1"/>
+<rect x="973.00" y="208.40" width="34.00" height="0.00" fill="#c74949" opacity="1"/>
+<rect x="1013.00" y="330.73" width="34.00" height="59.27" fill="#2375ae" opacity="1"/>
+<rect x="1013.00" y="270.19" width="34.00" height="60.53" fill="#158577" opacity="1"/>
+<rect x="1013.00" y="208.40" width="34.00" height="61.79" fill="#d97830" opacity="1"/>
+<rect x="1013.00" y="208.40" width="34.00" height="0.00" fill="#c74949" opacity="1"/>
+<line x1="254.94" y1="155.00" x2="254.94" y2="390.00" stroke="#203343" stroke-width="1.2" stroke-dasharray="4 4"/>
+<text x="261.94" y="153.00" class="value" text-anchor="start">STOP 20.6 s</text>
+<line x1="732.66" y1="155.00" x2="732.66" y2="390.00" stroke="#203343" stroke-width="1.2" stroke-dasharray="4 4"/>
+<text x="739.66" y="153.00" class="value" text-anchor="start">CONT 80.3 s</text>
+<text x="90.00" y="414.00" class="tick" text-anchor="middle">0</text>
+<text x="250.00" y="414.00" class="tick" text-anchor="middle">20</text>
+<text x="410.00" y="414.00" class="tick" text-anchor="middle">40</text>
+<text x="570.00" y="414.00" class="tick" text-anchor="middle">60</text>
+<text x="730.00" y="414.00" class="tick" text-anchor="middle">80</text>
+<text x="890.00" y="414.00" class="tick" text-anchor="middle">100</text>
+<text x="1050.00" y="414.00" class="tick" text-anchor="middle">120</text>
+<text x="570.00" y="437.00" class="tick" text-anchor="middle">Seconds since first request start</text>
+<text x="42.00" y="469.00" class="note" text-anchor="start">2,361/2,385 valid completions; 24 timeouts. Colors attribute successes to their actual worker.</text>
+<text x="42.00" y="491.00" class="note" text-anchor="start">First sampled pool contraction: 30.7 s after STOP; recovery: 1.8 s after CONT (5-second sampling; not exact SLOs).</text>
+</svg>

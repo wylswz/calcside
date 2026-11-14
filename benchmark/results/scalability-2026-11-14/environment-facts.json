@@ -1,0 +1,294 @@
+{
+  "captured_at": "2026-11-14T13:46:57.702706+00:00",
+  "host": {
+    "platform": "macOS-27.2.1-arm64-arm-64bit-Mach-O",
+    "machine": "arm64",
+    "docker_ncpu": 12,
+    "docker_mem_total": "12599218176",
+    "docker_architecture": "aarch64",
+    "docker_os": "linux",
+    "docker_mem_total_bytes": 12599218176
+  },
+  "tools": {
+    "kind": "kind v0.29.0 go1.24.3 darwin/arm64",
+    "kubectl": "v1.36.1",
+    "helm": "v3.19.0+g3d8990f",
+    "k6": "k6 v1.2.3 (commit/e4a5a88f7c, go1.24.6, darwin/arm64)",
+    "docker_server": "29.8.2"
+  },
+  "workloads": {
+    "calcside": {
+      "error": "Command '['kubectl', '--kubeconfig', '/private/tmp/calcside-scalability-state/kubeconfig', '-n', 'calcside', 'deployment"
+    },
+    "calcside-render": {
+      "error": "Command '['kubectl', '--kubeconfig', '/private/tmp/calcside-scalability-state/kubeconfig', '-n', 'calcside', 'deployment"
+    },
+    "calcside-worker": {
+      "error": "Command '['kubectl', '--kubeconfig', '/private/tmp/calcside-scalability-state/kubeconfig', '-n', 'calcside', 'statefulse"
+    },
+    "postgres": {
+      "error": "Command '['kubectl', '--kubeconfig', '/private/tmp/calcside-scalability-state/kubeconfig', '-n', 'calcside', 'deployment"
+    },
+    "scalability-delay": {
+      "error": "Command '['kubectl', '--kubeconfig', '/private/tmp/calcside-scalability-state/kubeconfig', '-n', 'calcside', 'deployment"
+    },
+    "scalability-proxy": {
+      "error": "Command '['kubectl', '--kubeconfig', '/private/tmp/calcside-scalability-state/kubeconfig', '-n', 'calcside', 'deployment"
+    }
+  },
+  "image_ids": {
+    "ghcr.io/wylswz/calcside:scalability-local": "sha256:14f4534fb95fac2ae4a747b765486134575eb12199db1d7d24c1d5894a86458a",
+    "ghcr.io/wylswz/calcside-render:scalability-local": "sha256:0c92b4c290f06f803fc7c84a35f744f89bd2d3895558eef886fe8977e47f3e4f",
+    "docker.io/library/postgres:17-alpine": "docker.io/library/postgres@sha256:d3244e8ce3f165ee3c93d9c4a4b1d0fe48b3a89e2287b717fdcbbde92d405065",
+    "docker.io/library/python:3.12-alpine": "docker.io/library/python@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89",
+    "docker.io/library/nginx:1.28-alpine": "docker.io/library/nginx@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236"
+  },
+  "pods": [
+    {
+      "name": "calcside-7d4b876979-cx5qt",
+      "namespace": "calcside",
+      "uid": "34fb143c-a762-4a28-afb4-4314eaf91bc8",
+      "node": "192.168.117.4",
+      "podIP": "10.244.0.13",
+      "phase": "Running",
+      "labels": {
+        "app.kubernetes.io/component": "api"
+      },
+      "containers": [
+        {
+          "name": "calcside",
+          "image": "ghcr.io/wylswz/calcside:scalability-local",
+          "imageID": "sha256:14f4534fb95fac2ae4a747b765486134575eb12199db1d7d24c1d5894a86458a",
+          "ready": true,
+          "restartCount": 0
+        }
+      ],
+      "resources": {
+        "calcside": {
+          "limits": {
+            "cpu": "2",
+            "memory": "1Gi"
+          },
+          "requests": {
+            "cpu": "250m",
+            "memory": "256Mi"
+          }
+        }
+      }
+    },
+    {
+      "name": "calcside-7d4b876979-dq56k",
+      "namespace": "calcside",
+      "uid": "0639bd63-81fe-48c6-a77c-7532c1681099",
+      "node": "192.168.117.4",
+      "podIP": "10.244.0.11",
+      "phase": "Running",
+      "labels": {
+        "app.kubernetes.io/component": "api"
+      },
+      "containers": [
+        {
+          "name": "calcside",
+          "image": "ghcr.io/wylswz/calcside:scalability-local",
+          "imageID": "sha256:14f4534fb95fac2ae4a747b765486134575eb12199db1d7d24c1d5894a86458a",
+          "ready": true,
+          "restartCount": 0
+        }
+      ],
+      "resources": {
+        "calcside": {
+          "limits": {
+            "cpu": "2",
+            "memory": "1Gi"
+          },
+          "requests": {
+            "cpu": "250m",
+            "memory": "256Mi"
+          }
+        }
+      }
+    },
+    {
+      "name": "calcside-render-75f9fd7fcc-bzzn9",
+      "namespace": "calcside",
+      "uid": "55c68dc3-8cca-4acf-a92a-65668301d464",
+      "node": "192.168.117.4",
+      "podIP": "10.244.0.8",
+      "phase": "Running",
+      "labels": {
+        "app.kubernetes.io/component": "render"
+      },
+      "containers": [
+        {
+          "name": "render",
+          "image": "ghcr.io/wylswz/calcside-render:scalability-local",
+          "imageID": "sha256:0c92b4c290f06f803fc7c84a35f744f89bd2d3895558eef886fe8977e47f3e4f",
+          "ready": true,
+          "restartCount": 0
+        }
+      ],
+      "resources": {
+        "render": {
+          "limits": {
+            "memory": "1Gi"
+          },
+          "requests": {
+            "cpu": "100m",
+            "memory": "256Mi"
+          }
+        }
+      }
+    },
+    {
+      "name": "calcside-worker-0",
+      "namespace": "calcside",
+      "uid": "ffa1a222-211b-4bb9-8d2d-fc45b8c02ecd",
+      "node": "192.168.117.4",
+      "podIP": "10.244.0.12",
+      "phase": "Running",
+      "labels": {
+        "app.kubernetes.io/component": "worker",
+        "apps.kubernetes.io/pod-index": "0"
+      },
+      "containers": [
+        {
+          "name": "calcside-worker",
+          "image": "ghcr.io/wylswz/calcside:scalability-local",
+          "imageID": "sha256:14f4534fb95fac2ae4a747b765486134575eb12199db1d7d24c1d5894a86458a",
+          "ready": false,
+          "restartCount": 0
+        }
+      ],
+      "resources": {
+        "calcside-worker": {
+          "limits": {
+            "cpu": "1",
+            "memory": "1Gi"
+          },
+          "requests": {
+            "cpu": "250m",
+            "memory": "256Mi"
+          }
+        }
+      }
+    },
+    {
+      "name": "postgres-8bdbddcb4-nxffn",
+      "namespace": "calcside",
+      "uid": "1ff7ffdc-932e-4406-bb94-f576b31fa4c2",
+      "node": "192.168.117.4",
+      "podIP": "10.244.0.14",
+      "phase": "Running",
+      "labels": {},
+      "containers": [
+        {
+          "name": "postgres",
+          "image": "docker.io/library/postgres:17-alpine",
+          "imageID": "docker.io/library/postgres@sha256:d3244e8ce3f165ee3c93d9c4a4b1d0fe48b3a89e2287b717fdcbbde92d405065",
+          "ready": true,
+          "restartCount": 0
+        }
+      ],
+      "resources": {
+        "postgres": {
+          "limits": {
+            "cpu": "2",
+            "memory": "2Gi"
+          },
+          "requests": {
+            "cpu": "250m",
+            "memory": "256Mi"
+          }
+        }
+      }
+    },
+    {
+      "name": "scalability-delay-669f9c88d4-th4hq",
+      "namespace": "calcside",
+      "uid": "7ea2ab1c-b987-49b6-875d-9e45547e6f5e",
+      "node": "192.168.117.4",
+      "podIP": "10.244.0.15",
+      "phase": "Running",
+      "labels": {
+        "app": "scalability-delay"
+      },
+      "containers": [
+        {
+          "name": "delay",
+          "image": "docker.io/library/python:3.12-alpine",
+          "imageID": "docker.io/library/python@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89",
+          "ready": true,
+          "restartCount": 0
+        }
+      ],
+      "resources": {
+        "delay": {
+          "limits": {
+            "cpu": "1",
+            "memory": "256Mi"
+          },
+          "requests": {
+            "cpu": "100m",
+            "memory": "64Mi"
+          }
+        }
+      }
+    },
+    {
+      "name": "scalability-proxy-854b69b445-gxcc5",
+      "namespace": "calcside",
+      "uid": "e943197a-28a7-4d38-a98d-1a90f5489e7f",
+      "node": "192.168.117.4",
+      "podIP": "10.244.0.16",
+      "phase": "Running",
+      "labels": {
+        "app": "scalability-proxy"
+      },
+      "containers": [
+        {
+          "name": "nginx",
+          "image": "docker.io/library/nginx:1.28-alpine",
+          "imageID": "docker.io/library/nginx@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236",
+          "ready": true,
+          "restartCount": 0
+        }
+      ],
+      "resources": {
+        "nginx": {
+          "limits": {
+            "cpu": "1",
+            "memory": "128Mi"
+          },
+          "requests": {
+            "cpu": "100m",
+            "memory": "64Mi"
+          }
+        }
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "name": "calcside-scalability-control-plane",
+      "uid": "9388b5e3-25f0-4a2d-ac09-284c361d7330",
+      "capacity": {
+        "cpu": "12",
+        "memory": "12303924Ki",
+        "pods": "110"
+      },
+      "allocatable": {
+        "cpu": "12",
+        "memory": "12303924Ki",
+        "pods": "110"
+      }
+    }
+  ],
+  "services": {
+    "port_forwards": {
+      "18119": "svc/calcside (deploy-release original)",
+      "18120": "svc/scalability-proxy",
+      "18121": "pod/calcside-7d4b876979-cx5qt (first sorted API pod)",
+      "18122": "pod/calcside-7d4b876979-dq56k (second sorted API pod)"
+    }
+  }
+}

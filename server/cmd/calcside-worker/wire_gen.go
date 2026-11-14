@@ -31,7 +31,7 @@ func initializeWorker(cfg config.WorkerConfig) (*workerApp, func(), error) {
 		cleanup()
 		return nil, nil, err
 	}
-	server := provideServer(cfg, runtime)
+	server := provideServer(cfg, runtime, agent)
 	mainWorkerApp := &workerApp{
 		Agent:  agent,
 		Server: server,

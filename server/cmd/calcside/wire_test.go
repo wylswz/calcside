@@ -38,7 +38,7 @@ func testConfig(t *testing.T) config.Config {
 	return config.Config{
 		Addr: "127.0.0.1:0", AddrExplicit: true, Dev: true, ConsoleOrigin: "http://localhost:8080",
 		Store: types.DriverSQLite, DSN: storetest.SQLite(t),
-		Workers: "w1=127.0.0.1:1", WorkerKey: "test-worker-key",
+		WorkerKey:  "test-worker-key",
 		DefaultTTL: time.Minute, MaxTTL: time.Hour, MaxExecTimeout: time.Minute,
 		MaxConcurrentExecs: 2, ReaperInterval: time.Hour, PolicyEvalTimeout: time.Second,
 		ExtCacheDir: t.TempDir(),
@@ -62,6 +62,22 @@ func request(t *testing.T, h http.Handler, method, path, body string, want int) 
 	return out
 }
 
+// registerWorker announces a worker boot through the signed internal
+// callback surface — the only way nodes join the scheduler now that
+// static worker lists are gone.
+func registerWorker(t *testing.T, h http.Handler, key, nodeID, addr string) {
+	t.Helper()
+	body := fmt.Sprintf(`{"node_id":%q,"boot_id":"boot1","capacity":8,"addr":%q}`, nodeID, addr)
+	req := httptest.NewRequest("POST", "/internal/v1/nodes/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	remote.SignRequest([]byte(key), nodeID, req, []byte(body), time.Now())
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("register worker %s: %d %s", nodeID, w.Code, w.Body.String())
+	}
+}
+
 func TestInitializeApp(t *testing.T) {
 	{
 		t.Run("remote", func(t *testing.T) {
@@ -70,7 +86,6 @@ func TestInitializeApp(t *testing.T) {
 			t.Cleanup(nd.Close)
 			worker := httptest.NewServer(remote.NewHandler(nd.Manager, []byte("test-worker-key")))
 			t.Cleanup(worker.Close)
-			cfg.Workers = "worker-test=" + strings.TrimPrefix(worker.URL, "http://")
 			app, cleanup, err := initializeApp(t.Context(), cfg)
 			if err != nil {
 				t.Fatal(err)
@@ -80,6 +95,7 @@ func TestInitializeApp(t *testing.T) {
 				t.Fatalf("incomplete app: %+v", app)
 			}
 			h := app.Server.Handler
+			registerWorker(t, h, cfg.WorkerKey, "worker-test", strings.TrimPrefix(worker.URL, "http://"))
 			request(t, h, "GET", "/healthz", "", http.StatusOK)
 			if got := request(t, h, "GET", "/api/v1/auth/config", "", http.StatusOK); got["dev_mode"] != true || got["google"] != false {
 				t.Fatalf("auth config: %v", got)
@@ -151,7 +167,6 @@ func TestInitializeAppFailureCleanup(t *testing.T) {
 		{"cipher", func(c *config.Config) { c.SecretKey = "invalid" }, "--secret-key:"},
 		{"policy", func(c *config.Config) { c.PolicyDir = filepath.Join(t.TempDir(), "[") }, "--policy-dir:"},
 		{"worker-key", func(c *config.Config) { c.WorkerKey = "" }, "--worker-key is required"},
-		{"workers", func(c *config.Config) { c.Workers, c.WorkerKey = "invalid", "test-key" }, "--workers: bad entry"},
 		{"dev-address", func(c *config.Config) { c.Addr = "0.0.0.0:8080" }, "dev mode refuses non-loopback"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -196,7 +211,6 @@ func TestInitializeAppFlushesAuditBeforeClosingStore(t *testing.T) {
 	t.Cleanup(nd.Close)
 	worker := httptest.NewServer(remote.NewHandler(nd.Manager, []byte(cfg.WorkerKey)))
 	t.Cleanup(worker.Close)
-	cfg.Workers = "worker-test=" + strings.TrimPrefix(worker.URL, "http://")
 	st := trackStore(t, &cfg)
 	var id string
 	func() {
@@ -206,6 +220,7 @@ func TestInitializeAppFlushesAuditBeforeClosingStore(t *testing.T) {
 		}
 		defer cleanup()
 		h := app.Server.Handler
+		registerWorker(t, h, cfg.WorkerKey, "worker-test", strings.TrimPrefix(worker.URL, "http://"))
 		created := request(t, h, "POST", "/api/v1/instances", `{"capabilities":{}}`, http.StatusCreated)
 		id = created["instance"].(map[string]any)["id"].(string)
 		request(t, h, "POST", "/api/v1/instances/"+id+"/exec", `{"code":"io.println(42)"}`, http.StatusOK)
@@ -495,7 +510,6 @@ func TestArtifactsUseConsoleOrigin(t *testing.T) {
 	t.Cleanup(nd.Close)
 	worker := httptest.NewServer(remote.NewHandler(nd.Manager, []byte(cfg.WorkerKey)))
 	t.Cleanup(worker.Close)
-	cfg.Workers = "worker-test=" + strings.TrimPrefix(worker.URL, "http://")
 	cfg.ConsoleOrigin = "https://console.example.com"
 	cfg.ArtifactPreviewBaseURL = "https://reports.example.net"
 	app, cleanup, err := initializeApp(t.Context(), cfg)
@@ -504,6 +518,7 @@ func TestArtifactsUseConsoleOrigin(t *testing.T) {
 	}
 	defer cleanup()
 	h := app.Server.Handler
+	registerWorker(t, h, cfg.WorkerKey, "worker-test", strings.TrimPrefix(worker.URL, "http://"))
 	created := request(t, h, "POST", "/api/v1/instances", `{"capabilities":{"fs":{}}}`, http.StatusCreated)
 	id := created["instance"].(map[string]any)["id"].(string)
 	request(t, h, "POST", "/api/v1/instances/"+id+"/exec", `{"code":"fs.write(\"report.html\", \"<h1>Report</h1>\")"}`, http.StatusOK)

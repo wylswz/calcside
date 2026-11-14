@@ -42,8 +42,8 @@ test.beforeAll(async () => {
   const workerURL = `http://127.0.0.1:${workerPort}`
   consoleURL = `http://console.localhost:${listenPort}`
   const transportURL = `http://127.0.0.1:${listenPort}`
-  server = spawn(binary, ['serve', '--dev', '--store', 'sqlite', '--dsn', database, '--addr', `127.0.0.1:${listenPort}`, '--console-origin', consoleURL, '--artifact-preview-base-url', `http://preview.localhost:${listenPort}`, '--artifact-allow-scripts', '--workers', `w1=127.0.0.1:${workerPort}`, '--worker-key', wkey], { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] })
-  worker = spawn(workerBin, ['serve', '--listen', `127.0.0.1:${workerPort}`, '--api-addr', transportURL, '--shared-key', wkey, '--node-id', 'w1', '--ext-cache-dir', join(directory, 'workercache'), '--instance-memory-max', '0'], { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] })
+  server = spawn(binary, ['serve', '--dev', '--store', 'sqlite', '--dsn', database, '--addr', `127.0.0.1:${listenPort}`, '--console-origin', consoleURL, '--artifact-preview-base-url', `http://preview.localhost:${listenPort}`, '--artifact-allow-scripts', '--worker-key', wkey], { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] })
+  worker = spawn(workerBin, ['serve', '--listen', `127.0.0.1:${workerPort}`, '--api-addr', transportURL, '--shared-key', wkey, '--node-id', 'w1', '--advertise-addr', `127.0.0.1:${workerPort}`, '--ext-cache-dir', join(directory, 'workercache'), '--instance-memory-max', '0'], { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] })
   server.stdout?.on('data', (chunk) => { output = (output + String(chunk)).slice(-64_000) })
   server.stderr?.on('data', (chunk) => { output = (output + String(chunk)).slice(-64_000) })
   worker.stdout?.on('data', (chunk) => { output = (output + '[worker] ' + String(chunk)).slice(-64_000) })
@@ -57,7 +57,7 @@ test.beforeAll(async () => {
     const c = await request.newContext({ baseURL: workerURL })
     await expect.poll(async () => {
       if (worker?.exitCode !== null && worker?.exitCode !== undefined) throw new Error(`Worker exited: ${output}`)
-      try { return (await c.get('/healthz', { timeout: 1000 })).status() } catch { return 0 }
+      try { return (await c.get('/readyz', { timeout: 1000 })).status() } catch { return 0 }
     }, { timeout: 30_000 }).toBe(200)
     await c.dispose()
   }

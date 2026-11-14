@@ -14,7 +14,6 @@ import (
 	"calcside/cmd/calcside/internal/auth"
 	"calcside/internal/capability"
 	common "calcside/internal/config"
-	"calcside/internal/placement"
 	"calcside/internal/types"
 )
 
@@ -36,7 +35,6 @@ type Config struct {
 	GoogleClientSecret     string
 	GoogleAllowedDomains   []string
 	CookieSecure           bool
-	Workers                string
 	WorkerKey              string
 	MaxInstancesPerUser    int
 	MaxInstancesPerNode    int
@@ -83,8 +81,7 @@ func Parse(args []string) (Config, error) {
 	fs.BoolVar(&c.CookieSecure, "cookie-secure", common.EnvBool("COOKIE_SECURE", false), "set Secure on cookies")
 	fs.BoolVar(&c.Dev, "dev", common.EnvBool("DEV", false), "dev mode: no login, anonymous principal (INSECURE)")
 	fs.BoolVar(&c.DevAllowRemote, "dev-allow-remote", common.EnvBool("DEV_ALLOW_REMOTE", false), "allow --dev on non-loopback addr (INSECURE)")
-	fs.StringVar(&c.Workers, "workers", common.EnvOr("WORKERS", ""), "comma-separated worker list nodeID=host:port (required — the API never executes code locally)")
-	fs.StringVar(&c.WorkerKey, "worker-key", common.EnvOr("WORKER_SHARED_KEY", ""), "shared HMAC secret authenticating API↔worker calls")
+	fs.StringVar(&c.WorkerKey, "worker-key", common.EnvOr("WORKER_SHARED_KEY", ""), "shared HMAC secret authenticating API↔worker calls (required — it is also the worker enrollment boundary)")
 	fs.IntVar(&c.MaxInstancesPerUser, "max-instances-per-user", common.EnvInt("MAX_INSTANCES_PER_USER", 10), "max live instances per user (cluster-wide, counted from the store)")
 	fs.IntVar(&c.MaxInstancesPerNode, "max-instances-per-node", common.EnvInt("MAX_INSTANCES_PER_NODE", 0), "max live instances on this execution node (0 = unlimited)")
 	fs.DurationVar(&c.DefaultTTL, "default-ttl", common.EnvDur("DEFAULT_TTL", 15*time.Minute), "default instance TTL")
@@ -115,6 +112,9 @@ func Parse(args []string) (Config, error) {
 		if os.Getenv(key) != "" {
 			return c, fmt.Errorf("%s has been removed; use CALCSIDE_CONSOLE_ORIGIN", key)
 		}
+	}
+	if os.Getenv("CALCSIDE_WORKERS") != "" || os.Getenv("CALCSIDE_WORKER_DISCOVERY") != "" {
+		return c, fmt.Errorf("CALCSIDE_WORKERS/CALCSIDE_WORKER_DISCOVERY have been removed: workers self-register — set CALCSIDE_WORKER_ADVERTISE_ADDR on each worker instead")
 	}
 	origin, err := url.Parse(c.ConsoleOrigin)
 	if err != nil || origin.Hostname() == "" || origin.Scheme != "http" && origin.Scheme != "https" || origin.User != nil || origin.Path != "" && origin.Path != "/" || origin.RawQuery != "" || origin.ForceQuery || strings.Contains(c.ConsoleOrigin, "#") || strings.HasSuffix(origin.Host, ":") {
@@ -165,9 +165,6 @@ func Parse(args []string) (Config, error) {
 	}
 	if c.DefaultTTL <= 0 || c.MaxTTL <= 0 {
 		return c, fmt.Errorf("TTLs must be positive")
-	}
-	if _, err := ParseWorkers(c.Workers); err != nil {
-		return c, err
 	}
 	if c.WorkerKey == "" {
 		return c, fmt.Errorf("--worker-key is required")
@@ -222,28 +219,4 @@ func (c Config) ExecLimits() capability.ServerLimits {
 		MaxNetResponseBytes: c.MaxNetResponseBytes,
 		SecretsAllowHTTP:    c.SecretsAllowHTTP,
 	}
-}
-
-// ParseWorkers parses --workers entries of the form "nodeID=host:port";
-// at least one valid entry is required — the API never executes code
-// locally.
-func ParseWorkers(spec string) ([]placement.NodeRef, error) {
-	var out []placement.NodeRef
-	seen := make(map[string]bool)
-	for _, ent := range strings.Split(spec, ",") {
-		id, addr, ok := strings.Cut(strings.TrimSpace(ent), "=")
-		id, addr = strings.TrimSpace(id), strings.TrimSpace(addr)
-		if !ok || id == "" || len(id) > 128 || addr == "" {
-			return nil, fmt.Errorf("--workers: bad entry %q, want nodeID=host:port", ent)
-		}
-		if seen[id] {
-			return nil, fmt.Errorf("--workers: duplicate node id")
-		}
-		seen[id] = true
-		out = append(out, placement.NodeRef{NodeID: id, Addr: addr})
-	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("--workers is required")
-	}
-	return out, nil
 }

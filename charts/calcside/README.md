@@ -108,10 +108,31 @@ Bootstrap administrator:
 
 ## Workers
 
-Workers are a StatefulSet; each pod's name is its node ID and is pre-registered
-in the API's `--workers` list. The headless Service is
-`<release>-calcside-worker`. Scaling the StatefulSet updates the API worker list
-and rolls the API.
+Workers are a StatefulSet; each pod's name is its node ID. Workers
+self-register with the API over the signed control channel, advertising
+their pod IP (`status.podIP`) on port 8090 — there is no static worker
+list and no DNS discovery. The shared database is the membership
+authority, so every API replica sees the same live set and scaling the
+StatefulSet (`kubectl scale` or `worker.replicaCount`) needs no API
+rollout: new pods register on boot, removed pods' heartbeats expire. The
+headless Service `<release>-calcside-worker` remains for StatefulSet
+identity only. Worker readiness is `/readyz` (registered + heartbeating);
+`/healthz` stays plain liveness.
+
+### Migrating from static worker lists
+
+`--workers` / `CALCSIDE_WORKERS` is removed — the API now rejects both with
+a migration error. Each worker instead requires `--advertise-addr` /
+`CALCSIDE_WORKER_ADVERTISE_ADDR` (canonical `host:port`); the Helm chart,
+Compose files and `make dev`/`serve-dev` set it automatically. The shared
+worker key is the enrollment boundary: any holder can register a syntactically
+valid endpoint, so run workers on a trusted network. Persistent applications
+keep one prepared replica per live worker — a new worker automatically gains
+a replica on the next reconcile pass, invokes round-robin across the healthy
+ready set, and each replica still serializes its own invokes. Node capacity,
+the instance failure backoff and the per-pass claim budget bound how fast a
+pool fills; this is horizontal replica pooling, not unlimited scalability.
+Notebook instances remain stateful and pinned to their original worker.
 
 ## Renderer
 

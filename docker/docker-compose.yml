@@ -32,9 +32,9 @@ services:
       CALCSIDE_STORE: ${CALCSIDE_STORE:-sqlite}
       CALCSIDE_DSN: ${CALCSIDE_DSN:-/data/calcside.db}
       CALCSIDE_CONSOLE_ORIGIN: ${CALCSIDE_CONSOLE_ORIGIN:-http://localhost:8080}
-      # Remote execution tier: worker list nodeID=host:port plus the
-      # shared HMAC key both sides must carry.
-      CALCSIDE_WORKERS: ${CALCSIDE_WORKERS:-worker-1=worker:8090}
+      # Remote execution tier: workers self-register over the signed
+      # control channel — the API only needs the shared HMAC key,
+      # which is also the enrollment boundary.
       CALCSIDE_WORKER_SHARED_KEY: ${CALCSIDE_WORKER_SHARED_KEY:?run `make docker-env` first, or set CALCSIDE_WORKER_SHARED_KEY}
       # MCP chart images: the API renders stored validated specs on
       # demand through the private render service (EP-0024).
@@ -44,7 +44,9 @@ services:
       migrate:
         condition: service_completed_successfully
       worker:
-        condition: service_healthy
+        # started, not healthy: the worker can only register (readyz)
+        # after the API is up — gating on healthy would deadlock.
+        condition: service_started
       render:
         condition: service_healthy
     networks:
@@ -88,10 +90,13 @@ services:
         required: false
     environment:
       CALCSIDE_WORKER_LISTEN: ":8090"
-      # Stable identity across container restarts; must match the id
-      # the API's CALCSIDE_WORKERS list names for this node.
+      # Stable identity across container restarts; the API learns this
+      # worker's endpoint from the registration below, not from config.
       CALCSIDE_NODE_ID: worker-1
       CALCSIDE_WORKER_SHARED_KEY: ${CALCSIDE_WORKER_SHARED_KEY:?run `make docker-env` first, or set CALCSIDE_WORKER_SHARED_KEY}
+      # Endpoint advertised at registration — the compose DNS name the
+      # API dials back on.
+      CALCSIDE_WORKER_ADVERTISE_ADDR: worker:8090
       # Local ext sources are resolved through the API over the shared
       # key — the worker deliberately has no mount of the API's /data.
       # The image ENV sets EXT_LOCAL_ROOTS for the API; clear it here.
@@ -104,7 +109,9 @@ services:
       # here is authoritative — safe to wipe.
       - ./worker-cache:/cache
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8090/healthz"]
+      # readyz = registered with the API, not merely alive — the API
+      # has no static worker list, so an unregistered worker is useless.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8090/readyz"]
       interval: 10s
       timeout: 5s
       retries: 3

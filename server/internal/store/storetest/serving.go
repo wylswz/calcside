@@ -672,4 +672,230 @@ func serving(t *testing.T, s store.Store) {
 			t.Fatal("rejected claim bumped epoch")
 		}
 	})
+
+	t.Run("replica_pool", func(t *testing.T) {
+		_, inst := seed(t, s)
+		n1, err := s.RegisterServingNode(ctx, node("pp1", "b", 0), sNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n2, err := s.RegisterServingNode(ctx, node("pp2", "b", 0), sNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n3, err := s.RegisterServingNode(ctx, node("pp3", "b", 0), sNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		epoch := func() int64 {
+			got, err := s.GetPersistentInstance(ctx, "ws_1", inst.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return got.LastEpoch
+		}
+		claimOn := func(n *store.ServingNode, expected int64, now time.Time) (*store.ServingReplica, error) {
+			return s.ClaimServingReplica(ctx, store.ServingReplicaClaim{
+				InstanceID: inst.ID, ReleaseID: inst.ReleaseID, NodeID: n.NodeID, BootID: n.BootID,
+				ReplicaID: store.NewID(store.PrefixServingReplica), NodeIncarnation: n.Incarnation,
+				Generation: inst.Generation, ExpectedEpoch: expected, Now: now,
+				LeaseUntil: now.Add(time.Hour)})
+		}
+		fence := func(r *store.ServingReplica) store.ServingReplicaFence {
+			return store.ServingReplicaFence{ReplicaID: r.ID, InstanceID: inst.ID, ReleaseID: inst.ReleaseID,
+				NodeID: r.NodeID, BootID: r.BootID, NodeIncarnation: r.NodeIncarnation,
+				Generation: r.Generation, Epoch: r.Epoch}
+		}
+
+		// Two different nodes claim the same instance with a refreshed
+		// high-water mark: distinct epochs, no singleton block.
+		r1, err := claimOn(n1, epoch(), sNow)
+		if err != nil || r1.Epoch != 1 {
+			t.Fatalf("claim n1: %v %+v", err, r1)
+		}
+		r2, err := claimOn(n2, epoch(), sNow)
+		if err != nil || r2.Epoch != 2 {
+			t.Fatalf("claim n2: %v %+v", err, r2)
+		}
+		// Same node duplicate still conflicts while the lease lives.
+		if _, err := claimOn(n1, epoch(), sNow); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("same-node dup: %v", err)
+		}
+		// A third node joins the pool — epoch 3, still gen 1.
+		r3, err := s.ClaimServingReplica(ctx, store.ServingReplicaClaim{
+			InstanceID: inst.ID, ReleaseID: inst.ReleaseID, NodeID: n3.NodeID, BootID: n3.BootID,
+			ReplicaID: store.NewID(store.PrefixServingReplica), NodeIncarnation: n3.Incarnation,
+			Generation: inst.Generation, ExpectedEpoch: epoch(), Now: sNow,
+			LeaseUntil: sNow.Add(time.Hour)})
+		if err != nil || r3.Epoch != 3 {
+			t.Fatalf("claim n3: %v %+v", err, r3)
+		}
+		// ListInstanceServingReplicas returns every live nonterminal row
+		// sorted by id.
+		rows, err := s.ListInstanceServingReplicas(ctx, inst.ID, sNow)
+		if err != nil || len(rows) != 3 {
+			t.Fatalf("list: %v %d", err, len(rows))
+		}
+		for i := 1; i < len(rows); i++ {
+			if rows[i-1].ID >= rows[i].ID {
+				t.Fatal("list not sorted by id")
+			}
+		}
+		seen := map[string]int64{}
+		for _, r := range rows {
+			seen[r.NodeID] = r.Epoch
+			if r.State != store.ServingReplicaPreparing {
+				t.Fatalf("state: %+v", r)
+			}
+		}
+		if seen["pp1"] != 1 || seen["pp2"] != 2 || seen["pp3"] != 3 {
+			t.Fatalf("pool epochs: %v", seen)
+		}
+		// Lower-epoch ready + renew stay valid after later claims.
+		if ok, err := s.ReportServingReplica(ctx, fence(r1), store.ServingReplicaReady, "", sNow); !ok || err != nil {
+			t.Fatalf("ready r1: %v %v", ok, err)
+		}
+		if ok, err := s.HeartbeatServingNode(ctx,
+			store.ServingNodeFence{NodeID: n1.NodeID, BootID: n1.BootID, Incarnation: n1.Incarnation},
+			sNow, sNow.Add(2*time.Hour), 4); !ok || err != nil {
+			t.Fatalf("hb extend: %v %v", ok, err)
+		}
+		if ok, err := s.RenewServingReplica(ctx, fence(r1), sNow, sNow.Add(90*time.Minute)); !ok || err != nil {
+			t.Fatalf("renew r1 after later claims: %v %v", ok, err)
+		}
+		// Replayed READY is idempotent: ok, and — after a sibling
+		// failure sets backoff — the duplicate does not reset it.
+		if ok, err := s.ReportServingReplica(ctx, fence(r2), store.ServingReplicaFailed, "runtime", sNow); !ok || err != nil {
+			t.Fatalf("fail r2: %v %v", ok, err)
+		}
+		pin, _ := s.GetPersistentInstance(ctx, "ws_1", inst.ID)
+		if pin.ConsecutiveFailures != 1 || pin.RetryAfter == nil {
+			t.Fatalf("backoff: %+v", pin)
+		}
+		if ok, err := s.ReportServingReplica(ctx, fence(r1), store.ServingReplicaReady, "", sNow); !ok || err != nil {
+			t.Fatalf("ready replay: %v %v", ok, err)
+		}
+		pin, _ = s.GetPersistentInstance(ctx, "ws_1", inst.ID)
+		if pin.ConsecutiveFailures != 1 || pin.RetryAfter == nil {
+			t.Fatalf("ready replay reset backoff: %+v", pin)
+		}
+		// The failed sibling did not touch the healthy one.
+		got1, _ := s.GetServingReplica(ctx, r1.ID)
+		if got1.State != store.ServingReplicaReady {
+			t.Fatalf("sibling state: %+v", got1)
+		}
+		// Generation bump: old-gen leases still block their nodes, the
+		// pool view keeps listing them, and a fresh node claims gen 3.
+		// The sibling failure set a backoff — move past it first.
+		now2 := sNow.Add(30 * time.Second)
+		if ok, err := s.SetPersistentEnabled(ctx, "ws_1", inst.ID, pin.Generation, false, now2); !ok || err != nil {
+			t.Fatalf("disable: %v %v", ok, err)
+		}
+		if ok, err := s.SetPersistentEnabled(ctx, "ws_1", inst.ID, pin.Generation+1, true, now2); !ok || err != nil {
+			t.Fatalf("reenable: %v %v", ok, err)
+		}
+		gen := pin.Generation + 2
+		n4, err := s.RegisterServingNode(ctx, node("pp4", "b", 0), now2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Same-node old-gen claim still conflicts while the gen-1
+		// lease lives.
+		if _, err := s.ClaimServingReplica(ctx, store.ServingReplicaClaim{
+			InstanceID: inst.ID, ReleaseID: inst.ReleaseID, NodeID: n1.NodeID, BootID: n1.BootID,
+			ReplicaID: store.NewID(store.PrefixServingReplica), NodeIncarnation: n1.Incarnation,
+			Generation: gen, ExpectedEpoch: epoch(), Now: now2,
+			LeaseUntil: now2.Add(time.Hour)}); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("old-gen same-node claim: %v", err)
+		}
+		r4, err := s.ClaimServingReplica(ctx, store.ServingReplicaClaim{
+			InstanceID: inst.ID, ReleaseID: inst.ReleaseID, NodeID: n4.NodeID, BootID: n4.BootID,
+			ReplicaID: store.NewID(store.PrefixServingReplica), NodeIncarnation: n4.Incarnation,
+			Generation: gen, ExpectedEpoch: epoch(), Now: now2,
+			LeaseUntil: sNow.Add(59 * time.Minute)})
+		if err != nil || r4.Epoch != 4 || r4.Generation != gen {
+			t.Fatalf("claim n4 new gen: %v %+v", err, r4)
+		}
+		// The pool view spans generations: r2 is terminal (failed) so
+		// the live rows are r1+r3 (gen 1) and r4 (gen 3).
+		rows, err = s.ListInstanceServingReplicas(ctx, inst.ID, now2)
+		if err != nil || len(rows) != 3 {
+			t.Fatalf("pool list across gens: %v %d", err, len(rows))
+		}
+		gens := map[int64]int{}
+		for _, r := range rows {
+			gens[r.Generation]++
+		}
+		if gens[1] != 2 || gens[gen] != 1 {
+			t.Fatalf("pool generations: %v", gens)
+		}
+		// Disabled/new-generation mutations invalidate old renewals.
+		if ok, err := s.SetPersistentEnabled(ctx, "ws_1", inst.ID, gen, false, now2); !ok || err != nil {
+			t.Fatalf("disable2: %v %v", ok, err)
+		}
+		if ok, _ := s.RenewServingReplica(ctx, fence(r1), now2, now2.Add(time.Minute)); ok {
+			t.Fatal("old-gen renew accepted")
+		}
+		if ok, _ := s.ReportServingReplica(ctx, fence(r1), store.ServingReplicaReady, "", now2); ok {
+			t.Fatal("old-gen ready accepted")
+		}
+		// Expired leases drop out of the pool view.
+		later := sNow.Add(2 * time.Hour)
+		rows, err = s.ListInstanceServingReplicas(ctx, inst.ID, later)
+		if err != nil || len(rows) != 0 {
+			t.Fatalf("expired list: %v %d", err, len(rows))
+		}
+	})
+
+	t.Run("replica_pool_concurrency", func(t *testing.T) {
+		_, inst := seed(t, s)
+		n1, _ := s.RegisterServingNode(ctx, node("pc1", "b", 0), sNow)
+		n2, _ := s.RegisterServingNode(ctx, node("pc2", "b", 0), sNow)
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		wins := map[string]int{}
+		for i := 0; i < 8; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				n := n1
+				if i%2 == 1 {
+					n = n2
+				}
+				// Each contender refreshes the high-water mark and
+				// retries CAS conflicts — the per-node lease is the
+				// only thing that can permanently block it.
+				for try := 0; try < 4; try++ {
+					got, err := s.GetPersistentInstance(ctx, "ws_1", inst.ID)
+					if err != nil {
+						return
+					}
+					_, err = s.ClaimServingReplica(ctx, store.ServingReplicaClaim{
+						InstanceID: inst.ID, ReleaseID: inst.ReleaseID,
+						NodeID: n.NodeID, BootID: n.BootID, ReplicaID: store.NewID(store.PrefixServingReplica),
+						NodeIncarnation: n.Incarnation, Generation: inst.Generation,
+						ExpectedEpoch: got.LastEpoch, Now: sNow, LeaseUntil: sNow.Add(time.Minute),
+					})
+					if err == nil {
+						mu.Lock()
+						wins[n.NodeID]++
+						mu.Unlock()
+						return
+					}
+					if !errors.Is(err, store.ErrConflict) {
+						return
+					}
+				}
+			}(i)
+		}
+		wg.Wait()
+		// Exactly one live replica per node — never two on either.
+		if wins["pc1"] != 1 || wins["pc2"] != 1 {
+			t.Fatalf("per-node wins: %v", wins)
+		}
+		rows, err := s.ListInstanceServingReplicas(ctx, inst.ID, sNow)
+		if err != nil || len(rows) != 2 {
+			t.Fatalf("pool rows: %v %d", err, len(rows))
+		}
+	})
 }
