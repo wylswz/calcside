@@ -1,0 +1,8 @@
+# Benchmark agent environment: LangChain create_agent + AgentMiddleware,
+# langchain-openai ChatOpenAI (DeepSeek-compatible), e2b-code-interpreter.
+# Direct dependencies pinned exactly. Resolve with a >=7-day-published cutoff:
+#   uv pip install --python .venv/bin/python \
+#     --exclude-newer 2026-11-07T04:26:51Z -r requirements-langchain.txt
+langchain==1.4.9
+langchain-openai==1.7.4
+e2b-code-interpreter==2.11.9

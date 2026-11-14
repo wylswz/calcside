@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.log
+*.pid
+# Experiment data stays outside the repository: only the report and the
+# figures it embeds are committed. Rerun the harness to regenerate datasets,
+# frozen report views, preflights and service state.
+results/*
+!results/figures-v2/
+!results/figures-agentic/
+!results/figures-openai-sol/
+results/**/*.png
