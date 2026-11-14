@@ -26,8 +26,8 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
         with:
           version: v3.19.0
@@ -38,8 +38,11 @@ jobs:
           chmod +x "$RUNNER_TEMP/atlas"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - run: go build ./...
+        working-directory: server
       - run: go vet ./...
+        working-directory: server
       - run: go test ./...
+        working-directory: server
       - run: helm lint charts/calcside
       - name: Render chart (SQLite)
         run: helm template calcside charts/calcside --namespace calcside >/dev/null

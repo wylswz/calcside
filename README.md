@@ -6,6 +6,21 @@ Inspired by [citron](https://github.com/mishudark/citron) and [marimo](https://m
 
 Powered by [starlark-go](https://github.com/google/starlark-go)
 
+## Repository layout
+
+- `server/` — Go module (`calcside`): API + worker binaries (`cmd/`), shared execution code (`internal/`), example policies (`policies/`), Atlas config (`atlas.hcl`), and `webdist/` — the embed package the console build outputs into.
+- `api/` — OpenAPI specs shared by all modules: the public API and worker protocol; generated Go/TS code comes from here.
+- `contrib/` — bundled community extensions.
+- `web/` — console frontend (React + Vite); `pnpm -C web build` writes into `server/webdist/dist`.
+- `render/` — stateless Vega-Lite → PNG service for MCP chart images.
+- `sdk/` — Python SDK (`sdk/python`, uv project).
+- `charts/` — Helm chart plus `deploy-test.py` test-deploy helper.
+- `docker/` — Dockerfiles, Compose stacks, env bootstrap.
+- `benchmark/` — k6 API benchmark and release-gate runner/report.
+- `docs/` — design docs (proposals/releases/articles are historical).
+- `examples/` — sample agents and Starlark programs.
+- `.github/` — CI and release workflows.
+
 ## Get started
 
 ```bash

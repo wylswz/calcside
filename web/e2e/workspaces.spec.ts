@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { createServer } from 'node:net'
 
 const repo = fileURLToPath(new URL('../../', import.meta.url))
+const serverDir = join(repo, 'server')
 let server: ChildProcess | undefined
 let worker: ChildProcess | undefined
 let directory: string
@@ -30,11 +31,11 @@ test.beforeAll(async () => {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('CALCSIDE_') && !key.startsWith('ATLAS_')))
   const binary = join(directory, 'calcside')
   const database = join(directory, 'test.db')
-  execFileSync('go', ['build', '-o', binary, './cmd/calcside'], { cwd: repo, env, stdio: 'pipe' })
+  execFileSync('go', ['build', '-o', binary, './cmd/calcside'], { cwd: serverDir, env, stdio: 'pipe' })
   const extRoots = join(repo, 'contrib')
   const workerBin = join(directory, 'calcside-worker')
-  execFileSync('go', ['build', '-o', workerBin, './cmd/calcside-worker'], { cwd: repo, env, stdio: 'pipe' })
-  execFileSync('atlas', ['migrate', 'apply', '--env', 'sqlite'], { cwd: repo, env: { ...env, ATLAS_DB_URL: `sqlite://${database}` }, stdio: 'pipe' })
+  execFileSync('go', ['build', '-o', workerBin, './cmd/calcside-worker'], { cwd: serverDir, env, stdio: 'pipe' })
+  execFileSync('atlas', ['migrate', 'apply', '--env', 'sqlite'], { cwd: serverDir, env: { ...env, ATLAS_DB_URL: `sqlite://${database}` }, stdio: 'pipe' })
   const listenPort = await port()
   const workerPort = await port()
   const wkey = randomBytes(32).toString('hex')

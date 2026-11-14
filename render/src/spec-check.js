@@ -1,5 +1,5 @@
 // Defence-in-depth spec screening for the renderer. The API tier
-// already validates specs against the Vega-Lite subset (internal/chart);
+// already validates specs against the Vega-Lite subset (server/internal/chart);
 // this pass re-checks the two properties the renderer cannot allow at
 // all: any url/href key anywhere in the tree (data sources, href
 // channels, mark properties) and the image/geoshape marks that would
