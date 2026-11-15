@@ -398,6 +398,9 @@ type Store interface {
 	GetAPIKeyByHash(ctx context.Context, hash string) (*APIKey, error)
 	GetAPIKey(ctx context.Context, id string) (*APIKey, error)
 	RevokeAPIKey(ctx context.Context, userID, id string) error
+	// TouchAPIKey advances last_used_at monotonically: a timestamp at or
+	// behind the stored value is a no-op, so buffered flushes from
+	// different API replicas cannot regress the column.
 	TouchAPIKey(ctx context.Context, id string, at time.Time) error
 
 	CreateSession(ctx context.Context, s *Session) error

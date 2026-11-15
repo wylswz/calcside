@@ -609,7 +609,10 @@ func (d *sqlDB) RevokeAPIKey(ctx context.Context, userID, id string) error {
 }
 
 func (d *sqlDB) TouchAPIKey(ctx context.Context, id string, at time.Time) error {
-	_, err := gorm.G[keyRow](d.g).Where("id = ?", id).
+	// Monotonic guard: out-of-order flushes from different API replicas
+	// must never move last_used_at backwards.
+	_, err := gorm.G[keyRow](d.g).
+		Where("id = ? AND (last_used_at IS NULL OR last_used_at < ?)", id, at.UTC()).
 		Update(ctx, "last_used_at", at.UTC())
 	return err
 }

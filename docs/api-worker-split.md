@@ -36,8 +36,10 @@ remains to put a network boundary between them.
   process incarnation. A restart keeps the node_id — its bindings still point
   at it — but the new boot_id tells the control plane every instance bound to
   it is dead.
-- Asynq is only for genuinely async work (audit flush, `TouchAPIKey` batching,
-  node-death reconciliation, session GC, ext prewarm). Never on the `exec` path.
+- Asynq is only for genuinely async work (audit flush, `TouchAPIKey` batching —
+  landed in-process, `auth` buffers newest-per-key and flushes on a timer +
+  shutdown — node-death reconciliation, session GC, ext prewarm). Never on the
+  `exec` path.
 - Workers never query the database. All context arrives inside the request.
 
 ## Phase 2 — placement & store schema  ✅ landed
@@ -146,8 +148,9 @@ security event, not just a correctness bug.
 
 1. `server/internal/jobs` port (`Dispatcher`/`Handler`) + `jobs/asynq` adapter; asynq
    types appear only inside the adapter.
-2. First jobs: audit batch flush, `TouchAPIKey` throttle→batch, node-death
-   reconciler, session/API-key GC.
+2. First jobs: audit batch flush, `TouchAPIKey` throttle→batch (done without
+   asynq — in-process buffer + monotonic store write), node-death reconciler,
+   session/API-key GC.
 3. `server/internal/cache` port + `cache/redis`: `auth.Resolve` caches
    `hash(token)→Principal` for ~30–60s with a revocation set for deletes;
    session lookups same. This removes the per-request write (`TouchAPIKey`)

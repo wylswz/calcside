@@ -188,8 +188,20 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		if err != nil || len(keys) != 1 {
 			t.Fatalf("ListAPIKeys: %v %d", err, len(keys))
 		}
-		if err := s.TouchAPIKey(ctx, k.ID, time.Now()); err != nil {
+		used := time.Now().UTC().Truncate(time.Second)
+		if err := s.TouchAPIKey(ctx, k.ID, used); err != nil {
 			t.Fatal(err)
+		}
+		if got, _ = s.GetAPIKeyByHash(ctx, "h1"); got.LastUsedAt == nil || !got.LastUsedAt.Equal(used) {
+			t.Fatalf("last_used_at: %+v", got.LastUsedAt)
+		}
+		// A stale timestamp must not regress the monotonic column —
+		// buffered flushes from different API replicas race this way.
+		if err := s.TouchAPIKey(ctx, k.ID, used.Add(-time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ = s.GetAPIKeyByHash(ctx, "h1"); got.LastUsedAt == nil || !got.LastUsedAt.Equal(used) {
+			t.Fatalf("last_used_at regressed: %+v", got.LastUsedAt)
 		}
 		if err := s.RevokeAPIKey(ctx, "other-user", k.ID); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("revoke as other user: %v", err)
