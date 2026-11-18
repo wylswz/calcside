@@ -1,0 +1,304 @@
+name: github
+version: 0.2.0
+description: GitHub - repositories, issues, pull requests, commits, trees, search, and contribution totals via REST + one fixed GraphQL query.
+icon: icon.png
+dependencies: [net]
+ops:
+  # --- legacy ops (0.1.0 signatures and shapes) ---
+  - name: get_repo
+    doc: Repository metadata reduced to {full_name, description, default_branch, stars, private}.
+    returns: "dict - {full_name, description, default_branch, stars, private}"
+    example: |
+      repo = ext.github.get_repo("octocat", "Hello-World")
+      print(repo["stars"])
+    params:
+      - {name: owner, type: string, doc: "Repository owner login or org."}
+      - {name: repo, type: string, doc: "Repository name."}
+  - name: list_issues
+    doc: Issue summaries for a repo; pull requests returned by the endpoint are filtered out. limit must be 1..100.
+    returns: "list[dict] - {number, title, state, user, labels} per issue"
+    example: |
+      for i in ext.github.list_issues("octocat", "Hello-World", state="open", limit=50):
+          print(i["number"], i["title"])
+    params:
+      - {name: owner, type: string, doc: "Repository owner login or org."}
+      - {name: repo, type: string, doc: "Repository name."}
+      - {name: state, type: string, doc: "open|closed|all.", optional: true, default: "open"}
+      - {name: limit, type: int, doc: "Page size, 1..100 (becomes per_page).", optional: true, default: 20}
+  - name: create_issue
+    doc: Create an issue (POST /issues). Requires a token with Issues write on the repo.
+    returns: "dict - {number, html_url}"
+    example: |
+      created = ext.github.create_issue("octocat", "Hello-World", "Bug: x", body="details", labels=["bug"])
+      print(created["html_url"])
+    params:
+      - {name: owner, type: string, doc: "Repository owner login or org."}
+      - {name: repo, type: string, doc: "Repository name."}
+      - {name: title, type: string, doc: "Issue title."}
+      - {name: body, type: string, doc: "Issue body markdown.", optional: true, default: ""}
+      - {name: labels, type: "list[string]", doc: "Label names to apply.", optional: true}
+  - name: create_comment
+    doc: Comment on an issue or pull request (POST /issues/{n}/comments).
+    returns: "dict - {id, html_url}"
+    example: |
+      c = ext.github.create_comment("octocat", "Hello-World", 1, "looks good")
+      print(c["html_url"])
+    params:
+      - {name: owner, type: string, doc: "Repository owner login or org."}
+      - {name: repo, type: string, doc: "Repository name."}
+      - {name: number, type: int, doc: "Issue or pull request number."}
+      - {name: body, type: string, doc: "Comment markdown."}
+  - name: list_pull_requests
+    doc: Pull request summaries for a repo. limit must be 1..100.
+    returns: "list[dict] - {number, title, state, user, head} per PR"
+    example: |
+      for pr in ext.github.list_pull_requests("octocat", "Hello-World"):
+          print(pr["number"], pr["head"])
+    params:
+      - {name: owner, type: string, doc: "Repository owner login or org."}
+      - {name: repo, type: string, doc: "Repository name."}
+      - {name: state, type: string, doc: "open|closed|all.", optional: true, default: "open"}
+      - {name: limit, type: int, doc: "Page size, 1..100 (becomes per_page).", optional: true, default: 20}
+  - name: get_file
+    doc: Raw UTF-8 file contents (default branch, or ref). path segments are validated and escaped; ref may contain "/". Capped at max_file_bytes.
+    returns: "dict - {path, size, content}"
+    example: |
+      f = ext.github.get_file("octocat", "Hello-World", "README.md", ref="main")
+      print(f["content"][:200])
+    params:
+      - {name: owner, type: string, doc: "Repository owner login or org."}
+      - {name: repo, type: string, doc: "Repository name."}
+      - {name: path, type: string, doc: "File path inside the repo, e.g. \"docs/guide.md\"; segments may not be empty, \".\", \"..\" or contain backslash."}
+      - {name: ref, type: string, doc: "Branch, tag or SHA; may contain \"/\". Empty = default branch.", optional: true, default: ""}
+  # --- identity and activity ---
+  - name: get_user
+    doc: User profile; the token's own user when username is empty (/user).
+    returns: "dict - raw GitHub user object"
+    example: |
+      me = ext.github.get_user()
+      print(me["login"])
+    params:
+      - {name: username, type: string, doc: "Login name; empty = authenticated user.", optional: true, default: ""}
+  - name: get_rate_limit
+    doc: "Rate-limit quotas for the token (or anonymous caller): core/search/graphql buckets with reset times."
+    returns: "dict - raw GitHub rate_limit object"
+    example: |
+      rl = ext.github.get_rate_limit()
+      print(rl["resources"]["core"]["remaining"])
+    params: []
+  - name: list_orgs
+    doc: Organizations the user belongs to; public orgs for other users. Paged.
+    returns: "dict - {items, page, per_page, has_more, next_page, rate_limit}"
+    example: |
+      page = {"has_more": True, "next_page": 1}
+      for _ in range(5):
+          page = ext.github.list_orgs(page=page["next_page"], per_page=100)
+          for o in page["items"]:
+              print(o["login"])
+          if not page["has_more"]:
+              break
+    params:
+      - {name: username, type: string, doc: "User login; empty = authenticated user.", optional: true, default: ""}
+      - {name: page, type: int, doc: "1-based page number.", optional: true, default: 1}
+      - {name: per_page, type: int, doc: "Page size, 1..100.", optional: true, default: 100}
+  - name: list_events
+    doc: Recent public activity events for a user. GitHub keeps only ~90 days / ~300 events - not a complete history. Paged.
+    returns: "dict - {items, page, per_page, has_more, next_page, rate_limit}"
+    example: |
+      ev = ext.github.list_events("octocat", per_page=100)
+      print(len(ev["items"]), ev["rate_limit"])
+    params:
+      - {name: username, type: string, doc: "User login (required)."}
+      - {name: page, type: int, doc: "1-based page number.", optional: true, default: 1}
+      - {name: per_page, type: int, doc: "Page size, 1..100.", optional: true, default: 100}
+      - {name: public_only, type: bool, doc: "True = public events feed; False = /events (token-visible events for the authenticated user).", optional: true, default: true}
+  # --- repositories ---
+  - name: list_repos
+    doc: Repositories visible to the caller (raw records - fork/archived/language/topics/pushed_at preserved). Empty username = /user/repos with affiliation; else /users/{u}/repos. Paged.
+    returns: "dict - {items, page, per_page, has_more, next_page, rate_limit}"
+    example: |
+      page = {"has_more": True, "next_page": 1}
+      for _ in range(5):
+          page = ext.github.list_repos(sort="pushed", page=page["next_page"], per_page=100)
+          print([x["full_name"] for x in page["items"]])
+          if not page["has_more"]:
+              break
+    params:
+      - {name: username, type: string, doc: "User login; empty = repos the token can access.", optional: true, default: ""}
+      - {name: page, type: int, doc: "1-based page number.", optional: true, default: 1}
+      - {name: per_page, type: int, doc: "Page size, 1..100.", optional: true, default: 100}
+      - {name: sort, type: string, doc: "created|updated|pushed|full_name.", optional: true, default: "updated"}
+      - {name: direction, type: string, doc: "asc|desc.", optional: true, default: "desc"}
+      - {name: affiliation, type: string, doc: "Comma list for /user/repos only: owner,collaborator,organization_member.", optional: true, default: "owner,collaborator,organization_member"}
+  - name: get_languages
+    doc: Bytes of code per language on the default branch.
+    returns: "dict - {language: bytes}"
+    example: |
+      print(ext.github.get_languages("octocat", "Hello-World"))
+    params:
+      - {name: owner, type: string, doc: "Repository owner login or org."}
+      - {name: repo, type: string, doc: "Repository name."}
+  - name: list_commits
+    doc: Commit history (raw records). author/since/until/sha filters are omitted when empty. Paged.
+    returns: "dict - {items, page, per_page, has_more, next_page, rate_limit}"
+    example: |
+      page = {"has_more": True, "next_page": 1}
+      for _ in range(5):
+          page = ext.github.list_commits("octocat", "Hello-World", author="octocat", page=page["next_page"], per_page=100)
+          for cm in page["items"]:
+              print(cm["sha"][:8], cm["commit"]["message"].split("\n")[0])
+          if not page["has_more"]:
+              break
+    params:
+      - {name: owner, type: string, doc: "Repository owner login or org."}
+      - {name: repo, type: string, doc: "Repository name."}
+      - {name: author, type: string, doc: "GitHub login or email filter; empty = omitted.", optional: true, default: ""}
+      - {name: since, type: string, doc: "ISO 8601 / RFC3339 lower bound; empty = omitted.", optional: true, default: ""}
+      - {name: until, type: string, doc: "ISO 8601 / RFC3339 upper bound; empty = omitted.", optional: true, default: ""}
+      - {name: sha, type: string, doc: "Branch, tag or SHA to list from; empty = default branch.", optional: true, default: ""}
+      - {name: page, type: int, doc: "1-based page number.", optional: true, default: 1}
+      - {name: per_page, type: int, doc: "Page size, 1..100.", optional: true, default: 100}
+  - name: get_commit
+    doc: Single commit by SHA, tag, or slash-free branch name.
+    returns: "dict - raw GitHub commit object"
+    example: |
+      cm = ext.github.get_commit("octocat", "Hello-World", "master")
+      print(cm["sha"], cm["commit"]["message"])
+    params:
+      - {name: owner, type: string, doc: "Repository owner login or org."}
+      - {name: repo, type: string, doc: "Repository name."}
+      - {name: ref, type: string, doc: "SHA, tag or branch name without \"/\"."}
+  - name: list_contributors
+    doc: Contributors ordered by commit count; anon=true always sent so anonymous entries (deleted users, unmapped emails) appear with login=None. GitHub caches this data and it reflects the default branch - not a complete commit-author census. Paged.
+    returns: "dict - {items, page, per_page, has_more, next_page, rate_limit}"
+    example: |
+      ct = ext.github.list_contributors("octocat", "Hello-World", per_page=100)
+      print([(c.get("login"), c["contributions"]) for c in ct["items"]])
+    params:
+      - {name: owner, type: string, doc: "Repository owner login or org."}
+      - {name: repo, type: string, doc: "Repository name."}
+      - {name: page, type: int, doc: "1-based page number.", optional: true, default: 1}
+      - {name: per_page, type: int, doc: "Page size, 1..100.", optional: true, default: 100}
+  - name: get_tree
+    doc: Git tree for a ref; recursive flattens entries. GitHub may return truncated=true on huge trees - preserved as-is. ref must be a single path segment.
+    returns: "dict - raw GitHub tree object {sha, tree, truncated}"
+    example: |
+      t = ext.github.get_tree("octocat", "Hello-World", "HEAD", recursive=True)
+      print(t["truncated"], len(t["tree"]))
+    params:
+      - {name: owner, type: string, doc: "Repository owner login or org."}
+      - {name: repo, type: string, doc: "Repository name."}
+      - {name: ref, type: string, doc: "SHA, tag or slash-free branch; default HEAD.", optional: true, default: "HEAD"}
+      - {name: recursive, type: bool, doc: "Request the recursively flattened tree.", optional: true, default: true}
+  - name: get_readme
+    doc: README metadata JSON for a ref - content is base64 with embedded newlines in the raw object (strip "\n" then base64.decode, e.g. base64.decode(rm["content"].replace("\n", "")).decode("utf-8")), plus download_url.
+    returns: "dict - raw GitHub content object {name, path, sha, size, content, encoding, ...}"
+    example: |
+      rm = ext.github.get_readme("octocat", "Hello-World")
+      text = base64.decode(rm["content"].replace("\n", "")).decode("utf-8")
+      print(text[:200])
+    params:
+      - {name: owner, type: string, doc: "Repository owner login or org."}
+      - {name: repo, type: string, doc: "Repository name."}
+      - {name: ref, type: string, doc: "Branch, tag or SHA; empty = default branch.", optional: true, default: ""}
+  # --- issues and pull requests ---
+  - name: get_pull_request
+    doc: Full pull request object (raw GitHub JSON).
+    returns: "dict - raw GitHub pull request object"
+    example: |
+      pr = ext.github.get_pull_request("octocat", "Hello-World", 1347)
+      print(pr["title"], pr["state"])
+    params:
+      - {name: owner, type: string, doc: "Repository owner login or org."}
+      - {name: repo, type: string, doc: "Repository name."}
+      - {name: number, type: int, doc: "Pull request number."}
+  - name: list_reviews
+    doc: Reviews on a pull request. Paged.
+    returns: "dict - {items, page, per_page, has_more, next_page, rate_limit}"
+    example: |
+      rv = ext.github.list_reviews("octocat", "Hello-World", 1347, per_page=100)
+      print([(r["user"]["login"], r["state"]) for r in rv["items"]])
+    params:
+      - {name: owner, type: string, doc: "Repository owner login or org."}
+      - {name: repo, type: string, doc: "Repository name."}
+      - {name: number, type: int, doc: "Pull request number."}
+      - {name: page, type: int, doc: "1-based page number.", optional: true, default: 1}
+      - {name: per_page, type: int, doc: "Page size, 1..100.", optional: true, default: 100}
+  - name: list_issue_comments
+    doc: Comments on an issue or pull request (shared endpoint). Paged.
+    returns: "dict - {items, page, per_page, has_more, next_page, rate_limit}"
+    example: |
+      cm = ext.github.list_issue_comments("octocat", "Hello-World", 1347, per_page=100)
+      print(len(cm["items"]), cm["has_more"])
+    params:
+      - {name: owner, type: string, doc: "Repository owner login or org."}
+      - {name: repo, type: string, doc: "Repository name."}
+      - {name: number, type: int, doc: "Issue or pull request number."}
+      - {name: page, type: int, doc: "1-based page number.", optional: true, default: 1}
+      - {name: per_page, type: int, doc: "Page size, 1..100.", optional: true, default: 100}
+  # --- search ---
+  - name: search_repositories
+    doc: Search repositories (raw items + total_count/incomplete_results). sort optional; GitHub caps results at the first 1000 (page*per_page <= 1000).
+    returns: "dict - {items, total_count, incomplete_results, window_limit, page, per_page, has_more, next_page, rate_limit}"
+    example: |
+      page = {"has_more": True, "next_page": 1}
+      for _ in range(5):
+          page = ext.github.search_repositories("language:go stars:>1000", page=page["next_page"], per_page=100)
+          print([r["full_name"] for r in page["items"]])
+          if not page["has_more"]:
+              break
+    params:
+      - {name: query, type: string, doc: "GitHub search query, e.g. \"language:go stars:>100\"."}
+      - {name: page, type: int, doc: "1-based page; page*per_page must stay <= 1000.", optional: true, default: 1}
+      - {name: per_page, type: int, doc: "Page size, 1..100.", optional: true, default: 100}
+      - {name: sort, type: string, doc: "stars|forks|help-wanted-issues|updated; empty = best match.", optional: true, default: ""}
+      - {name: order, type: string, doc: "asc|desc.", optional: true, default: "desc"}
+  - name: search_issues
+    doc: Search issues AND pull requests - add is:issue or is:pr to query to restrict type. Same 1000-result window.
+    returns: "dict - {items, total_count, incomplete_results, window_limit, page, per_page, has_more, next_page, rate_limit}"
+    example: |
+      s = ext.github.search_issues("is:issue is:open label:bug repo:octocat/Hello-World", sort="updated", per_page=100)
+      print(s["total_count"], [i["number"] for i in s["items"]])
+    params:
+      - {name: query, type: string, doc: "GitHub issue/PR search query; use is:issue or is:pr to pick a type."}
+      - {name: page, type: int, doc: "1-based page; page*per_page must stay <= 1000.", optional: true, default: 1}
+      - {name: per_page, type: int, doc: "Page size, 1..100.", optional: true, default: 100}
+      - {name: sort, type: string, doc: "comments|reactions|reactions-+1|reactions--1|reactions-smile|reactions-thinking_face|reactions-heart|reactions-tada|interactions|created|updated; empty = best match.", optional: true, default: "updated"}
+      - {name: order, type: string, doc: "asc|desc.", optional: true, default: "desc"}
+  - name: search_commits
+    doc: Search commits (raw items + total_count). Same 1000-result window.
+    returns: "dict - {items, total_count, incomplete_results, window_limit, page, per_page, has_more, next_page, rate_limit}"
+    example: |
+      s = ext.github.search_commits("repo:octocat/Hello-World fix", sort="committer-date", per_page=100)
+      print(s["total_count"], [c["sha"][:8] for c in s["items"]])
+    params:
+      - {name: query, type: string, doc: "GitHub commit search query, e.g. \"repo:o/r fix author:octocat\"."}
+      - {name: page, type: int, doc: "1-based page; page*per_page must stay <= 1000.", optional: true, default: 1}
+      - {name: per_page, type: int, doc: "Page size, 1..100.", optional: true, default: 100}
+      - {name: sort, type: string, doc: "author-date|committer-date; empty = best match.", optional: true, default: "committer-date"}
+      - {name: order, type: string, doc: "asc|desc.", optional: true, default: "desc"}
+  # --- contributions ---
+  - name: get_contributions
+    doc: Contribution totals for a user between from_time and to_time (RFC3339 bounds passed to GitHub; max span 1 year) via one fixed GraphQL query. Restricted/private contributions are counted only when visible; commit contributions count authored+co-authored default-branch commits, not all commits; per-repo lists cap at 100. Returns {contributions, rate_limit}.
+    returns: "dict - {contributions: <contributionsCollection>, rate_limit: <GraphQL rateLimit>}"
+    example: |
+      c = ext.github.get_contributions("octocat", "2025-01-01T00:00:00Z", "2025-12-31T23:59:59Z")
+      coll = c["contributions"]
+      print(coll["totalCommitContributions"], coll["totalPullRequestContributions"], c["rate_limit"]["remaining"])
+    params:
+      - {name: username, type: string, doc: "User login (required, nonempty)."}
+      - {name: from_time, type: string, doc: "RFC3339/ISO8601 lower bound, e.g. \"2025-01-01T00:00:00Z\"; GitHub defines the window semantics."}
+      - {name: to_time, type: string, doc: "RFC3339/ISO8601 upper bound; GitHub limits the window to <= 1 year - split longer ranges yourself."}
+config:
+  - name: base_url
+    type: string
+    doc: GitHub REST API base URL
+    default: https://api.github.com
+  - name: token
+    type: secret
+    doc: GitHub personal access token or app token (secret reference); empty = unauthenticated public requests
+    default: "{{secrets.GITHUB_TOKEN}}"
+  - name: max_file_bytes
+    type: int
+    doc: Maximum file size returned by get_file
+    default: 262144
