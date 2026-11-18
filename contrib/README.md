@@ -11,7 +11,7 @@ policies, and audit apply unchanged.
 | Extension | Service | Required secret | API host |
 |---|---|---|---|
 | `slack` | Slack messaging | `SLACK_BOT_TOKEN` | `slack.com` |
-| `github` | GitHub repos/issues/PRs | `GITHUB_TOKEN` | `api.github.com` |
+| `github` | GitHub repos/issues/PRs/commits/search/contributions | `GITHUB_TOKEN` | `api.github.com` |
 | `stripe` | Stripe payments | `STRIPE_SECRET_KEY` | `api.stripe.com` |
 | `linear` | Linear issues (GraphQL) | `LINEAR_API_KEY` | `api.linear.app` |
 | `notion` | Notion pages/databases | `NOTION_API_TOKEN` | `api.notion.com` |
