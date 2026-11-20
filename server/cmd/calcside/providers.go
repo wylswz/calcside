@@ -217,8 +217,11 @@ func provideSandboxOptions(ctx context.Context, cfg config.Config, st store.Stor
 	}, nil
 }
 
-func provideAuth(cfg config.Config, st store.Store) *auth.Service {
-	return auth.NewService(st, cfg.CookieSecure)
+func provideAuth(cfg config.Config, st store.Store) (*auth.Service, func()) {
+	svc := auth.NewService(st, cfg.CookieSecure)
+	// The cleanup flushes buffered last_used_at writes before the
+	// store closes (cleanups run in reverse provider order).
+	return svc, svc.Close
 }
 
 func provideBasic(ctx context.Context, cfg config.Config, svc *auth.Service) (*auth.BasicLogin, error) {

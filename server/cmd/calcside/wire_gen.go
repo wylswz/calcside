@@ -85,9 +85,10 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	catalogService := catalog.New(registry, catalogProvider)
 	workspaceService := workspace.New(store, checker)
 	llmproviderService := llmprovider.New(store, checker, repository)
-	authService := provideAuth(cfg, store)
+	authService, cleanup4 := provideAuth(cfg, store)
 	basicLogin, err := provideBasic(ctx, cfg, authService)
 	if err != nil {
+		cleanup4()
 		cleanup3()
 		cleanup2()
 		cleanup()
@@ -96,13 +97,15 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	fs := provideWeb()
 	user, err := provideAnonymous(ctx, cfg, store)
 	if err != nil {
+		cleanup4()
 		cleanup3()
 		cleanup2()
 		cleanup()
 		return nil, nil, err
 	}
-	artifactPreviews, cleanup4, err := provideArtifacts(cfg, sandboxService)
+	artifactPreviews, cleanup5, err := provideArtifacts(cfg, sandboxService)
 	if err != nil {
+		cleanup4()
 		cleanup3()
 		cleanup2()
 		cleanup()
@@ -110,6 +113,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	}
 	runService, err := provideRunService(store, runtime, sandboxService, checker, recorder, cipher, cfg)
 	if err != nil {
+		cleanup5()
 		cleanup4()
 		cleanup3()
 		cleanup2()
@@ -118,6 +122,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	}
 	applicationService, err := provideApplicationService(store, runtime, sandboxService, checker, recorder, cfg, runService)
 	if err != nil {
+		cleanup5()
 		cleanup4()
 		cleanup3()
 		cleanup2()
@@ -126,6 +131,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	}
 	moduleService, err := provideModuleService(store, checker, registry, repository, sandboxService)
 	if err != nil {
+		cleanup5()
 		cleanup4()
 		cleanup3()
 		cleanup2()
@@ -155,6 +161,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	}
 	googleFlow, err := provideGoogle(ctx, cfg)
 	if err != nil {
+		cleanup5()
 		cleanup4()
 		cleanup3()
 		cleanup2()
@@ -163,6 +170,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 	}
 	servingService, err := provideServingService(store, service, v, scheduler)
 	if err != nil {
+		cleanup5()
 		cleanup4()
 		cleanup3()
 		cleanup2()
@@ -177,6 +185,7 @@ func initializeApp(ctx context.Context, cfg config.Config) (*application, func()
 		Runs:    runService,
 	}
 	return mainApplication, func() {
+		cleanup5()
 		cleanup4()
 		cleanup3()
 		cleanup2()

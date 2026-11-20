@@ -86,11 +86,16 @@ const (
 type Service struct {
 	st           store.Store
 	cookieSecure bool
+	touch        *keyToucher
 }
 
 func NewService(st store.Store, cookieSecure bool) *Service {
-	return &Service{st: st, cookieSecure: cookieSecure}
+	return &Service{st: st, cookieSecure: cookieSecure, touch: newKeyToucher(st, touchFlushEvery)}
 }
+
+// Close flushes buffered api-key touches and stops the background
+// writer. Safe to call more than once.
+func (s *Service) Close() { s.touch.Close() }
 
 func randBytes(n int) []byte {
 	b := make([]byte, n)
@@ -204,7 +209,7 @@ func (s *Service) Resolve(ctx context.Context, r *http.Request) (*Principal, err
 		if err != nil {
 			return nil, errors.New("key owner missing")
 		}
-		_ = s.st.TouchAPIKey(ctx, k.ID, now)
+		s.touch.Touch(k.ID, now)
 		return &Principal{User: u, Kind: types.AuthAPIKey, KeyID: k.ID, KeySpec: k.Spec, KeyMaxInstances: k.MaxInstances, KeyViewOnly: k.ViewOnly, KeyBoundID: k.BoundID, KeyWorkspaceID: k.WorkspaceID}, nil
 	}
 	if c, err := r.Cookie(sessionCookie); err == nil && c.Value != "" {
