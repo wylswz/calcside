@@ -128,6 +128,10 @@ func (s *basicLoginStore) BootstrapAdminUser(ctx context.Context, username, emai
 	return s.user, nil
 }
 
+// TouchAPIKey is a no-op: the service's buffered flusher must never
+// panic on this partial fake when a test leaves touches pending.
+func (s *basicLoginStore) TouchAPIKey(context.Context, string, time.Time) error { return nil }
+
 func (s *basicLoginStore) CreatePasswordSession(ctx context.Context, session *store.Session, passwordHash string) error {
 	s.ctx, s.session = ctx, session
 	if s.user.PasswordHash != passwordHash {
