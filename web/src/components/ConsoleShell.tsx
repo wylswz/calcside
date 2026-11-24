@@ -1,6 +1,9 @@
-// ConsoleShell: desktop left sidebar + canvas topbar; mobile hamburger
-// drawer (shared Modal, left placement). One Primary nav landmark.
-import { useEffect, useState } from 'react'
+// ConsoleShell: one header + hamburger drawer at every width (shared
+// Modal, left placement). `.console-main` is the page scroller —
+// children get `.console-content`'s centered max width; a workbench
+// route (instance detail) opts out via :has and scrolls its own panes.
+// One Primary nav landmark.
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import WorkspaceSwitcher from './WorkspaceSwitcher'
@@ -85,34 +88,28 @@ export function ConsoleShell({ user, dev, onLogout, children }: {
   const { pathname } = useLocation()
   const [drawer, setDrawer] = useState(false)
   useEffect(() => { setDrawer(false) }, [pathname])
-  useEffect(() => {
-    const mq = window.matchMedia('(min-width: 1024px)')
-    const h = () => { if (mq.matches) setDrawer(false) }
-    mq.addEventListener('change', h)
-    return () => mq.removeEventListener('change', h)
-  }, [])
+  const mainRef = useRef<HTMLElement>(null)
+  // The main pane is the scroller: a real pathname change starts at the
+  // top (view/query switches on the same route keep their position).
+  useLayoutEffect(() => {
+    mainRef.current?.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+  }, [pathname])
   return (
     <div className="console-shell">
-      <aside className="shell-sidebar">
-        <Link to="/" className="shell-brand">calcside</Link>
-        <NavLinks />
-        <div className="shell-footer">
-          {dev && <span className="console-dev text-xs text-mute">dev · anonymous</span>}
-        </div>
-      </aside>
-      <div className="shell-canvas flex min-h-screen min-w-0 flex-col">
-        <header className="console-header sticky top-0 z-40 border-b border-line bg-paper/95 backdrop-blur">
+      <div className="shell-canvas">
+        <header className="console-header z-40 border-b border-line bg-paper/95 backdrop-blur">
           <div className="console-header-inner flex h-14 items-center gap-3 px-4">
-            <button type="button" className="shell-hamburger" aria-label="Open navigation" onClick={() => setDrawer(true)}>
+            <button type="button" className="shell-hamburger" aria-label="Open navigation"
+              aria-haspopup="dialog" aria-expanded={drawer} onClick={() => setDrawer(true)}>
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
             </button>
-            <Link to="/" className="shell-wordmark lg:hidden text-[15px] font-semibold text-ink">calcside</Link>
+            <Link to="/" className="shell-wordmark text-[15px] font-semibold text-ink">calcside</Link>
             <div className="min-w-0 flex-1"><WorkspaceSwitcher /></div>
             <AccountMenu user={user} dev={dev} onLogout={onLogout} />
           </div>
         </header>
-        <main tabIndex={-1} className="console-main mx-auto w-full max-w-7xl flex-1 px-4 py-10 focus:outline-none sm:px-6">
-          {children}
+        <main ref={mainRef} tabIndex={-1} className="console-main focus:outline-none">
+          <div className="console-content mx-auto w-full max-w-7xl px-4 py-10 sm:px-6">{children}</div>
         </main>
       </div>
       {drawer && (

@@ -1,23 +1,15 @@
-/* Console shell: fixed left sidebar ≥1024px, topbar inside the canvas,
-   left-placement drawer below. Paint-only states — no metric shifts.
-   Tokens are RGB triplets — always wrap in rgb(). */
-.console-shell { min-height: 100dvh; }
-.shell-canvas { min-width: 0; }
-@media (min-width: 1024px) {
-  .shell-canvas { margin-left: 224px; }
-  .shell-sidebar {
-    position: fixed; inset: 0 auto 0 0; width: 224px;
-    display: flex; flex-direction: column;
-    border-right: 1px solid rgb(var(--line)); background: rgb(var(--paper));
-    z-index: 40;
-  }
+/* Console shell: fixed header + one shared main scroller at every
+   width; navigation lives in the left-placement drawer. Paint-only
+   states — no metric shifts. Tokens are RGB triplets — wrap in rgb(). */
+.shell-canvas { height: 100dvh; min-width: 0; display: flex; flex-direction: column; }
+.console-header { flex: none; }
+.console-main { flex: 1; min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; }
+/* Instance detail is a workbench: the shared pane never scrolls —
+   the Notebook/Activity panes inside own their scrollers. */
+.console-main:has(.instance-detail) { overflow: hidden; }
+.console-content:has(> .instance-detail) {
+  height: 100%; min-height: 0; display: flex; padding: 0; max-width: none;
 }
-@media (max-width: 1023px) {
-  .shell-sidebar { display: none; }
-  .shell-hamburger { display: inline-flex; }
-}
-@media (min-width: 1024px) { .shell-hamburger { display: none; } }
-.shell-brand { padding: 16px; font-size: 15px; font-weight: 600; color: rgb(var(--ink)); }
 .shell-nav { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; flex: 1; overflow-y: auto; }
 .shell-group { margin-top: 14px; }
 .shell-group-label { padding: 0 12px 4px; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .04em; color: rgb(var(--mute)); }
@@ -39,7 +31,7 @@
 [data-ui='dialog-surface'][data-placement='left'] {
   position: fixed; top: 0; left: 0;
   width: min(280px, 85vw); height: 100dvh; max-width: none; max-height: none;
-  transform: none; border-radius: 0;
+  transform: none; border-radius: 0; overflow-y: auto;
 }
 @media (prefers-reduced-motion: no-preference) {
   [data-ui='dialog-surface'][data-placement='left'][data-state='open'] {
@@ -56,6 +48,7 @@
 .shell-account-name { max-width: 160px; font-size: 12px; color: rgb(var(--sec)); }
 @media (max-width: 1023px) { .shell-account-name { display: none; } }
 .shell-hamburger {
+  display: inline-flex; flex: none;
   align-items: center; justify-content: center; width: 44px; height: 44px;
   border-radius: 8px; color: rgb(var(--sec));
 }

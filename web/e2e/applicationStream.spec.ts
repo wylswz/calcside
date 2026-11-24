@@ -116,7 +116,7 @@ test('a) Develop Run streams prefix before gate release; S3/S4 boxes stable; pub
   expect(await box(page, '[data-testid="app-stream-stop-slot"]')).toEqual(stop0)
   expect(await box(page, '[data-testid="app-stream-meta"]')).toEqual(meta0)
   await page.locator('.app-out >> nth=0').screenshot({ path: 'test-results/stream-prefix.png' })
-  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.locator('.console-main').evaluate((el) => el.scrollTo({ top: 0, behavior: 'instant' }))
 
   releaseGate()
   await expect(page.locator('[data-testid="app-stream-meta"]')).toContainText('2 items', { timeout: 30_000 })
@@ -126,7 +126,7 @@ test('a) Develop Run streams prefix before gate release; S3/S4 boxes stable; pub
   expect(await box(page, '.app-out-head >> nth=0')).toEqual(head0)
   expect(await box(page, '.app-out-pre:not(.app-call-out)')).toEqual(pre0)
   await page.locator('.app-out >> nth=0').screenshot({ path: 'test-results/stream-completed.png' })
-  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.locator('.console-main').evaluate((el) => el.scrollTo({ top: 0, behavior: 'instant' }))
 
   await publishViaDialog(page)
   await waitReady(id)

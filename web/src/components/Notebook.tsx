@@ -1,8 +1,9 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import { api, ApiError, Instance, Notebook as NotebookData, NotebookSectionResponse, RunSectionsResponse, SaveNotebookSectionResponse } from '../api'
+import { api, ApiError, Instance, Notebook as NotebookData, NotebookSectionResponse, ResourceUsages, RunSectionsResponse, SaveNotebookSectionResponse } from '../api'
 import { AutosaveQueue } from '../autosave'
+import { fmtBytes } from '../format'
 import { Button, Confirm, Icon, Loading, Notice, RevealNew, SignalMark, SwapLabel } from './ui'
 import { SectionCard, SectionValue, sectionFingerprint, sectionPath, sectionStateLabel } from './SectionCard'
 import { NotebookGraph, type GraphStructure } from './NotebookGraph'
@@ -17,12 +18,43 @@ function errCode(e: unknown): string {
 
 const nbPath = (id: string) => `/api/v1/instances/${id}/notebook`
 
+// MemoryStatus is the workbench footer readout — current/limit inline,
+// peak and limit in the tooltip. It renders from the shared inspect
+// snapshot the page passes down (undefined while not running or when
+// memory reporting is unavailable).
+export function MemoryStatus({ resources }: { resources?: ResourceUsages }) {
+  const current = resources ? fmtBytes(resources.memory_usage) : '—'
+  const limit = resources && resources.memory_max > 0 ? fmtBytes(resources.memory_max) : ''
+  const peak = resources && resources.memory_peak > 0 ? fmtBytes(resources.memory_peak) : ''
+  return (
+    <span className="nb-memory" title={resources
+      ? `Memory: ${current}${peak ? `; peak ${peak}` : ''}; ${limit ? `limit ${limit}` : 'no limit'}`
+      : 'Memory reporting unavailable'}>
+      <span>Memory</span> <strong>{current}</strong>
+      {limit && <span className="nb-memory-limit"> / {limit}</span>}
+      {!resources && <span className="sr-only"> reporting unavailable</span>}
+    </span>
+  )
+}
+
 // Notebook is the instance's working document: an ordered directory of
 // durable sections, each an editable card with autosave — every run is
 // a section run in dependency order. Polling never overwrites a dirty
 // draft (C2) and the held order keeps polled arrivals behind "Show N
-// new" (S5).
-export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; canRun: boolean }) {
+// new" (S5). The parent owns the section outline's open state so it
+// can coordinate with the instance inspector on narrow viewports.
+export function Notebook({ id, inst, canRun, visible, resources, outlineOpen, onToggleOutline, onOutlineNavigate }: {
+  id: string
+  inst: Instance
+  canRun: boolean
+  /** this view is the one on screen — the code scroller can't be targeted while hidden */
+  visible: boolean
+  /** shared inspect snapshot's memory accounting — undefined when not running */
+  resources?: ResourceUsages
+  outlineOpen: boolean
+  onToggleOutline: () => void
+  onOutlineNavigate: () => void
+}) {
   const qc = useQueryClient()
   const [params, setParams] = useSearchParams()
   const live = inst.status === 'running'
@@ -38,6 +70,9 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
     retry: false,
   })
   const notebook = nb.data?.notebook
+  // codeRef mounts only once the first payload lands (`!notebook` returns
+  // null below) — pane-root effects must key off this, not mount order.
+  const hasNotebook = notebook !== undefined
   const sections = useMemo(() => notebook?.sections ?? [], [notebook])
   const order = useMemo(() => sections.map((s) => s.name), [sections])
 
@@ -65,6 +100,9 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
   }), [sections, notebook])
   const graphMetas = useMemo(() => new Map(sections.map((s) => [s.name, s])), [sections])
   const openGraphCode = useCallback((name: string) => {
+    // Clear the deep-link guard so returning to this same section still
+    // jumps after the code pane scrolled away from it.
+    scrolledTo.current = ''
     setParams((p) => {
       const n = new URLSearchParams(p)
       n.delete('nbview') // keep ?section=name — the scroll effect lands on the card
@@ -111,6 +149,42 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
   // the one-line summary (S3: nothing is inserted above the cells).
   const [cellNote, setCellNote] = useState<{ name: string; tone: 'warning' | 'neutral'; text: string } | null>(null)
   const [focusName, setFocusName] = useState('') // section whose editor takes focus once mounted
+  const [dirFilter, setDirFilter] = useState('')
+
+  // The code pane is its own scroller — the window never moves. Its
+  // ref and the programmatic-scroll marker must exist before the
+  // structural handler that scrolls after a user-caused reveal.
+  const codeRef = useRef<HTMLDivElement | null>(null)
+  const dirRef = useRef<HTMLElement | null>(null)
+  const sectionsBtnRef = useRef<HTMLButtonElement | null>(null)
+  const spyHold = useRef(0)
+  const selfScrollAt = useRef(0)
+  // One "active section" concept (S1/S3): an explicit pick — a
+  // directory row, a graph node, a deep link — marks the row at once
+  // and holds the scroll-spy until the programmatic scroll settles or
+  // the user scrolls; otherwise the spy marks the topmost card in
+  // view. In graph view the selected node IS the active section.
+  const [activeNav, setActiveNav] = useState('')
+  // scrolledTo records the ?section= navigation this mount already
+  // performed so polls and unrelated arrivals never re-scroll (S5).
+  const scrolledTo = useRef('')
+  // Returns true once the pane was scrolled — false when the card or a
+  // measurable root is missing (still loading, or a hidden pane).
+  const scrollToCard = useCallback((name: string) => {
+    const root = codeRef.current
+    const card = document.getElementById(`section-${name}`)
+    if (!root || !card || !root.contains(card) || !root.clientHeight) return false
+    selfScrollAt.current = performance.now()
+    root.scrollTo({
+      top: root.scrollTop + card.getBoundingClientRect().top - root.getBoundingClientRect().top,
+      behavior: 'instant',
+    })
+    return true
+  }, [])
+  const pickSection = useCallback((name: string) => {
+    spyHold.current = performance.now() + 600
+    setActiveNav(name)
+  }, [])
 
   // Prefix invalidation covers every section detail — including ones
   // whose cards are not mounted yet — and stays correct regardless of
@@ -144,9 +218,7 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
     const target = pendingScroll.current
     pendingScroll.current = ''
     if (target) {
-      const t = window.setTimeout(() => {
-        document.getElementById(`section-${target}`)?.scrollIntoView({ block: 'start' })
-      }, 50)
+      const t = window.setTimeout(() => scrollToCard(target), 50)
       return () => window.clearTimeout(t)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -370,34 +442,11 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
     }
   }
 
-  // Scroll-spy for the sticky directory (S3/S1): one IntersectionObserver
-  // over the shown cards; its top edge sits under the head
-  // (--nb-bar-h is the same reservation the cards' scroll-margin uses),
-  // and the first intersecting chip in shown order is highlighted
-  // paint-only via aria-current.
-  const [activeNav, setActiveNav] = useState('')
-  const headRef = useRef<HTMLDivElement | null>(null)
-  const dirRef = useRef<HTMLElement | null>(null)
-  // One "active section" concept (S1/S3): an explicit pick — a chip
-  // click, a graph node, a deep link — highlights its chip at once and
-  // holds the scroll-spy until the programmatic scroll settles or the
-  // user scrolls; otherwise the spy marks the topmost card in view.
-  // In graph view the selected node IS the active section.
-  const spyHold = useRef(0)
-  const selfScrollAt = useRef(0)
-  const scrollToCard = useCallback((name: string) => {
-    selfScrollAt.current = performance.now()
-    document.getElementById(`section-${name}`)?.scrollIntoView({ block: 'start' })
-  }, [])
-  const pickSection = useCallback((name: string) => {
-    spyHold.current = performance.now() + 600
-    setActiveNav(name)
-  }, [])
   const navNames = shown.map((s) => s.name)
   const navKey = JSON.stringify(navNames)
   const sectionParam = params.get('section') ?? ''
 
-  // ?section= is the explicit selection — a chip click, a graph node,
+  // ?section= is the explicit selection — a row click, a graph node,
   // a deep link: it highlights its chip at once and holds the spy
   // until the scroll settles. Clearing it clears the chip (graph
   // deselect); in code view the spy resumes on the next scroll.
@@ -421,63 +470,63 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
     }
   }, [sectionParam, sections, notebook, setParams])
 
-  // View-switch scroll continuity (S6): an explicit Code→Graph switch
-  // reveals the graph just under the sticky head instead of inheriting
-  // the cards' deep scroll position; Graph→Code restores the saved
-  // position unless a ?section= navigation owns the scroll. This runs
-  // only on view changes — polls never scroll the page. The scroller
-  // is the window: the console shell has no inner scroll container.
-  // codeScrollY is captured in goView BEFORE the navigation: by the
-  // time any effect runs the browser has already re-laid out and
-  // clamped scrollY against the shorter graph page, so the pre-switch
-  // position only exists in the click handler. Scrolls are instant —
-  // a view switch is already a hard cut, and animation would only race
-  // the user's own scrolling.
-  const graphPanelRef = useRef<HTMLDivElement | null>(null)
+  // View-switch scroll continuity (S6): Graph→Code restores the code
+  // pane's saved scrollTop unless a pending ?section= navigation owns
+  // the scroll (a graph "Open code" pick, a deep link or Back — never a
+  // stale URL selection after the user scrolled on). The capture runs
+  // in the click handler BEFORE the navigation; the restore runs in a
+  // layout effect once the code pane is unhidden again. Scrolls are
+  // instant — a view switch is already a hard cut.
   const codeScrollY = useRef<number | null>(null)
   const prevView = useRef(view)
   const goView = useCallback((v: 'code' | 'graph') => {
-    if (v === 'graph' && view === 'code') codeScrollY.current = window.scrollY
+    if (v === 'graph' && view === 'code') codeScrollY.current = codeRef.current?.scrollTop ?? null
+    if (v === 'code' && sectionParam && codeScrollY.current !== null) {
+      // Explicit Code click with a saved position: a lingering
+      // ?section= is a stale pick — mark it already-scrolled so it
+      // cannot jump. Without a saved position (a direct Graph deep
+      // link) the URL selection still owns the landing scroll.
+      scrolledTo.current = sectionParam
+    }
     setView(v)
-  }, [view, setView])
+  }, [view, setView, sectionParam])
   useLayoutEffect(() => {
     const prev = prevView.current
     prevView.current = view
-    if (prev === view) return
-    if (view === 'graph') {
-      graphPanelRef.current
-        ?.querySelector('.nb-graph')
-        ?.scrollIntoView({ block: 'start' })
-      return
-    }
+    if (prev === view || view !== 'code') return
     const y = codeScrollY.current
     codeScrollY.current = null
-    if (y !== null && !sectionParam) {
-      // Force the reflow so scrollTo clamps against the restored card
-      // list's scrollHeight, not the short graph page's.
-      void document.documentElement.scrollHeight
-      window.scrollTo({ top: y })
+    const pendingNav = !!sectionParam && scrolledTo.current !== sectionParam
+    if (y !== null && !pendingNav && codeRef.current) {
+      codeRef.current.scrollTop = y
     }
   }, [view, sectionParam])
 
-  // C4: ?section=name deep-links scroll the target into view; the
-  // outline sets it so a shared URL lands on the same section. In graph
-  // view the canvas reveals the node itself through ?section= — the
-  // only scroll this effect owns is the code-view card.
+  // C4: ?section=name deep-links scroll the target into view once its
+  // card is actually mounted and the pane is on screen — an eventual
+  // arrival (or opening the notebook view after landing on Activity)
+  // is picked up when the held order admits it or `visible` flips, but
+  // unrelated additions/polls never re-scroll (scrolledTo covers them).
+  // In graph view the canvas reveals the node itself through ?section=.
   useEffect(() => {
-    if (!sectionParam || view === 'graph') return
-    const t = window.setTimeout(() => scrollToCard(sectionParam), 300)
-    return () => window.clearTimeout(t)
-  }, [sectionParam, shown.length, view, scrollToCard])
+    if (!sectionParam) scrolledTo.current = ''
+    if (!visible || !sectionParam || view === 'graph' || scrolledTo.current === sectionParam) return
+    if (scrollToCard(sectionParam)) scrolledTo.current = sectionParam
+  }, [sectionParam, view, navKey, visible, scrollToCard])
 
+  // Scroll-spy (S3/S1): one IntersectionObserver rooted at the code
+  // pane; the first intersecting card in shown order highlights its
+  // row, paint-only via aria-current. A hidden pane reports nothing
+  // intersecting, so graph view can never clobber the pick.
+  const spyEls = useRef<{ key: string; el: HTMLElement }[]>([])
   useEffect(() => {
-    const barH = headRef.current
-      ? parseFloat(getComputedStyle(headRef.current).getPropertyValue('--nb-bar-h')) || 0
-      : 0
+    const root = codeRef.current
+    if (!root) return
     const targets = navNames.map((n) => ({ key: n, id: `section-${n}` }))
     const els = targets
       .map((t) => ({ key: t.key, el: document.getElementById(t.id) }))
       .filter((t): t is { key: string; el: HTMLElement } => t.el !== null)
+    spyEls.current = els
     if (!els.length) {
       setActiveNav('')
       return
@@ -493,50 +542,60 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
       }
       const next = els.map((t) => t.key).find((k) => hit.has(k))
       // An explicit pick holds the spy until its programmatic scroll
-      // settles — the clicked chip keeps the highlight (S1/S3).
+      // settles — the clicked row keeps the highlight (S1/S3).
       if (next !== undefined && performance.now() >= spyHold.current) {
         setActiveNav((prev) => (prev === next ? prev : next))
       }
-    }, { rootMargin: `-${73 + barH}px 0px 0px 0px` })
+    }, { root })
     for (const t of els) io.observe(t.el)
     return () => io.disconnect()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navKey])
 
-  // The hold ends on the next user-initiated scroll: wheel/touch, a
-  // scroll key, and any scroll event that is not our own scrollIntoView
-  // (scrollbar drags emit only scroll). Nested scrollers releasing the
-  // hold early is harmless — the spy simply resumes.
+  // The hold ends on the next user-initiated scroll of the code pane:
+  // wheel/touch, a scroll key, and any scroll event that is not our own
+  // programmatic scroll (scrollbar drags emit only scroll). A user
+  // scroll also recomputes the spy at once — intersection entries may
+  // not have changed even though the topmost card did.
   useEffect(() => {
+    const root = codeRef.current
+    if (!root) return
     const release = () => { spyHold.current = 0 }
     const onScroll = () => {
-      if (performance.now() - selfScrollAt.current > 150) release()
+      if (performance.now() - selfScrollAt.current <= 150) return
+      release()
+      const rTop = root.getBoundingClientRect().top
+      const next = spyEls.current.find(({ el }) => {
+        const r = el.getBoundingClientRect()
+        return r.bottom > rTop + 8 && r.top < rTop + root.clientHeight
+      })?.key
+      if (next !== undefined) setActiveNav((prev) => (prev === next ? prev : next))
     }
     const scrollKeys = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '])
     const onKey = (e: KeyboardEvent) => { if (scrollKeys.has(e.key)) release() }
-    window.addEventListener('wheel', release, { passive: true })
-    window.addEventListener('touchstart', release, { passive: true })
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('scroll', onScroll, { passive: true, capture: true })
+    root.addEventListener('wheel', release, { passive: true })
+    root.addEventListener('touchstart', release, { passive: true })
+    root.addEventListener('keydown', onKey)
+    root.addEventListener('scroll', onScroll, { passive: true })
     return () => {
-      window.removeEventListener('wheel', release)
-      window.removeEventListener('touchstart', release)
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('scroll', onScroll, { capture: true })
+      root.removeEventListener('wheel', release)
+      root.removeEventListener('touchstart', release)
+      root.removeEventListener('keydown', onKey)
+      root.removeEventListener('scroll', onScroll)
     }
-  }, [])
+  }, [hasNotebook])
 
-  // Keep the active chip inside the strip by moving the nav's own
-  // scrollLeft — never scrollIntoView, which could move the page (S6).
+  // Keep the active row inside the directory by moving the nav's own
+  // scrollTop — never scrollIntoView, which could move other panes (S6).
   useEffect(() => {
     const nav = dirRef.current
-    const chip = nav?.querySelector<HTMLElement>('.nb-dir-row[aria-current="true"]')
-    if (!nav || !chip) return
+    const row = nav?.querySelector<HTMLElement>('.nb-dir-row[aria-current="true"]')
+    if (!nav || !row) return
     const n = nav.getBoundingClientRect()
-    const c = chip.getBoundingClientRect()
-    const d = c.left < n.left ? c.left - n.left : c.right > n.right ? c.right - n.right : 0
-    if (d) nav.scrollLeft += d
-  }, [activeNav])
+    const c = row.getBoundingClientRect()
+    const d = c.top < n.top ? c.top - n.top : c.bottom > n.bottom ? c.bottom - n.bottom : 0
+    if (d) nav.scrollTop += d
+  }, [activeNav, dirFilter, outlineOpen])
 
   // One-line status, first match wins (S3/S4: it replaces every banner
   // that used to push the cells down). Warning tone carries the failed
@@ -635,19 +694,18 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
 
   const incarnation = notebook.incarnation
   const empty = sections.length === 0
+  const dirQuery = dirFilter.trim().toLowerCase()
+  const dirMatch = (name: string) => !dirQuery || name.toLowerCase().includes(dirQuery)
+  const dirEmpty = shown.length > 0 && !shown.some((m) => dirMatch(m.name))
 
   return (
     <div className="nb">
-      {/* Floating head panel (S3): the toolbar row plus the section
-          directory ride together as one fixed-height opaque surface
-          pinned under the console header — cards scroll beneath it
-          with scroll-margin clearance. */}
-      <div className="nb-head" ref={headRef}>
-        {/* Sticky status toolbar: run actions | one-line status | reveal
-            + view switch. Every notice that used to be a banner above
-            the cells now lives in this fixed-height row — the status
-            line's title carries the full text — nothing inserts
-            content above the cells after a click or a poll (S3/S5). */}
+      {/* Toolbar row: run actions | reveal + view switch + Sections
+          toggle. Every notice that used to be a banner above the cells
+          lives in the reserved status bar at the bottom — nothing
+          inserts content above the cells after a click or a poll
+          (S3/S5). */}
+      <div className="nb-head">
         <div className="nb-toolbar">
           <div className="nb-toolbar-actions">
             {canExec && (
@@ -670,15 +728,8 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
               </Button>
             )}
           </div>
-          <span className={`nb-status${status.warn ? ' nb-status-warn' : ''}`} role="status" title={status.title}>
-            {status.warn && <SignalMark signal="failed" />}
-            <span className="nb-status-text">{status.text}</span>
-          </span>
           <div className="nb-toolbar-side">
             <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />
-            {/* The view switch is the LAST toolbar item — flush with the
-                panel's right inner padding, ≥12px clear of its left
-                neighbour (S3 spacing). */}
             <div className="seg-filters nb-view-toggle" role="group" aria-label="Notebook view">
               <button type="button" aria-pressed={view === 'code'} onClick={() => goView('code')}>
                 Code
@@ -687,15 +738,37 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
                 Graph
               </button>
             </div>
+            <Button variant="ghost" size="xs" className="nb-icon-btn nb-sections-btn"
+              ref={sectionsBtnRef}
+              aria-label="Sections" title="Sections"
+              aria-expanded={outlineOpen} aria-controls="notebook-outline"
+              onClick={onToggleOutline}>
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="1.6" strokeLinecap="round">
+                <path d="M9 4h11M9 12h11M9 20h11" />
+                <path d="M4 4h.01M4 12h.01M4 20h.01" strokeWidth="3" />
+              </svg>
+            </Button>
           </div>
         </div>
+      </div>
 
-        {/* Compact section directory (C4): held shown order, click
-            deep-links and scrolls to the card. It renders even with zero
-            sections — the row's fixed height keeps the head box constant
-            when the first section lands (S3/F1). */}
+      {/* Section outline (C4): held shown order, name filter keeps the
+          original ordinals, click deep-links and scrolls to the card.
+          Stays mounted behind `hidden` so the filter and scroll survive
+          toggles (C2/C3); overlays the code pane under 740px. */}
+      <aside id="notebook-outline" className="nb-outline" hidden={!outlineOpen}>
+        <div className="nb-outline-head">
+          <h2 className="nb-outline-title">Sections</h2>
+          <label className="nb-outline-filter">
+            <span className="sr-only">Filter sections</span>
+            <input type="search" value={dirFilter} placeholder="Filter"
+              aria-label="Filter sections"
+              onChange={(e) => setDirFilter(e.target.value)} />
+          </label>
+        </div>
         <nav className="nb-directory" aria-label="Section directory" ref={dirRef}>
-          {shown.map((m, i) => (
+          {shown.map((m, i) => dirMatch(m.name) ? (
             <button
               key={m.name}
               type="button"
@@ -704,10 +777,22 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
               aria-current={activeNav === m.name ? 'true' : undefined}
               data-running={running === m.name ? 'true' : undefined}
               onClick={() => {
+                pickSection(m.name)
                 setParams((p) => { const n = new URLSearchParams(p); n.set('section', m.name); return n })
-                // Code view scrolls the card; in graph view the
-                // ?section= change makes the canvas reveal the node.
-                if (view !== 'graph') scrollToCard(m.name)
+                // Code view scrolls the card — the pick marks the nav
+                // done. In graph view the ?section= change makes the
+                // canvas reveal the node; scrolledTo stays untouched so
+                // a later return to Code still honours the selection.
+                if (view !== 'graph') {
+                  scrolledTo.current = m.name
+                  scrollToCard(m.name)
+                }
+                onOutlineNavigate()
+                // The overlay just closed — drop focus back on its
+                // toggle rather than losing it to the pane (C1).
+                if (window.matchMedia('(max-width: 739px)').matches) {
+                  sectionsBtnRef.current?.focus()
+                }
               }}
             >
               <span className="nb-dir-ord">{i + 1}.</span>
@@ -715,14 +800,16 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
               <span className="nb-dir-dot" data-state={m.state} />
               <span className="sr-only">{sectionStateLabel(m.state)}</span>
             </button>
-          ))}
+          ) : null)}
+          {dirEmpty && <p className="nb-dir-empty">No sections match “{dirFilter.trim()}”.</p>}
         </nav>
-      </div>
+      </aside>
 
       {/* Code panel stays mounted while the graph view is shown —
           hidden, never unmounted, so editors/drafts/autosave survive
-          toggling and polling (C2/C3). */}
-      <div className="nb-code" hidden={view === 'graph'}>
+          toggling and polling (C2/C3). It is the scroll container —
+          the window never moves. */}
+      <div className="nb-code" hidden={view === 'graph'} ref={codeRef}>
       {empty ? (
         <div className="nb-empty">
           <p>No sections yet.</p>
@@ -758,12 +845,12 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
                 {canEdit && (
                   <Button
                     variant="ghost" size="xs"
-                    className="nb-icon-btn nb-insert-btn"
+                    className="nb-insert-btn"
                     aria-label={`Insert section after ${meta.name}`}
                     disabled={adding}
                     onClick={() => void addSection(meta.name)}
                   >
-                    <Icon name="plus" />
+                    <Icon name="plus" /><span>Add section</span>
                   </Button>
                 )}
               </div>
@@ -776,7 +863,7 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
 
       {/* Read-only dependency graph — same fixed box in both themes;
           follows polls live with an animated re-layout. */}
-      <div className="nb-graph-panel" hidden={view !== 'graph'} ref={graphPanelRef}>
+      <div className="nb-graph-panel" hidden={view !== 'graph'}>
         <NotebookGraph
           structure={graphStructure}
           metas={graphMetas}
@@ -790,6 +877,19 @@ export function Notebook({ id, inst, canRun }: { id: string; inst: Instance; can
           onRunSection={runOne}
           running={running}
         />
+      </div>
+
+      {/* Reserved status bar: the one-line summary (title carries the
+          full text — screen readers get the same via an sr-only twin so
+          there is no Details dialog). Memory sits at the far end from
+          the shared inspect snapshot. */}
+      <div className="nb-statusbar">
+        <span className={`nb-status${status.warn ? ' nb-status-warn' : ''}`} role="status" title={status.title}>
+          {status.warn && <SignalMark signal="failed" />}
+          <span className="nb-status-text" aria-hidden="true">{status.text}</span>
+          <span className="sr-only">{status.title}</span>
+        </span>
+        <MemoryStatus resources={resources} />
       </div>
 
       {pendingOnce && (

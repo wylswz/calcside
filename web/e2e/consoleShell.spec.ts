@@ -3,25 +3,43 @@ import { startApplicationRuntime } from './applicationRuntime'
 
 test.setTimeout(120_000)
 
+// No horizontal overflow on the document OR inside the shared main
+// scroller on regular routes.
 const noOverflow = async (page: Page) =>
-  page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)
+  page.evaluate(() => {
+    const main = document.querySelector('.console-main')
+    const docOK = document.documentElement.scrollWidth <= document.documentElement.clientWidth
+    const mainOK = !main || main.scrollWidth <= main.clientWidth
+    return docOK && mainOK
+  })
 
-test('console shell: desktop sidebar, groups, active state, account menu', async ({ page }) => {
+test('console shell: desktop header, drawer nav, account menu', async ({ page }) => {
   const rt = await startApplicationRuntime()
   try {
     await page.setViewportSize({ width: 1440, height: 900 })
     const cr = await rt.client.post('/api/v1/modules', { data: { name: 'm1', files: { 'main.star': 'x = 1' } } })
     const mid = (await cr.json()).module.id
     await page.goto(`${rt.viteURL}/modules/${mid}`)
-    // sidebar landmark
-    const nav = page.locator('aside').getByRole('navigation', { name: 'Primary' })
-    await expect(nav).toBeVisible()
+    // one shell everywhere: no sidebar aside; the hamburger is the only
+    // navigation entry at desktop width too.
+    await expect(page.locator('aside.shell-sidebar')).toHaveCount(0)
+    const open = page.getByLabel('Open navigation')
+    await expect(open).toBeVisible()
+    await expect(open).toHaveAttribute('aria-haspopup', 'dialog')
+    await expect(open).toHaveAttribute('aria-expanded', 'false')
     // header has no top nav links
     const header = page.locator('header.console-header')
     for (const l of ['Instances', 'Applications', 'Modules', 'Inbox', 'Audit']) {
       await expect(header.getByRole('link', { name: l, exact: true })).toHaveCount(0)
     }
-    // all six destinations in sidebar
+    await open.click()
+    const dlg = page.getByRole('dialog')
+    await expect(dlg).toBeVisible()
+    await expect(open).toHaveAttribute('aria-expanded', 'true')
+    await page.waitForTimeout(250) // entrance animation settles
+    const nav = dlg.getByRole('navigation', { name: 'Primary' })
+    await expect(nav).toBeVisible()
+    // all six destinations in the drawer
     for (const l of ['Instances', 'Applications', 'Modules', 'Inbox', 'Audit', 'Workspace']) {
       await expect(nav.getByRole('link', { name: l })).toBeVisible()
     }
@@ -43,11 +61,30 @@ test('console shell: desktop sidebar, groups, active state, account menu', async
       expect(hrefs, `missing ${h}`).toContain(h)
     }
     // real colors — rgb() computed, so invalid token CSS can't slip
-    const bg = await page.locator('aside.shell-sidebar').evaluate((el) => getComputedStyle(el).backgroundColor)
-    expect(bg).toMatch(/^rgba?\(/)
+    const drawerBg = await page.locator("[data-ui='dialog-surface']").evaluate((el) => getComputedStyle(el).backgroundColor)
+    expect(drawerBg).toMatch(/^rgba?\(/)
     const activeBg = await mod.evaluate((el) => getComputedStyle(el).backgroundColor)
     expect(activeBg).toMatch(/^rgba?\(/)
     await page.screenshot({ path: '/tmp/calcside-shell-desktop.png' })
+    await page.keyboard.press('Escape')
+    await expect(dlg).toHaveCount(0)
+
+    // .console-main is the page scroller; the header stays fixed.
+    const main = page.locator('.console-main')
+    await page.setViewportSize({ width: 1440, height: 480 })
+    const headerBox = await header.boundingBox()
+    await expect.poll(async () =>
+      main.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
+    await main.evaluate((el) => { el.scrollTop = el.scrollHeight })
+    expect(await main.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
+    expect(await page.evaluate(() => window.scrollY)).toBe(0)
+    expect(await header.boundingBox()).toEqual(headerBox)
+    // navigating to a different pathname resets the pane scroll
+    await open.click()
+    await page.getByRole('dialog').getByRole('link', { name: 'Applications' }).click()
+    await expect(page).toHaveURL(/applications/)
+    await expect.poll(async () => main.evaluate((el) => el.scrollTop)).toBe(0)
+
     // account menu → Profile
     await page.getByLabel(/^Account /).click()
     await page.getByRole('menuitem', { name: 'Profile' }).click()
@@ -61,8 +98,8 @@ test('console shell: mobile drawer opens/closes, nav works', async ({ page }) =>
   try {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto(`${rt.viteURL}/modules`)
-    // sidebar hidden; hamburger opens drawer
-    await expect(page.locator('aside.shell-sidebar')).toBeHidden()
+    // hamburger opens the drawer — there is no sidebar at any width
+    await expect(page.locator('aside.shell-sidebar')).toHaveCount(0)
     const open = page.getByLabel('Open navigation')
     await open.click()
     const dlg = page.getByRole('dialog')
@@ -89,12 +126,12 @@ test('console shell: mobile drawer opens/closes, nav works', async ({ page }) =>
     await page.getByRole('dialog').getByRole('link', { name: 'Modules' }).click()
     await expect(page.getByRole('dialog')).toHaveCount(0)
     await expect(page).toHaveURL(/modules/)
-    
+
     expect(await noOverflow(page)).toBe(true)
   } finally { await rt.close() }
 })
 
-test('console shell: drawer closes on widen; one nav landmark; edits survive', async ({ page }) => {
+test('console shell: drawer stays open on widen; one nav landmark; edits survive', async ({ page }) => {
   const rt = await startApplicationRuntime()
   try {
     await page.setViewportSize({ width: 390, height: 844 })
@@ -110,14 +147,17 @@ test('console shell: drawer closes on widen; one nav landmark; edits survive', a
     await page.keyboard.press('Escape')
     await expect(cm).toHaveText(/y = 2/)
     await expect(caller).toHaveText(/caller-marker/)
-    // reopen, then WIDEN — drawer must close on its own
+    // reopen, then WIDEN — the drawer stays open: the hamburger is
+    // mounted at every width, so there is no implicit close.
     await page.getByLabel('Open navigation').click()
     await expect(page.getByRole('dialog')).toBeVisible()
     await page.setViewportSize({ width: 1440, height: 900 })
-    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expect(page.getByRole('dialog')).toBeVisible()
     const landmarks = page.getByRole('navigation', { name: 'Primary' })
     await expect(landmarks).toHaveCount(1)
-    // shrink back — markers still there
+    // Escape still closes it; markers still there on shrink
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog')).toHaveCount(0)
     await page.setViewportSize({ width: 390, height: 844 })
     await expect(cm).toHaveText(/y = 2/)
     await expect(caller).toHaveText(/caller-marker/)

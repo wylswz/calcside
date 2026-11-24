@@ -127,7 +127,7 @@ Every invariant has an owner mechanism, in order of preference:
 |---|---|---|
 | S1 | `material.css` paint-only states; static CSS/Tailwind check; e2e "controls keep their box under hover and press"; notebook directory active chip (`aria-current` tint + name colour only, whether set by the scroll-spy or an explicit pick), the Code|Graph segmented control's active segment and the State/Files tab active state reuse paint-only styles — e2e "S1: scroll-spy highlight is paint-only", "S1/S3: a chip click highlights immediately; a user scroll hands back to the spy", "S1: view-toggle segment boxes are identical active/inactive"; `completion.spec.ts` wrapped completion row geometry stays stable across keyboard selection | enforced |
 | S2 | shared `Menu` (Radix); S1; e2e "the More menu stays where it opened" | enforced |
-| S3 | fixed reveal slot (`RevealNew`); the notebook's one-line status slot (`role="status"`, ellipsis) carries every run/lifecycle/block/next notice — its `title` holds the full untruncated text — and per-cell run notes sit in the alerts slot; the notebook's floating panel head (toolbar + fixed-height directory rows inside one opaque rounded surface pinned 8px under the console header, its header gap masked) is one fixed overlay — cards scroll beneath via `scroll-margin-top`; the directory strip and the disabled Run all/Run stale controls render even while the notebook is empty, so the head and toolbar keep their box when the first section lands and the first card takes the placeholder's slot; nested radii are concentric and circular (`inner = outer − edge gap`, gap equal on both axes, via `calc()` from shared custom properties); the run page's progress card reserves its measured waiting height through the running phase (`RunDetail` layout effect + `ResizeObserver`, run-id guarded); chart displays reserve their box from the spec's declared size before the lazy vega chunk loads (`chartReservedBox` + `ChartView`, min-height so growth for legends/tooltips is possible but the box never shrinks); e2e "palette controls stay put", run editor placement test, notebook "run feedback never moves the cell", "section directory stays visible while a long notebook scrolls", "jumping to a section lands the card below the sticky head", "floating head box is constant across scroll, view switch and a run", "S3/F1: the first Add section keeps the head, toolbar and card slot in place", "toolbar spacing holds and nested radii are concentric" | partial — builder, detail and notebook covered; chart reservation covers pre-render layout, post-render growth still possible |
+| S3 | fixed reveal slot (`RevealNew`); the notebook's reserved bottom status bar (`role="status"`, ellipsis) carries every run/lifecycle/block/next notice — its `title` holds the full untruncated text, mirrored for screen readers by an `sr-only` sibling — beside the shared inspect snapshot's memory readout (`current / limit`, peak in the tooltip); per-cell run notes sit in the alerts slot; the workbench layout is a fixed grid (toolbar row / outline + code-or-graph / status bar) where the code pane is the central scroller, so the toolbar, outline and status bar never move; the directory column and the disabled Run all/Run stale controls render even while the notebook is empty, so the toolbar keeps its box when the first section lands and the first card takes the placeholder's slot; the run page's progress card reserves its measured waiting height through the running phase (`RunDetail` layout effect + `ResizeObserver`, run-id guarded); chart displays reserve their box from the spec's declared size before the lazy vega chunk loads (`chartReservedBox` + `ChartView`, min-height so growth for legends/tooltips is possible but the box never shrinks); e2e "palette controls stay put", run editor placement test, notebook "run feedback never moves the cell", "section directory stays visible while the code pane scrolls", "jumping to a section lands the card at the top of the code pane", "toolbar and status bar stay put across scroll, view switch and a run", "S3/F1: the first Add section keeps the toolbar and card slot in place", "view-toggle track and thumb stay concentric" | partial — builder, detail and notebook covered; chart reservation covers pre-render layout, post-render growth still possible |
 | S4 | `SwapLabel` and `RevealNew`; inserter rows keep a fixed height; static label check; e2e "Show latest" and "Show N new", notebook "cell controls keep their box under hover" | enforced for state/request-driven labels and counters; module workbench autosave status, Publish preparation and Run use `SwapLabel`; notebook controls are the ghost/xs scale except the seg-filters Code|Graph toggle |
 | S5 | `useHeldOrder` + "Show N new"/"Show latest"; `stableList` unit tests; e2e activity, instance list and notebook sections; the directory keeps held order inside the sticky head (the side-column file list is not polled — refresh is explicit — so it needs no hold) | enforced for polled lists |
 | S6 | scroll-locked `Modal`; e2e "opening a dialog does not shift the page" | enforced for dialogs |
@@ -337,14 +337,20 @@ proxying a scratch dev API + worker.
 
 - **S3/S5**: every notice that used to be a banner or report inserted
   above the cells — lost/expired/restored, run blocks, the batch report,
-  the next-steps list — now lives in one sticky toolbar row inside the
-  floating head (`top` sits under the console header). The row's
-  one-line status slot (`role="status"`, ellipsis) picks the first
-  match of running → restore → blocked → report → lifecycle →
-  next → section count; its `title` carries the FULL text — every
-  blocked message, every `name · status — reason` batch row, every
-  next item, one per line — so nothing is hidden behind a modal (there
-  is no Details button any more). Per-cell run feedback for a
+  the next-steps list — lives in the reserved one-line status bar at the
+  bottom of the notebook (`role="status"`, ellipsis). The status slot
+  picks the first match of running → restore → blocked → report →
+  lifecycle → next → section count; its `title` carries the FULL text —
+  every blocked message, every `name · status — reason` batch row,
+  every next item, one per line — with an `sr-only` copy inside the
+  `role="status"` element so screen readers hear the whole diagnosis
+  once (the visible text is `aria-hidden`). The bar's far end reads
+  memory from the single `useInstanceInspect` snapshot the page owns —
+  current and limit inline, peak and limit again in the tooltip, an
+  em-dash when the instance isn't running — and the Activity view
+  renders the same footer as a sibling of its scroller, so exactly one
+  status bar is on screen for either tab.
+  Per-cell run feedback for a
   single-section run — block messages, the 409, generic errors and the
   trigger restore — lands on that cell's alerts slot as `.nb-note`
   (P5) and is cleared at the next run start; a failed batch section's
@@ -358,8 +364,8 @@ proxying a scratch dev API + worker.
   the refetched order once it lands instead of hiding behind the reveal.
   The held-order e2e adds a section server-side and asserts the card
   stays hidden until the explicit reveal, then checks server order. The
-  directory is a borderless chip strip (`flex-wrap: nowrap;
-  overflow-x: auto`) so its height never changes on poll.
+  directory is a vertical row list inside the outline column
+  (`overflow-y: auto`) so the toolbar and status bar never move on poll.
 - **C2/F3**: each card autosaves code/description/rerun through a serial
   revision-CAS queue (800 ms debounce, latest-wins). The 409 retry
   captures the notebook revision BEFORE re-reading the section, so an
@@ -475,28 +481,37 @@ proxying a scratch dev API + worker.
   without moving nodes`). Mobile stacks the aside below the canvas
   inside the same fixed box (`screenshots: notebook graph desktop/
   mobile × light/dark`).
-- **C4**: `?section=name` deep-links scroll the addressed card into
-  view; the directory chip strip lists ordinal, name and a state dot
-  (state also in `title`/sr-only, description in `title`) in held
-  order and is the single active-section indicator — a click sets
-  `?section=`, marks the chip `aria-current` immediately and scrolls
-  the card (or, in graph view, selects the node and reveals it on the
-  canvas). In code view an IntersectionObserver whose top edge sits
-  under the head marks the first intersecting chip in shown order —
-  paint-only tint + name colour (S1, measured identical chip boxes);
-  an explicit pick holds the spy until the programmatic scroll settles
-  or the next user scroll (wheel/touch/scroll key/scrollbar) hands
-  control back (`S1/S3: a chip click highlights immediately; a user
-  scroll hands back to the spy`). The strip keeps the active chip
-  visible through its own `scrollLeft`, never `scrollIntoView` (S6).
+- **C4**: `?section=name` deep-links scroll the addressed card to the
+  top of the code pane once the card is actually mounted (an eventual
+  arrival is picked up when the held order admits it; unrelated
+  additions and polls never re-scroll). The outline's directory column
+  lists ordinal, name and a state dot (state also in `title`/sr-only,
+  description in `title`) in held order — filterable by name with
+  original ordinals kept — and is the single active-section
+  indicator — a click sets `?section=`, marks the row `aria-current`
+  immediately and scrolls the card (or, in graph view, selects the node
+  and reveals it on the canvas). In code view an IntersectionObserver
+  rooted at the code pane marks the first intersecting row in shown
+  order — paint-only tint + name colour (S1, measured identical row
+  boxes); an explicit pick holds the spy until the programmatic scroll
+  settles or the next user scroll on the code pane (wheel/touch/scroll
+  key/scrollbar) hands control back, recomputing the topmost card even
+  when intersection entries did not change (`S1/S3: a row click
+  highlights immediately; a user scroll hands back to the spy`). The
+  column keeps the active row visible through its own `scrollTop`,
+  never `scrollIntoView` (S6).
   Cells are flat bordered blocks on a
   40px gutter + body grid; the header row carries ordinal, name, state
   badge, the `once` tag, an inline borderless description input and
-  SaveStatus/collapse/⋯ actions; collapse hides only the editor —
-  alerts, output and footer stay. "Add section" appends an "Untitled
+  SaveStatus/collapse/⋯ actions — there is no per-section footer row
+  and no details dialog; the state badge's `title` carries the optional
+  metadata (last run, Defines/Reads/Calls/Depends on, read-only note)
+  as one newline-joined native tooltip; collapse hides only the editor — alerts
+  and output stay. "Add section" appends an "Untitled
   Section" — auto-named `untitled_section[_N]` — immediately with no
   dialog, and the fixed-height `.nb-insert` rows between cells (and
-  after the last) create one directly after their cell; creation
+  after the last) carry a full-width dashed `Add section` card that
+  creates one directly after its cell; creation
   errors go to the status line, and the row keeps its height without
   edit rights (S3). CodeMirror
   editors auto-size (`minHeight` 44px, `maxHeight` 420px) and a
@@ -508,38 +523,34 @@ proxying a scratch dev API + worker.
   `-section`/`-notes` detail shots and the 2x `nb-corner-*-2x.png`
   close-ups under `.devin-artifacts/screenshots/`.
 
-The section directory is no longer a strip that scrolls away with the
-cards: `.nb-head` is ONE floating panel — an opaque raised surface
-(`--paper` fill, `--radius-surface`, `--shadow-float`, 1px `--edge`
-border, real `6px 10px` padding, no negative margins) pinned 8px under
-the console header, its header gap masked by an opaque `::before` so
-scrolling content never peeks through. Inside it the toolbar row and
-the 30px directory row are split by one inner hairline; the whole
-panel is a fixed height (`--nb-bar-h` reserves it for the cards'
-`scroll-margin-top` and the observer's `rootMargin`), so the outline,
-the segmented Code|Graph control and the run actions stay reachable on
-a long notebook (S3 — e2e measures the strip pinned, the jumped card
-landing below the head, and the panel box constant across scroll, view
-switch and a run). Spacing is explicit: the toolbar's left group and
-the chip row share the panel's `6px` inner padding (7px from the
-border-box edge), the segmented Code|Graph toggle is the LAST toolbar
-item — ≥12px clear of the "Show N new" slot, its right edge 7px inside
-the panel edge like every corner-near control (the `toolbar spacing
-holds` e2e measures both). Nested rounded corners are concentric and
-circular — the gap is equal on both axes and inner radius = outer
-radius − gap, written as `calc()` from the `--nb-head-*` custom
-properties (every head control takes the panel's 12px corner minus the
-uniform 7px inset = 5px; the toggle thumb takes the track's 5px minus
-its 2px padding = 3px). The active chip's paint-only highlight is set by
-the explicit pick or the scroll-spy as described under C4, and the
-strip keeps it visible through its own `scrollLeft`, never
-`scrollIntoView` (S6). A single-section run pulses its chip's dot, opacity-only and
-disabled under `prefers-reduced-motion`. On the detail page's side
-column, an
-fs-capable instance's State panel and file browser share one "Live
-state" tablist — both panels stay mounted behind `hidden` like the
-Notebook/Activity views (C2/C3, covered by the artifacts e2e) — and
-the bottom Results block is gone, freeing the work surface.
+The console uses one global shell: a fixed header with the hamburger
+drawer at every width (no sidebar) above `.console-main`, the shared
+scroller (`overscroll-behavior: contain`, `scrollTo` reset on real
+pathname changes). The instance detail route turns that pane into a
+workbench — `.console-main:has(.instance-detail)` stops scrolling and
+`.console-content` yields its padding/max-width — so the identity row and a compact one-line next-action strip
+sit above the Notebook|Activity tab strip, and the main region is a
+grid — work surface beside a 310px inspector rail that becomes a
+right-edge overlay under 1240px so code is never squeezed. Both the
+view panels and the inspector stay mounted (`hidden`), and the
+inspector's State/Files tablist keeps both panels mounted too (C2/C3,
+covered by the artifacts e2e). Inside the notebook, `.nb` is a fixed
+grid — toolbar row / outline + code-or-graph / status bar — where the
+code pane is the central scroller: the toolbar, the 192px outline
+column (with labeled filter and the vertically scrolling directory)
+and the status bar never move while cards scroll, and side contents
+(the directory, the inspector body) scroll independently inside their
+columns. Under 740px the outline becomes an overlay filling the
+row-2 grid area; on
+that breakpoint opening either panel closes the other, and picking a
+section dismisses the overlay and returns focus to its Sections toggle
+(C1). The segmented Code|Graph toggle keeps its concentric
+track/thumb corners (thumb radius = track radius − padding, via
+`calc()`). The active row's paint-only highlight is set by the explicit
+pick or the scroll-spy as described under C4, and the column keeps it
+visible through its own `scrollTop`, never `scrollIntoView` (S6). A
+single-section run pulses its row's dot, opacity-only and disabled
+under `prefers-reduced-motion`.
 
 Known gaps: in-app navigation away from
 a dirty draft is unguarded like the rest of the console — recovery is
@@ -549,9 +560,11 @@ output cap (S5, bounded).
 
 ## Console shell navigation (consoleShell.spec.ts)
 
-- C1: mobile drawer closes via shared Modal Escape and returns focus to the
-  "Open navigation" trigger; drawer also closes on route change and on
-  widening past 1024px.
+- C1: the drawer closes via shared Modal Escape and returns focus to the
+  "Open navigation" trigger (which advertises `aria-haspopup="dialog"` /
+  `aria-expanded`); it also closes on route change, but NOT on resize —
+  the hamburger is mounted at every width so the drawer simply stays
+  open across a widen.
 - C2: module source + caller-script buffers survive drawer open/Escape and
   viewport resize (390→1440→390) without remount.
 - S1: nav link boxes are measured under hover — identical geometry;
@@ -561,6 +574,8 @@ output cap (S5, bounded).
   A single `Primary` navigation landmark and `aria-current="page"` identify
   the active destination including nested detail routes.
 - S6: left-placement drawer reuses the shared Modal; centered modals and
-  the page-scroll lock are unchanged.
+  the page-scroll lock are unchanged. `.console-main` is the only page
+  scroller (`window.scrollY` stays 0 and the header box never moves);
+  a pathname change resets the pane to the top via `scrollTo`.
 - F2: destructive flows (dep removal, draft reload) still go through
   `Confirm`.

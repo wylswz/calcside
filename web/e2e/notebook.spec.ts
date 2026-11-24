@@ -97,8 +97,8 @@ test('autosave: Run section awaits the pending save and executes latest code', a
   await page.keyboard.insertText('print("RUNS-LATEST")')
   await c.getByRole('button', { name: 'Run section' }).click()
 
-  // Single-section feedback is one line in the sticky status slot (S3).
-  await expect(page.locator('.nb-status')).toContainText('untitled_section · ok', { timeout: 20_000 })
+  // Single-section feedback is one line in the status bar (S3).
+  await expect(page.locator('.nb-status:visible')).toContainText('untitled_section · ok', { timeout: 20_000 })
   // The PUT landed before the run request — never the other way round.
   expect(order.indexOf('PUT untitled_section')).toBeGreaterThanOrEqual(0)
   expect(order.indexOf('PUT untitled_section')).toBeLessThan(order.indexOf('RUN'))
@@ -132,8 +132,14 @@ test('Add section appends an Untitled Section without a dialog', async ({ page }
   expect(nb.notebook.sections.map((s: { name: string }) => s.name))
     .toEqual(['s1', 's2', 'untitled_section', 'untitled_section_2'])
 
-  // The per-cell inserter creates one directly after its cell.
-  await page.getByRole('button', { name: 'Insert section after s1' }).click()
+  // The per-cell inserter is a full-width quiet card, labeled Add
+  // section, that creates one directly after its cell.
+  const ins = page.getByRole('button', { name: 'Insert section after s1' })
+  await expect(ins).toContainText('Add section')
+  const cardBox = await card(page, 's1').boundingBox()
+  const insBox = await ins.boundingBox()
+  expect(Math.abs(insBox!.width - cardBox!.width)).toBeLessThanOrEqual(2)
+  await ins.click()
   await expect(card(page, 'untitled_section_3')).toBeVisible()
   await expect(page.getByRole('dialog')).toHaveCount(0)
   expect(await names()).toEqual(['s1', 'untitled_section_3', 's2', 'untitled_section', 'untitled_section_2'])
@@ -257,7 +263,7 @@ test('once: an explicit rerun of a succeeded once-section asks first (F2)', asyn
   await expect(c.locator('.nb-once')).toHaveText('once')
 
   await c.getByRole('button', { name: 'Run section' }).click()
-  await expect(page.locator('.nb-status')).toContainText('charge · ok', { timeout: 20_000 })
+  await expect(page.locator('.nb-status:visible')).toContainText('charge · ok', { timeout: 20_000 })
 
   // Second explicit run → Confirm, not silent repeat.
   await c.getByRole('button', { name: 'Run section' }).click()
@@ -265,7 +271,7 @@ test('once: an explicit rerun of a succeeded once-section asks first (F2)', asyn
   await expect(dlg).toContainText('Run charge again?')
   await expect(dlg.getByRole('button', { name: 'Run again' })).toBeVisible()
   await dlg.getByRole('button', { name: 'Run again' }).click()
-  await expect(page.locator('.nb-status')).toContainText('charge · ok', { timeout: 20_000 })
+  await expect(page.locator('.nb-status:visible')).toContainText('charge · ok', { timeout: 20_000 })
 })
 
 test('restored: a dead child restores an EMPTY process — the request does not run', async ({ page }) => {
@@ -292,8 +298,8 @@ test('restored: a dead child restores an EMPTY process — the request does not 
   // The status line and the cell note both carry the restore warning —
   // the request did NOT run (P5: single-section feedback lands on the
   // cell too, so scope assertions to avoid strict-mode duplicates).
-  await expect(page.locator('.nb-status')).toContainText('Runtime restored', { timeout: 30_000 })
-  await expect(page.locator('.nb-status')).toContainText('did not run')
+  await expect(page.locator('.nb-status:visible')).toContainText('Runtime restored', { timeout: 30_000 })
+  await expect(page.locator('.nb-status:visible')).toContainText('did not run')
   await expect(c.locator('.nb-note')).toContainText('did not run')
   // Exactly one run request — never an automatic retry of the trigger.
   expect(runPosts).toBe(1)
@@ -304,7 +310,7 @@ test('restored: a dead child restores an EMPTY process — the request does not 
   // State is verifiably empty: re-running loader alone fails (mark was
   // never defined), while the notebook itself is intact.
   await c.getByRole('button', { name: 'Run section' }).click()
-  await expect(page.locator('.nb-status')).toContainText('loader', { timeout: 20_000 })
+  await expect(page.locator('.nb-status:visible')).toContainText('loader', { timeout: 20_000 })
 })
 
 test('expired: read-only history with the expiry shown, no run or edit affordances', async ({ page }) => {
@@ -315,8 +321,11 @@ test('expired: read-only history with the expiry shown, no run or edit affordanc
   // Wait for the reaper to flip status → expired (UI polls every 15s).
   // The one-line status slot carries the lifecycle text — scoped so the
   // The scoped status text must not collide with other page copy.
-  await expect(page.locator('.nb-status')).toContainText('Expired.', { timeout: 60_000 })
-  await expect(page.locator('.nb-status')).toContainText('Read-only history')
+  await expect(page.locator('.nb-status:visible')).toContainText('Expired.', { timeout: 60_000 })
+  await expect(page.locator('.nb-status:visible')).toContainText('Read-only history')
+  // No live runtime → no stale memory numbers; the footer shows the
+  // em-dash fallback instead.
+  await expect(page.locator('.nb-statusbar:visible .nb-memory')).toContainText('—')
   // No run buttons, no Add section, no editable fields.
   await expect(page.getByRole('button', { name: 'Run section' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Run all' })).toHaveCount(0)
@@ -328,7 +337,9 @@ test('expired: read-only history with the expiry shown, no run or edit affordanc
 test('directory + collapse: outline rows deep-link; code folds per card', async ({ page }) => {
   const id = await createInstance()
   await saveSection(id, 'alpha', 'a = 1')
-  await saveSection(id, 'beta', 'b = 2')
+  // beta reads what alpha defines — the details dialog must show the
+  // real provider edge.
+  await saveSection(id, 'beta', 'b = a + 1')
   await page.goto(`${rt.viteURL}/instances/${id}`)
   const dir = page.locator('.nb-directory')
   await expect(dir).toBeVisible()
@@ -338,37 +349,95 @@ test('directory + collapse: outline rows deep-link; code folds per card', async 
   await dir.locator('.nb-dir-row', { hasText: 'beta' }).click()
   await expect(page).toHaveURL(/section=beta/)
   await expect(card(page, 'beta')).toBeInViewport()
-  // Per-card collapse hides the editor; header and footer stay (H).
+  // Per-card collapse hides the editor; the header stays (H).
   const c = card(page, 'beta')
   await c.getByRole('button', { name: 'Collapse beta code' }).click()
   await expect(c.locator('.cm-content')).toHaveCount(0)
   await expect(c.locator('.nb-card-head')).toBeVisible()
+  // The old footer and the details dialog are gone — the state badge's
+  // title carries the same metadata (provider data included).
+  await expect(c.getByRole('button', { name: 'Section beta details' })).toHaveCount(0)
+  await expect(c.locator('footer')).toHaveCount(0)
+  const badgeTitle = await c.locator('header [title]').first().getAttribute('title')
+  expect(badgeTitle).toContain('not run')
+  expect(badgeTitle).toContain('Never run')
+  expect(badgeTitle).toContain('Reads: a')
+  expect(badgeTitle).toContain('Depends on: alpha')
   await c.getByRole('button', { name: 'Expand beta code' }).click()
   await expect(c.locator('.cm-content')).toBeVisible()
 })
 
-test('S3: section directory stays visible while a long notebook scrolls', async ({ page }) => {
+test('workbench footer reads memory from one shared inspect snapshot', async ({ page }) => {
+  const id = await createInstance()
+  await saveSection(id, 'alpha', 'a = 1')
+  let inspectCalls = 0
+  await page.route(`**/api/v1/instances/${id}/inspect`, async (route) => {
+    inspectCalls++
+    await route.fulfill({
+      json: {
+        variables: { demo: '42' },
+        resources: { memory_usage: 1048576, memory_peak: 2097152, memory_max: 4194304 },
+      },
+    })
+  })
+  // 1100px: the inspector starts closed (it defaults open at >=1240px).
+  await page.setViewportSize({ width: 1100, height: 800 })
+  await page.goto(`${rt.viteURL}/instances/${id}`)
+  const bar = page.locator('.nb-statusbar:visible')
+  await expect(bar).toContainText('Memory')
+  await expect(bar).toContainText('1.00 MiB / 4.00 MiB')
+  const memTitle = await bar.locator('.nb-memory').getAttribute('title')
+  expect(memTitle).toContain('peak 2.00 MiB')
+  expect(memTitle).toContain('limit 4.00 MiB')
+  await expect.poll(() => inspectCalls).toBe(1)
+  // The inspector's State reuses the same snapshot — variables, no
+  // separate memory block, and no extra inspect request.
+  await page.getByRole('button', { name: 'Inspector', exact: true }).click()
+  const inspector = page.locator('#instance-inspector')
+  await expect(inspector).toContainText('demo')
+  await expect(inspector).toContainText('42')
+  await expect(inspector.locator('.nb-memory')).toHaveCount(0)
+  // Activity shows the same footer; switching views fetches nothing.
+  await page.getByRole('tab', { name: 'Activity' }).click()
+  const actBar = page.locator('.nb-statusbar:visible')
+  await expect(actBar).toContainText('Activity')
+  await expect(actBar).toContainText('1.00 MiB / 4.00 MiB')
+  await page.waitForTimeout(300)
+  expect(inspectCalls).toBe(1)
+})
+
+test('S3: section directory stays visible while the code pane scrolls', async ({ page }) => {
   const id = await createInstance()
   for (let i = 1; i <= 8; i++) await saveSection(id, `sec${i}`, `v${i} = ${i}`)
   await page.goto(`${rt.viteURL}/instances/${id}`)
   const dir = page.locator('.nb-directory')
-  const head = page.locator('.nb-head')
+  const code = page.locator('.nb-code')
+  const statusbar = page.locator('.nb-statusbar:visible')
   await expect(dir).toBeVisible()
-  // 8 section chips — there is no scratch chip anymore.
+  // 8 section rows — there is no scratch row.
   await expect(dir.locator('.nb-dir-row')).toHaveCount(8)
-  const headBefore = (await head.boundingBox())!.height
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
-  await page.waitForTimeout(300)
-  // The strip is pinned as row 2 of the sticky head: its top is the
-  // toolbar's bottom edge and the head keeps one height (S3).
-  await expect(dir).toBeInViewport()
   const dirBox = (await dir.boundingBox())!
   const barBox = (await page.locator('.nb-toolbar').boundingBox())!
-  expect(Math.abs(dirBox.y - (barBox.y + barBox.height))).toBeLessThanOrEqual(1)
-  expect((await head.boundingBox())!.height).toBe(headBefore)
+  const sbBox = (await statusbar.boundingBox())!
+  const inspBox = (await page.locator('#instance-inspector').boundingBox())!
+
+  // The code pane is the only scroller: it moves, the window does not.
+  const scrolled = await code.evaluate((el) => {
+    el.scrollTop = el.scrollHeight - el.clientHeight
+    return el.scrollTop
+  })
+  expect(scrolled).toBeGreaterThan(0)
+  await page.waitForTimeout(200)
+  expect(await page.evaluate(() => window.scrollY)).toBe(0)
+  // The outline column, toolbar, status bar and inspector keep their
+  // exact boxes — only the code pane scrolled (S3).
+  expect(await dir.boundingBox()).toEqual(dirBox)
+  expect(await page.locator('.nb-toolbar').boundingBox()).toEqual(barBox)
+  expect(await statusbar.boundingBox()).toEqual(sbBox)
+  expect(await page.locator('#instance-inspector').boundingBox()).toEqual(inspBox)
 })
 
-test('S3: jumping to a section lands the card below the sticky head', async ({ page }) => {
+test('S3: jumping to a section lands the card at the top of the code pane', async ({ page }) => {
   const id = await createInstance()
   for (let i = 1; i <= 8; i++) await saveSection(id, `sec${i}`, `v${i} = ${i}`)
   await page.goto(`${rt.viteURL}/instances/${id}`)
@@ -378,8 +447,13 @@ test('S3: jumping to a section lands the card below the sticky head', async ({ p
   const c = card(page, 'sec8')
   await expect(c).toBeInViewport()
   const cBox = (await c.boundingBox())!
-  const dBox = (await dir.boundingBox())!
-  expect(cBox.y).toBeGreaterThanOrEqual(dBox.y + dBox.height)
+  const codeBox = (await page.locator('.nb-code').boundingBox())!
+  // The jump scrolls the card into the pane (the last card clamps below
+  // the top edge — there is no content under it to pull it higher) —
+  // and the window never moves.
+  expect(cBox.y).toBeGreaterThanOrEqual(codeBox.y - 1)
+  expect(cBox.y + cBox.height).toBeLessThanOrEqual(codeBox.y + codeBox.height + 1)
+  expect(await page.evaluate(() => window.scrollY)).toBe(0)
 })
 
 test('S1: scroll-spy highlight is paint-only', async ({ page }) => {
@@ -412,7 +486,7 @@ test('no scratch affordance: every run belongs to a section', async ({ page }) =
   await expect(page.getByRole('button', { name: 'Save as section…' })).toHaveCount(0)
 })
 
-test('S1/S3: a chip click highlights immediately; a user scroll hands back to the spy', async ({ page }) => {
+test('S1/S3: an outline row click highlights immediately; a user scroll hands back to the spy', async ({ page }) => {
   const id = await createInstance()
   // Long enough to scroll; the LAST card cannot reach the top of the
   // viewport, so the scroll-spy alone could never mark its chip.
@@ -423,14 +497,15 @@ test('S1/S3: a chip click highlights immediately; a user scroll hands back to th
   await expect(last).toBeVisible()
   await last.click()
   await expect(page).toHaveURL(/section=sec8/)
-  // The clicked chip is active at once — the spy does not get to
+  // The clicked row is active at once — the spy does not get to
   // override it while the programmatic scroll settles.
   await expect(last).toHaveAttribute('aria-current', 'true')
   await expect(dir.locator('.nb-dir-row[aria-current="true"]')).toHaveCount(1)
   // The programmatic scroll settles inside the hold window; once the
-  // user scrolls, the spy marks the topmost card again.
+  // user scrolls the code pane, the spy marks the topmost card again.
   await page.waitForTimeout(700)
-  await page.mouse.move(720, 500)
+  const codeBox = (await page.locator('.nb-code').boundingBox())!
+  await page.mouse.move(codeBox.x + codeBox.width / 2, codeBox.y + codeBox.height / 2)
   await page.mouse.wheel(0, -400)
   await expect.poll(async () => {
     const t = await dir.locator('.nb-dir-row[aria-current="true"]').textContent()
@@ -476,42 +551,21 @@ async function cornerRadius(loc: import('@playwright/test').Locator, corner: str
   }, corner)
 }
 
-test('S3: toolbar spacing holds and nested radii are concentric', async ({ page }) => {
+test('S3: the view-toggle track and thumb stay concentric', async ({ page }) => {
   const id = await createInstance()
   await saveSection(id, 's1', 'x = 1')
   await page.goto(`${rt.viteURL}/instances/${id}`)
   await expect(card(page, 's1')).toBeVisible()
-  const head = page.locator('.nb-head')
   const toggle = page.locator('.nb-view-toggle')
-  // Activate the first chip first — its click scrolls the page and the
-  // sticky head moves, so every box below is measured in ONE state.
-  const chip = page.locator('.nb-dir-row').first()
-  await chip.click()
-  await expect(chip).toHaveAttribute('aria-current', 'true')
-  await page.waitForTimeout(150)
-  const headBox = (await head.boundingBox())!
   const toggleBox = (await toggle.boundingBox())!
-  const chipBox = (await chip.boundingBox())!
   const thumb = toggle.getByRole('button', { name: 'Code' })
   const thumbBox = (await thumb.boundingBox())!
-  const firstBtn = page.locator('.nb-toolbar-actions [data-ui="button"]').first()
-  const btnBox = (await firstBtn.boundingBox())!
 
   const near = (actual: number, expected: number, what: string) =>
     expect(Math.abs(actual - expected), what).toBeLessThanOrEqual(0.5)
-  // Corner-near controls sit border+pad = 7px inside the panel edge on
-  // BOTH axes; the toggle keeps ≥12px clear of the "Show N new" slot.
-  near(chipBox.x - headBox.x, 7, 'chip left inset')
-  near(headBox.y + headBox.height - (chipBox.y + chipBox.height), 7, 'chip bottom inset')
-  near(headBox.x + headBox.width - (toggleBox.x + toggleBox.width), 7, 'toggle right inset')
-  near(toggleBox.y - headBox.y, 7, 'toggle top inset')
-  near(btnBox.x - headBox.x, 7, 'button left inset')
-  near(btnBox.y - headBox.y, 7, 'button top inset')
-  const revealBox = (await page.locator('.nb-toolbar-side > button').boundingBox())!
-  expect(toggleBox.x - (revealBox.x + revealBox.width)).toBeGreaterThanOrEqual(12)
-
-  // Concentric AND circular (AGENTS.md): the gap must be equal on both
-  // axes, the radius circular, and inner = outer − gap.
+  // Concentric AND circular (AGENTS.md): the thumb's gap to the track
+  // edge is equal on both axes, the thumb radius is circular, and
+  // inner = outer − gap.
   const assertConcentric = async (
     inner: import('@playwright/test').Locator, outer: import('@playwright/test').Locator,
     corner: string, gapX: number, gapY: number, label: string,
@@ -522,62 +576,45 @@ test('S3: toolbar spacing holds and nested radii are concentric', async ({ page 
     near(i.rx, i.ry, `${label}: radius is circular`)
     near(i.rx, Math.max(0, o.rx - (gapX + gapY) / 2), `${label}: inner = outer − gap`)
   }
-  await assertConcentric(chip, head, 'BottomLeft',
-    chipBox.x - headBox.x, headBox.y + headBox.height - (chipBox.y + chipBox.height), 'head→chip')
-  await assertConcentric(toggle, head, 'TopRight',
-    headBox.x + headBox.width - (toggleBox.x + toggleBox.width), toggleBox.y - headBox.y, 'head→track')
-  await assertConcentric(firstBtn, head, 'TopLeft',
-    btnBox.x - headBox.x, btnBox.y - headBox.y, 'head→button')
   await assertConcentric(thumb, toggle, 'TopLeft',
     thumbBox.x - toggleBox.x, thumbBox.y - toggleBox.y, 'track→thumb')
 })
 
-test('S3: the floating head box is constant across scroll, view switch and a run', async ({ page }) => {
+test('S3: toolbar and status bar boxes are constant across scroll, view switch and a run', async ({ page }) => {
   const id = await createInstance()
   for (let i = 1; i <= 8; i++) await saveSection(id, `sec${i}`, `v${i} = ${i}`)
   await page.goto(`${rt.viteURL}/instances/${id}`)
   const head = page.locator('.nb-head')
-  // Wait for the notebook to lay out — scrolling earlier clamps to a
-  // still-short page and the sticky head never engages.
+  const statusbar = page.locator('.nb-statusbar:visible')
+  const code = page.locator('.nb-code')
   await expect(head).toBeVisible()
   await expect(card(page, 'sec8')).toBeVisible()
-  const box = async () => {
-    const b = (await head.boundingBox())!
-    return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)]
+  const boxes = async () => {
+    const [h, s] = await Promise.all([head.boundingBox(), statusbar.boundingBox()])
+    return [
+      Math.round(h!.x), Math.round(h!.y), Math.round(h!.width), Math.round(h!.height),
+      Math.round(s!.x), Math.round(s!.y), Math.round(s!.width), Math.round(s!.height),
+    ]
   }
-  const scrollTop = () => page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }))
-  await scrollTop()
-  await page.waitForTimeout(200)
-  const top = await box()
+  const top = await boxes()
 
-  // Stuck state is what must hold still — scroll near the bottom, then
-  // to the very bottom (instant: the app's smooth scroll-behavior would
-  // otherwise animate the head mid-measurement).
-  const maxScroll = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)
-  await page.evaluate((y) => window.scrollTo({ top: y, behavior: 'instant' }), maxScroll - 120)
-  await page.waitForTimeout(300)
-  const stuck = await box()
-  expect(stuck[1]).toBe(65) // actually pinned, not still in flow
-  await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }))
-  await page.waitForTimeout(300)
-  expect(await box()).toEqual(stuck)
-  // A run repaints statuses inside cells — the stuck head never moves.
+  // The workbench frame never scrolls — window scroll stays 0 while the
+  // code pane scrolls beneath a fixed toolbar and status bar.
+  await code.evaluate((el) => { el.scrollTop = el.scrollHeight })
+  await page.waitForTimeout(200)
+  expect(await page.evaluate(() => window.scrollY)).toBe(0)
+  expect(await boxes()).toEqual(top)
+  // A run repaints statuses inside cells — the frame never moves.
   await page.locator('.nb-toolbar').getByRole('button', { name: 'Run all' }).click()
-  await expect(page.locator('.nb-status')).toContainText('ran', { timeout: 30_000 })
-  expect(await box()).toEqual(stuck)
-  // View switch at the same scroll offset: the panel's box is identical
-  // in Code and Graph (the graph page is shorter, so re-pin scroll top).
-  await scrollTop()
-  await page.waitForTimeout(200)
-  expect(await box()).toEqual(top)
+  await expect(page.locator('.nb-status:visible')).toContainText('ran', { timeout: 30_000 })
+  expect(await boxes()).toEqual(top)
+  // View switch: the toolbar and status bar boxes are identical in
+  // Code and Graph.
   await openGraph(page)
-  await scrollTop()
-  await page.waitForTimeout(200)
-  expect(await box()).toEqual(top)
+  expect(await boxes()).toEqual(top)
   await page.locator('.nb-view-toggle').getByRole('button', { name: 'Code' }).click()
-  await expect(page.locator('.nb-code')).toBeVisible()
-  await page.waitForTimeout(200)
-  expect(await box()).toEqual(top)
+  await expect(code).toBeVisible()
+  expect(await boxes()).toEqual(top)
 })
 
 test('S3/F1: the first Add section keeps the head, toolbar and card slot in place', async ({ page }) => {
@@ -635,7 +672,7 @@ test('run CAS: an agent edit between validation and POST conflicts — nothing e
   await c.getByRole('button', { name: 'Run section' }).click()
   // No report — the status line carries the block AND the s1 cell note
   // repeats it (P5); both are the same runBlock message.
-  await expect(page.locator('.nb-status')).toContainText('notebook changed while preparing the run', { timeout: 20_000 })
+  await expect(page.locator('.nb-status:visible')).toContainText('notebook changed while preparing the run', { timeout: 20_000 })
   await expect(c.locator('.nb-note')).toContainText('notebook changed while preparing the run')
   await page.unroute('**/notebook/run')
   const execsAfter = await (await rt.client.get(`/api/v1/instances/${id}/executions`)).json()
@@ -710,7 +747,7 @@ test('run validation: an agent edit before the run blocks unseen code (F)', asyn
     if (r.method() === 'POST' && r.url().endsWith('/notebook/run') && !r.postDataJSON()?.dry_run) runPosts++
   })
   await c.getByRole('button', { name: 'Run section' }).click()
-  await expect(page.locator('.nb-status')).toContainText('changed on the server', { timeout: 20_000 })
+  await expect(page.locator('.nb-status:visible')).toContainText('changed on the server', { timeout: 20_000 })
   // The dry-run preview went out but no real run request was ever sent.
   expect(runPosts).toBe(0)
   // The displayed draft is preserved — polling could not overwrite it.
@@ -753,8 +790,8 @@ test('partial restore: a mid-batch loss warns that earlier sections executed', a
   await page.getByRole('button', { name: 'Run all' }).click()
   // The status line carries the restore warning AND every per-section
   // row in its title — there is no Details modal any more.
-  await expect(page.locator('.nb-status')).toContainText('earlier sections in this batch did execute', { timeout: 20_000 })
-  const title = await page.locator('.nb-status').getAttribute('title')
+  await expect(page.locator('.nb-status:visible')).toContainText('earlier sections in this batch did execute', { timeout: 20_000 })
+  const title = await page.locator('.nb-status:visible').getAttribute('title')
   expect(title).toContain('s1 · ok')
   expect(title).toContain('s2 · not_run')
   expect(title).toContain('do not blindly retry')
@@ -781,7 +818,7 @@ test('shortcut: ⌘/Ctrl+Enter in a section editor runs that section', async ({ 
   await c.locator('.cm-content').click()
   await page.keyboard.press('Control+Enter')
   await expect.poll(() => runPosts, { timeout: 20_000 }).toBe(1)
-  await expect(page.locator('.nb-status')).toContainText('s1 · ok', { timeout: 20_000 })
+  await expect(page.locator('.nb-status:visible')).toContainText('s1 · ok', { timeout: 20_000 })
   await page.waitForTimeout(400)
   expect(execPosts).toBe(0)
 })
@@ -808,7 +845,7 @@ test('S3: run feedback never moves the cell', async ({ page }) => {
   await runBtn.click()
   // The status line updates in place; the second cell's run control and
   // the toolbar keep their exact boxes (S3 — no banner insertion).
-  await expect(page.locator('.nb-status')).toContainText('second · ok', { timeout: 20_000 })
+  await expect(page.locator('.nb-status:visible')).toContainText('second · ok', { timeout: 20_000 })
   expect(await runBtn.boundingBox()).toEqual(before.btn)
   expect(await toolbar.boundingBox()).toEqual(before.bar)
   expect(await page.evaluate(() => window.scrollY)).toBe(before.scroll)
@@ -875,65 +912,87 @@ test('screenshots: notebook desktop/mobile × light/dark', async ({ page }) => {
   await expect(card(page, 'setup')).toBeVisible()
   await expect(card(page, 'report')).toBeVisible()
   await expect(page.locator('.nb-directory .nb-dir-row')).toHaveCount(6)
+
+  // The workbench frame at 1440: outline column, inspector rail, and a
+  // code pane that scrolls while the window never moves (S3).
+  const inspector = page.locator('#instance-inspector')
+  await expect(inspector).toBeVisible()
+  const inspBox = (await inspector.boundingBox())!
+  const dirBox = (await page.locator('.nb-directory').boundingBox())!
+  const codeBox = (await page.locator('.nb-code').boundingBox())!
+  await page.mouse.move(codeBox.x + codeBox.width / 2, codeBox.y + codeBox.height / 2)
+  await page.mouse.wheel(0, 400)
+  await expect.poll(() => page.locator('.nb-code').evaluate((el) => el.scrollTop))
+    .toBeGreaterThan(100)
+  expect(await page.evaluate(() => window.scrollY)).toBe(0)
+  expect(await inspector.boundingBox()).toEqual(inspBox)
+  expect(await page.locator('.nb-directory').boundingBox()).toEqual(dirBox)
+  await page.locator('.nb-code').evaluate((el) => { el.scrollTop = 0 })
+
   for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme })
-    // The previous iteration's mobile shots leave the page scrolled.
-    await page.evaluate(() => window.scrollTo(0, 0))
     await page.waitForTimeout(150)
     await page.screenshot({ path: join(SHOTS, `notebook-desktop-${scheme}.png`), fullPage: false })
-    // Sticky toolbar pinned under the console header, overlapping cells.
-    await card(page, 'notes').scrollIntoViewIfNeeded()
+    // Scrolled cards stay inside the pane — the toolbar, outline and
+    // status bar hold their boxes (S3).
+    await page.locator('.nb-code').evaluate((el) => { el.scrollTop = el.scrollHeight })
     await page.waitForTimeout(300)
-    // The floating head is pinned 8px under the 57px console header —
-    // the toolbar sits inside it behind the panel's padding (S3).
-    const headBox = (await page.locator('.nb-head').boundingBox())!
     const bar = await page.locator('.nb-toolbar').boundingBox()
     expect(bar).not.toBeNull()
-    expect(Math.round(bar!.y - headBox.y)).toBe(7) // 1px border + 6px padding
-    // The panel paints above the cells scrolling beneath it and is
-    // opaque — including the ::before mask over the header gap.
-    const topmost = await page.evaluate(
-      ([x, y]) => document.elementFromPoint(x, y)?.closest('.nb-head') != null,
-      [bar!.x + bar!.width / 2, bar!.y + bar!.height / 2],
-    )
-    expect(topmost).toBe(true)
+    const sb = await page.locator('.nb-statusbar:visible').boundingBox()
+    expect(sb).not.toBeNull()
+    expect(Math.round(sb!.y + sb!.height)).toBeLessThanOrEqual(1000)
+    // The head paints opaque above the pane's border seam.
     const headBg = await page.locator('.nb-head').evaluate((el) => getComputedStyle(el).backgroundColor)
     expect(headBg).not.toBe('rgba(0, 0, 0, 0)')
-    const maskBg = await page.locator('.nb-head').evaluate((el) => getComputedStyle(el, '::before').backgroundColor)
-    expect(maskBg).not.toBe('rgba(0, 0, 0, 0)')
     const barBw = await page.locator('.nb-toolbar').evaluate((el) => getComputedStyle(el).borderBottomWidth)
-    expect(barBw).toBe('1px')
-    // --nb-bar-h equals the measured two-row head so the cards'
-    // scroll-margin clears it exactly (S3).
-    const deskHead = (await page.locator('.nb-head').boundingBox())!
-    const deskBarH = await page.locator('.nb').evaluate(
-      (el) => parseFloat(getComputedStyle(el).getPropertyValue('--nb-bar-h')),
-    )
-    expect(Math.round(deskHead.height)).toBe(Math.round(deskBarH))
+    expect(barBw).toBe('0px') // the seam lives on .nb-head now
     // No horizontal overflow at desktop width either.
     const deskOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     expect(deskOverflow).toBeLessThanOrEqual(1)
-    await page.screenshot({ path: join(SHOTS, `notebook-desktop-${scheme}-sticky.png`), fullPage: false })
-    await page.evaluate(() => window.scrollTo(0, 0))
-    // Run feedback lives on the one-line status; its title carries the
-    // full per-section report — no Details modal exists.
+    await page.screenshot({ path: join(SHOTS, `notebook-desktop-${scheme}-scrolled.png`), fullPage: false })
+    await page.locator('.nb-code').evaluate((el) => { el.scrollTop = 0 })
+
+    // The run title keeps the full diagnostics; there is no Details
+    // control in the status bar any more.
     await page.locator('.nb-toolbar').getByRole('button', { name: 'Run all' }).click()
-    await expect(page.locator('.nb-status')).toContainText('ran', { timeout: 20_000 })
-    const runTitle = await page.locator('.nb-status').getAttribute('title')
+    await expect(page.locator('.nb-status:visible')).toContainText('ran', { timeout: 20_000 })
+    const runTitle = await page.locator('.nb-status:visible').getAttribute('title')
     expect(runTitle).toContain('setup')
     expect(runTitle).toContain('ok')
+    await expect(page.locator('.nb-statusbar:visible').getByRole('button', { name: 'Details' })).toHaveCount(0)
+
+    // Mobile: the outline and inspector collapse behind their toggles.
     await page.setViewportSize({ width: 390, height: 844 })
     await expect(page.locator('.nb')).toBeVisible()
-    // --nb-bar-h must equal the measured sticky head so the cards'
-    // scroll-margin clears both rows at mobile width too (S3).
-    const mobHead = (await page.locator('.nb-head').boundingBox())!
-    const mobBarH = await page.locator('.nb').evaluate(
-      (el) => parseFloat(getComputedStyle(el).getPropertyValue('--nb-bar-h')),
-    )
-    expect(Math.round(mobHead.height)).toBe(Math.round(mobBarH))
-    // No horizontal overflow at mobile width.
+    await expect(page.locator('.nb-outline')).toBeHidden()
+    const sectionsBtn = page.getByRole('button', { name: 'Sections' })
+    await expect(sectionsBtn).toHaveAttribute('aria-expanded', 'false')
+    await sectionsBtn.click()
+    await expect(page.locator('.nb-outline')).toBeVisible()
+    await expect(sectionsBtn).toHaveAttribute('aria-expanded', 'true')
+    // The filter narrows rows; a pick jumps and dismisses the overlay,
+    // returning focus to the toggle.
+    await page.locator('.nb-outline-filter input').fill('repo')
+    await expect(page.locator('.nb-directory .nb-dir-row')).toHaveCount(1)
+    await page.locator('.nb-directory .nb-dir-row', { hasText: 'report' }).click()
+    await expect(page).toHaveURL(/section=report/)
+    await expect(page.locator('.nb-outline')).toBeHidden()
+    await expect(sectionsBtn).toBeFocused()
+    // The inspector toggle opens the rail as an overlay.
+    const inspBtn = page.getByRole('button', { name: 'Inspector', exact: true })
+    await inspBtn.click()
+    await expect(inspector).toBeVisible()
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     expect(overflow).toBeLessThanOrEqual(1)
+    expect(await page.evaluate(() => window.scrollY)).toBe(0)
+    // Compact header at true 390px: the identity column keeps full
+    // width (actions dropped to their own row) — the head stays under
+    // 155px total and the title keeps a comfortable width.
+    const headH = (await page.locator('.detail-head').boundingBox())!.height
+    expect(headH).toBeLessThan(155)
+    const h1W = (await page.locator('.detail-id h1').boundingBox())!.width
+    expect(h1W).toBeGreaterThan(240)
     // The gutter run control is top-aligned with its cell, not stretched
     // to mid-cell: its top sits within 16px of the card's top edge.
     const setupCard = await card(page, 'setup').boundingBox()
@@ -945,20 +1004,17 @@ test('screenshots: notebook desktop/mobile × light/dark', async ({ page }) => {
     expect(gutterOffset).toBeLessThanOrEqual(16)
     // Viewport top — not a tiled fullPage capture.
     await page.screenshot({ path: join(SHOTS, `notebook-mobile-${scheme}.png`), fullPage: false })
-    // A scrolled section card as the second shot.
-    await card(page, 'report').scrollIntoViewIfNeeded()
-    await page.screenshot({ path: join(SHOTS, `notebook-mobile-${scheme}-section.png`), fullPage: false })
-    await card(page, 'notes').scrollIntoViewIfNeeded()
-    await page.screenshot({ path: join(SHOTS, `notebook-mobile-${scheme}-notes.png`), fullPage: false })
+    await inspBtn.click()
+    await page.locator('.nb-code').evaluate((el) => { el.scrollTop = el.scrollHeight })
+    await page.screenshot({ path: join(SHOTS, `notebook-mobile-${scheme}-scrolled.png`), fullPage: false })
     await page.setViewportSize({ width: 1440, height: 1000 })
   }
 
-  // S4: the wrapped mobile toolbar keeps one height whether the status
-  // line is short or clamped at two lines — the status box is reserved.
+  // The reserved status bar keeps one height whether the status line is
+  // short or carries the longest warning it ever shows (S4/S3).
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.locator('.nb')).toBeVisible()
-  const barShort = (await page.locator('.nb-toolbar').boundingBox())!.height
-  expect((await page.locator('.nb-status').boundingBox())!.height).toBe(36)
+  const sbShort = (await page.locator('.nb-statusbar:visible').boundingBox())!.height
   // Killing the child makes the next run hit the restore path — the
   // request does not execute and the status line carries the longest
   // warning text it ever shows (a lost-status wait would not work: the
@@ -969,9 +1025,9 @@ test('screenshots: notebook desktop/mobile × light/dark', async ({ page }) => {
   process.kill(mine[0], 'SIGKILL')
   await page.waitForTimeout(1200)
   await page.locator('.nb-toolbar').getByRole('button', { name: 'Run all' }).click()
-  await expect(page.locator('.nb-status')).toContainText('Runtime restored', { timeout: 30_000 })
-  const barLong = (await page.locator('.nb-toolbar').boundingBox())!.height
-  expect(Math.abs(barLong - barShort)).toBeLessThanOrEqual(1)
+  await expect(page.locator('.nb-status:visible')).toContainText('Runtime restored', { timeout: 30_000 })
+  const sbLong = (await page.locator('.nb-statusbar:visible').boundingBox())!.height
+  expect(Math.abs(sbLong - sbShort)).toBeLessThanOrEqual(1)
 })
 
 // --- dependency graph view (EP-0023) ----------------------------------------
@@ -1266,15 +1322,52 @@ test('graph: Open code lands on the section card', async ({ page }) => {
   const id = await createInstance()
   for (let i = 1; i <= 8; i++) await saveSection(id, `s${i}`, `v${i} = ${i}`)
   await page.goto(`${rt.viteURL}/instances/${id}`)
+  const code = page.locator('.nb-code')
+  // In Code, deep-link to a middle section then scroll away — the URL
+  // selection must not pin the return.
+  await page.locator('.nb-directory .nb-dir-row', { hasText: 's4' }).click()
+  await expect(page).toHaveURL(/section=s4/)
+  await expect(card(page, 's4')).toBeInViewport()
+  await code.evaluate((el) => { el.scrollTop = el.scrollHeight })
   await openGraph(page)
   await graphNode(page, 's8').click()
   await page.locator('.nb-graph-aside').getByRole('button', { name: 'Open code' }).click()
 
-  await expect(page.locator('.nb-code')).toBeVisible()
+  await expect(code).toBeVisible()
   expect(page.url()).not.toContain('nbview')
   expect(page.url()).toContain('section=s8')
-  // The deep-link scroll fires on return from the graph panel.
+  // The deep-link scroll fires on return from the graph panel — s8,
+  // not the scrolled-away s4 position.
   await expect(card(page, 's8')).toBeInViewport({ timeout: 10_000 })
+})
+
+test('regression: ?view=activity&section= still scrolls the code pane on Notebook open', async ({ page }) => {
+  const id = await createInstance()
+  for (let i = 1; i <= 10; i++) await saveSection(id, `sec${i}`, `v${i} = ${i}`)
+  // Land on Activity with a pending section deep link — the code pane
+  // is hidden, so nothing can scroll yet.
+  await page.goto(`${rt.viteURL}/instances/${id}?view=activity&section=sec8`)
+  await expect(page.getByRole('tab', { name: 'Activity', selected: true })).toBeVisible()
+  // Opening Notebook picks up the deferred navigation — sec8 lands in
+  // the pane, not a stale top position.
+  await page.getByRole('tab', { name: 'Notebook' }).click()
+  await expect(card(page, 'sec1')).toBeVisible()
+  await expect(card(page, 'sec8')).toBeInViewport({ timeout: 10_000 })
+  await expect(page.locator('.nb-directory .nb-dir-row', { hasText: 'sec8' }))
+    .toHaveAttribute('aria-current', 'true')
+  // A user scroll hands the spy back; re-picking the SAME row still
+  // jumps and keeps it active.
+  const codeBox = (await page.locator('.nb-code').boundingBox())!
+  await page.mouse.move(codeBox.x + codeBox.width / 2, codeBox.y + codeBox.height / 2)
+  await page.mouse.wheel(0, -600)
+  await expect.poll(async () => {
+    const t = await page.locator('.nb-directory .nb-dir-row[aria-current="true"]').textContent()
+    return t ?? ''
+  }, { timeout: 10_000 }).not.toContain('sec8')
+  await page.locator('.nb-directory .nb-dir-row', { hasText: 'sec8' }).click()
+  await expect(page.locator('.nb-directory .nb-dir-row', { hasText: 'sec8' }))
+    .toHaveAttribute('aria-current', 'true')
+  await expect(card(page, 'sec8')).toBeInViewport({ timeout: 10_000 })
 })
 
 test('graph: running sections repaints state without moving nodes', async ({ page }) => {
@@ -1286,10 +1379,10 @@ test('graph: running sections repaints state without moving nodes', async ({ pag
   await expect(graphNode(page, 'r1')).toHaveAttribute('data-state', 'not_run')
   const before = await nodeBoxes(page)
 
-  // Run controls stay in the sticky toolbar in graph view; the state
+  // Run controls stay in the toolbar in graph view; the state
   // repaint is paint-only — no node may move (S1).
   await page.locator('.nb-toolbar').getByRole('button', { name: 'Run all' }).click()
-  await expect(page.locator('.nb-status')).toContainText('ran', { timeout: 30_000 })
+  await expect(page.locator('.nb-status:visible')).toContainText('ran', { timeout: 30_000 })
   await expect(graphNode(page, 'r1')).toHaveAttribute('data-state', 'fresh', { timeout: 20_000 })
   await expect(graphNode(page, 'r2')).toHaveAttribute('data-state', 'fresh', { timeout: 20_000 })
   expect(await nodeBoxes(page)).toEqual(before)
@@ -1317,14 +1410,14 @@ test('run: a consumer runs its not-fresh upstream first — dependency order, no
   })
   await c.getByRole('button', { name: 'Run section' }).click()
   // The single-target run pulled in upstream — summarized as a batch.
-  await expect(page.locator('.nb-status')).toContainText('2 ran', { timeout: 30_000 })
-  await expect(page.locator('.nb-status')).toContainText('2 ok')
+  await expect(page.locator('.nb-status:visible')).toContainText('2 ran', { timeout: 30_000 })
+  await expect(page.locator('.nb-status:visible')).toContainText('2 ok')
   // Exactly one dry-run preview, then one real run.
   await expect.poll(() => realPosts, { timeout: 20_000 }).toBe(1)
   expect(dryPosts).toBe(1)
   // Plan order is provider → consumer — the status title lists the
   // per-section rows in execution order (no Details modal).
-  const reportTitle = await page.locator('.nb-status').getAttribute('title')
+  const reportTitle = await page.locator('.nb-status:visible').getAttribute('title')
   const providerAt = reportTitle!.indexOf('provider · ok')
   const consumerAt = reportTitle!.indexOf('consumer · ok')
   expect(providerAt).toBeGreaterThanOrEqual(0)
@@ -1352,8 +1445,8 @@ test('run: a fresh upstream is reused, not re-executed', async ({ page }) => {
 
   await c.getByRole('button', { name: 'Run section' }).click()
   // provider is fresh → reused; consumer is the target → runs.
-  await expect(page.locator('.nb-status')).toContainText('1 ran', { timeout: 30_000 })
-  await expect(page.locator('.nb-status')).toContainText('1 reused')
+  await expect(page.locator('.nb-status:visible')).toContainText('1 ran', { timeout: 30_000 })
+  await expect(page.locator('.nb-status:visible')).toContainText('1 reused')
   const execsAfter = (await (await rt.client.get(`/api/v1/instances/${id}/executions`)).json()).executions.length
   // Only the consumer executed — the fresh upstream cost no exec.
   expect(execsAfter).toBe(execsBefore + 1)
@@ -1385,7 +1478,7 @@ test('run: an agent edit to an upstream section blocks the run (F3)', async ({ p
     if (r.method() === 'POST' && r.url().endsWith('/notebook/run') && !r.postDataJSON()?.dry_run) realPosts++
   })
   await c.getByRole('button', { name: 'Run section' }).click()
-  await expect(page.locator('.nb-status')).toContainText('changed on the server', { timeout: 20_000 })
+  await expect(page.locator('.nb-status:visible')).toContainText('changed on the server', { timeout: 20_000 })
   // The dry-run preview went out but no real run request was ever sent.
   expect(realPosts).toBe(0)
   // The displayed draft is preserved.
@@ -1409,11 +1502,11 @@ test('run: graph_blocked shows the server diagnostic and executes nothing', asyn
   await c.getByRole('button', { name: 'Run section' }).click()
   // The server's diagnostic reaches the status line AND the cell note —
   // it is not the generic revision-conflict text.
-  await expect(page.locator('.nb-status')).toContainText('no section defines it', { timeout: 20_000 })
+  await expect(page.locator('.nb-status:visible')).toContainText('no section defines it', { timeout: 20_000 })
   await expect(c.locator('.nb-note')).toContainText('no section defines it')
   expect(realPosts).toBe(0)
   // No run report exists — the block is only the status line + title.
-  const title = await page.locator('.nb-status').getAttribute('title')
+  const title = await page.locator('.nb-status:visible').getAttribute('title')
   expect(title).toContain('no section defines it')
 })
 
@@ -1428,7 +1521,7 @@ test('run: a failed section shows its error on its card after a batch run', asyn
   await expect(bad).toBeVisible()
   await expect(bad.getByText('Saved', { exact: true })).toBeVisible({ timeout: 15_000 })
   await page.locator('.nb-toolbar').getByRole('button', { name: 'Run all' }).click()
-  await expect(page.locator('.nb-status')).toContainText('failed', { timeout: 30_000 })
+  await expect(page.locator('.nb-status:visible')).toContainText('failed', { timeout: 30_000 })
   // The failure is on the card itself — the error output block, no
   // Details modal involved.
   await expect(bad.locator('.nb-output-err .nb-output-pre')).toContainText('boom-marker', { timeout: 15_000 })
@@ -1550,7 +1643,7 @@ test('graph: Run section from the aside runs it and repaints without moving node
   await graphNode(page, 'g2').click()
   await page.locator('.nb-graph-aside').getByRole('button', { name: 'Run section' }).click()
   // g1 is g2's not-fresh upstream — it runs first, then g2; both repaint.
-  await expect(page.locator('.nb-status')).toContainText('ran', { timeout: 30_000 })
+  await expect(page.locator('.nb-status:visible')).toContainText('ran', { timeout: 30_000 })
   await expect(graphNode(page, 'g2')).toHaveAttribute('data-state', 'fresh', { timeout: 20_000 })
   await expect(graphNode(page, 'g1')).toHaveAttribute('data-state', 'fresh', { timeout: 20_000 })
   // Feedback lives in the toolbar status line; node boxes and the
@@ -1618,28 +1711,24 @@ test('graph: zoom persists across polls; a chip click pans a node into view', as
   expect(await viewportTransform(page)).not.toBe(vpZoomed)
 })
 
-test('graph: the wheel over the canvas still scrolls the page', async ({ page }) => {
+test('graph: the wheel over the canvas scrolls nothing', async ({ page }) => {
   const id = await createInstance()
   await saveSection(id, 'w1', 'a = 1')
   await saveSection(id, 'w2', 'b = a + 1')
   await page.goto(`${rt.viteURL}/instances/${id}`)
-  // A short viewport makes the fixed-height graph box taller than the
-  // remaining page — the window must still scroll with the pointer
-  // over the canvas (panOnScroll stays off; wheel is not captured).
-  await page.setViewportSize({ width: 1440, height: 460 })
   await openGraph(page)
   await expect(page.locator('.react-flow__node')).toHaveCount(2)
   await graphFitted(page)
 
+  // The workbench frame never scrolls and the canvas does not capture
+  // the wheel (zoomOnScroll is off): the graph viewport stays put and
+  // the window offset remains pinned at 0.
   const vpBefore = await viewportTransform(page)
-  await page.evaluate(() => window.scrollTo(0, 10))
   const cb = (await page.locator('.nb-graph-canvas').boundingBox())!
   await page.mouse.move(cb.x + cb.width / 2, cb.y + cb.height / 2)
-  const y0 = await page.evaluate(() => window.scrollY)
   await page.mouse.wheel(0, 300)
-  await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 5_000 }).toBeGreaterThan(y0)
-  // The canvas viewport itself did not pan — the wheel belonged to
-  // the page.
+  await page.waitForTimeout(400)
+  expect(await page.evaluate(() => window.scrollY)).toBe(0)
   expect(await viewportTransform(page)).toBe(vpBefore)
 })
 
@@ -1765,40 +1854,41 @@ test('view switch: Code→Graph reveals the graph; polls never scroll; Code rest
   const id = await createInstance()
   for (let i = 1; i <= 10; i++) await saveSection(id, `sec${i}`, `v${i} = ${i}`)
   await page.goto(`${rt.viteURL}/instances/${id}`)
+  const code = page.locator('.nb-code')
   await expect(card(page, 'sec1')).toBeVisible()
-  // Deep scroll in Code view — the page (window) is the scroller.
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
-  const yCode = await page.evaluate(() => window.scrollY)
+  // Deep scroll in Code view — the code pane is the only scroller.
+  const yCode = await code.evaluate((el) => {
+    el.scrollTop = el.scrollHeight - el.clientHeight
+    return el.scrollTop
+  })
   expect(yCode).toBeGreaterThan(0)
+  expect(await page.evaluate(() => window.scrollY)).toBe(0)
 
-  // Explicit switch: the graph box lands just under the sticky head,
-  // not at the bottom of the long card list.
+  // Explicit switch: the graph panel fills the row — right under the
+  // toolbar, above the status bar.
   await page.locator('.nb-view-toggle').getByRole('button', { name: 'Graph' }).click()
   await expect(page.locator('.nb-graph')).toBeVisible()
   await graphFitted(page)
-  await expect.poll(async () => {
-    const g = await page.locator('.nb-graph').boundingBox()
-    return g ? g.y : -1
-  }, { timeout: 5_000 }).toBeGreaterThan(60)
-  await page.waitForTimeout(600) // let the smooth scrollIntoView settle
-  const gTop = (await page.locator('.nb-graph').boundingBox())!.y
-  expect(gTop).toBeLessThan(320) // revealed near the viewport top
-  expect(gTop).toBeGreaterThan(60) // and clear of the sticky head
-  const yGraph = await page.evaluate(() => window.scrollY)
+  const barBox = (await page.locator('.nb-toolbar').boundingBox())!
+  const sbBox = (await page.locator('.nb-statusbar:visible').boundingBox())!
+  const gBox = (await page.locator('.nb-graph').boundingBox())!
+  expect(gBox.y).toBeGreaterThanOrEqual(barBox.y + barBox.height)
+  expect(gBox.y + gBox.height).toBeLessThanOrEqual(sbBox.y + 1)
 
-  // A structural poll re-lays the graph out but must NOT scroll the
-  // page — viewport pan/zoom and window scroll both stay put.
+  // A structural poll re-lays the graph out but must NOT scroll
+  // anything — viewport pan/zoom, code pane and window all stay put.
   await saveSection(id, 'tail', 'v11 = v10 + 1')
   await expect(page.locator('.react-flow__node')).toHaveCount(11, { timeout: 20_000 })
   await page.waitForTimeout(500)
-  expect(await page.evaluate(() => window.scrollY)).toBe(yGraph)
+  expect(await page.evaluate(() => window.scrollY)).toBe(0)
 
-  // Back to Code: the previous card-list scroll position is restored
+  // Back to Code: the previous code-pane scroll position is restored
   // (no ?section= navigation is involved, so nothing fights it).
   await page.locator('.nb-view-toggle').getByRole('button', { name: 'Code' }).click()
-  await expect(page.locator('.nb-code')).toBeVisible()
-  await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 5_000 })
+  await expect(code).toBeVisible()
+  await expect.poll(() => code.evaluate((el) => el.scrollTop), { timeout: 5_000 })
     .toBeGreaterThan(yCode - 120)
+  expect(await page.evaluate(() => window.scrollY)).toBe(0)
 })
 
 test('graph: nodes are keyboard-focusable and Enter/Space select them', async ({ page }) => {
@@ -1874,15 +1964,15 @@ test('screenshots: 2x corner close-ups — head chip, toggle, graph node', async
     const page = await ctx.newPage()
     await page.goto(`${rt.viteURL}/instances/${id}`)
     await expect(card(page, 'alpha')).toBeVisible()
-    // (a) the head's left end with the first chip active.
+    // (a) the outline's top with the first row active.
     const firstChip = page.locator('.nb-dir-row').first()
     await firstChip.click()
     await expect(firstChip).toHaveAttribute('aria-current', 'true')
     await page.waitForTimeout(250)
-    const head = (await page.locator('.nb-head').boundingBox())!
+    const outline = (await page.locator('.nb-outline').boundingBox())!
     await page.screenshot({
-      path: join(SHOTS, `nb-corner-head-chip-${scheme}-2x.png`),
-      clip: { x: head.x, y: head.y, width: Math.min(460, head.width), height: head.height },
+      path: join(SHOTS, `nb-corner-outline-row-${scheme}-2x.png`),
+      clip: { x: outline.x, y: outline.y, width: Math.min(460, outline.width), height: Math.min(220, outline.height) },
     })
     // (b) the segmented toggle — Code active, then Graph active.
     const tog = (await page.locator('.nb-view-toggle').boundingBox())!
