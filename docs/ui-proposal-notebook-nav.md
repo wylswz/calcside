@@ -1,6 +1,8 @@
 # UI Proposal: persistent section navigation + file browser reorganization
 
-> Status: implemented (Option A + Live state tabs).
+> Status: implemented (Option A + Live state tabs), then superseded by
+> the v1 workbench redesign recorded below — the two-row sticky header
+> is now a fixed grid (toolbar / outline + code-or-graph / status bar).
 > Targets the notebook UI delivered by EP-0022 (`feat/instance-notebooks`,
 > not yet on `main`). If the EP-0022 branch has moved since this was
 > written, re-check the component/CSS references below before
@@ -80,7 +82,7 @@ users cross-reference activity/audit; not worth the cost yet.
 ```
 side-col
 ├─ [ State ] [ Files ]              ← tabs; both stay mounted (hidden
-│    State: Variables + filter + Memory (unchanged)   switching, C2/C3)
+│    State: Variables + filter   switching, C2/C3)
 │    Files: ArtifactBrowser (breadcrumb + list + export + limits)
 ├─ Boundary
 ├─ Agent
@@ -110,7 +112,9 @@ Rationale:
 
 1. Tabs vs stacked sections: **tabs chosen** — `State`/`Files` under one
    "Live state" tablist, both panels mounted behind `hidden`.
-2. Memory block stays under Variables (current), not a third tab.
+2. Memory leaves the inspector entirely — the status bar reads it from
+   the single `useInstanceInspect` snapshot the page owns (`current /
+   limit`, peak in the tooltip); State keeps Variables only.
 3. Side column width stays **340px** — the file rows already truncate;
    no widening.
 4. Export flow stays a dialog/section inside the Files tab, unchanged.
@@ -155,3 +159,60 @@ rows) when implementing.
       work-surface is freed of the bottom Results block.
 - [x] No interaction-stability invariant regresses (S1/S3/S5 rows
       updated in `docs/interaction-stability.md`).
+## v1 workbench update (implemented)
+
+The route became a full workbench: the console shell itself went
+global — one header + hamburger drawer at every width, `.console-main`
+the shared scroller — and `/instances/:id` opts that pane out of
+page scroll so the
+main area is `detail-grid` = notebook/activity surface + 310px
+inspector rail (right-edge overlay under 1240px, toggled from the view
+strip), and the notebook itself is a fixed grid:
+
+```
+.nb  (columns: auto minmax(0,1fr); rows: auto minmax(0,1fr) auto)
+├─ row1 .nb-head    single toolbar: run actions | RevealNew | Code|Graph | Sections
+├─ row2 .nb-outline (192px, filter + vertical directory) | .nb-code / .nb-graph-panel
+└─ row3 .nb-statusbar  one-line status (role="status", full text on title/sr-only) + memory
+```
+
+Decisions taken, with the references behind them:
+
+- **Workbench frame, not a document page** — the console canvas locks to
+  `100dvh`, `detail-grid` is `minmax(0,1fr) auto`, and the code pane is
+  the central scroller — side contents (the outline's directory and
+  the inspector body) scroll independently inside their own columns
+  while the window never moves. Follows the VS Code workbench regions model
+  (https://code.visualstudio.com/docs/editing/getting-started/userinterface)
+  and JupyterLab's docked side panels
+  (https://jupyterlab.readthedocs.io/en/stable/user/interface.html).
+- **Sections outline as a left rail** — order/name/state-dot rows with a
+  labeled filter, vertical nearest scrolling inside the column only;
+  under 740px it becomes an overlay and picking a row dismisses it.
+- **Inspector rail** — State/Files, Boundary and Agent stay mounted
+  behind `hidden` in a 310px rail that overlays (never squeezes) the
+  code under 1240px.
+- **Single toolbar row, status bar at the bottom** — diagnostics are one
+  `role="status"` line with the full text on `title` (mirrored by an
+  `sr-only` twin; the visible text is `aria-hidden`), and the bar's far
+  end shows memory from the shared inspect snapshot — current / limit
+  inline, peak in the tooltip, `—` when the instance is not running.
+  Activity renders the same `.nb-statusbar` footer as a sibling of its
+  scroller, so the workbench keeps one bottom bar per view. Section
+  metadata moved the same way: no footers and no Details dialogs — the
+  state badge's native `title` tooltip carries last-run/facts/read-only
+  notes.
+- **Graph + outline as panes** — explicit execution stays: nothing runs
+  implicitly; the console renders the server-derived `notebook.graph`
+  built from the saved sections
+  (Observable's reactive dataflow is the model for *dependency
+  visualization* here, not execution —
+  https://observablehq.github.io/notebook-kit/system-guide — Calcside
+  sections still only run on explicit Run/Run all/Run stale).
+- No resizable splits or persistence in v1; panel defaults are
+  viewport-derived (`matchMedia` 740px/1240px) with explicit toggles.
+
+Invariants are unchanged: paint-only selection (S1), fixed reveal slot
+and grid rows (S3/S5), both view panels and rail panels kept mounted
+(C2/C3), the active row is kept visible via the column's own
+`scrollTop` — never `scrollIntoView` (S6).

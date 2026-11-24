@@ -297,7 +297,8 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
   const switchView = (next: View) => {
     setView(next)
     const tabs = tabsRef.current
-    if (tabs && tabs.getBoundingClientRect().top < 0) tabs.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' })
+    if (tabs && tabs.getBoundingClientRect().top < (tabs.closest('.console-main')?.getBoundingClientRect().top ?? 0))
+      tabs.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' })
   }
   const openSettings = (section: string) => { setView('settings'); setReveal(section) }
   const append = (key: ItemKey) => {

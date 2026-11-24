@@ -1,103 +1,85 @@
-/* notebook.css — Jupyter-style cell notebook inside instance-detail.
-   Flat cells, a sticky one-line status toolbar, ghost/xs controls only
-   (P2 — no primary or default-size buttons inside .nb). Paint-only
-   states (S1); polled arrivals stay held behind "Show N new" (S5). */
+/* notebook.css — workbench notebook inside instance-detail.
+   Grid panes: toolbar row / outline + code-or-graph / status bar.
+   The code pane is the only scroller — the window never moves.
+   Ghost/xs controls only inside .nb (P2). Paint-only states (S1);
+   polled arrivals stay held behind "Show N new" (S5). */
 
-/* Nested rounded corners are concentric AND circular (AGENTS.md): the
-   gap between two nested edges must be equal on both axes, then the
-   inner radius is outer − gap via calc() — never an elliptical `a / b`
-   radius to compensate for unequal gaps. The head's geometry lives in
-   these properties so every derived radius stays a visible calc(). */
 .nb {
-  display: grid; gap: 12px;
-  --nb-bar-h: 71px;
-  --nb-head-pad: 6px;
-  --nb-head-border: 1px;
-  --nb-head-radius: var(--radius-surface);        /* 12px outer corner */
-  /* corner-near inner shapes sit border+pad = 7px inside the panel's
-     border-box edge on BOTH axes → one circular inner radius (5px) */
-  --nb-head-gap: calc(var(--nb-head-border) + var(--nb-head-pad));      /* 7px */
-  --nb-head-corner-r: calc(var(--nb-head-radius) - var(--nb-head-gap)); /* 5px */
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%; min-height: 0; gap: 0;
+  position: relative;
 }
 /* grid items default to min-width:auto — a wide CodeMirror line or
-   unbreakable fact string would stretch the track past the viewport.
+   unbreakable fact string would stretch the track past the pane.
    Let every card/section shrink; inner scrollers clip horizontally. */
 .nb > *, .nb-cards > * { min-width: 0; }
 
-/* ---- sticky head: ONE floating panel ----
-   Sits 8px under the console header (57px + 8px gap) as an opaque
-   raised surface — paper fill, hairline edge, float shadow, uniform
-   6px padding, no negative margins. Inside it a 30px toolbar row
-   (26px controls + 3px above the hairline) and a 27px directory row
-   (3px below the hairline + 24px chips) fill the padding box; the
-   whole panel is a fixed height (S3) and cards scroll beneath with
-   scroll-margin clearance. */
+/* ---- head: one toolbar row in flow (row 1, both columns) ---- */
 .nb-head {
-  position: sticky; top: 65px; z-index: 30;
-  padding: var(--nb-head-pad);
+  grid-column: 1 / -1; grid-row: 1;
+  position: relative;
   background: rgb(var(--paper));
-  border: var(--nb-head-border) solid var(--edge);
-  border-radius: var(--nb-head-radius);
-  box-shadow: var(--shadow-float);
-}
-/* mask the 8px gap to the console header — scrolling content must not
-   peek through between header and panel (the strip matches the paper
-   work surface, so the gap reads as background, not content) */
-.nb-head::before {
-  content: ''; position: absolute; left: 0; right: 0; top: -9px; height: 9px;
-  background: rgb(var(--paper));
+  border-bottom: 1px solid var(--edge);
 }
 .nb-toolbar {
   display: flex; align-items: center; gap: 4px 10px; flex-wrap: nowrap;
-  /* 26px content for the controls + 3px of space above the hairline —
-     the directory row mirrors it below (equal spacing) */
-  height: 30px; padding-bottom: 3px;
-  border-bottom: 1px solid var(--edge);
+  height: 40px; padding: 0 8px;
 }
 .nb-toolbar-actions { display: flex; align-items: center; gap: 4px; flex: none; }
-.nb-status {
-  flex: 1; min-width: 0;
-  display: flex; align-items: center; gap: 6px;
-  font-size: 12px; line-height: 18px; color: rgb(var(--sec));
-}
-.nb-status-warn { color: rgb(var(--warn-text)); }
-.nb-status-text {
-  min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-}
-.nb-toolbar-side { display: flex; align-items: center; gap: 4px; flex: none; margin-left: 8px; }
-/* every control in the head shares the panel's corner treatment:
-   circular radius = outer 12px − the uniform 7px inset = 5px (S1:
-   paint-only state changes either way). Three classes beat the
-   `button[data-ui='button'][data-size='xs']` material rule (0-2-1). */
-.nb .nb-toolbar [data-ui='button'] { border-radius: var(--nb-head-corner-r); }
+.nb-toolbar-side { display: flex; align-items: center; gap: 4px; flex: none; margin-left: auto; }
+.nb-toolbar-side > * + * { margin-left: 4px; }
 
-/* section directory — fixed-height chip strip as row 2 of the floating
-   head (S5: held order; constant height, horizontal scroll not wrap) */
-.nb-directory {
-  display: flex; align-items: flex-end; flex-wrap: nowrap; gap: 2px;
-  /* 3px below the hairline + 24px chips bottom-aligned → chip bottoms
-     sit on the content-box bottom edge, 7px from the panel's edge */
-  height: 27px; overflow-x: auto;
-  scrollbar-width: none;
+/* ---- section outline (row 2, col 1): filter + vertical directory ---- */
+.nb-outline {
+  grid-column: 1; grid-row: 2;
+  width: 192px; min-height: 0;
+  display: flex; flex-direction: column;
+  background: rgb(var(--paper));
+  border-right: 1px solid var(--edge);
 }
-.nb-directory::-webkit-scrollbar { display: none; }
+.nb-outline-head {
+  flex: none; padding: 8px 8px 6px;
+  border-bottom: 1px solid var(--detail-edge);
+}
+.nb-outline-title {
+  margin: 0 0 6px; font-size: 11px; font-weight: 600;
+  letter-spacing: 0.05em; text-transform: uppercase; color: rgb(var(--mute));
+}
+.nb-outline-filter { display: block; }
+.nb-outline-filter input {
+  width: 100%; height: 26px; padding: 0 8px;
+  border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-inset);
+  background: rgb(var(--paper)); box-shadow: var(--detail-shadow-inset);
+  font-size: 12px; color: rgb(var(--ink));
+}
+.nb-outline-filter input::placeholder { color: rgb(var(--mute)); }
+.nb-outline-filter input:focus { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.nb-outline-filter input::-webkit-search-cancel-button { display: none; }
+
+/* directory — vertical rows in held order; fixed height, paint-only
+   active (S1), scrolls inside the pane only */
+.nb-directory {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; gap: 1px;
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: 4px 6px;
+}
 .nb-dir-row {
-  /* positioned so the row's .sr-only state text is clipped by the
-     directory's overflow-x scroller instead of escaping to the page. */
-  position: relative;
-  display: inline-flex; align-items: center; gap: 6px; flex: none;
-  border: 0; background: transparent; cursor: pointer;
-  height: 24px; padding: 0 10px;
-  border-radius: var(--nb-head-corner-r);
-  font-size: 12px; color: rgb(var(--body)); max-width: 100%;
+  display: flex; align-items: center; gap: 6px; flex: none; width: 100%;
+  border: 0; background: transparent; cursor: pointer; text-align: left;
+  height: 30px; padding: 0 8px;
+  border-radius: var(--detail-radius-inset);
+  font-size: 12px; color: rgb(var(--body));
 }
 .nb-dir-row:hover { background: rgb(var(--ink) / 0.05); }
 .nb-dir-row:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
-/* scroll-spy/explicit-pick highlight is paint-only (S1): a tinted pill
-   + name colour — the chip box never changes */
+/* scroll-spy/explicit-pick highlight is paint-only (S1): a tinted row
+   + name colour — the box never changes */
 .nb-dir-row[aria-current='true'] { background: rgb(var(--accent) / 0.14); }
 .nb-dir-row[aria-current='true'] .nb-dir-name { color: rgb(var(--accent)); }
-/* a single-section run pulses its chip's dot — opacity only, and only
+/* a single-section run pulses its row's dot — opacity only, and only
    when reduced motion is not requested (P4); the graph node's dot
    pulses the same way */
 @keyframes nb-dir-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
@@ -106,15 +88,17 @@
   .nb-graph-node[data-running='true'] .nb-dir-dot { animation: nb-dir-pulse 420ms ease-in-out infinite; }
 }
 .nb-dir-ord {
+  flex: none; min-width: 3ch; text-align: right;
   font-family: var(--font-mono); font-size: 11px; color: rgb(var(--mute));
   font-variant-numeric: tabular-nums;
 }
 .nb-dir-name {
+  flex: 1; min-width: 0;
   font-family: var(--font-mono); font-weight: 500; color: rgb(var(--ink));
-  max-width: 20ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 /* state recolour is a short paint-only cross-fade (S1) everywhere the
-   dot appears — chips, cards, graph nodes, the aside */
+   dot appears — rows, cards, graph nodes, the graph aside */
 .nb-dir-dot {
   width: 7px; height: 7px; flex: none; border-radius: 50%;
   background: rgb(var(--mute));
@@ -123,26 +107,24 @@
 .nb-dir-dot[data-state='fresh'] { background: rgb(var(--sec)); }
 .nb-dir-dot[data-state='stale'] { background: rgb(var(--warn-text)); }
 .nb-dir-dot[data-state='failed'] { background: rgb(var(--danger)); }
+.nb-dir-empty { margin: 0; padding: 8px; font-size: 12px; color: rgb(var(--sec)); }
 
 /* Code|Graph view — a real segmented control on the seg-filters
-   material, sized down to the toolbar's 26px control scale: one
-   rounded track, two equal segments, the active segment a raised
-   thumb (material.css paints the states — paint-only, S1). No track
-   border: the thumb's inset gap is the padding alone, so thumb radius
-   = track radius − padding stays concentric and circular. */
+   material, sized down to the toolbar's control scale: one rounded
+   track, two equal segments, the active segment a raised thumb
+   (paint-only state, S1). Thumb radius = track radius − padding so
+   the corners stay concentric and circular. */
 .nb .seg-filters.nb-view-toggle {
   flex: none; width: 104px; height: 26px; gap: 2px;
   --nb-toggle-pad: 2px;
-  --nb-toggle-thumb-r: calc(var(--nb-head-corner-r) - var(--nb-toggle-pad)); /* 3px */
+  --nb-toggle-thumb-r: calc(var(--detail-radius-inset) - var(--nb-toggle-pad));
   padding: var(--nb-toggle-pad);
   border: 0;
-  border-radius: var(--nb-head-corner-r);
-  /* ≥12px clear of the "Show N new" slot on its left */
-  margin-left: 8px;
+  border-radius: var(--detail-radius-inset);
 }
 .nb .seg-filters.nb-view-toggle button {
-  /* fills the track's 22px content box → the thumb's gap to the track
-     edge is the 2px padding on ALL sides (concentric, circular) */
+  /* fills the track's content box → the thumb's gap to the track edge
+     is the padding on ALL sides (concentric, circular) */
   flex: 1; min-width: 0; height: 22px; min-height: 22px;
   padding: 0 6px; font-size: 12px; font-weight: 500; line-height: 1;
   display: inline-flex; align-items: center; justify-content: center;
@@ -152,9 +134,53 @@
 .nb .seg-filters.nb-view-toggle button:focus-visible {
   outline: 2px solid rgb(var(--accent)); outline-offset: 1px;
 }
+.nb .nb-sections-btn[aria-expanded='true'] { color: rgb(var(--accent)); }
 @media (max-width: 900px) {
   .nb .seg-filters.nb-view-toggle { height: auto; }
   .nb .seg-filters.nb-view-toggle button { height: auto; min-height: 44px; }
+}
+
+/* ---- main panes (row 2, col 2): code scroller or graph ---- */
+.nb-code {
+  grid-column: 2; grid-row: 2;
+  display: grid; align-content: start;
+  overflow: auto; min-height: 0; overscroll-behavior: contain;
+  padding: 12px 16px;
+}
+.nb-graph-panel {
+  grid-column: 2; grid-row: 2;
+  display: flex; min-height: 0;
+  padding: 12px 16px;
+}
+.nb-code[hidden], .nb-graph-panel[hidden], .nb-outline[hidden] { display: none; }
+
+/* ---- status bar (row 3, both columns): one-line summary + memory ---- */
+.nb-statusbar {
+  grid-column: 1 / -1; grid-row: 3;
+  flex: none;
+  display: flex; align-items: center; gap: 8px;
+  height: 34px; padding: 0 10px;
+  background: rgb(var(--paper));
+  border-top: 1px solid var(--edge);
+}
+.nb-status {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; line-height: 18px; color: rgb(var(--sec));
+}
+.nb-status-warn { color: rgb(var(--warn-text)); }
+.nb-status-text {
+  min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.nb-memory {
+  flex: none; display: inline-flex; align-items: baseline; gap: 4px;
+  padding-inline-start: 8px; border-inline-start: 1px solid var(--edge);
+  font-size: 12px; color: rgb(var(--sec));
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.nb-memory strong { font-weight: 500; color: rgb(var(--body)); }
+@media (max-width: 500px) {
+  .nb-memory-limit { display: none; }
 }
 
 /* ---- cells: flat bordered blocks, 40px gutter + body ---- */
@@ -163,7 +189,6 @@
   display: grid; grid-template-columns: 40px minmax(0, 1fr);
   border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-inset);
   background: var(--detail-work);
-  scroll-margin-top: calc(73px + var(--nb-bar-h));
 }
 .nb-card:focus-within {
   border-color: rgb(var(--accent) / 0.35);
@@ -173,14 +198,14 @@
   /* flex-start: the run control keeps its own height at the top of the
      cell instead of stretching to the full cell height (S3/S4). */
   display: flex; align-items: flex-start; justify-content: center;
-  padding: 13px 0 0; min-width: 0;
+  padding: 10px 0 0; min-width: 0;
 }
-.nb-body { min-width: 0; padding: 0 14px 10px; }
+.nb-body { min-width: 0; padding: 0 12px 8px; }
 
 /* header row: ordinal · name · state · once · description · actions */
 .nb-card-head {
   display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap;
-  min-height: 32px; padding-top: 10px;
+  min-height: 30px; padding-top: 8px;
 }
 .nb-ordinal {
   font-family: var(--font-mono); font-size: 12px; color: rgb(var(--mute));
@@ -288,31 +313,25 @@
   border-left: 3px solid rgb(var(--warn)); color: rgb(var(--warn-text));
 }
 
-/* footer: one quiet line — last run, facts, read-only note */
-.nb-card-foot {
-  margin-top: 8px; padding-top: 8px;
-  border-top: 1px solid var(--detail-edge);
-  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px;
-  font-size: 11px; line-height: 16px; color: rgb(var(--mute));
-}
-.nb .nb-facts code { font-family: var(--font-mono); font-size: 11px; }
-.nb-readonly-note { color: rgb(var(--sec)); }
 
-/* inserter rows between cells — fixed height (S3). The Button
-   primitive supplies the ghost/xs chrome (P2); this class shrinks it
-   into a quiet framed 22px control inside the 32px seam — the ghost
-   hover/focus paint still wins on specificity. Mobile restores the
-   44px hit target with the row below. */
+/* inserter rows between cells — a full-width quiet card on a fixed
+   40px seam (S3). The Button primitive supplies the ghost chrome (P2);
+   hover/focus is paint-only so nothing measures differently. */
 .nb-insert {
-  height: 32px; display: flex; align-items: center; justify-content: center;
+  height: 40px; display: flex; align-items: center;
 }
 .nb [data-ui='button'].nb-insert-btn {
-  width: 22px; height: 22px; min-height: 22px; padding: 0;
-  border-color: var(--detail-edge);
-  background-color: var(--detail-work);
-  color: rgb(var(--sec));
+  width: 100%; min-width: 0; min-height: 28px; height: 28px;
+  gap: 6px; justify-content: center; padding: 0 8px;
+  border: 1px dashed var(--edge); border-radius: var(--detail-radius-inset);
+  background: rgb(var(--surface) / 0.35); color: rgb(var(--sec));
+  font-size: 12px;
 }
-.nb [data-ui='button'].nb-insert-btn svg { width: 12px; height: 12px; }
+.nb [data-ui='button'].nb-insert-btn:hover {
+  background: rgb(var(--accent) / .06); border-color: rgb(var(--accent) / .4);
+  color: rgb(var(--accent));
+}
+.nb [data-ui='button'].nb-insert-btn svg { width: 14px; height: 14px; }
 
 /* empty notebook — intentional, not an error */
 .nb-empty {
@@ -335,24 +354,19 @@
 .view-tab:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }
 
 /* ---- dependency graph view (read-only) ----
-   Fixed-height region: a React Flow canvas (drag-pan, pinch/ctrl-wheel
-   zoom, Controls fit) beside a fixed-width detail aside that stacks
-   below the canvas under 820px. The graph follows polls live: a changed
-   dagre layout tweens node positions in JS (~250ms, edges stay
-   attached), entries/exits fade, and an unchanged structure moves
-   nothing — the viewport only moves on first reveal or an explicit
-   user action (S5/S6). Selection and state are paint-only (S1). */
-.nb-code { display: grid; gap: 12px; }
-.nb-code[hidden], .nb-graph-panel[hidden] { display: none; }
-
+   Fills the row-2/col-2 pane: a React Flow canvas (drag-pan,
+   pinch/ctrl-wheel zoom, Controls fit) beside a fixed-width detail
+   aside that stacks below the canvas under 820px. The graph follows
+   polls live: a changed dagre layout tweens node positions in JS
+   (~250ms, edges stay attached), entries/exits fade, and an unchanged
+   structure moves nothing — the viewport only moves on first reveal
+   or an explicit user action (S5/S6). Selection and state are
+   paint-only (S1). */
 .nb-graph {
+  flex: 1; min-height: 0;
   display: flex; flex-direction: column;
-  height: min(70vh, 640px); min-height: 320px;
   border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-inset);
   background: var(--detail-work); overflow: hidden;
-  /* explicit Code→Graph reveal lands the box just under the sticky
-     head — same clearance the section cards get (S6) */
-  scroll-margin-top: calc(73px + var(--nb-bar-h));
 }
 .nb-graph-empty {
   flex: 1; display: flex; align-items: center; justify-content: center;
@@ -517,7 +531,7 @@
 
 @media (max-width: 820px) {
   /* the aside stacks below the canvas with its own fixed height — the
-     graph region keeps its fixed box either way (S4) */
+     graph region keeps its box either way (S4) */
   .nb-graph-body { flex-direction: column; }
   .nb-graph-aside {
     width: auto; height: 260px; flex: none;
@@ -525,28 +539,26 @@
   }
 }
 
-@media (max-width: 900px) {
-  /* wrapped toolbar inside the same floating panel: actions row, then
-     status + side — the status text reserves a constant two-line box so
-     the bar height never changes with content (S4); --nb-bar-h tracks
-     the measured panel height (panel padding + wrapped toolbar + hairline
-     + fixed directory row). */
-  .nb { --nb-bar-h: 143px; }
-  .nb-toolbar {
-    height: auto; min-height: 26px; flex-wrap: wrap; row-gap: 6px;
-    padding: 0 0 3px;
+@media (max-width: 739px) {
+  /* the outline becomes an overlay filling the row-2 grid area — the
+     work surface behind it keeps its width and never squeezes */
+  .nb-outline {
+    position: absolute; z-index: 30;
+    grid-column: 1 / -1; grid-row: 2;
+    justify-self: start; inset-block: 0; inset-inline-start: 0;
+    width: min(260px, 100%);
+    border-right: 1px solid var(--edge);
+    box-shadow: var(--shadow-float);
   }
-  .nb-toolbar-actions { flex-basis: 100%; }
-  /* the status row keeps a fixed 36px box so the wrapped bar height is
-     identical for one- and two-line statuses (S4) */
-  .nb-status { height: 36px; }
-  .nb-status-text {
-    max-height: 36px;
-    white-space: normal;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    overflow: hidden;
+}
+
+@media (max-width: 900px) {
+  .nb-code, .nb-graph-panel { padding: 10px 10px; }
+  /* wrapped toolbar: actions row, then the side controls — the bar
+     keeps a constant min-height (S4) */
+  .nb-toolbar {
+    height: auto; min-height: 44px; flex-wrap: wrap;
+    padding: 4px 8px; row-gap: 4px;
   }
   /* header wraps to two rows: name/badge/once/actions stay on row 1,
      the description takes a full-width row 2 (no mid-word clipping). */
@@ -554,17 +566,17 @@
   .nb .nb-card .nb-card-head .nb-desc-text {
     order: 1; flex-basis: 100%;
   }
-  .nb-body { padding: 0 12px 10px; }
+  .nb-body { padding: 0 10px 8px; }
   /* the 44px run button centres on the first header row's text —
      padding-top 0 is the measured value (the gutter column does not
      affect the header row, so this moves only the button). */
   .nb-gutter { padding-top: 0; }
+  .nb-dir-row { height: 40px; }
   /* 44px hit targets: the gutter widens so run/menu buttons fit, and the
-     inserter row grows to hold its button (instance-detail.css). */
+     inserter row grows to hold its button. */
   .nb-card { grid-template-columns: 48px minmax(0, 1fr); }
-  .nb-insert { height: 44px; }
-  .nb [data-ui='button'].nb-insert-btn {
-    width: 44px; height: 44px; min-height: 44px; min-width: 44px;
-  }
-  .nb [data-ui='button'].nb-insert-btn svg { width: 16px; height: 16px; }
+  .nb-insert { height: 52px; }
+  .nb [data-ui='button'].nb-insert-btn { height: 44px; min-height: 44px; }
+  .nb [data-ui='button'].nb-insert-btn svg { width: 14px; height: 14px; }
+  .nb-statusbar { padding: 0 6px 0 10px; }
 }

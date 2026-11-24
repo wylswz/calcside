@@ -1,4 +1,4 @@
-import { Fragment, lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { api, ApiError, Instance, Notebook, NotebookSectionMeta, NotebookSectionResponse, SaveNotebookSectionResponse } from '../api'
@@ -54,8 +54,8 @@ const stateTone: Record<string, string> = {
   stale: 'text-warn-text',
   failed: 'text-danger',
 }
-export function SectionStateBadge({ state }: { state: NotebookSectionMeta['state'] }) {
-  return <span className={`whitespace-nowrap text-xs font-medium ${stateTone[state] ?? stateTone.not_run}`}>{sectionStateLabel(state)}</span>
+export function SectionStateBadge({ state, title }: { state: NotebookSectionMeta['state']; title?: string }) {
+  return <span title={title} className={`whitespace-nowrap text-xs font-medium ${stateTone[state] ?? stateTone.not_run}`}>{sectionStateLabel(state)}</span>
 }
 
 // SaveStatus is the persistent autosave indicator (C2): it always shows
@@ -333,16 +333,27 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
     startRun()
   }
 
-  const factParts: ReactNode[] = []
-  if (meta.defines.length > 0) factParts.push(<>defines <code>{meta.defines.join(', ')}</code></>)
-  if (meta.uses.length > 0) factParts.push(<>uses <code>{meta.uses.join(', ')}</code></>)
-  if (meta.effects.length > 0) factParts.push(<>calls <code>{meta.effects.join(', ')}</code></>)
-  if (meta.depends_on.length > 0) factParts.push(<>needs <code>{meta.depends_on.join(', ')}</code></>)
+  const facts = [
+    ['Defines', meta.defines],
+    ['Reads', meta.uses],
+    ['Calls', meta.effects],
+    ['Depends on', meta.depends_on],
+  ] as const
   const readonlyNote = inst.status === 'expired'
     ? 'Expired — read-only.'
     : lost
       ? 'Runtime lost — code is retained; running restores an empty process.'
       : 'Read-only.'
+  // Facts hover on the state badge — one newline-joined title instead
+  // of a per-section footer or details dialog.
+  const stateDetails = [
+    sectionStateLabel(meta.state),
+    meta.last_run_at
+      ? `Last run ${relTime(meta.last_run_at)} (${fmtTime(meta.last_run_at)})${meta.last_status ? ` · ${meta.last_status}` : ''}`
+      : 'Never run',
+    ...facts.flatMap(([label, values]) => values.length ? [`${label}: ${values.join(', ')}`] : []),
+    ...(!canEdit ? [readonlyNote] : []),
+  ].join('\n')
 
   return (
     <section
@@ -370,7 +381,7 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
         <header className="nb-card-head">
           <span className="nb-ordinal">{meta.position + 1}.</span>
           <h3 className="nb-name">{name}</h3>
-          <SectionStateBadge state={meta.state} />
+          <SectionStateBadge state={meta.state} title={stateDetails} />
           {meta.rerun === 'once' && (
             <span className="nb-once">once</span>
           )}
@@ -498,19 +509,6 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
           </div>
         )}
 
-        <footer className="nb-card-foot">
-          <span>
-            {meta.last_run_at
-              ? <>last run <span title={fmtTime(meta.last_run_at)}>{relTime(meta.last_run_at)}</span>{meta.last_status ? ` · ${meta.last_status}` : ''}</>
-              : 'never run'}
-          </span>
-          {factParts.length > 0 && (
-            <span className="nb-facts">
-              {factParts.map((p, i) => <Fragment key={i}>{i > 0 && ' · '}{p}</Fragment>)}
-            </span>
-          )}
-          {!canEdit && <span className="nb-readonly-note">{readonlyNote}</span>}
-        </footer>
       </div>
 
       {confirmOnce && (

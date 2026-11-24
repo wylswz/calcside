@@ -7,10 +7,13 @@
   --detail-radius-surface: var(--radius-surface); --detail-radius-control: var(--radius-control); --detail-radius-inset: var(--radius-inset);
   --detail-shadow-surface: var(--shadow-surface); --detail-shadow-control: var(--shadow-control); --detail-shadow-inset: var(--shadow-inset);
   font-size: 14px; line-height: 22px;
+  /* the route fills the console canvas — panes scroll internally */
+  flex: 1; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
 }
 
-/* type scale: body 14/22 · title 30/36 · section 18/26 · sub 14/22 · meta 12/18 */
-.instance-detail h1 { font-size: 30px; line-height: 36px; font-weight: 600; letter-spacing: -0.025em; }
+/* type scale: body 14/22 · title 20/28 · section 18/26 · sub 14/22 · meta 12/18 */
+.instance-detail h1 { font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -0.02em; }
 .instance-detail h2 { font-size: 18px; line-height: 26px; font-weight: 600; }
 .instance-detail .side-col h2 { font-size: 16px; line-height: 22px; }
 .instance-detail .detail-meta { font-size: 12px; line-height: 18px; }
@@ -20,44 +23,124 @@
   font-family: var(--font-mono); font-size: 13px; line-height: 20px; font-weight: 400;
 }
 
-/* header — quiet, no enclosing box, no heavy black rule */
-.instance-detail .detail-head { padding-top: 4px; }
-
-/* shell header hooks — only inside detail */
-body:has(.instance-detail) .console-header-inner { gap: 24px; }
-body:has(.instance-detail) .console-dev {
-  font-size: 12px; border: 0; text-transform: none; letter-spacing: normal;
-  color: rgb(var(--sec)); padding: 0;
+/* header — compact identity row, no enclosing box, no heavy black rule */
+.instance-detail .detail-head {
+  flex: none;
+  display: flex; align-items: flex-start; gap: 8px 24px; flex-wrap: wrap;
+  padding: 8px 20px 10px;
 }
-body:has(.instance-detail) .console-profile { font-size: 13px; color: rgb(var(--sec)); }
+.instance-detail .detail-id { min-width: 0; flex: 1; }
+.instance-detail .detail-id h1 {
+  margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.instance-detail .detail-desc {
+  margin: 2px 0 0; max-width: 72ch;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.instance-detail .detail-error { flex: none; padding: 0 20px 6px; }
 
-/* next-action strip — shallow white surface, tinted signal tile */
+/* next-action — one reserved line under the identity row: a tinted
+   signal, one-line title (and optional note), actions flush right.
+   Never wraps on desktop; the strip is a hairline band, not a card. */
 .instance-detail .next-action {
-  display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px;
-  background: var(--detail-work); border: 1px solid var(--detail-edge);
-  border-radius: var(--detail-radius-surface); padding: 24px;
-  box-shadow: var(--detail-shadow-surface); margin-bottom: 24px;
+  flex: none;
+  display: flex; flex-wrap: nowrap; align-items: center; gap: 10px;
+  height: 44px; box-sizing: border-box;
+  background: var(--detail-work); padding: 5px 20px; margin: 0;
+  border-block: 1px solid var(--detail-edge);
 }
 .instance-detail .next-signal {
-  width: 36px; height: 36px; flex-shrink: 0;
+  width: 22px; height: 22px; flex-shrink: 0;
   border-radius: var(--detail-radius-control); display: grid; place-items: center;
 }
 .instance-detail .next-signal.denied { background: rgb(var(--danger) / 0.08); color: rgb(var(--danger)); }
 .instance-detail .next-signal.expiring { background: rgb(var(--warn-text) / 0.1); color: rgb(var(--warn-text)); }
 .instance-detail .next-signal.connect { background: rgb(var(--accent) / 0.1); color: rgb(var(--accent)); }
 .instance-detail .next-signal.neutral { background: rgb(var(--sec) / 0.1); color: rgb(var(--sec)); }
-.instance-detail .next-body { min-width: 0; flex: 1; }
-.instance-detail .next-title { font-size: 18px; line-height: 26px; font-weight: 600; color: rgb(var(--ink)); margin: 0 0 4px; }
-.instance-detail .next-text { font-size: 14px; line-height: 22px; color: rgb(var(--body)); margin: 0; overflow-wrap: anywhere; }
-.instance-detail .next-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
-
-/* main column + right sidebar */
-.instance-detail .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 32px; align-items: start; }
-.instance-detail .work-surface {
-  background: var(--detail-work); border: 1px solid var(--detail-edge);
-  border-radius: var(--detail-radius-surface); box-shadow: var(--detail-shadow-surface); padding: 24px;
+.instance-detail .next-body {
+  min-width: 0; flex: 1;
+  display: flex; align-items: baseline; gap: 8px;
 }
-.instance-detail .side-col { display: grid; gap: 24px; min-width: 0; font-size: 13px; }
+.instance-detail .next-title {
+  font-size: 13px; line-height: 20px; font-weight: 500; color: rgb(var(--ink));
+  margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.instance-detail .next-text {
+  font-size: 12px; line-height: 20px; color: rgb(var(--body)); margin: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.instance-detail .next-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: none; }
+/* the reserved band is never a bare empty strip — a quiet ready note
+   fills it when no step applies */
+.instance-detail .next-ready {
+  font-size: 12px; line-height: 18px; color: rgb(var(--sec));
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* view tab strip — Notebook | Activity + the inspector toggle at the
+   strip's right edge, a sibling of the tablist */
+.instance-detail .detail-views {
+  flex: none; display: flex; align-items: stretch; gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--detail-edge);
+  background: var(--detail-work);
+}
+.instance-detail .detail-views .view-tabs { flex: 1; min-width: 0; border-bottom: 0; }
+.instance-detail .panel-toggle {
+  align-self: center; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border: 0; border-radius: var(--detail-radius-inset);
+  background: transparent; color: rgb(var(--sec)); cursor: pointer;
+}
+.instance-detail .panel-toggle:hover { background: rgb(var(--ink) / 0.05); color: rgb(var(--ink)); }
+.instance-detail .panel-toggle:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.instance-detail .panel-toggle[aria-expanded='true'] { background: rgb(var(--accent) / 0.12); color: rgb(var(--accent)); }
+
+/* main workbench — work surface beside the dockable inspector */
+.instance-detail .detail-grid {
+  flex: 1; min-height: 0; position: relative;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+}
+.instance-detail .work-surface {
+  min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
+  background: var(--detail-work);
+}
+.instance-detail .work-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.instance-detail .work-panel[hidden] { display: none; }
+.instance-detail .work-panel-scroll { flex: 1; min-height: 0; overflow: auto; padding: 12px 16px; }
+.instance-detail .work-panel-scroll > * { flex: none; }
+.instance-detail .work-panel > .nb { flex: 1; min-height: 0; }
+
+/* inspector — a fixed-width rail at 1240px+, an overlay below that so
+   it never squeezes the code panes; the body scrolls independently */
+.instance-detail .side-col {
+  width: 310px; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
+  font-size: 13px; background: rgb(var(--paper));
+  border-left: 1px solid var(--detail-edge);
+}
+.instance-detail .side-col[hidden] { display: none; }
+.instance-detail .detail-inspector-head {
+  flex: none; display: flex; align-items: center; justify-content: space-between;
+  height: 40px; padding: 0 12px;
+  border-bottom: 1px solid var(--detail-edge);
+}
+/* scoped past the broad side-col h2 rules below — the panel title is
+   its own quiet label, not a section heading */
+.instance-detail .side-col .detail-inspector-head h2 { margin: 0; font-size: 13px; line-height: 20px; }
+.instance-detail .detail-inspector-body {
+  flex: 1; min-height: 0; overflow: auto;
+  display: grid; gap: 24px; align-content: start;
+  padding: 14px 16px;
+}
+@media (max-width: 1239px) {
+  .instance-detail .side-col {
+    position: absolute; right: 0; inset-block: 0; z-index: 20;
+    width: min(340px, 100%);
+    box-shadow: var(--shadow-float);
+  }
+}
 /* live-state tabs — same underline look as the view tabs; both panels
    stay mounted behind `hidden` (C2/C3) */
 .instance-detail .state-tabs {
@@ -87,7 +170,6 @@ body:has(.instance-detail) .console-profile { font-size: 13px; color: rgb(var(--
 }
 .instance-detail .side-kv-sub { color: rgb(var(--sec)); }
 .instance-detail .side-kv-env { display: flex; flex-wrap: wrap; gap: 4px 16px; }
-.instance-detail .side-actions { display: flex; gap: 8px; margin-top: 12px; }
 
 /* work-surface headings — plain, no boxes */
 .instance-detail [data-ui='section-title'] { border: 0; padding-bottom: 0; margin-bottom: 16px; flex-wrap: wrap; }
@@ -161,13 +243,16 @@ body:has(.instance-detail) .console-profile { font-size: 13px; color: rgb(var(--
 .instance-detail .editor-toolbar { border-bottom: 1px solid var(--detail-edge); }
 
 @media (max-width: 900px) {
-  .instance-detail .detail-grid { grid-template-columns: 1fr; }
-  .instance-detail .work-surface { padding: 16px; }
-  .instance-detail .next-action { padding: 16px; }
-  .instance-detail .next-actions { margin-left: 0; padding-left: 0; width: 100%; }
+  .instance-detail .detail-head { padding: 8px 12px 8px; }
+  .instance-detail .detail-views { padding: 0 6px; }
+  /* the band keeps one reserved slot at narrow widths too (S3) */
+  .instance-detail .next-action { padding: 6px 12px; height: 56px; }
+  .instance-detail .next-actions { margin-left: 0; }
+  .instance-detail .detail-inspector-body { padding: 12px; }
   .instance-detail [data-ui='button'], .instance-detail .artifact-action {
     min-height: 44px; min-width: 44px; height: auto;
   }
+  .instance-detail .panel-toggle { width: 44px; height: 44px; }
   .instance-detail .seg-filters button { min-height: 44px; }
 }
 
@@ -180,3 +265,13 @@ body:has(.instance-detail) .console-profile { font-size: 13px; color: rgb(var(--
 .instance-detail .artifact-empty-icon { height: 16px; width: 16px; color: rgb(var(--sec)); }
 .instance-detail .editor-toolbar, .instance-detail .editor-footer { font-size: 12px; color: rgb(var(--sec)); }
 .instance-detail .call-detail dt { text-transform: none; font-size: 12px; letter-spacing: normal; }
+
+@media (max-width: 650px) {
+  /* the identity column and its actions never fight for one row —
+     actions take their own compact row, the title keeps full width */
+  .instance-detail .detail-head {
+    flex-direction: column; align-items: stretch; gap: 5px;
+  }
+  .instance-detail .detail-actions { margin-left: 0; gap: 4px; }
+  .instance-detail .detail-actions [data-ui='button'] { padding-inline: 8px; }
+}

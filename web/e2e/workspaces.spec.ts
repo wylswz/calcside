@@ -146,8 +146,10 @@ test('instance flow exposes a compact connect-agent action', async ({ page }) =>
   await page.getByRole('button', { name: 'Continue to configuration' }).click()
   await page.getByRole('button', { name: 'Create instance' }).click()
   await expect(page).toHaveURL(/\/instances\/ins_/, { timeout: 10000 })
-  await expect(page.getByText('Connect an agent')).toHaveCount(0)
-  const connect = page.getByRole('button', { name: 'Connect agent', exact: true })
+  // The connect guidance is the reserved one-line next-action band —
+  // no oversized card — and the header keeps the compact icon control.
+  await expect(page.locator('.next-action .next-title')).toContainText('Connect an agent')
+  const connect = page.locator('.detail-actions').getByRole('button', { name: 'Connect agent', exact: true })
   await expect(connect).toBeVisible()
   const box = (await connect.boundingBox())!
   expect(box.width).toBeLessThanOrEqual(44)
@@ -327,7 +329,7 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
 
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto(`${consoleURL}/instances/${inst.id}`)
-  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.locator('.console-main').evaluate((el) => el.scrollTo({ top: 0, behavior: 'instant' }))
   // title comes from labels.name, not 'name=…'
   await expect(page.getByRole('heading', { name: 'Research session' })).toBeVisible()
   await expect(page.getByText('The latest run was denied')).toBeVisible()
@@ -487,15 +489,18 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   await page.getByRole('tab', { name: 'Notebook' }).click()
   expect(await workCard.locator('.cm-content').innerText()).toBe(codeBefore)
 
-  // mobile: Work precedes Boundary; ≥44px primary; no overflow
+  // mobile: the inspector is a right-edge overlay — open it, then
+  // Boundary sits in the rail; ≥44px primary; no overflow
   await page.setViewportSize({ width: 390, height: 900 })
   await page.waitForTimeout(600)
-  const mob = await page.evaluate(() => {
-    const work = document.querySelector('[aria-label="Section work"]')!.getBoundingClientRect()
-    const bound = document.querySelector('[aria-label="Boundary"]')!.getBoundingClientRect()
-    return { work: work.top, bound: bound.top, sw: document.documentElement.scrollWidth, iw: window.innerWidth }
-  })
-  expect(mob.work).toBeLessThan(mob.bound)
+  await page.getByRole('button', { name: 'Inspector', exact: true }).click()
+  const boundEl = page.locator('[aria-label="Boundary"]')
+  await expect(boundEl).toBeVisible()
+  const mob = await page.evaluate(() => ({
+    bound: document.querySelector('[aria-label="Boundary"]')!.getBoundingClientRect().top,
+    sw: document.documentElement.scrollWidth, iw: window.innerWidth,
+  }))
+  expect(mob.bound).toBeGreaterThanOrEqual(0)
   expect(mob.sw).toBeLessThanOrEqual(mob.iw)
   const bb = await primary.boundingBox()
   expect(bb!.height).toBeGreaterThanOrEqual(44)
@@ -510,14 +515,14 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   })
   expect(tools.inside).toBe(true)
   await page.reload()
-  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.locator('.console-main').evaluate((el) => el.scrollTo({ top: 0, behavior: 'instant' }))
   await page.waitForTimeout(800)
   await page.screenshot({ path: testInfo.outputPath('detail-denied-mobile.png'), fullPage: true })
 
   // dark: desk + ink actually dark/light
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.emulateMedia({ colorScheme: 'dark' })
-  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.locator('.console-main').evaluate((el) => el.scrollTo({ top: 0, behavior: 'instant' }))
   const dark = await page.evaluate(() => ({
     body: getComputedStyle(document.body).backgroundColor,
     title: getComputedStyle(document.querySelector('.next-title')!).color,
@@ -536,7 +541,7 @@ test('instance detail: header actions replace the create entry', async ({ page }
   await expect(page.getByRole('button', { name: 'New instance' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Share', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Copy prompt', exact: true })).toBeVisible()
-  const connect = page.getByRole('button', { name: 'Connect agent', exact: true })
+  const connect = page.locator('.detail-actions').getByRole('button', { name: 'Connect agent', exact: true })
   await expect(connect).toBeVisible()
   const box = (await connect.boundingBox())!
   expect(box.width).toBeLessThanOrEqual(44)
