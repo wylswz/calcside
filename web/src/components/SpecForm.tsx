@@ -1,6 +1,7 @@
 import { switchExtSource } from '../instanceDraft.ts'
 import { findExtension } from '../builderCatalog.ts' 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
 import * as Tabs from '@radix-ui/react-tabs'
 import { api, currentWorkspace, type ExtensionCatalog, type ExtensionInfo, type Policy, type Secret } from '../api'
@@ -9,7 +10,7 @@ import {
   type BuildResult, type DraftError, type ExtDraft, type InstanceDraft, type InstanceSpec, type JsonValue,
 } from '../instanceDraft'
 import { fmtBytes } from '../format'
-import { Confirm, Field, inputCls } from './ui'
+import { Button, Confirm, Field, inputCls } from './ui'
 import { InstanceExtensionEditor } from './InstanceExtensionEditor'
 import { setBindingField, removeBindingField } from '../environment'
 import { ExtensionPicker } from './ExtensionPicker'
@@ -25,6 +26,9 @@ import { InputsSection, LimitsSection } from './SpecSections'
 export interface SpecFormHandle {
   buildSpec(): { spec?: InstanceSpec; specJSON?: string; err?: string }
   applyBasics(basics: { name?: string; description?: string; labels?: { k: string; v: string }[] }): void
+  /** Notebook Settings: open the Runtime page at the first invalid
+      extension card. False when no extension needs configuration. */
+  revealInvalidExtension(): boolean
 }
 
 interface Props {
@@ -52,12 +56,32 @@ interface Props {
   /** Module mode: disables dependency add/remove while leaving the rest
       of the runtime configuration editable (e.g. source save conflict). */
   fixedDepsDisabled?: boolean
+  /** Application notebook: render the extension catalog into this dock
+      (side panel) instead of the inline capabilities block. */
+  extensionCatalogTarget?: HTMLElement | null
+  /** Notebook rails: the same pickers also dock as parallel left panels —
+      add entries live beside Extensions, review stays in Dependencies. */
+  moduleCatalogTarget?: HTMLElement | null
+  policyCatalogTarget?: HTMLElement | null
+  /** Hide the inline catalog even before the dock element exists. */
+  dockExtensionCatalog?: boolean
+  /** Docked catalog "Added, show settings": the host opens the panel
+      containing this form before the internal settings view reveals. */
+  onConfigureCatalogExtension?: () => void
+  /** The catalog portal escapes the disabled fieldset, so read-only
+      must reach the picker explicitly (browsing stays, mutating stops). */
+  catalogReadOnly?: boolean
+  /** Application notebook: render the same draft through the Settings
+      workspace layout (categorized panels) instead of the two-pane
+      capabilities/settings builder. */
+  notebookSettings?: { general: ReactNode; contract: { input: ReactNode; output: ReactNode }; readOnly: boolean; onClose?: () => void }
 }
 
 // Item keys order the instance summary: 'fs', 'net' or 'ext:<id>'. The id
 // is UI-only and never serialized.
 type ItemKey = string
 type View = 'capabilities' | 'settings'
+type NotebookSettingsPage = 'general' | 'runtime' | 'dependencies' | 'contract'
 type Removed = { at: number; title: string } & (
   | { key: 'fs'; data: NonNullable<InstanceDraft['fs']> }
   | { key: 'net'; data: NonNullable<InstanceDraft['net']> }
@@ -71,6 +95,17 @@ const NetworkIcon = () => <svg aria-hidden="true" width="20" height="20" viewBox
 const CheckIcon = () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 5 5L20 7"/></svg>
 
 const capabilityLabel = (name: string) => name === 'net' ? 'Network' : name === 'fs' ? 'Files' : name
+
+// Notebook Settings workspace: a two-column heading/controls band per
+// topic — same draft controls as the builder, grouped for reading.
+function NotebookSettingGroup({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+  return (
+    <section className="appnb-setting-group">
+      <div className="appnb-setting-heading"><h3>{title}</h3><p>{description}</p></div>
+      <div className="appnb-setting-controls">{children}</div>
+    </section>
+  )
+}
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 // The draft is the only editable model. Cards, JSON mode and submission
@@ -84,6 +119,8 @@ const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)'
 export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
   keyMode = false, application = false, debug = false, initial, workspaceId, onSpecChange, onRawDirtyChange, footer, hideBasics = false, fixedExtensions,
   onAddFixedExtension, onSwitchFixedExtension, onRemoveFixedExtension, fixedDepsDisabled = false,
+  extensionCatalogTarget, moduleCatalogTarget, policyCatalogTarget, dockExtensionCatalog = false, onConfigureCatalogExtension, catalogReadOnly = false,
+  notebookSettings,
 }, ref) {
   // Application mode: vault-ref secrets only (same ceiling as key
   // specs) — never inline values in a durable spec.
@@ -93,6 +130,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
   const [json, setJSON] = useState('')
   const jsonBaseline = useRef('')
   const [view, setView] = useState<View>('capabilities')
+  const [notebookPage, setNotebookPage] = useState<NotebookSettingsPage>('general')
   const extIds = useRef<number[]>(draft.exts.map((_, i) => i))
   const extNext = useRef(draft.exts.length)
   const [order, setOrder] = useState<ItemKey[]>(() => [
@@ -164,6 +202,8 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
   }, [fixedExtensions])
   const [flash, setFlash] = useState<ItemKey | null>(null)
   const [reveal, setReveal] = useState<ItemKey | null>(null)
+  // Set below `items` each render — the imperative handle stays stable.
+  const revealInvalidExt = useRef<() => boolean>(() => false)
   const tabsRef = useRef<HTMLDivElement>(null)
   const settingsRef = useRef<HTMLDivElement>(null)
   const [extErrors, setExtErrors] = useState<Map<number, string>>(new Map())
@@ -260,13 +300,18 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
         return JSON.stringify(raw, null, 2)
       })
     },
+    revealInvalidExtension() {
+      return revealInvalidExt.current()
+    },
   }), [result, advanced, json])
   // "Configure" is navigation: the page scrolls to the chosen section.
   useEffect(() => {
     if (!reveal) return
     setReveal(null)
-    settingsRef.current?.querySelector<HTMLElement>(`[data-section="${reveal}"]`)
-      ?.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' })
+    const card = settingsRef.current?.querySelector<HTMLElement>(`[data-section="${reveal}"]`)
+    if (!card) return
+    card.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' })
+    card.focus({ preventScroll: true })
   }, [reveal])
   useEffect(() => {
     if (!flash) return
@@ -300,7 +345,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
     if (tabs && tabs.getBoundingClientRect().top < (tabs.closest('.console-main')?.getBoundingClientRect().top ?? 0))
       tabs.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' })
   }
-  const openSettings = (section: string) => { setView('settings'); setReveal(section) }
+  const openSettings = (section: string) => { setView('settings'); setNotebookPage('runtime'); setReveal(section) }
   const append = (key: ItemKey) => {
     setOrder((o) => [...o.filter((k) => k !== key), key])
     setRemoved(null)
@@ -347,6 +392,13 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
   }
   const pointAtExtension = (entry: ExtensionInfo) => {
     const index = draft.exts.findIndex((e) => e.source === entry.source || e.source === entry.family)
+    // Docked catalog: opening the host Settings panel is part of the
+    // reveal — the dock keeps no selection of its own.
+    if (index >= 0 && onConfigureCatalogExtension) {
+      onConfigureCatalogExtension()
+      openSettings(`ext:${extIds.current[index]}`)
+      return
+    }
     if (index >= 0) setFlash(`ext:${extIds.current[index]}`)
   }
 
@@ -367,6 +419,8 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
     setFlash(`mod:${alias}`)
   }
   const pointAtModule = (entry: ModuleEntry) => {
+    // Notebook: the installed list lives in Settings → Dependencies.
+    if (notebookSettings) { onConfigureCatalogExtension?.(); setNotebookPage('dependencies') }
     const mount = modMounts.find((x) => mountName(x) === entry.name)
     if (mount) setFlash(`mod:${mount.alias}`)
   }
@@ -528,6 +582,21 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
     if (item.issues.length) return <span className="selected-status is-warn">Needs setup</span>
     return <span className="selected-status" title={item.summary}>{item.brief}</span>
   }
+  // Jump target for the page-level "Configure extension" action: the
+  // first extension whose own config needs attention (issues/missing).
+  revealInvalidExt.current = () => {
+    const item = items.find((i) => i.key.startsWith('ext:') && (i.issues.length || i.missing.length))
+    if (!item) {
+      // Errors not attributable to one card still land on Runtime.
+      onConfigureCatalogExtension?.()
+      if (!advanced) setNotebookPage('runtime')
+      return false
+    }
+    onConfigureCatalogExtension?.()
+    if (!advanced) openSettings(item.key)
+    return true
+  }
+
   const rows: ReactNode[] = items.map((item) => (
     <div key={item.key} data-row={item.key} className={'selected-row' + (flash === item.key ? ' is-flash' : '')}>
       <span className="config-item-icon">{item.icon}</span>
@@ -539,25 +608,265 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
       <button type="button" className="text-btn" aria-label={`Remove ${item.title}`} disabled={isFixedRow(item.key) && fixedDepsDisabled} onClick={() => remove(item.key, item.title)}>Remove</button>
     </div>
   ))
+  const removedCapabilityRow = removed && (
+    <div key="removed" className="selected-row is-removed" role="status">
+      <span>{removed.title} removed</span>
+      <button type="button" className="text-btn" onClick={undo}>Undo</button>
+    </div>
+  )
   if (removed) {
-    rows.splice(Math.min(removed.at, rows.length), 0, (
-      <div key="removed" className="selected-row is-removed" role="status">
-        <span>{removed.title} removed</span>
-        <button type="button" className="text-btn" onClick={undo}>Undo</button>
-      </div>
-    ))
+    rows.splice(Math.min(removed.at, rows.length), 0, removedCapabilityRow)
   }
 
   const alert = !result.ok && !footer && (submitted || advanced) && (
     <div className="rounded-md border-l-4 border-danger bg-danger/5 p-4" role="alert"><h3 className="font-semibold text-danger">Check the configuration</h3><ul className="mt-2 space-y-1 text-sm">{errors.map((e, i) => <li key={i}>{e.section}: {e.message}</li>)}</ul></div>
   )
 
-  if (advanced) {
+  // One catalog instance whether docked or inline — the picker drives
+  // the same draft either way (C2: no duplicate editable state).
+  const extensionPicker = (
+    <fieldset className="m-0 min-w-0 border-0 p-0" disabled={(fixedExtensions !== undefined && fixedDepsDisabled) || catalogReadOnly}>
+      <ExtensionPicker entries={extensions} selectedSources={selectedSources} loading={catalog.isPending} error={catalog.isError}
+        onRetry={() => catalog.refetch()}
+        onAdd={fixedExtensions !== undefined ? (entry) => onAddFixedExtension?.(entry) : addExtension}
+        onShow={pointAtExtension}
+        onSwitch={fixedExtensions !== undefined ? (f, t) => onSwitchFixedExtension?.(f, t) : switchExtension} />
+    </fieldset>
+  )
+  const dockedCatalog = dockExtensionCatalog && extensionCatalogTarget
+    ? createPortal(
+        advanced && notebookSettings
+          ? <p className="appnb-catalog-note">Switch Settings editor to Form to edit extensions.</p>
+          : extensionPicker,
+        extensionCatalogTarget)
+    : null
+
+  // Shared fragments — the legacy two-pane builder and the notebook
+  // Settings workspace render the same controls, never copies.
+  const basicCapabilities = (
+    <div className="ability-choices">
+      <button type="button" className="ability-choice" data-selected={!!draft.fs} aria-label={draft.fs ? 'Files added' : 'Add Files'} onClick={addFiles}>
+        <FilesIcon />
+        <span className="min-w-0 flex-1"><strong>Files</strong><small>bounded virtual storage</small></span>
+        <span className="ability-add">{draft.fs ? <><CheckIcon /> Added</> : 'Add'}</span>
+      </button>
+      <button type="button" className="ability-choice" data-selected={!!draft.net} aria-label={draft.net ? 'Network added' : 'Add Network'} onClick={addNetwork}>
+        <NetworkIcon />
+        <span className="min-w-0 flex-1"><strong>Network</strong><small>outbound HTTP</small></span>
+        <span className="ability-add">{draft.net ? <><CheckIcon /> Added</> : 'Add'}</span>
+      </button>
+    </div>
+  )
+  const modulePickerEl = application && (
+    !modParsed.ok ? (
+      <p className="spec-pane-note">The spec declares modules this editor can't display — edit them in Advanced JSON.</p>
+    ) : (
+      <ModulePicker entries={modulesQ.data?.modules ?? []} selectedNames={modNames}
+        loading={modulesQ.isPending} error={modulesQ.isError} onRetry={() => modulesQ.refetch()}
+        onAdd={addModule} onShow={pointAtModule} canAdd={(e) => canAddModule(modParsed, e)} />
+    )
+  )
+  const modulePicker = application && (
+    <div className="modules-block">
+      {!notebookSettings && <h4 className="mb-3 text-sm font-semibold text-ink">Modules</h4>}
+      {modulePickerEl}
+    </div>
+  )
+  const policyPickerEl = (
+    <PolicyPicker entries={policies.data?.policies ?? []} selected={selectedPolicies}
+      loading={policies.isPending} error={policies.isError} onRetry={() => policies.refetch()}
+      onToggle={togglePolicy} onRemove={removePolicy}
+      showUseDefaults={hasDefaults && draft.policies !== null} onUseDefaults={() => set({ policies: null })} />
+  )
+  const policyPicker = (
+    <div className="policies-block">
+      {!notebookSettings && <h4 className="mb-3 text-sm font-semibold text-ink">Policies</h4>}
+      {policyPickerEl}
+    </div>
+  )
+  // Modules/policies dock as parallel rails; adding never happens inside
+  // Settings — those groups only review/remove what the catalogs add.
+  const depsDockNote = <p className="appnb-catalog-note">Switch Settings editor to Form to edit dependencies.</p>
+  const dockedModules = moduleCatalogTarget
+    ? createPortal(
+        advanced ? depsDockNote
+          : <fieldset className="m-0 min-w-0 border-0 p-0" disabled={notebookSettings?.readOnly}>{modulePickerEl}</fieldset>,
+        moduleCatalogTarget)
+    : null
+  const dockedPolicies = policyCatalogTarget
+    ? createPortal(
+        advanced ? depsDockNote
+          : <fieldset className="m-0 min-w-0 border-0 p-0" disabled={notebookSettings?.readOnly}>{policyPickerEl}</fieldset>,
+        policyCatalogTarget)
+    : null
+  // The actual configurable cards — shared by the legacy Settings pane
+  // and the notebook's Capability configuration group.
+  const configuredItems: ReactNode[] = items.map((item) => (
+    <div key={item.key} data-section={item.key} className="settings-card" tabIndex={-1}>
+      <div className="config-item-head">
+        <span className="config-item-icon">{item.icon}</span>
+        <div className="min-w-0 flex-1">
+          <h4 className="config-item-title">{item.title}</h4>
+          <p className="config-item-summary">{item.summary}</p>
+        </div>
+        {notebookSettings && (
+          <button type="button" className="text-btn" aria-label={`Remove ${item.title}`}
+            disabled={isFixedRow(item.key) && fixedDepsDisabled}
+            onClick={() => remove(item.key, item.title)}>Remove</button>
+        )}
+      </div>
+      {item.missing.length > 0 && (
+        <p className="settings-note is-warn">Needs {item.missing.map(capabilityLabel).join(', ')}.{' '}
+          {item.missing.filter((d) => d === 'net' || d === 'fs').map((d) => (
+            <button key={d} type="button" className="underline" onClick={() => d === 'net' ? addNetwork() : addFiles()}>Add {capabilityLabel(d)}</button>
+          ))}
+        </p>
+      )}
+      {notebookSettings && item.issues.map((issue, i) => (
+        <p key={i} className="settings-note is-warn">{issue}</p>
+      ))}
+      <div className="config-item-body">{item.body}</div>
+    </div>
+  ))
+  configuredItems.push(...Object.keys(draft.otherCaps).map((name) => (
+    <div key={name} className="settings-card"><h4 className="config-item-title">{name}</h4><p className="config-item-summary">Edit in Advanced JSON.</p></div>
+  )))
+  if (removedCapabilityRow) {
+    configuredItems.splice(Math.min(removed!.at, configuredItems.length), 0, removedCapabilityRow)
+  }
+  const configuredCapabilities = (
+    <section className="settings-group" data-section="capabilities">
+      <h3 className="spec-pane-title">Capabilities</h3>
+      {items.length === 0 && (
+        notebookSettings ? (
+          <p className="text-sm text-sec">Compute only — nothing to configure.</p>
+        ) : (
+          <p className="text-sm text-sec">Compute only — nothing to configure. <button type="button" className="link" onClick={() => switchView('capabilities')}>Add capabilities</button></p>
+        )
+      )}
+      {configuredItems}
+    </section>
+  )
+  const limitsEditor = <LimitsSection draft={draft} set={set} />
+  const limitsPanel = (
+    <section className="settings-group" data-section="limits">
+      <h3 className="spec-pane-title">Limits <span className="spec-pane-meta">{limitsSummary}</span></h3>
+      {limitsEditor}
+    </section>
+  )
+  const inputsEditor = <InputsSection draft={draft} set={set} keyMode={refsOnly} hideLabels={hideBasics} vault={vault.data?.secrets ?? []} vaultError={vault.isError} onRetryVault={() => vault.refetch()} listId={`vault-names-${ws}`} />
+  const inputsPanel = (
+    <section className="settings-group" data-section="inputs">
+      <h3 className="spec-pane-title">Inputs <span className="spec-pane-meta">{inputsSummary}</span></h3>
+      {inputsEditor}
+    </section>
+  )
+  const capabilitiesList = (
+    <div className="selected-list">
+      {rows.length === 0 && (
+        <div className="selected-row is-empty">
+          <div className="min-w-0 flex-1">
+            <h4 className="config-item-title">Compute only</h4>
+          </div>
+        </div>
+      )}
+      {rows}
+    </div>
+  )
+  const modulesList = application && (
+    <div>
+      <p className="sidebar-label">{notebookSettings ? 'Mounted modules' : 'Modules'}</p>
+      <div className="selected-list">
+        {!modParsed.ok && (
+          <div className="selected-row is-empty">
+            <div className="min-w-0 flex-1">
+              <h4 className="config-item-title">Modules declared</h4>
+              <span className="selected-status">Edit them in Advanced JSON</span>
+            </div>
+          </div>
+        )}
+        {modParsed.ok && modMounts.length === 0 && !modRemoved && (
+          <div className="selected-row is-empty">
+            <div className="min-w-0 flex-1">
+              <h4 className="config-item-title">No modules</h4>
+            </div>
+          </div>
+        )}
+        {(() => {
+          const modRows: ReactNode[] = modMounts.map((mount) => {
+            const name = mountName(mount)
+            const v = mount.ref.version
+            const sum = mount.ref.sum
+            return (
+              <div key={mount.alias} data-row={`mod:${mount.alias}`} className={'selected-row' + (flash === `mod:${mount.alias}` ? ' is-flash' : '')}>
+                <div className="min-w-0 flex-1">
+                  <p className="config-item-title">{name}</p>
+                  <span className="selected-status">
+                    @{mount.alias}
+                    {typeof v === 'number' && v > 0 ? ` · v${v}` : ''}
+                    {typeof sum === 'string' && sum ? ` · ${sum.slice(0, 20)}…` : ''}
+                  </span>
+                  <code className="block truncate text-xs text-mute">{`load("@${mount.alias}/<file>.star", "<symbol>")`}</code>
+                </div>
+                <button type="button" className="text-btn" aria-label={`Remove module ${name}`} onClick={() => setModRemove(mount)}>Remove</button>
+              </div>
+            )
+          })
+          if (modRemoved) {
+            modRows.splice(Math.min(modRemoved.at, modRows.length), 0, (
+              <div key="mod-removed" className="selected-row is-removed" role="status">
+                <span>{modRemoved.title} removed</span>
+                <button type="button" className="text-btn" onClick={undoModule}>Undo</button>
+              </div>
+            ))
+          }
+          return modRows
+        })()}
+      </div>
+    </div>
+  )
+  const policiesList = (
+    <div>
+      <p className="sidebar-label">{notebookSettings ? 'Selected policies' : 'Policies'}</p>
+      <div className="selected-list">
+        {selectedPolicies.length === 0 && (
+          <div className="selected-row is-empty">
+            <div className="min-w-0 flex-1">
+              <h4 className="config-item-title">No policies</h4>
+            </div>
+          </div>
+        )}
+        {selectedPolicies.map((name) => (
+          <div key={name} data-row={`policy:${name}`} className="selected-row">
+            <div className="min-w-0 flex-1">
+              <p className="config-item-title">{name}</p>
+              <span className="selected-status">{policyKind(name) === 'builtin' ? 'Built-in' : policyKind(name) === 'rego' ? 'Workspace policy' : 'Unknown'}</span>
+            </div>
+            <button type="button" className="text-btn" aria-label={`Remove policy ${name}`} onClick={() => removePolicy(name)}>Remove</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+  const moduleRemoveDialog = modRemove && (
+    <Confirm title={`Remove module ${mountName(modRemove)}?`} tone="danger" confirm="Remove" pending="Removing…"
+      action={async () => { doRemoveModule(modRemove); setModRemove(null) }}
+      onClose={() => setModRemove(null)}>
+      Remove the {mountName(modRemove)} module mounted as @{modRemove.alias}?
+    </Confirm>
+  )
+
+  if (advanced && !notebookSettings) {
     return (
       <div className="spec-form">
+        {/* The dock target lives outside this form — Advanced JSON and
+            the catalog must not mutate the same spec in parallel. */}
+        {dockExtensionCatalog && extensionCatalogTarget && createPortal(
+          <p className="appnb-catalog-note">Exit Advanced JSON in Settings to edit extensions.</p>,
+          extensionCatalogTarget)}
         <div className="spec-json">
           <div className="mb-3 flex flex-wrap items-center justify-end gap-3">
-            <button type="button" className="text-btn underline" onClick={toggleAdvanced}>Back to editor</button>
+            <button type="button" className="text-btn underline" onClick={toggleAdvanced}>{notebookSettings ? 'Back to settings' : 'Back to editor'}</button>
           </div>
           <textarea aria-label={application ? 'Application spec JSON' : debug ? 'Debug spec JSON' : 'Instance spec JSON'} className={inputCls + ' min-h-[420px] font-mono text-xs'} value={json} spellCheck={false} onChange={(e) => setJSON(e.target.value)} />
           {alert}
@@ -567,8 +876,103 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
     )
   }
 
+  // Notebook applications get a categorized Settings workspace instead
+  // of the two-pane builder — same draft, same controls (C2). The Form
+  // | JSON mode switch is one persistent header control; raw mode hides
+  // the category panels in place and never swaps the header (S3/S4).
+  if (notebookSettings) {
+    return (
+      <div className="appnb-settings-shell">
+        {dockedCatalog}
+        {dockedModules}
+        {dockedPolicies}
+        <header className="appnb-settings-header">
+          <div>
+            <h2>Settings</h2>
+            <p>Changes apply to the draft. Publish to update the live application.</p>
+          </div>
+          <div className="appnb-settings-actions">
+            <div className="seg-filters appnb-settings-mode" role="group" aria-label="Settings editor">
+              <button type="button" aria-pressed={!advanced}
+                onClick={() => { if (advanced) toggleAdvanced() }}>Form</button>
+              <button type="button" aria-pressed={advanced} disabled={notebookSettings.readOnly && !advanced}
+                onClick={() => { if (!advanced) toggleAdvanced() }}>JSON</button>
+            </div>
+            {notebookSettings.onClose && (
+              <Button variant="ghost" size="sm" aria-label="Close settings" title="Close settings"
+                onClick={notebookSettings.onClose}>
+                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              </Button>
+            )}
+          </div>
+        </header>
+        <Tabs.Root value={notebookPage} onValueChange={(v) => setNotebookPage(v as NotebookSettingsPage)}>
+          <Tabs.List className="segmented appnb-settings-nav" aria-label="Settings categories">
+            <Tabs.Trigger value="general" disabled={advanced}>General</Tabs.Trigger>
+            <Tabs.Trigger value="runtime" disabled={advanced}>Runtime</Tabs.Trigger>
+            <Tabs.Trigger value="dependencies" disabled={advanced}>Dependencies</Tabs.Trigger>
+            <Tabs.Trigger value="contract" disabled={advanced}>Contract</Tabs.Trigger>
+          </Tabs.List>
+          <div className="appnb-settings-json" hidden={!advanced}>
+            <textarea aria-label="Application spec JSON" className={inputCls + ' min-h-[420px] font-mono text-xs'} value={json} spellCheck={false} onChange={(e) => setJSON(e.target.value)} />
+            {footer && <div className="spec-json-footer">{footer}</div>}
+          </div>
+          <Tabs.Content value="general" forceMount hidden={advanced || notebookPage !== 'general'} className="appnb-settings-content">
+            <fieldset disabled={notebookSettings.readOnly} className="app-fieldset">
+              <NotebookSettingGroup title="Application identity" description="Name shown in the console.">
+                {notebookSettings.general}
+              </NotebookSettingGroup>
+              <NotebookSettingGroup title="Environment" description="Variables, secrets and labels available to calls.">
+                {inputsEditor}
+              </NotebookSettingGroup>
+            </fieldset>
+          </Tabs.Content>
+          <Tabs.Content value="runtime" forceMount hidden={advanced || notebookPage !== 'runtime'} className="appnb-settings-content" ref={settingsRef}>
+            <fieldset disabled={notebookSettings.readOnly} className="app-fieldset">
+              <NotebookSettingGroup title="Base capabilities" description="Storage and network access for calls.">
+                {basicCapabilities}
+              </NotebookSettingGroup>
+              <NotebookSettingGroup title="Capability configuration" description="Per-capability settings for this draft.">
+                {configuredItems.length === 0 && (
+                  <p className="text-sm text-sec">Compute only — nothing to configure.</p>
+                )}
+                {configuredItems}
+              </NotebookSettingGroup>
+              <NotebookSettingGroup title="Execution limits" description="CPU, memory and time budgets for calls.">
+                {limitsEditor}
+              </NotebookSettingGroup>
+            </fieldset>
+          </Tabs.Content>
+          <Tabs.Content value="dependencies" forceMount hidden={advanced || notebookPage !== 'dependencies'} className="appnb-settings-content">
+            <fieldset disabled={notebookSettings.readOnly} className="app-fieldset">
+              <NotebookSettingGroup title="Modules" description="Published modules mounted into the draft. Add them from the left catalog.">
+                {modulesList}
+              </NotebookSettingGroup>
+              <NotebookSettingGroup title="Policies" description="Runtime policies applied to calls. Add them from the left catalog.">
+                {policiesList}
+              </NotebookSettingGroup>
+            </fieldset>
+          </Tabs.Content>
+          <Tabs.Content value="contract" forceMount hidden={advanced || notebookPage !== 'contract'} className="appnb-settings-content">
+            <fieldset disabled={notebookSettings.readOnly} className="app-fieldset">
+              <NotebookSettingGroup title="Input schema" description="Validate the JSON object before the application runs.">
+                {notebookSettings.contract.input}
+              </NotebookSettingGroup>
+              <NotebookSettingGroup title="Output schema" description="Validate the result or each streamed item.">
+                {notebookSettings.contract.output}
+              </NotebookSettingGroup>
+            </fieldset>
+          </Tabs.Content>
+        </Tabs.Root>
+        {moduleRemoveDialog}
+        {alert}
+      </div>
+    )
+  }
+
   return (
     <div className="spec-form">
+      {dockedCatalog}
       <div className="spec-builder">
         <Tabs.Root className="spec-main" value={view} onValueChange={(v) => switchView(v as View)}>
           <div className="spec-tabs" ref={tabsRef}>
@@ -583,84 +987,21 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
 
           {/* forceMount keeps both views mounted so editor state survives switching */}
           <Tabs.Content value="capabilities" forceMount className="spec-palette">
-            <div className="ability-choices">
-              <button type="button" className="ability-choice" data-selected={!!draft.fs} aria-label={draft.fs ? 'Files added' : 'Add Files'} onClick={addFiles}>
-                <FilesIcon />
-                <span className="min-w-0 flex-1"><strong>Files</strong><small>bounded virtual storage</small></span>
-                <span className="ability-add">{draft.fs ? <><CheckIcon /> Added</> : 'Add'}</span>
-              </button>
-              <button type="button" className="ability-choice" data-selected={!!draft.net} aria-label={draft.net ? 'Network added' : 'Add Network'} onClick={addNetwork}>
-                <NetworkIcon />
-                <span className="min-w-0 flex-1"><strong>Network</strong><small>outbound HTTP</small></span>
-                <span className="ability-add">{draft.net ? <><CheckIcon /> Added</> : 'Add'}</span>
-              </button>
-            </div>
+            {basicCapabilities}
+            {!dockExtensionCatalog && (
             <div className="extensions-block">
               <h4 className="mb-3 text-sm font-semibold text-ink">Extensions</h4>
-              <fieldset className="m-0 min-w-0 border-0 p-0" disabled={fixedExtensions !== undefined && fixedDepsDisabled}>
-                <ExtensionPicker entries={extensions} selectedSources={selectedSources} loading={catalog.isPending} error={catalog.isError}
-                  onRetry={() => catalog.refetch()}
-                  onAdd={fixedExtensions !== undefined ? (entry) => onAddFixedExtension?.(entry) : addExtension}
-                  onShow={pointAtExtension}
-                  onSwitch={fixedExtensions !== undefined ? (f, t) => onSwitchFixedExtension?.(f, t) : switchExtension} />
-              </fieldset>
+              {extensionPicker}
             </div>
-            {application && (
-              <div className="modules-block">
-                <h4 className="mb-3 text-sm font-semibold text-ink">Modules</h4>
-                {!modParsed.ok ? (
-                  <p className="spec-pane-note">The spec declares modules this editor can't display — edit them in Advanced JSON.</p>
-                ) : (
-                  <ModulePicker entries={modulesQ.data?.modules ?? []} selectedNames={modNames}
-                    loading={modulesQ.isPending} error={modulesQ.isError} onRetry={() => modulesQ.refetch()}
-                    onAdd={addModule} onShow={pointAtModule} canAdd={(e) => canAddModule(modParsed, e)} />
-                )}
-              </div>
             )}
-            <div className="policies-block">
-              <h4 className="mb-3 text-sm font-semibold text-ink">Policies</h4>
-              <PolicyPicker entries={policies.data?.policies ?? []} selected={selectedPolicies}
-                loading={policies.isPending} error={policies.isError} onRetry={() => policies.refetch()}
-                onToggle={togglePolicy} onRemove={removePolicy}
-                showUseDefaults={hasDefaults && draft.policies !== null} onUseDefaults={() => set({ policies: null })} />
-            </div>
+            {modulePicker}
+            {policyPicker}
           </Tabs.Content>
 
           <Tabs.Content value="settings" forceMount className="spec-settings" ref={settingsRef}>
-            <section className="settings-group" data-section="capabilities">
-              <h3 className="spec-pane-title">Capabilities</h3>
-              {items.length === 0 && (
-                <p className="text-sm text-sec">Compute only — nothing to configure. <button type="button" className="link" onClick={() => switchView('capabilities')}>Add capabilities</button></p>
-              )}
-              {items.map((item) => (
-                <div key={item.key} data-section={item.key} className="settings-card">
-                  <div className="config-item-head">
-                    <span className="config-item-icon">{item.icon}</span>
-                    <div className="min-w-0 flex-1">
-                      <h4 className="config-item-title">{item.title}</h4>
-                      <p className="config-item-summary">{item.summary}</p>
-                    </div>
-                  </div>
-                  {item.missing.length > 0 && (
-                    <p className="settings-note is-warn">Needs {item.missing.map(capabilityLabel).join(', ')}.{' '}
-                      {item.missing.filter((d) => d === 'net' || d === 'fs').map((d) => (
-                        <button key={d} type="button" className="underline" onClick={() => d === 'net' ? addNetwork() : addFiles()}>Add {capabilityLabel(d)}</button>
-                      ))}
-                    </p>
-                  )}
-                  <div className="config-item-body">{item.body}</div>
-                </div>
-              ))}
-              {Object.keys(draft.otherCaps).map((name) => <div key={name} className="settings-card"><h4 className="config-item-title">{name}</h4><p className="config-item-summary">Edit in Advanced JSON.</p></div>)}
-            </section>
-            <section className="settings-group" data-section="limits">
-              <h3 className="spec-pane-title">Limits <span className="spec-pane-meta">{limitsSummary}</span></h3>
-              <LimitsSection draft={draft} set={set} />
-            </section>
-            <section className="settings-group" data-section="inputs">
-              <h3 className="spec-pane-title">Inputs <span className="spec-pane-meta">{inputsSummary}</span></h3>
-              <InputsSection draft={draft} set={set} keyMode={refsOnly} hideLabels={hideBasics} vault={vault.data?.secrets ?? []} vaultError={vault.isError} onRetryVault={() => vault.refetch()} listId={`vault-names-${ws}`} />
-            </section>
+            {configuredCapabilities}
+            {limitsPanel}
+            {inputsPanel}
           </Tabs.Content>
         </Tabs.Root>
 
@@ -678,90 +1019,10 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
           )}
           <div>
             <p className="sidebar-label">Capabilities</p>
-            <div className="selected-list">
-              {rows.length === 0 && (
-                <div className="selected-row is-empty">
-                  <div className="min-w-0 flex-1">
-                    <h4 className="config-item-title">Compute only</h4>
-                  </div>
-                </div>
-              )}
-              {rows}
-            </div>
+            {capabilitiesList}
           </div>
-          {application && (
-            <div>
-              <p className="sidebar-label">Modules</p>
-              <div className="selected-list">
-                {!modParsed.ok && (
-                  <div className="selected-row is-empty">
-                    <div className="min-w-0 flex-1">
-                      <h4 className="config-item-title">Modules declared</h4>
-                      <span className="selected-status">Edit them in Advanced JSON</span>
-                    </div>
-                  </div>
-                )}
-                {modParsed.ok && modMounts.length === 0 && !modRemoved && (
-                  <div className="selected-row is-empty">
-                    <div className="min-w-0 flex-1">
-                      <h4 className="config-item-title">No modules</h4>
-                    </div>
-                  </div>
-                )}
-                {(() => {
-                  const modRows: ReactNode[] = modMounts.map((mount) => {
-                    const name = mountName(mount)
-                    const v = mount.ref.version
-                    const sum = mount.ref.sum
-                    return (
-                      <div key={mount.alias} data-row={`mod:${mount.alias}`} className={'selected-row' + (flash === `mod:${mount.alias}` ? ' is-flash' : '')}>
-                        <div className="min-w-0 flex-1">
-                          <p className="config-item-title">{name}</p>
-                          <span className="selected-status">
-                            @{mount.alias}
-                            {typeof v === 'number' && v > 0 ? ` · v${v}` : ''}
-                            {typeof sum === 'string' && sum ? ` · ${sum.slice(0, 20)}…` : ''}
-                          </span>
-                          <code className="block truncate text-xs text-mute">{`load("@${mount.alias}/<file>.star", "<symbol>")`}</code>
-                        </div>
-                        <button type="button" className="text-btn" aria-label={`Remove module ${name}`} onClick={() => setModRemove(mount)}>Remove</button>
-                      </div>
-                    )
-                  })
-                  if (modRemoved) {
-                    modRows.splice(Math.min(modRemoved.at, modRows.length), 0, (
-                      <div key="mod-removed" className="selected-row is-removed" role="status">
-                        <span>{modRemoved.title} removed</span>
-                        <button type="button" className="text-btn" onClick={undoModule}>Undo</button>
-                      </div>
-                    ))
-                  }
-                  return modRows
-                })()}
-              </div>
-            </div>
-          )}
-          <div>
-            <p className="sidebar-label">Policies</p>
-            <div className="selected-list">
-              {selectedPolicies.length === 0 && (
-                <div className="selected-row is-empty">
-                  <div className="min-w-0 flex-1">
-                    <h4 className="config-item-title">No policies</h4>
-                  </div>
-                </div>
-              )}
-              {selectedPolicies.map((name) => (
-                <div key={name} data-row={`policy:${name}`} className="selected-row">
-                  <div className="min-w-0 flex-1">
-                    <p className="config-item-title">{name}</p>
-                    <span className="selected-status">{policyKind(name) === 'builtin' ? 'Built-in' : policyKind(name) === 'rego' ? 'Workspace policy' : 'Unknown'}</span>
-                  </div>
-                  <button type="button" className="text-btn" aria-label={`Remove policy ${name}`} onClick={() => removePolicy(name)}>Remove</button>
-                </div>
-              ))}
-            </div>
-          </div>
+          {modulesList}
+          {policiesList}
           <div className="sidebar-links">
             <button type="button" onClick={() => openSettings('limits')}>
               Limits <span className={sectionIssues(['Limits']) ? 'is-warn' : ''}>{limitsSummary}</span>
@@ -773,13 +1034,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
           {alert}
           {footer}
         </aside>
-        {modRemove && (
-          <Confirm title={`Remove module ${mountName(modRemove)}?`} tone="danger" confirm="Remove" pending="Removing…"
-            action={async () => { doRemoveModule(modRemove); setModRemove(null) }}
-            onClose={() => setModRemove(null)}>
-            Remove the {mountName(modRemove)} module mounted as @{modRemove.alias}?
-          </Confirm>
-        )}
+        {moduleRemoveDialog}
       </div>
     </div>
   )

@@ -1,8 +1,10 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getRun, cancelRun, retryRun, Interrupt, currentWorkspace } from '../api'
-import { Button, Confirm, Loading, Notice, PageHeader, TimeLeft } from '../components/ui'
+import { Button, Confirm, Loading, Notice, TimeLeft } from '../components/ui'
+import { DetailWorkbenchHeader } from '../components/DetailWorkbench'
+import { ApplicationWorkView, ApplicationWorkSection } from '../components/ApplicationWorkView'
 import { ResumeForm } from '../components/ResumeForm'
 import { deadlineOf, interruptTitle, resolverLabel, runPhase } from '../interrupts'
 
@@ -51,8 +53,8 @@ export default function RunDetail() {
 	}, [pending, runId])
 
 	if (q.isLoading) return <Loading />
-	if (q.isError) return <Notice tone="warning">Could not load run: {(q.error as Error).message}</Notice>
-	if (!run) return <Notice tone="warning">Run not found.</Notice>
+	if (q.isError) return <div className="app-page"><Notice tone="warning">Could not load run: {(q.error as Error).message}</Notice></div>
+	if (!run) return <div className="app-page"><Notice tone="warning">Run not found.</Notice></div>
 
 	const cancellable = run.status === 'waiting' || run.status === 'unknown'
 	const retryable = run.status === 'unknown'
@@ -60,82 +62,85 @@ export default function RunDetail() {
 	const reserved = phase?.phase === 'running' && remembered != null && remembered.runId === runId ? remembered.height : undefined
 
 	return (
-		<div className="app-page">
-			<PageHeader title={
-				<span>Run <span className={`app-status app-status-${run.status}`}>{run.status}</span></span>
-			} actions={<>
-				{cancellable && <Button variant="danger" size="sm" onClick={() => setConfirm('cancel')}>Cancel run</Button>}
-				{retryable && <Button size="sm" onClick={() => setConfirm('retry')}>Retry step</Button>}
-			</>} />
-			<p className="app-dim">
-				<Link to={`/applications/${appId}`} className="link">← {appId}</Link> ·{' '}
-				<span className="app-mono">{run.id}</span>
-				{deadline && <> · <TimeLeft expiresAt={deadline} /></>}
-			</p>
-			{err !== '' && <Notice tone="warning">{err}</Notice>}
+		// inner .detail-workbench is not .console-content's direct child, so
+		// the shell keeps its normal outer scroll — the frame supplies the
+		// shared header and typography only
+		<div className="app-page app-run-page">
+		<div className="detail-workbench">
+			<DetailWorkbenchHeader
+				backTo={`/applications/${appId}?view=activity`}
+				backLabel="← Application activity"
+				title="Run"
+				id={run.id}
+				status={<>
+					<span className={`app-status app-status-${run.status}`}>{run.status}</span>
+					{deadline && <TimeLeft expiresAt={deadline} />}
+				</>}
+				actions={<>
+					{cancellable && <Button variant="danger" size="sm" onClick={() => setConfirm('cancel')}>Cancel run</Button>}
+					{retryable && <Button size="sm" onClick={() => setConfirm('retry')}>Retry step</Button>}
+				</>} />
+			{err !== '' && <div className="detail-error"><Notice tone="warning">{err}</Notice></div>}
 
+			<ApplicationWorkView>
 			{run.streaming && (
-				<section className="app-card">
-					<div className="app-card-head"><span className="app-card-title">Output</span></div>
-					<div className="app-card-body">
-						<p className="app-dim">Stream not retained · {run.stream_items ?? 0} item{(run.stream_items ?? 0) === 1 ? '' : 's'} · {run.stream_bytes ?? 0} bytes</p>
-					</div>
-				</section>
+				<ApplicationWorkSection title="Output">
+					<p className="app-dim">Stream not retained · {run.stream_items ?? 0} item{(run.stream_items ?? 0) === 1 ? '' : 's'} · {run.stream_bytes ?? 0} bytes</p>
+				</ApplicationWorkSection>
 			)}
 			{run.status === 'succeeded' && run.output_json && (
-				<section className="app-card">
-					<div className="app-card-head"><span className="app-card-title">Output</span></div>
-					<div className="app-card-body"><pre className="app-out-pre">{run.output_json}</pre></div>
-				</section>
+				<ApplicationWorkSection title="Output">
+					<pre className="app-out-pre">{run.output_json}</pre>
+				</ApplicationWorkSection>
 			)}
 			{run.status === 'failed' && run.error_code && (
 				<Notice tone="warning">Run failed — {run.error_code}</Notice>
 			)}
 
 			{(pending || phase?.phase === 'running') && (
-				<section className="app-card" data-testid="run-progress" ref={progressRef} style={reserved === undefined ? undefined : { minHeight: reserved }}>
-					<div className="app-card-head"><span className="app-card-title">{pending ? `Waiting on — ${interruptTitle(pending)}` : `Running — ${runningHandler ?? 'handler'}`}</span></div>
-					<div className="app-card-body">
-						{pending?.context_json && <pre className="app-out-pre mt-2">{pending.context_json}</pre>}
-						{pending?.resume_url && <p className="text-xs text-sec mt-2"><span className="app-mono">POST {pending.resume_url}</span></p>}
-						{pending ? (
-							pending.can_resume ? (
-								<ResumeForm interrupt={pending}
-									scope={{ userId: me?.user.id ?? '', workspaceId: ws }}
-									onResumed={() => qc.invalidateQueries({ queryKey: ['run', runId] })} />
-							) : (
-								<p className="text-sm text-body">Waiting to be resumed.</p>
-							)
+				<ApplicationWorkSection data-testid="run-progress" ref={progressRef}
+					style={reserved === undefined ? undefined : { minHeight: reserved }}
+					title={pending ? `Waiting on — ${interruptTitle(pending)}` : `Running — ${runningHandler ?? 'handler'}`}>
+					{pending?.context_json && <pre className="app-out-pre">{pending.context_json}</pre>}
+					{pending?.resume_url && <p className="text-xs text-sec"><span className="app-mono">POST {pending.resume_url}</span></p>}
+					{pending ? (
+						pending.can_resume ? (
+							<ResumeForm interrupt={pending}
+								scope={{ userId: me?.user.id ?? '', workspaceId: ws }}
+								onResumed={() => qc.invalidateQueries({ queryKey: ['run', runId] })} />
 						) : (
-							// S3: the card keeps its box while the handler runs.
-							<p className="text-sm text-body" aria-live="polite">Running {runningHandler ?? 'handler'}…</p>
-						)}
-					</div>
-				</section>
+							<p className="text-sm text-body">Waiting to be resumed.</p>
+						)
+					) : (
+						// S3: the card keeps its box while the handler runs.
+						<p className="text-sm text-body" aria-live="polite">Running {runningHandler ?? 'handler'}…</p>
+					)}
+				</ApplicationWorkSection>
 			)}
 
-			<section className="app-card">
-				<div className="app-card-head"><span className="app-card-title">Steps</span></div>
-				<div className="app-card-body">
-					<table className="tbl">
-						<thead>
-							<tr><th>Seq</th><th>Attempt</th><th>Entry</th><th>Status</th><th>Duration</th><th>Resolver</th></tr>
+			<ApplicationWorkSection title="Steps">
+				<div className="app-work-table" role="region" aria-label="Steps table" tabIndex={0}>
+					<table className="tbl app-step-table" role="table">
+						<thead role="rowgroup">
+							<tr role="row"><th role="columnheader">Seq</th><th role="columnheader">Attempt</th><th role="columnheader">Entry</th><th role="columnheader">Status</th><th role="columnheader">Duration</th><th role="columnheader">Resolver</th></tr>
 						</thead>
-						<tbody>
+						<tbody role="rowgroup">
 							{steps.map((s) => (
-								<tr key={`${s.seq}/${s.attempt}`}>
-									<td className="text-xs">{s.seq}</td>
-									<td className="text-xs">{s.attempt}</td>
-									<td className="text-xs">{s.entry}</td>
-									<td><span className={`app-status app-status-${s.status}`}>{s.status}</span>{s.error_code ? ` · ${s.error_code}` : ''}</td>
-									<td className="text-xs text-sec">{s.duration_ms}ms</td>
-									<td className="text-xs text-sec">{s.interrupt_id ? (intrs.find((i: Interrupt) => i.id === s.interrupt_id)?.resolved_by ? resolverLabel(intrs.find((i) => i.id === s.interrupt_id)!) : s.interrupt_id) : '—'}</td>
+								<tr role="row" key={`${s.seq}/${s.attempt}`}>
+									<td role="cell" className="text-xs" data-label="Seq">{s.seq}</td>
+									<td role="cell" className="text-xs" data-label="Attempt">{s.attempt}</td>
+									<td role="cell" className="text-xs" data-label="Entry">{s.entry}</td>
+									<td role="cell" data-label="Status"><span><span className={`app-status app-status-${s.status}`}>{s.status}</span>{s.error_code ? ` · ${s.error_code}` : ''}</span></td>
+									<td role="cell" className="text-xs text-sec" data-label="Duration">{s.duration_ms}ms</td>
+									<td role="cell" className="text-xs text-sec" data-label="Resolver">{s.interrupt_id ? (intrs.find((i: Interrupt) => i.id === s.interrupt_id)?.resolved_by ? resolverLabel(intrs.find((i) => i.id === s.interrupt_id)!) : s.interrupt_id) : '—'}</td>
 								</tr>
 							))}
 						</tbody>
 					</table>
 				</div>
-			</section>
+			</ApplicationWorkSection>
+			</ApplicationWorkView>
+		</div>
 
 			{confirm === 'cancel' && (
 				<Confirm tone="danger" title={`Cancel run ${run.id}?`} confirm="Cancel run" pending="Cancelling…"

@@ -4,10 +4,10 @@
 .shell-canvas { height: 100dvh; min-width: 0; display: flex; flex-direction: column; }
 .console-header { flex: none; }
 .console-main { flex: 1; min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; }
-/* Instance detail is a workbench: the shared pane never scrolls —
-   the Notebook/Activity panes inside own their scrollers. */
-.console-main:has(.instance-detail) { overflow: hidden; }
-.console-content:has(> .instance-detail) {
+/* Detail workbenches (instance + application): the shared pane never
+   scrolls — the panes inside own their scrollers. */
+.console-main:has(.console-content > .detail-workbench) { overflow: hidden; }
+.console-content:has(> .detail-workbench) {
   height: 100%; min-height: 0; display: flex; padding: 0; max-width: none;
 }
 .shell-nav { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; flex: 1; overflow-y: auto; }
@@ -53,6 +53,20 @@
   border-radius: 8px; color: rgb(var(--sec));
 }
 .shell-hamburger:hover { background: rgb(var(--accent) / 0.04); color: rgb(var(--ink)); }
+/* header Inbox entry — the badge slot keeps a stable box whether the
+   count is empty or not (S4) */
+.shell-inbox {
+  position: relative; display: inline-flex; flex: none;
+  align-items: center; justify-content: center; width: 44px; height: 44px;
+  border-radius: 8px; color: rgb(var(--sec));
+}
+.shell-inbox:hover { background: rgb(var(--accent) / 0.04); color: rgb(var(--ink)); }
+.shell-inbox .inbox-count {
+  position: absolute; top: 4px; right: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 1.5em; height: 14px; padding: 0 3px; box-sizing: border-box;
+  border-radius: 7px; font-size: 10px; font-weight: 600; line-height: 1;
+}
 /* WorkspaceSwitcher: bounded trigger + truncated name */
 .shell-canvas .ws-switcher { max-width: min(280px, 100%); }
 .ws-switcher { display: inline-flex; align-items: center; min-width: 0; }

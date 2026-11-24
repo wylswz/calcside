@@ -103,6 +103,12 @@ export function ConsoleShell({ user, dev, onLogout, children }: {
               aria-haspopup="dialog" aria-expanded={drawer} onClick={() => setDrawer(true)}>
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
             </button>
+            {/* the pending-interrupt count must stay visible with the
+                drawer closed — it mirrors the Inbox link's badge (S4) */}
+            <Link to="/inbox" className="shell-inbox" aria-label="Inbox">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden><path d="M4 6h16v12H4zM4 12h6l2 2h4l2-2h2" /></svg>
+              <InboxBadge />
+            </Link>
             <Link to="/" className="shell-wordmark text-[15px] font-semibold text-ink">calcside</Link>
             <div className="min-w-0 flex-1"><WorkspaceSwitcher /></div>
             <AccountMenu user={user} dev={dev} onLogout={onLogout} />

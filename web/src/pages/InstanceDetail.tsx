@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Instance, Execution, APIKey, SharedInstance, workspaces, InstanceInspect } from '../api'
 import { instanceDescription, instanceTitle } from '../activity'
@@ -13,6 +13,7 @@ import { Notebook, MemoryStatus } from '../components/Notebook'
 import { StatePanel } from '../components/StatePanel'
 import { PromptPanel } from '../components/PromptPanel'
 import { ArtifactBrowser } from '../components/Artifacts'
+import { DetailWorkbenchHeader, DetailWorkbenchViews } from '../components/DetailWorkbench'
 import './instance-detail.css'
 
 // Panel breakpoints: the section outline docks inside the notebook at
@@ -180,21 +181,14 @@ export default function InstanceDetail() {
   const mUrl = `${window.location.origin}/mcp/instances/${id}`
 
   return (
-    <div className="instance-detail">
-      <div className="detail-head">
-        <div className="detail-id min-w-0 flex-1">
-          <div className="detail-crumb text-xs text-sec">
-            <Link to="/" className="transition-colors hover:text-accent">← Instances</Link>
-          </div>
-          <h1 className="break-words font-semibold text-ink" title={name}>{name}</h1>
-          {name !== inst.id && <div className="mt-1 truncate font-mono text-xs text-mute" title={inst.id}>{inst.id}</div>}
-          {description && <p className="detail-desc text-sm text-sec" title={description}>{description}</p>}
-          <div className="mt-2 flex items-center gap-3">
-            <InstanceStatus inst={inst} />
-            {live && effRun && <button className="text-xs text-accent hover:underline disabled:opacity-50" onClick={keepalive} disabled={pending === 'extend'}><SwapLabel show={pending === 'extend' ? 'extending…' : 'extend'} options={['extend', 'extending…']} /></button>}
-          </div>
-        </div>
-        <div className="detail-actions ml-auto flex items-center gap-2">
+    <div className="instance-detail detail-workbench">
+      <DetailWorkbenchHeader backTo="/" backLabel="← Instances" title={name} id={inst.id}
+        description={description}
+        status={<>
+          <InstanceStatus inst={inst} />
+          {live && effRun && <button className="text-xs text-accent hover:underline disabled:opacity-50" onClick={keepalive} disabled={pending === 'extend'}><SwapLabel show={pending === 'extend' ? 'extending…' : 'extend'} options={['extend', 'extending…']} /></button>}
+        </>}
+        actions={<>
           {isOwner && <Button onClick={() => setShare(true)}>Share</Button>}
           <Button onClick={() => setPrompt(true)}>Copy prompt</Button>
           {canManage && live && (
@@ -207,8 +201,7 @@ export default function InstanceDetail() {
               <MenuItem tone="danger" onSelect={() => setEnding(true)}>End instance</MenuItem>
             </Menu>
           )}
-        </div>
-      </div>
+        </>} />
 
       {actErr && <div className="detail-error text-xs text-warn-text">{actErr}</div>}
       {/* One-line next-action slot — a reserved band that renders even
@@ -297,15 +290,7 @@ export default function InstanceDetail() {
         </Modal>
       )}
 
-      <div className="detail-views">
-        <div className="view-tabs flex gap-1" role="tablist" aria-label="Instance views">
-          {(['notebook', 'activity'] as const).map((v) => (
-            <button key={v} role="tab" aria-selected={view === v} data-on={view === v}
-              className="view-tab" onClick={() => setView(v)}>
-              {v === 'notebook' ? 'Notebook' : 'Activity'}
-            </button>
-          ))}
-        </div>
+      <DetailWorkbenchViews actions={
         <button type="button" className="panel-toggle" aria-label="Inspector"
           ref={inspectorBtnRef}
           aria-expanded={inspectorOpen} aria-controls="instance-inspector"
@@ -316,7 +301,16 @@ export default function InstanceDetail() {
             <path d="M15 4v16" />
           </svg>
         </button>
-      </div>
+      }>
+        <div className="view-tabs flex gap-1" role="tablist" aria-label="Instance views">
+          {(['notebook', 'activity'] as const).map((v) => (
+            <button key={v} role="tab" aria-selected={view === v} data-on={view === v}
+              className="view-tab" onClick={() => setView(v)}>
+              {v === 'notebook' ? 'Notebook' : 'Activity'}
+            </button>
+          ))}
+        </div>
+      </DetailWorkbenchViews>
 
       <div className="detail-grid">
         <div className="work-surface min-w-0">

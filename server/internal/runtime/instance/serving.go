@@ -196,6 +196,7 @@ func (m *Manager) Prepare(ctx context.Context, req *runtime.PrepareRequest) (*ru
 	deps.Observer = sink
 	cfg := engine.ProgramConfig{
 		Entrypoint:   req.Program.Entrypoint,
+		Notebook:     req.Program.Notebook,
 		Sources:      req.Program.Sources,
 		Assets:       req.Program.Assets,
 		InputSchema:  req.Program.InputSchema,

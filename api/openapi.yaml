@@ -3165,6 +3165,14 @@ components:
     ApplicationStatus:
       type: string
       enum: [draft, preparing, ready, degraded, disabled]
+    ApplicationSection:
+      type: object
+      required: [id, code]
+      properties:
+        id:
+          type: string
+          pattern: '^[a-z][a-z0-9_]{0,47}$'
+        code: { type: string }
     Application:
       type: object
       required: [id, workspace_id, user_id, name, code, spec, version, published_version,
@@ -3175,6 +3183,21 @@ components:
         user_id: { type: string }
         name: { type: string }
         code: { type: string, description: 'main.star source' }
+        sections:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items: { $ref: '#/components/schemas/ApplicationSection' }
+          description: notebook program sections; absent = script application
+        notebook_graph:
+          $ref: '#/components/schemas/NotebookGraph'
+          description: saved-draft dependency graph, detail responses only
+        notebook_entries:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+          description: section ID -> statically visible entry function names, detail responses only
         spec:
           $ref: '#/components/schemas/RawJSON'
           description: normalized boundary spec (JSON object, refs only)
@@ -3218,6 +3241,9 @@ components:
           description: omitted/null = scaffold
         spec:
           $ref: '#/components/schemas/RawJSON'
+        notebook:
+          type: boolean
+          description: 'Create a notebook application with a main section instead of a script.'
         input_schema:
           type: string
           nullable: true
@@ -3232,6 +3258,12 @@ components:
         version: { type: integer, format: int64, minimum: 1 }
         name: { type: string, maxLength: 128 }
         code: { type: string }
+        sections:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items: { $ref: '#/components/schemas/ApplicationSection' }
+          description: notebook program sections; must be absent for script applications
         spec:
           $ref: '#/components/schemas/RawJSON'
         input_schema:

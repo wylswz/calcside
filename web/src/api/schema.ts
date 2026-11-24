@@ -2065,6 +2065,10 @@ export interface components {
         RawJSON: unknown;
         /** @enum {string} */
         ApplicationStatus: "draft" | "preparing" | "ready" | "degraded" | "disabled";
+        ApplicationSection: {
+            id: string;
+            code: string;
+        };
         Application: {
             id: string;
             workspace_id: string;
@@ -2072,6 +2076,14 @@ export interface components {
             name: string;
             /** @description main.star source */
             code: string;
+            /** @description notebook program sections; absent = script application */
+            sections?: components["schemas"]["ApplicationSection"][];
+            /** @description saved-draft dependency graph, detail responses only */
+            notebook_graph?: components["schemas"]["NotebookGraph"];
+            /** @description section ID -> statically visible entry function names, detail responses only */
+            notebook_entries?: {
+                [key: string]: string[];
+            };
             /** @description normalized boundary spec (JSON object, refs only) */
             spec: components["schemas"]["RawJSON"];
             /** @description verbatim stored spec text — high-precision numbers stay exact; use this, never re-serialize spec */
@@ -2105,6 +2117,8 @@ export interface components {
             /** @description omitted/null = scaffold */
             code?: string | null;
             spec?: components["schemas"]["RawJSON"];
+            /** @description Create a notebook application with a main section instead of a script. */
+            notebook?: boolean;
             input_schema?: string | null;
             /** @description omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema */
             output_schema?: string | null;
@@ -2114,6 +2128,8 @@ export interface components {
             version: number;
             name: string;
             code: string;
+            /** @description notebook program sections; must be absent for script applications */
+            sections?: components["schemas"]["ApplicationSection"][];
             spec?: components["schemas"]["RawJSON"];
             input_schema?: string | null;
             /** @description omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema */

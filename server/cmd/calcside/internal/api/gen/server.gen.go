@@ -742,11 +742,18 @@ type Application struct {
 	InputSchema *string `json:"input_schema,omitempty"`
 	Name        string  `json:"name"`
 
+	// NotebookEntries section ID -> statically visible entry function names, detail responses only
+	NotebookEntries *map[string][]string `json:"notebook_entries,omitempty"`
+	NotebookGraph   *NotebookGraph       `json:"notebook_graph,omitempty"`
+
 	// OutputSchema omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema
 	OutputSchema         *string `json:"output_schema,omitempty"`
 	PersistentInstanceId *string `json:"persistent_instance_id,omitempty"`
 	PublishedVersion     int64   `json:"published_version"`
 	ReleaseId            *string `json:"release_id,omitempty"`
+
+	// Sections notebook program sections; absent = script application
+	Sections *[]ApplicationSection `json:"sections,omitempty"`
 
 	// Spec raw JSON preserved byte-for-byte; never re-parsed by the API tier
 	Spec RawJSON `json:"spec"`
@@ -766,6 +773,9 @@ type ApplicationCreateRequest struct {
 	Code        *string `json:"code,omitempty"`
 	InputSchema *string `json:"input_schema,omitempty"`
 	Name        *string `json:"name,omitempty"`
+
+	// Notebook Create a notebook application with a main section instead of a script.
+	Notebook *bool `json:"notebook,omitempty"`
 
 	// OutputSchema omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema
 	OutputSchema *string `json:"output_schema,omitempty"`
@@ -805,6 +815,12 @@ type ApplicationRunResponse struct {
 	Waiting    *InterruptWaiting `json:"waiting,omitempty"`
 }
 
+// ApplicationSection defines model for ApplicationSection.
+type ApplicationSection struct {
+	Code string `json:"code"`
+	Id   string `json:"id"`
+}
+
 // ApplicationStatus defines model for ApplicationStatus.
 type ApplicationStatus string
 
@@ -823,6 +839,9 @@ type ApplicationUpdateRequest struct {
 
 	// OutputSchema omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema
 	OutputSchema *string `json:"output_schema,omitempty"`
+
+	// Sections notebook program sections; must be absent for script applications
+	Sections *[]ApplicationSection `json:"sections,omitempty"`
 
 	// Spec raw JSON preserved byte-for-byte; never re-parsed by the API tier
 	Spec    *RawJSON `json:"spec,omitempty"`

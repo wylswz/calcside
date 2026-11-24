@@ -23,6 +23,7 @@ export default function NewApplication() {
   const step: Step = params.get('step') === 'config' ? 'config' : 'basics'
   const [configMounted, setConfigMounted] = useState(step === 'config')
   const [name, setName] = useState('')
+  const [notebook, setNotebook] = useState(true)
   const [description, setDescription] = useState('')
   const [labels, setLabels] = useState<{ k: string; v: string }[]>([])
   // A basics edit made while the hidden configuration is mounted must
@@ -90,7 +91,7 @@ export default function NewApplication() {
     setBusy(true)
     try {
       const r = await api.postRawJson<{ application: Application }>(`/api/v1/applications?workspace=${encodeURIComponent(dest.id)}`,
-        `{"name":${JSON.stringify(name)},"spec":${specJSON ?? JSON.stringify(spec ?? {})}}`)
+        `{"name":${JSON.stringify(name)},"spec":${specJSON ?? JSON.stringify(spec ?? {})}${notebook ? ',"notebook":true' : ''}}`)
       qc.invalidateQueries({ queryKey: ['applications'] })
       nav(`/applications/${r.application.id}`)
     } catch (x: any) { setErr(x.message); setBusy(false) }
@@ -131,6 +132,13 @@ export default function NewApplication() {
                 <Field label="Description">
                   <input id="basics-description" className={inputCls} value={description} maxLength={280}
                     placeholder="What does it do?" onChange={(e) => { basicsPending.current = true; setDescription(e.target.value) }} />
+                </Field>
+                <Field label="Source format">
+                  <select id="basics-source-format" className={inputCls} value={notebook ? 'notebook' : 'script'}
+                    onChange={(e) => setNotebook(e.target.value === 'notebook')}>
+                    <option value="notebook">Notebook</option>
+                    <option value="script">Script</option>
+                  </select>
                 </Field>
               </div>
               <div>

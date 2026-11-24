@@ -234,6 +234,49 @@ hide inactive panels without unmounting their editors or inputs (C2/C3).
   `application-ui-{desktop,mobile}.png`.
 - Coverage is the browser suite plus static/unit geometry checks, not
   frame-level measurement.
+- Notebook-format applications (`?nbview=…`) replace that Develop card
+  with the shared notebook workbench (C2/C4): every section is a
+  persistent stacked cell with its own CodeMirror, the entry-point owner
+  stays pinned last, and cells reorder via a left-gutter drag handle
+  (pointer capture; commit on release only, ArrowUp/ArrowDown and menu
+  Move as keyboard fallback) or a Rename…/Delete… menu — Delete goes
+  through `Confirm`. Add section shares the instance interaction — one
+  `NotebookAddSection` toolbar button and between-cell
+  `NotebookInsert` inserters auto-name `untitled_section[_N]` with no
+  prompt and focus the new editor (application-only difference: adds
+  never go after the pinned main). Code/Graph is a deep link
+  (`?nbview=graph&section=<id>`), the side rail docks a Sections
+  directory plus three parallel add catalogs — Extensions, Modules and
+  Policies are all portals of the same SpecForm pickers, so no duplicate
+  editable state exists and Settings only reviews/removes them. Pinned
+  main's gutter carries an Open-Test shortcut that only opens the Test
+  utility panel (execution still waits for Test main; the panel hides
+  in Graph view and returns with Code). Code | Graph shares the
+  instance semantics — the same `NotebookGraphPane` host, a
+  scroll-spy `aria-current` directory, captured/restored code scroll
+  across view and Settings toggles, ?section= deep links that scroll
+  once, saved-structure-only graph selection (pending rows disabled,
+  stale ?section= selects nothing), and a container-query-stacked
+  graph aside under ~580px of pane width. Under 739px the rail goes
+  horizontal and the explorer overlays the work pane (a Sections pick
+  closes it and refocuses the rail toggle; catalog panes stay open
+  until an explicit Configure opens Settings). Settings is a
+  full categorized workspace (General/Runtime/Dependencies/Contract)
+  that replaces the canvas — editors stay mounted behind `hidden`; its
+  header has a persistent Form | JSON mode switch with identical
+  geometry in both modes plus an explicit close that returns focus to
+  the toolbar toggle, and the page-level Extensions error offers a
+  Configure-extension jump straight to the failing card. The legacy
+  script app keeps
+  the Develop card described above.
+- Both detail routes share the IDE-style `DetailWorkbench` frame: the
+  same compact identity header (crumb, title, id, status, actions),
+  `view-tabs` strip, and a viewport-filling `.work-surface` where each
+  `.work-panel`'s own `.work-panel-scroll` (or the notebook's inner
+  grid) owns scrolling — `.console-main` stops scrolling for these two
+  roots, so header and tab bar never move and there is no document-level
+  gutter or container cap. Instance keeps its next-action band and
+  Inspector inside the same frame.
 
 Known gaps in the editor: there is no version history beyond the
 published release — autosave cannot undo a bad edit except by reverting

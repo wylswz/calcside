@@ -5,12 +5,14 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { api, ApiError, Application, Run, postApplication, workspaces } from '../api'
 import { applicationDescription } from '../activity'
-import { Button, Confirm, Icon, Loading, Notice, PageHeader, RevealNew, SwapLabel } from '../components/ui'
+import { Button, Confirm, Field, Icon, Loading, Notice, RevealNew, SwapLabel } from '../components/ui'
+import { DetailWorkbenchHeader, DetailWorkbenchViews } from '../components/DetailWorkbench'
+import { ApplicationWorkView, ApplicationWorkSection } from '../components/ApplicationWorkView'
 import { PublishReviewDialog } from '../components/PublishReviewDialog'
 import { cmTheme } from '../components/codemirror'
 import { useApplicationEditor } from '../components/editor'
 import { RunProgress, useRunProgress } from '../components/RunProgress'
-import { SpecForm } from '../components/SpecForm'
+import { SpecForm, type SpecFormHandle } from '../components/SpecForm'
 import type { DraftError, InstanceDraft, InstanceSpec } from '../instanceDraft'
 import './application.css'
 import { ApplicationCallExamples } from '../components/ApplicationCallExamples'
@@ -18,6 +20,7 @@ import { AppKeyModal } from '../components/AppKeyModal'
 import { useHeldOrder } from '../stableList'
 import { fmtDateTime, type RunPhase } from '../interrupts'
 import { ApplicationResources, type ResourceDocument } from '../components/ApplicationResources'
+import { ApplicationNotebook } from '../components/ApplicationNotebook'
 import { CopyBlock } from '../components/MCP'
 import { parseModuleMounts } from '../moduleMounts'
 import type { JsonValue } from '../instanceDraft'
@@ -25,6 +28,8 @@ import type { JsonValue } from '../instanceDraft'
 type Draft = {
   name: string
   code: string
+  /** notebook program sections; absent = script application */
+  sections?: Application['sections']
   input: string
   spec: string
   inOn: boolean
@@ -47,7 +52,7 @@ function draftOf(a: Application): Draft {
   // spec_json is the verbatim stored text — re-serializing the decoded
   // object would round precision-limited numbers in limits.
   return {
-    name: a.name, code: a.code, input: DEFAULT_INPUT,
+    name: a.name, code: a.code, sections: a.sections, input: DEFAULT_INPUT,
     spec: a.spec_json ?? '{}',
     inOn: a.input_schema != null, inText: a.input_schema ?? '',
     outOn: a.output_schema != null, outText: a.output_schema ?? '',
@@ -76,16 +81,26 @@ function sameJSON(a: unknown, b: unknown): boolean {
 }
 
 function fp(d: Draft): string {
-  return JSON.stringify([d.name, d.code, d.spec, d.inOn, d.inText, d.outOn, d.outText])
+  return JSON.stringify([d.name, d.code, d.spec, d.inOn, d.inText, d.outOn, d.outText, ...(d.sections ? [d.sections] : [])])
 }
 
 function validSaved(x: unknown): x is Saved {
   const s = x as Saved
   if (!s || typeof s !== 'object' || !Number.isSafeInteger(s.version) || s.version < 1 || typeof s.fp !== 'string') return false
   const d = s.draft as Draft
-  return !!d && typeof d === 'object' &&
+  const shape = !!d && typeof d === 'object' &&
     ['name', 'code', 'input', 'spec', 'inText', 'outText'].every((k) => typeof (d as any)[k] === 'string') &&
     ['inOn', 'outOn'].every((k) => typeof (d as any)[k] === 'boolean')
+  if (!shape) return false
+  if (d.sections !== undefined) {
+    if (!Array.isArray(d.sections) || d.sections.length < 1 || d.sections.length > 64) return false
+    const ids = new Set<string>()
+    for (const s of d.sections) {
+      if (!s || typeof s.id !== 'string' || typeof s.code !== 'string' || ids.has(s.id)) return false
+      ids.add(s.id)
+    }
+  }
+  return true
 }
 
 function scopeKey(user: string, ws: string, id: string) { return JSON.stringify(['appv1', user, ws, id]) }
@@ -182,6 +197,7 @@ function Editor({ app, role, userID, qc }: Props) {
   const [params, setParams] = useSearchParams()
   const activeView = params.get('view') === 'invoke' ? 'invoke' : params.get('view') === 'activity' ? 'activity' : 'develop'
   const settingsRef = useRef<HTMLDetailsElement>(null)
+  const notebookSpecRef = useRef<SpecFormHandle>(null)
   const configureResources = () => {
     setAdv(true)
     window.requestAnimationFrame(() => {
@@ -220,10 +236,10 @@ function Editor({ app, role, userID, qc }: Props) {
     return () => window.removeEventListener('beforeunload', h)
   }, [dirty])
 
-  const edit = (patch: Partial<Draft>) => {
+  const edit = (patch: Partial<Draft> | ((cur: Draft) => Partial<Draft>)) => {
     if (corrupt) return
     setDraft((cur) => {
-      const next = { ...cur, ...patch }
+      const next = { ...cur, ...(typeof patch === 'function' ? patch(cur) : patch) }
       setStoreFailed(!persist(scope, { draft: next, version: latestBase.current.version, fp: latestBase.current.fp }))
       return next
     })
@@ -276,7 +292,7 @@ function Editor({ app, role, userID, qc }: Props) {
     const spec = d.spec.trim() || 'null'
     const ins = d.inOn && d.inText.trim() ? JSON.stringify(d.inText) : 'null'
     const outs = d.outOn && d.outText.trim() ? JSON.stringify(d.outText) : 'null'
-    const body = `{"version":${fromVersion},"name":${JSON.stringify(d.name)},"code":${JSON.stringify(d.code)},"spec":${spec},"input_schema":${ins},"output_schema":${outs}}`
+    const body = `{"version":${fromVersion},"name":${JSON.stringify(d.name)},"code":${JSON.stringify(d.code)},"spec":${spec},"input_schema":${ins},"output_schema":${outs}${d.sections ? ',"sections":' + JSON.stringify(d.sections) : ''}}`
     const r = await api.putRawJson<{ application: Application }>(`/api/v1/applications/${app.id}`, body)
     return r.application ?? null
   }
@@ -499,40 +515,169 @@ function Editor({ app, role, userID, qc }: Props) {
   }
   const ready = app.status === 'ready'
   const saveState = busy === 'save' ? 'Saving…' : saveFailed ? "Couldn't save" : fpDirty ? 'Unsaved' : 'Saved'
-  return (
-    <div className="app-page app-editor">
-      <PageHeader title={draft.name || 'Application'}
-        actions={view === 'edit' ? <Button variant="danger" onClick={() => setDelOpen(true)}>Delete</Button> : undefined}>
-        <span className={`app-status app-status-${app.status}`}>{app.status}</span>{' '}
-        {app.has_unpublished_changes && <span className="app-dim">unpublished changes</span>}{' '}
-        <span className="app-dim"><SwapLabel show={saveState} options={['Saved', 'Saving…', 'Unsaved', "Couldn't save"]} /></span>{' '}
-        {saveFailed && view === 'edit' && <Button size="sm" onClick={saveNow} disabled={busy !== ''}>Retry</Button>}
-      </PageHeader>
-      <p className="app-dim"><Link to="/applications" className="link">← Applications</Link> · <span className="app-mono">{app.id}</span></p>
-      {applicationDescription(app) && <p className="app-dim max-w-3xl">{applicationDescription(app)}</p>}
-      {/* P5/F3: invocation and background-save failures stay visible in every view. */}
-      {warn && <Notice tone="warning">{warn}</Notice>}
-      {storeFailed && <Notice tone="warning">Not saved to this tab.</Notice>}
-      {corrupt && (
+  const notebookMode = draft.sections !== undefined
+  // Shared between the legacy Develop card and the notebook Test panel.
+  const testPanel = (
+    <div className="app-draft-test">
+      <div className="app-draft-input">
+        <div className="app-io-toolbar">
+          <label className="app-label" htmlFor="app-input">Input — a JSON object</label>
+          <span className="app-dim">{notebookMode ? 'main(input)' : 'main.star'}</span>
+        </div>
+        <textarea id="app-input" className="app-area" rows={5} spellCheck={false}
+          value={draft.input} onChange={(e) => edit({ input: e.target.value })} />
+      </div>
+      <div className="app-out">
+        <div className="app-out-head">
+          <span className="app-label">Output</span>
+          <span className="app-stream-stop" data-testid="app-stream-stop-slot">
+            <Button size="sm" variant="danger" onClick={() => setStopKind('dev')} data-testid="app-stream-stop"
+              disabled={!devStream || !!devStream.done || !!devStream.error || !!devStream.stopped}
+              tabIndex={devStream && !devStream.done && !devStream.error && !devStream.stopped ? 0 : -1}
+              style={{ visibility: devStream && !devStream.done && !devStream.error && !devStream.stopped ? 'visible' : 'hidden' }}
+              aria-hidden={!(devStream && !devStream.done && !devStream.error && !devStream.stopped)}><SwapLabel show="Stop" options={['Stop', 'Stopping…']} /></Button>
+          </span>
+          <span className="app-dim app-stream-meta" data-testid="app-stream-meta">{streamMeta(devStream)}</span>
+        </div>
+        <pre className="app-out-pre" aria-live="polite">
+          {streamText(devStream) ?? preText(run, devPhase, 'Run to see output')}
+        </pre>
+        {streamError(devStream) && <p className="app-dim">{streamError(devStream)}</p>}
+        {outdated && <p className="app-dim">Result is from before your latest edits.</p>}
+        {run?.run_id && !run.output_json && !run.result.error && !run.result.streaming && !devStream && (
+          <RunProgress runId={run.run_id} appId={app.id} inline
+            scope={{ userId: userID, workspaceId: app.workspace_id }}
+            fallbackWaiting={run.waiting ?? undefined} />
+        )}
+        </div>
+      </div>
+  )
+  const schemaFields = (['in', 'out'] as const).map((side) => (
+    <div key={side} className="app-schema">
+      <label className="app-check">
+        <input type="checkbox" checked={side === 'in' ? draft.inOn : draft.outOn} disabled={view === 'view'}
+          onChange={(e) => {
+            const on = e.target.checked
+            // an enabled-but-empty schema must not silently fall
+            // back to the default: seed the open-object contract
+            const seed = '{"type":"object","additionalProperties":true}'
+            edit(side === 'in' ? { inOn: on, inText: on && !draft.inText.trim() ? seed : draft.inText }
+                              : { outOn: on, outText: on && !draft.outText.trim() ? seed : draft.outText })
+          }} />
+        Custom {side === 'in' ? 'input' : 'output'} schema
+      </label>
+      {(side === 'in' ? draft.inOn : draft.outOn) && (
+        <textarea className="app-area" rows={6} spellCheck={false} disabled={view === 'view'}
+          aria-label={`${side} schema JSON`}
+          value={side === 'in' ? draft.inText : draft.outText}
+          onChange={(e) => edit(side === 'in' ? { inText: e.target.value } : { outText: e.target.value })} />
+      )}
+    </div>
+  ))
+  const resultNotices = (
+    <>
+      {specErrs.length > 0 && (
         <Notice tone="warning">
-          Saved editor state for this application is unreadable.
-          <button className="link-btn" onClick={() => setResetOpen(true)}>Reset it</button>
+          {specErrs[0].section}: {specErrs[0].message}
+          {notebookMode && specErrs.some((e) => e.section === 'Extensions') && (
+            <Button size="sm" onClick={() => notebookSpecRef.current?.revealInvalidExtension()}>Configure extension</Button>
+          )}
         </Notice>
       )}
+      {reviewOpen && (
+        <PublishReviewDialog resource="applications" id={app.id} version={reviewVer}
+          onClose={() => setReviewOpen(false)}
+          onPublished={() => {
+            setReviewOpen(false)
+            setPublished(true)
+            qc.invalidateQueries({ queryKey: ['application', app.id] })
+            qc.invalidateQueries({ queryKey: ['applications'] })
+          }} />
+      )}
+      {published && (
+        <Notice><SwapLabel
+          show={app.status === 'preparing' ? 'Published — deploying. Invoke becomes available when status is ready.' : 'Published.'}
+          options={['Published — deploying. Invoke becomes available when status is ready.', 'Published.']} /></Notice>
+      )}
+    </>
+  )
+  return (
+    <div className="app-page app-editor detail-workbench">
+      <DetailWorkbenchHeader backTo="/applications" backLabel="← Applications"
+        title={draft.name || 'Application'} id={app.id}
+        description={applicationDescription(app) || undefined}
+        status={<>
+          <span className={`app-status app-status-${app.status}`}>{app.status}</span>{' '}
+          {app.has_unpublished_changes && <span className="app-dim">unpublished changes</span>}{' '}
+          <span className="app-dim"><SwapLabel show={saveState} options={['Saved', 'Saving…', 'Unsaved', "Couldn't save"]} /></span>{' '}
+          {saveFailed && view === 'edit' && <Button size="sm" onClick={saveNow} disabled={busy !== ''}>Retry</Button>}
+        </>}
+        actions={view === 'edit' ? <Button variant="danger" onClick={() => setDelOpen(true)}>Delete</Button> : undefined} />
+      {/* P5/F3: invocation and background-save failures stay visible in every view. */}
+      {(warn || storeFailed || corrupt) && (
+        <div className="detail-error">
+          {warn && <Notice tone="warning">{warn}</Notice>}
+          {storeFailed && <Notice tone="warning">Not saved to this tab.</Notice>}
+          {corrupt && (
+            <Notice tone="warning">
+              Saved editor state for this application is unreadable.
+              <button className="link-btn" onClick={() => setResetOpen(true)}>Reset it</button>
+            </Notice>
+          )}
+        </div>
+      )}
 
-      <Tabs.Root value={activeView} onValueChange={(value) => {
+      <Tabs.Root className="app-detail-views" value={activeView} onValueChange={(value) => {
         const next = new URLSearchParams(params)
         if (value === 'develop') next.delete('view')
         else next.set('view', value)
         setParams(next)
       }}>
-      <Tabs.List className="app-view-tabs" aria-label="Application views">
-        <Tabs.Trigger value="develop">Develop</Tabs.Trigger>
-        <Tabs.Trigger value="invoke">Invoke</Tabs.Trigger>
-        <Tabs.Trigger value="activity">Activity</Tabs.Trigger>
-      </Tabs.List>
+      <DetailWorkbenchViews>
+        <Tabs.List className="view-tabs flex gap-1" aria-label="Application views">
+          <Tabs.Trigger className="view-tab" value="develop">{notebookMode ? 'Notebook' : 'Develop'}</Tabs.Trigger>
+          <Tabs.Trigger className="view-tab" value="invoke">Invoke</Tabs.Trigger>
+          <Tabs.Trigger className="view-tab" value="activity">Activity</Tabs.Trigger>
+        </Tabs.List>
+      </DetailWorkbenchViews>
       {/* C2/C3: switching views hides panels, never remounts their editors. */}
-      <Tabs.Content value="develop" forceMount hidden={activeView !== 'develop'} className="app-view-panel">
+      <Tabs.Content value="develop" forceMount hidden={activeView !== 'develop'} className="work-panel app-view-panel">
+      {notebookMode ? (
+        <>
+        <ApplicationNotebook
+          visible={activeView === 'develop'}
+          sections={draft.sections ?? []}
+          saved={app}
+          extensions={editor.extensions}
+          readOnly={view === 'view' || corrupt}
+          busy={busy}
+          canRun={busy === '' && view === 'edit' && !corrupt && specErrs.length === 0}
+          onRun={onRun}
+          onPublish={onPublish}
+          onChange={(update) => edit((cur) => ({ sections: update(cur.sections ?? []) }))}
+          saveStatus={<SwapLabel show={saveState} options={['Saved', 'Saving…', 'Unsaved', "Couldn't save"]} />}
+          test={testPanel}
+          settings={(catalogTargets, openSettings, closeSettings) => (
+            <SpecForm key={specKey} ref={notebookSpecRef} application workspaceId={app.workspace_id} initial={initialSpec} onSpecChange={onSpec}
+              dockExtensionCatalog extensionCatalogTarget={catalogTargets.extensions}
+              moduleCatalogTarget={catalogTargets.modules} policyCatalogTarget={catalogTargets.policies}
+              onConfigureCatalogExtension={openSettings}
+              catalogReadOnly={view === 'view' || corrupt}
+              notebookSettings={{
+                general: <Field label="Name"><input id="app-name" className="app-input" value={draft.name} onChange={(e) => edit({ name: e.target.value })} /></Field>,
+                contract: { input: schemaFields[0], output: schemaFields[1] },
+                readOnly: view === 'view' || corrupt,
+                onClose: closeSettings,
+              }} />
+          )}
+        />
+        <div className="app-result appnb-result" role="status" aria-live="polite"
+          hidden={specErrs.length === 0 && !published && !reviewOpen}>
+          {resultNotices}
+        </div>
+        </>
+      ) : (
+      <div className="work-panel-scroll">
       <section className="app-card">
         <div className="app-card-head">
           <span className="app-card-title">Develop</span>
@@ -600,58 +745,11 @@ function Editor({ app, role, userID, qc }: Props) {
                 )}
               </div>
             )}
-          <div className="app-draft-test">
-            <div className="app-draft-input">
-              <div className="app-io-toolbar">
-                <label className="app-label" htmlFor="app-input">Input — a JSON object</label>
-                <span className="app-dim">main.star</span>
-              </div>
-              <textarea id="app-input" className="app-area" rows={5} spellCheck={false}
-                value={draft.input} onChange={(e) => edit({ input: e.target.value })} />
-            </div>
-            <div className="app-out">
-              <div className="app-out-head">
-                <span className="app-label">Output</span>
-                <span className="app-stream-stop" data-testid="app-stream-stop-slot">
-                  <Button size="sm" variant="danger" onClick={() => setStopKind('dev')} data-testid="app-stream-stop"
-                    disabled={!devStream || !!devStream.done || !!devStream.error || !!devStream.stopped}
-                    tabIndex={devStream && !devStream.done && !devStream.error && !devStream.stopped ? 0 : -1}
-                    style={{ visibility: devStream && !devStream.done && !devStream.error && !devStream.stopped ? 'visible' : 'hidden' }}
-                    aria-hidden={!(devStream && !devStream.done && !devStream.error && !devStream.stopped)}><SwapLabel show="Stop" options={['Stop', 'Stopping…']} /></Button>
-                </span>
-                <span className="app-dim app-stream-meta" data-testid="app-stream-meta">{streamMeta(devStream)}</span>
-              </div>
-              <pre className="app-out-pre" aria-live="polite">
-                {streamText(devStream) ?? preText(run, devPhase, 'Run to see output')}
-              </pre>
-              {streamError(devStream) && <p className="app-dim">{streamError(devStream)}</p>}
-              {outdated && <p className="app-dim">Result is from before your latest edits.</p>}
-              {run?.run_id && !run.output_json && !run.result.error && !run.result.streaming && !devStream && (
-                <RunProgress runId={run.run_id} appId={app.id} inline
-                  scope={{ userId: userID, workspaceId: app.workspace_id }}
-                  fallbackWaiting={run.waiting ?? undefined} />
-              )}
-              </div>
-            </div>
+          {testPanel}
           </div>
         </div>
         <div className="app-result" role="status" aria-live="polite">
-          {specErrs.length > 0 && <Notice tone="warning">{specErrs[0].section}: {specErrs[0].message}</Notice>}
-          {reviewOpen && (
-        <PublishReviewDialog resource="applications" id={app.id} version={reviewVer}
-          onClose={() => setReviewOpen(false)}
-          onPublished={() => {
-            setReviewOpen(false)
-            setPublished(true)
-            qc.invalidateQueries({ queryKey: ['application', app.id] })
-            qc.invalidateQueries({ queryKey: ['applications'] })
-          }} />
-      )}
-      {published && (
-            <Notice><SwapLabel
-              show={app.status === 'preparing' ? 'Published — deploying. Invoke becomes available when status is ready.' : 'Published.'}
-              options={['Published — deploying. Invoke becomes available when status is ready.', 'Published.']} /></Notice>
-          )}
+          {resultNotices}
         </div>
       </section>
 
@@ -661,41 +759,22 @@ function Editor({ app, role, userID, qc }: Props) {
         <fieldset disabled={view === 'view'} className="app-fieldset">
           <SpecForm key={specKey} application workspaceId={app.workspace_id} initial={initialSpec} onSpecChange={onSpec} />
         </fieldset>
-        {(['in', 'out'] as const).map((side) => (
-          <div key={side} className="app-schema">
-            <label className="app-check">
-              <input type="checkbox" checked={side === 'in' ? draft.inOn : draft.outOn} disabled={view === 'view'}
-                onChange={(e) => {
-                  const on = e.target.checked
-                  // an enabled-but-empty schema must not silently fall
-                  // back to the default: seed the open-object contract
-                  const seed = '{"type":"object","additionalProperties":true}'
-                  edit(side === 'in' ? { inOn: on, inText: on && !draft.inText.trim() ? seed : draft.inText }
-                                    : { outOn: on, outText: on && !draft.outText.trim() ? seed : draft.outText })
-                }} />
-              Custom {side === 'in' ? 'input' : 'output'} schema
-            </label>
-            {(side === 'in' ? draft.inOn : draft.outOn) && (
-              <textarea className="app-area" rows={6} spellCheck={false} disabled={view === 'view'}
-                aria-label={`${side} schema JSON`}
-                value={side === 'in' ? draft.inText : draft.outText}
-                onChange={(e) => edit(side === 'in' ? { inText: e.target.value } : { outText: e.target.value })} />
-            )}
-          </div>
-        ))}
+        {schemaFields}
         </div>
       </details>
+      </div>
+      )}
       </Tabs.Content>
 
-      <Tabs.Content value="invoke" forceMount hidden={activeView !== 'invoke'} className="app-view-panel">
-      <section className="app-card">
-        <div className="app-card-head">
-          <span className="app-card-title">Invoke</span>
-          {view === 'edit' && <Button onClick={() => setKeyOpen(true)}>Create API key</Button>}
-        </div>
+      <Tabs.Content value="invoke" forceMount hidden={activeView !== 'invoke'} className="work-panel app-view-panel">
+      <div className="work-panel-scroll app-work-scroll">
+      <ApplicationWorkView>
+      <ApplicationWorkSection title="Invoke"
+        description="Call the published release. Draft changes are not used."
+        actions={view === 'edit' ? <Button onClick={() => setKeyOpen(true)}>Create API key</Button> : undefined}>
         {!ready && <p className="app-dim">{statusHint[app.status] ?? 'Not ready.'}</p>}
-        <div className="app-grid">
-          <div>
+        <div className="app-invoke-layout">
+          <div className="app-invoke-io">
             <div className="app-io-toolbar">
               <label className="app-label" htmlFor="app-call-input">Input — a JSON object</label>
               <Button variant="primary" onClick={onInvoke} disabled={busy !== '' || !ready || view === 'view' || corrupt}><SwapLabel show={busy === 'invoke' ? 'Invoking…' : 'Invoke'} options={['Invoke', 'Invoking…']} /></Button>
@@ -725,18 +804,25 @@ function Editor({ app, role, userID, qc }: Props) {
               )}
             </div>
           </div>
-          <div>
-            <span className="app-label">Request examples</span>
+          <aside className="app-invoke-examples">
+            <h3 className="app-invoke-examples-title">Request examples</h3>
             <ApplicationCallExamples appId={app.id} input={callInput} />
-          </div>
+          </aside>
         </div>
-      </section>
+      </ApplicationWorkSection>
+      </ApplicationWorkView>
+      </div>
       </Tabs.Content>
-      <Tabs.Content value="activity" forceMount hidden={activeView !== 'activity'} className="app-view-panel">
-        <section className="app-card">
-          <div className="app-card-head"><span className="app-card-title">Runs</span></div>
-          <div className="app-card-body"><RunsTable appId={app.id} /></div>
-        </section>
+      <Tabs.Content value="activity" forceMount hidden={activeView !== 'activity'} className="work-panel app-view-panel">
+        <div className="work-panel-scroll app-work-scroll">
+        <ApplicationWorkView>
+        <ApplicationWorkSection title="Runs" description="Every durable run of this application — invokes, tests and interrupt resumes.">
+          <div className="app-work-table" role="region" aria-label="Runs table" tabIndex={0}>
+            <RunsTable appId={app.id} />
+          </div>
+        </ApplicationWorkSection>
+        </ApplicationWorkView>
+        </div>
       </Tabs.Content>
       </Tabs.Root>
 

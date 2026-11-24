@@ -189,3 +189,33 @@ func TestNewServingReleaseClones(t *testing.T) {
 		t.Fatal("caller mutation leaked")
 	}
 }
+
+func TestNewServingReleaseNotebook(t *testing.T) {
+	legacy := mkRel(t, tSpec(), tBundle())
+
+	nb := tBundle()
+	nb.Notebook = true
+	r, err := NewServingRelease("ws_1", "usr_1", tSpec(), runtime.PolicyBundle{}, nb, tNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Same bytes, different shape: the flag feeds the digest.
+	if r.ID == legacy.ID {
+		t.Fatal("notebook release must hash differently from script")
+	}
+	// A notebook release carries no entrypoint and the clone keeps
+	// the flag.
+	if r.Program.Entrypoint != "" {
+		t.Fatalf("notebook entrypoint = %q", r.Program.Entrypoint)
+	}
+	if !r.Program.Notebook {
+		t.Fatal("notebook flag not preserved")
+	}
+	// Notebook and an explicit entrypoint are mutually exclusive.
+	bad := tBundle()
+	bad.Notebook = true
+	bad.Entrypoint = "main.star"
+	if _, err := NewServingRelease("ws_1", "usr_1", tSpec(), runtime.PolicyBundle{}, bad, tNow); !errors.Is(err, ErrInvalidServingRecord) {
+		t.Fatalf("notebook + entrypoint: %v", err)
+	}
+}

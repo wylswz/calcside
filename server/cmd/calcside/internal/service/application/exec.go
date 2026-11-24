@@ -110,9 +110,19 @@ func newRelease(app *store.Application, b *sandbox.Boundary, at time.Time) (*sto
 	if out == nil {
 		out = json.RawMessage(`{}`)
 	}
+	sources := map[string][]byte{"main.star": []byte(app.Code)}
+	if app.Sections != nil {
+		// Notebook release: every section compiles as an ordinary
+		// section whose path is <id>.star.
+		sources = make(map[string][]byte, len(app.Sections))
+		for _, sec := range app.Sections {
+			sources[sec.ID+".star"] = []byte(sec.Code)
+		}
+	}
 	return store.NewServingReleaseWithModules(app.WorkspaceID, app.UserID, b.Spec, b.Policies,
 		runtime.ProgramBundle{
-			Sources:      map[string][]byte{"main.star": []byte(app.Code)},
+			Sources:      sources,
+			Notebook:     app.Sections != nil,
 			InputSchema:  in,
 			OutputSchema: out,
 		}, b.Modules, at)

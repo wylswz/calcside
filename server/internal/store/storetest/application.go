@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -222,6 +223,55 @@ func RunApplications(t *testing.T, s store.Store) {
 		pinRow, _ := s.GetPersistentInstance(ctx, "ws_1", pin.ID)
 		if pinRow == nil || pinRow.Enabled {
 			t.Fatal("delete did not disable the persistent instance")
+		}
+	})
+
+	t.Run("notebook_sections_round_trip", func(t *testing.T) {
+		a, err := store.NewApplication("ws_1", u.ID, "nb", "", spec, nil, nil, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		a.Sections = []store.ApplicationSection{
+			{ID: "main", Code: "def main(input):\n    return {\"m\": greet(input[\"name\"])}\n"},
+			{ID: "helper", Code: "def greet(n):\n    return \"hi \" + n\n"},
+		}
+		if err := s.CreateApplication(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.GetApplication(ctx, a.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got.Sections, a.Sections) {
+			t.Fatalf("sections round trip: %+v", got.Sections)
+		}
+		// CAS update touching only the helper code.
+		a.Sections = []store.ApplicationSection{
+			{ID: "main", Code: "def main(input):\n    return {\"m\": greet(input[\"name\"])}\n"},
+			{ID: "helper", Code: "def greet(n):\n    return \"yo \" + n\n"},
+		}
+		ok, err := s.UpdateApplicationDraft(ctx, a, 1)
+		if err != nil || !ok {
+			t.Fatalf("cas: %v %v", ok, err)
+		}
+		got, err = s.GetApplication(ctx, a.ID)
+		if err != nil || got.Version != 2 {
+			t.Fatalf("get v2: %v %+v", err, got)
+		}
+		if !reflect.DeepEqual(got.Sections, a.Sections) ||
+			got.Sections[0].ID != "main" || got.Sections[1].ID != "helper" ||
+			!strings.Contains(got.Sections[1].Code, "yo ") {
+			t.Fatalf("sections after update: %+v", got.Sections)
+		}
+		// Legacy rows keep nil sections.
+		list, err := s.ListApplications(ctx, store.ApplicationFilter{WorkspaceID: "ws_1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, l := range list {
+			if l.ID != a.ID && l.Sections != nil {
+				t.Fatalf("legacy app %s gained sections", l.ID)
+			}
 		}
 	})
 }

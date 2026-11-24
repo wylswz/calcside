@@ -47,9 +47,20 @@ func Analyze(code string, caps []string) (defines, uses []string, ok bool) {
 	if err != nil {
 		return nil, nil, false
 	}
+	defines, uses, _ = AnalyzeFile(f, caps)
+	return defines, uses, true
+}
+
+// AnalyzeFile is Analyze for an already-parsed file: same bound set,
+// same defines/uses contract. It also returns bindings — the count of
+// module-level binding sites per defined name (assignments, defs,
+// loads and loop targets across conditional and loop bodies, but not
+// function locals) — so callers like the application compiler can
+// detect names bound more than once inside a section.
+func AnalyzeFile(f *syntax.File, caps []string) (defines, uses []string, bindings map[string]int) {
 	a := &analyzer{
 		bound:      map[string]bool{},
-		allDefs:    map[string]bool{},
+		allDefs:    map[string]int{},
 		guaranteed: map[string]bool{},
 		defined:    map[string]bool{},
 		readsNow:   map[string]bool{},
@@ -91,7 +102,7 @@ func Analyze(code string, caps []string) (defines, uses []string, ok bool) {
 		uses = append(uses, n)
 	}
 	sort.Strings(uses)
-	return defines, uses, true
+	return defines, uses, a.allDefs
 }
 
 // analyzer walks the AST with an explicit scope stack. Local scopes
@@ -100,7 +111,7 @@ func Analyze(code string, caps []string) (defines, uses []string, ok bool) {
 // classified by whether the name was bound yet at that program point.
 type analyzer struct {
 	bound      map[string]bool // names always provided by the instance
-	allDefs    map[string]bool // every module-level binding in the file
+	allDefs    map[string]int  // module-level binding site count per name
 	guaranteed map[string]bool // module bindings that always happen
 	defined    map[string]bool // unconditional module bindings seen so far
 	cond       int             // >0 inside conditional module-level blocks
@@ -114,18 +125,18 @@ func (a *analyzer) collectDefines(ss []syntax.Stmt) {
 	for _, st := range ss {
 		switch s := st.(type) {
 		case *syntax.AssignStmt:
-			a.collectTarget(s.LHS)
+			collectTarget(s.LHS, func(n string) { a.allDefs[n]++ })
 		case *syntax.DefStmt:
-			a.allDefs[s.Name.Name] = true
+			a.allDefs[s.Name.Name]++
 		case *syntax.LoadStmt:
 			for _, id := range s.To {
-				a.allDefs[id.Name] = true
+				a.allDefs[id.Name]++
 			}
 		case *syntax.IfStmt:
 			a.collectDefines(s.True)
 			a.collectDefines(s.False)
 		case *syntax.ForStmt:
-			a.collectTarget(s.Vars)
+			collectTarget(s.Vars, func(n string) { a.allDefs[n]++ })
 			a.collectDefines(s.Body)
 		case *syntax.WhileStmt:
 			a.collectDefines(s.Body)
@@ -133,23 +144,21 @@ func (a *analyzer) collectDefines(ss []syntax.Stmt) {
 	}
 }
 
-func (a *analyzer) collectTarget(e syntax.Expr) {
-	a.collectTargetInto(e, a.allDefs)
-}
-
-func (a *analyzer) collectTargetInto(e syntax.Expr, m map[string]bool) {
+// collectTarget reports every identifier a destructuring assignment
+// target binds: plain idents plus paren/tuple/list targets.
+func collectTarget(e syntax.Expr, bind func(string)) {
 	switch t := e.(type) {
 	case *syntax.Ident:
-		m[t.Name] = true
+		bind(t.Name)
 	case *syntax.ParenExpr:
-		a.collectTargetInto(t.X, m)
+		collectTarget(t.X, bind)
 	case *syntax.TupleExpr:
 		for _, e := range t.List {
-			a.collectTargetInto(e, m)
+			collectTarget(e, bind)
 		}
 	case *syntax.ListExpr:
 		for _, e := range t.List {
-			a.collectTargetInto(e, m)
+			collectTarget(e, bind)
 		}
 	}
 }
@@ -163,7 +172,7 @@ func (a *analyzer) collectGuaranteed(ss []syntax.Stmt, cond bool) {
 		switch s := st.(type) {
 		case *syntax.AssignStmt:
 			if !cond {
-				a.collectTargetInto(s.LHS, a.guaranteed)
+				collectTarget(s.LHS, func(n string) { a.guaranteed[n] = true })
 			}
 		case *syntax.DefStmt:
 			if !cond {

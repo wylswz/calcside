@@ -66,6 +66,47 @@ func appDTO(v *application.View) gen.Application {
 	if v.ErrorCode != "" {
 		d.ErrorCode = &v.ErrorCode
 	}
+	if a.Sections != nil {
+		secs := make([]gen.ApplicationSection, 0, len(a.Sections))
+		for _, s := range a.Sections {
+			secs = append(secs, gen.ApplicationSection{Id: s.ID, Code: s.Code})
+		}
+		d.Sections = &secs
+	}
+	return d
+}
+
+// appDetailDTO is appDTO plus the saved-draft notebook analysis —
+// dependency graph and static entry hints — computed only on detail
+// responses and only for notebook applications.
+func appDetailDTO(v *application.View) gen.Application {
+	d := appDTO(v)
+	if v.Application.Sections == nil {
+		return d
+	}
+	g, entries := application.DraftNotebook(v.Application)
+	strs := func(s []string) []string {
+		if s == nil {
+			return []string{}
+		}
+		return s
+	}
+	ng := gen.NotebookGraph{Edges: []gen.NotebookGraphEdge{}, Diagnostics: []gen.NotebookGraphDiagnostic{}}
+	for _, e := range g.Edges {
+		ng.Edges = append(ng.Edges, gen.NotebookGraphEdge{From: e.From, To: e.To, Name: e.Name})
+	}
+	for _, dg := range g.Diagnostics {
+		ng.Diagnostics = append(ng.Diagnostics, gen.NotebookGraphDiagnostic{
+			Kind: gen.NotebookGraphDiagnosticKind(dg.Kind), Message: dg.Message,
+			Sections: strs(dg.Sections), Names: strs(dg.Names),
+		})
+	}
+	d.NotebookGraph = &ng
+	en := map[string][]string{}
+	for k, names := range entries {
+		en[k] = append([]string{}, names...)
+	}
+	d.NotebookEntries = &en
 	return d
 }
 
@@ -347,13 +388,13 @@ func (s *strictImpl) CreateApplication(ctx context.Context, req gen.CreateApplic
 		spec = json.RawMessage(*b.Spec)
 	}
 	v, err := s.d.Application.Create(ctx, a, application.CreateRequest{
-		Name: name, Code: b.Code, Spec: spec,
+		Name: name, Code: b.Code, Notebook: b.Notebook != nil && *b.Notebook, Spec: spec,
 		InputSchema: schemaSide(b.InputSchema), OutputSchema: schemaSide(b.OutputSchema),
 	})
 	if err != nil {
 		return createApplicationResp{appFail(err)}, nil
 	}
-	d := appDTO(v)
+	d := appDetailDTO(v)
 	return createApplicationResp{rawJSON{http.StatusOK, gen.ApplicationResponse{Application: &d}}}, nil
 }
 
@@ -367,7 +408,7 @@ func (s *strictImpl) GetApplication(ctx context.Context, req gen.GetApplicationR
 	if err != nil {
 		return getApplicationResp{appFail(err)}, nil
 	}
-	d := appDTO(v)
+	d := appDetailDTO(v)
 	return getApplicationResp{rawJSON{http.StatusOK, gen.ApplicationResponse{Application: &d}}}, nil
 }
 
@@ -385,14 +426,21 @@ func (s *strictImpl) UpdateApplication(ctx context.Context, req gen.UpdateApplic
 	if b.Spec != nil {
 		spec = json.RawMessage(*b.Spec)
 	}
+	var sections []store.ApplicationSection
+	if b.Sections != nil {
+		sections = make([]store.ApplicationSection, 0, len(*b.Sections))
+		for _, s := range *b.Sections {
+			sections = append(sections, store.ApplicationSection{ID: s.Id, Code: s.Code})
+		}
+	}
 	v, err := s.d.Application.Update(ctx, actorOf(p), req.Id, application.UpdateRequest{
-		Version: b.Version, Name: b.Name, Code: b.Code, Spec: spec,
+		Version: b.Version, Name: b.Name, Code: b.Code, Sections: sections, Spec: spec,
 		InputSchema: schemaSide(b.InputSchema), OutputSchema: schemaSide(b.OutputSchema),
 	})
 	if err != nil {
 		return updateApplicationResp{appFail(err)}, nil
 	}
-	d := appDTO(v)
+	d := appDetailDTO(v)
 	return updateApplicationResp{rawJSON{http.StatusOK, gen.ApplicationResponse{Application: &d}}}, nil
 }
 

@@ -773,3 +773,41 @@ def on_ok(ctx):
 		t.Fatalf("handler output: %s", out2.Result.Output)
 	}
 }
+
+func TestReplicaNotebookPrepareInvoke(t *testing.T) {
+	now := time.Now()
+	n := newNode(t, Options{Limits: defaultLimits()}, &now)
+	// A notebook bundle: entry.star's main uses a helper defined in
+	// the lexically-later lib.star section — no load(), no entrypoint.
+	bundle := runtime.ProgramBundle{
+		Notebook: true,
+		Sources: map[string][]byte{
+			"entry.star": []byte(`def main(input):
+    return {"msg": greet(input["name"])}
+`),
+			"lib.star": []byte(`def greet(name):
+    return "hi " + name
+`),
+		},
+		InputSchema:  json.RawMessage(`{}`),
+		OutputSchema: json.RawMessage(`{}`),
+	}
+	req := prepReq(n, bundle)
+	resp, err := n.m.Prepare(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Result.Error != nil {
+		t.Fatalf("prepare: %+v", resp.Result.Error)
+	}
+	out, err := n.m.Invoke(context.Background(), invokeReq(req, `{"name":"ann"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Result.Error != nil {
+		t.Fatalf("invoke: %+v", out.Result.Error)
+	}
+	if string(out.Result.Output) != `{"msg":"hi ann"}` {
+		t.Fatalf("output: %s", out.Result.Output)
+	}
+}

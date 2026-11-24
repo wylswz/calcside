@@ -25,11 +25,65 @@
   padding-bottom: 12px; margin-bottom: 16px; border-bottom: 1px solid rgb(var(--line));
 }
 .app-page .app-card-title { font-size: 15px; font-weight: 600; color: rgb(var(--ink)) }
-.app-view-tabs { display: flex; gap: 4px; margin-top: 24px; border-bottom: 1px solid rgb(var(--line)); }
-.app-view-tabs > button { padding: 10px 18px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: rgb(var(--sec)); font: inherit; cursor: pointer; }
-.app-view-tabs > button[data-state="active"] { color: rgb(var(--accent)); border-bottom-color: rgb(var(--accent)); }
-.app-view-tabs > button:hover { background: rgb(var(--hover)); }
-.app-view-panel[hidden] { display: none; }
+/* Shared detail-workbench frame: the views strip + panels own the viewport. */
+.detail-workbench .app-view-panel[hidden] { display: none; }
+.detail-workbench .app-work-view > .app-card:not(.app-work-section) { margin: 0; border: 0; border-radius: 0; padding: 0; }
+.detail-workbench .work-panel-scroll.app-work-scroll { padding: 0; }
+
+/* shared application work view — a centered column of framed sections;
+   the pane scrolls, each section lays out against its own width */
+.app-page .app-work-content {
+  width: 100%; max-width: 1120px; margin-inline: auto; min-width: 0;
+  display: grid; gap: clamp(16px, 3vw, 28px);
+  padding: clamp(14px, 2.5vw, 28px);
+}
+.app-page .app-work-section {
+  margin: 0; padding: clamp(14px, 2vw, 24px);
+  container-type: inline-size;
+}
+.app-page .app-work-heading {
+  display: flex; flex-wrap: wrap; align-items: flex-start;
+  justify-content: space-between; gap: 12px; margin-bottom: 16px;
+}
+.app-page .app-work-heading .app-card-title { font-size: 16px; line-height: 24px; }
+.app-page .app-work-desc { margin: 2px 0 0; font-size: 13px; line-height: 20px; color: rgb(var(--sec)); }
+.app-page .app-work-actions { flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.app-page .app-work-section-body { display: grid; gap: 12px; min-width: 0; }
+.app-page .app-work-table { min-width: 0; max-width: 100%; overflow-x: auto; }
+
+/* run steps — a real table on wide panes; on narrow screens each step
+   restacks into a labelled key/value card (no forced horizontal scroll) */
+@media (max-width: 600px) {
+  .app-step-table thead {
+    position: absolute; width: 1px; height: 1px;
+    clip-path: inset(50%); overflow: hidden; white-space: nowrap;
+  }
+  .app-step-table, .app-step-table tbody { display: block; }
+  .app-step-table tbody tr {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px 12px; padding: 12px 0; border-top: 1px solid var(--edge);
+  }
+  .app-step-table tbody tr:first-child { border-top: 0; }
+  .app-step-table tbody td {
+    display: grid; align-content: start; gap: 2px;
+    min-width: 0; padding: 0; border: 0; overflow-wrap: anywhere;
+  }
+  .app-step-table tbody td::before { content: attr(data-label); color: rgb(var(--sec)); font-size: 11px; }
+  .app-step-table .app-status { justify-self: start; }
+}
+
+/* Invoke — input/output beside request examples, stacked on a narrow
+   section (container width, not viewport) */
+.app-page .app-invoke-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; }
+.app-page .app-invoke-io, .app-page .app-invoke-examples { min-width: 0; }
+.app-page .app-invoke-io .app-io-toolbar { justify-content: space-between; }
+.app-page .app-invoke-examples-title { margin: 0 0 4px; font-size: 12px; font-weight: 500; color: rgb(var(--sec)); }
+@container (max-width: 800px) {
+  .app-page .app-invoke-layout { grid-template-columns: minmax(0, 1fr); }
+}
+.app-page .app-invoke-examples .app-ex-tabs { flex-wrap: wrap; }
+.detail-workbench .appnb-result { flex: none; padding: 6px 12px; border-top: 1px solid rgb(var(--line)); }
+.detail-workbench .appnb-result[hidden] { display: none; }
 .app-page .app-workbench { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; align-items: stretch; }
 .app-page .app-code-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .app-resources { min-width: 0; height: auto; min-height: 0; position: relative; box-sizing: border-box; border: 1px solid rgb(var(--line)); border-radius: var(--radius-control); background: var(--fill-muted); font-size: 12px; }

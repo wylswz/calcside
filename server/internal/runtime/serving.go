@@ -21,9 +21,14 @@ import (
 // client-tunable JSON limit field. This is not yet a full
 // content-hashed, spec-pinned release record.
 type ProgramBundle struct {
-	Entrypoint string            `json:"entrypoint,omitempty"`
-	Sources    map[string][]byte `json:"sources"`
-	Assets     map[string][]byte `json:"assets,omitempty"`
+	Entrypoint string `json:"entrypoint,omitempty"`
+	// Notebook marks the bundle as an EP-0025 notebook program: every
+	// source is an ordinary section and entry points are uniquely
+	// bound top-level functions. Notebook and Entrypoint are mutually
+	// exclusive; a notebook bundle carries no entrypoint.
+	Notebook bool              `json:"notebook,omitempty"`
+	Sources  map[string][]byte `json:"sources"`
+	Assets   map[string][]byte `json:"assets,omitempty"`
 	// The two contract schemas are publish-time release metadata, not
 	// declared inside the Starlark sources.
 	InputSchema  json.RawMessage `json:"input_schema"`
@@ -154,6 +159,7 @@ func (b ProgramBundle) String() string {
 func (b ProgramBundle) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.String("entrypoint", b.Entrypoint),
+		slog.Bool("notebook", b.Notebook),
 		slog.Int("sources", len(b.Sources)),
 		slog.Int("source_bytes", byteLen(b.Sources)),
 		slog.Int("assets", len(b.Assets)),

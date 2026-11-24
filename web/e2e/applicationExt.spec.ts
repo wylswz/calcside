@@ -33,6 +33,7 @@ test('create application with ext -> blocked publish fails -> republish -> ready
   test.setTimeout(180_000)
   await page.goto(`${viteURL}/applications/new`)
   await page.locator('#basics-name').fill('Echo app')
+  await page.getByLabel('Source format').selectOption('script')
   await page.getByRole('button', { name: 'Continue to configuration' }).click()
   // the Add capabilities tab holds the ext selection
   await page.getByRole('button', { name: 'Add probe 0.1.0', exact: true }).click()

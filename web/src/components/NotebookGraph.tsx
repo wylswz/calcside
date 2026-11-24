@@ -64,6 +64,8 @@ interface Props {
   onRunSection?: (name: string) => void
   /** section currently running — its node pulses like the head chip */
   running?: string | null
+  /** static entry labels by section name (e.g. "Main: main") — no run state */
+  entryLabels?: ReadonlyMap<string, string>
 }
 
 // linkLabel renders the edge caption: first two names plus a +N
@@ -109,6 +111,7 @@ interface Tween {
 interface NbNodeData extends Record<string, unknown> {
   name: string
   state?: string
+  entryLabel?: string
   once: boolean
   running: boolean
   description?: string
@@ -152,9 +155,14 @@ function NbNode({ data }: NodeProps<NbFlowNode>) {
         }}
       >
         <span className="nb-graph-node-name">{d.name}</span>
+        {d.entryLabel && <span className="nb-graph-node-entry">{d.entryLabel}</span>}
         <span className="nb-graph-node-meta">
-          <span className="nb-dir-dot" data-state={d.state} />
-          <span className="sr-only">{sectionStateLabel(d.state as NotebookSectionMeta['state'])}</span>
+          {d.state && (
+            <>
+              <span className="nb-dir-dot" data-state={d.state} />
+              <span className="sr-only">{sectionStateLabel(d.state as NotebookSectionMeta['state'])}</span>
+            </>
+          )}
           {d.once && <span className="nb-once">once</span>}
           {d.diagCount > 0 && <span className="nb-graph-node-diag" title={d.diagTitle}>!</span>}
         </span>
@@ -174,6 +182,7 @@ interface NodePaint {
   hi: Hi
   diagsBySection: Map<string, GraphDiag[]>
   running: string | null
+  entryLabels?: ReadonlyMap<string, string>
   onFocusNode: (name: string) => void
 }
 
@@ -201,6 +210,7 @@ function makeNode(name: string, pose: Pose, d: NodePaint): NbFlowNode {
     data: {
       name,
       state: meta?.state,
+      entryLabel: d.entryLabels?.get(name),
       once: meta?.rerun === 'once',
       running: d.running === name,
       description: meta?.description,
@@ -227,6 +237,7 @@ function GraphCanvas({
   hi,
   diagsBySection,
   running,
+  entryLabels,
 }: {
   layout: GraphLayout
   metas: Map<string, NotebookSectionMeta>
@@ -235,6 +246,7 @@ function GraphCanvas({
   hi: Hi
   diagsBySection: Map<string, GraphDiag[]>
   running: string | null
+  entryLabels?: ReadonlyMap<string, string>
 }) {
   const rf = useReactFlow()
   const wrapRef = useRef<HTMLDivElement | null>(null)
@@ -299,9 +311,9 @@ function GraphCanvas({
 
   // Latest paint inputs for reconcile — exit node snapshots freeze the
   // current data, so reconcile must read the committed render's values.
-  const dataRef = useRef<NodePaint>({ metas, selected, hi, diagsBySection, running, onFocusNode: panToNode })
+  const dataRef = useRef<NodePaint>({ metas, selected, hi, diagsBySection, running, entryLabels, onFocusNode: panToNode })
   useEffect(() => {
-    dataRef.current = { metas, selected, hi, diagsBySection, running, onFocusNode: panToNode }
+    dataRef.current = { metas, selected, hi, diagsBySection, running, entryLabels, onFocusNode: panToNode }
   })
 
   const tick = useCallback((now: number) => {
@@ -589,7 +601,7 @@ function GraphCanvas({
       .map((n) => {
         const pose = poseMap.get(n.name) ?? { x: n.x, y: n.y, o: 1 }
         return makeNode(n.name, pose, {
-          metas, selected, hi, diagsBySection, running, onFocusNode: panToNode,
+          metas, selected, hi, diagsBySection, running, entryLabels, onFocusNode: panToNode,
         })
       })
     for (const ex of exits.values()) {
@@ -602,7 +614,7 @@ function GraphCanvas({
       })
     }
     return out
-  }, [layout, poseMap, exits, metas, selected, hi, diagsBySection, running, panToNode])
+  }, [layout, poseMap, exits, metas, selected, hi, diagsBySection, running, entryLabels, panToNode])
 
   const rfEdges = useMemo<Edge[]>(() => {
     const live = layout.links.map((l) => {
@@ -679,7 +691,7 @@ function GraphCanvas({
 // (~250ms ease-out, JS-driven so edges stay attached), new nodes/edges
 // fade in, removed ones fade out; the viewport never moves on a poll
 // and an unchanged structure moves nothing (S1/S5).
-export function NotebookGraph({ structure, metas, selected, onSelect, onClear, onOpenCode, canRunSection, runBusy, runLabel, onRunSection, running }: Props) {
+export function NotebookGraph({ structure, metas, selected, onSelect, onClear, onOpenCode, canRunSection, runBusy, runLabel, onRunSection, running, entryLabels }: Props) {
   const layout = useMemo(
     () => layoutGraph(structure.names, structure.edges as GraphEdge[]),
     [structure],
@@ -708,9 +720,11 @@ export function NotebookGraph({ structure, metas, selected, onSelect, onClear, o
   // a name with no edge is unresolved: ambiguous when a duplicate
   // diagnostic names it, otherwise no provider.
   const reads = useMemo(() => {
-    if (!selExists || !selMeta) return [] as { name: string; providers: string[]; problem: '' | 'ambiguous' | 'missing' }[]
+    if (!selExists) return [] as { name: string; providers: string[]; problem: '' | 'ambiguous' | 'missing' }[]
     const dup = new Set(structure.diagnostics.filter((d) => d.kind === 'duplicate_define').flatMap((d) => d.names))
-    return (selMeta.uses ?? []).map((u) => {
+    // No live meta (saved application graph): fall back to edge uses.
+    const uses = selMeta?.uses ?? [...new Set(structure.edges.filter((e) => e.to === selected).map((e) => e.name))]
+    return uses.map((u) => {
       const providers = [...new Set(structure.edges.filter((e) => e.to === selected && e.name === u).map((e) => e.from))]
       const problem = providers.length ? '' : dup.has(u) ? 'ambiguous' : 'missing'
       return { name: u, providers, problem: problem as '' | 'ambiguous' | 'missing' }
@@ -749,6 +763,7 @@ export function NotebookGraph({ structure, metas, selected, onSelect, onClear, o
               hi={hi}
               diagsBySection={diagsBySection}
               running={running ?? null}
+              entryLabels={entryLabels}
             />
           </ReactFlowProvider>
 
@@ -786,6 +801,9 @@ export function NotebookGraph({ structure, metas, selected, onSelect, onClear, o
                   <h3 className="nb-graph-detail-name">{selected}</h3>
                   <button type="button" className="nb-graph-clear" onClick={onClear}>Clear</button>
                 </div>
+                {entryLabels?.get(selected) && (
+                  <p className="nb-graph-detail-line"><span className="nb-graph-node-entry">{entryLabels.get(selected)}</span></p>
+                )}
                 {selMeta && (
                   <>
                     {selMeta.description && <p className="nb-graph-detail-desc">{selMeta.description}</p>}

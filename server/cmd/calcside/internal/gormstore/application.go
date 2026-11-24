@@ -14,20 +14,21 @@ import (
 )
 
 type applicationRow struct {
-	ID                   string     `gorm:"primaryKey"`
-	WorkspaceID          string     `gorm:"not null"`
-	UserID               string     `gorm:"not null"`
-	Name                 string     `gorm:"not null"`
-	Code                 string     `gorm:"not null"`
-	Spec                 string     `gorm:"not null"`
-	InputSchema          *string    `gorm:""`
-	OutputSchema         *string    `gorm:""`
-	Version              int64      `gorm:"not null"`
-	PublishedVersion     int64      `gorm:"not null"`
-	PersistentInstanceID string     `gorm:"not null"`
-	CreatedAt            time.Time  `gorm:"not null"`
-	UpdatedAt            time.Time  `gorm:"not null"`
-	DeletedAt            *time.Time `gorm:""`
+	ID                   string                     `gorm:"primaryKey"`
+	WorkspaceID          string                     `gorm:"not null"`
+	UserID               string                     `gorm:"not null"`
+	Name                 string                     `gorm:"not null"`
+	Code                 string                     `gorm:"not null"`
+	Sections             []store.ApplicationSection `gorm:"serializer:json;type:text"`
+	Spec                 string                     `gorm:"not null"`
+	InputSchema          *string                    `gorm:""`
+	OutputSchema         *string                    `gorm:""`
+	Version              int64                      `gorm:"not null"`
+	PublishedVersion     int64                      `gorm:"not null"`
+	PersistentInstanceID string                     `gorm:"not null"`
+	CreatedAt            time.Time                  `gorm:"not null"`
+	UpdatedAt            time.Time                  `gorm:"not null"`
+	DeletedAt            *time.Time                 `gorm:""`
 }
 
 func (applicationRow) TableName() string { return "applications" }
@@ -35,7 +36,7 @@ func (applicationRow) TableName() string { return "applications" }
 func (r *applicationRow) toDomain() *store.Application {
 	a := &store.Application{
 		ID: r.ID, WorkspaceID: r.WorkspaceID, UserID: r.UserID,
-		Name: r.Name, Code: r.Code, Spec: json.RawMessage(r.Spec),
+		Name: r.Name, Code: r.Code, Sections: r.Sections, Spec: json.RawMessage(r.Spec),
 		Version: r.Version, PublishedVersion: r.PublishedVersion,
 		PersistentInstanceID: r.PersistentInstanceID,
 		CreatedAt:            r.CreatedAt.UTC(), UpdatedAt: r.UpdatedAt.UTC(),
@@ -53,7 +54,7 @@ func (r *applicationRow) toDomain() *store.Application {
 func appToRow(a *store.Application) *applicationRow {
 	r := &applicationRow{
 		ID: a.ID, WorkspaceID: a.WorkspaceID, UserID: a.UserID,
-		Name: a.Name, Code: a.Code, Spec: string(a.Spec),
+		Name: a.Name, Code: a.Code, Sections: a.Sections, Spec: string(a.Spec),
 		Version: a.Version, PublishedVersion: a.PublishedVersion,
 		PersistentInstanceID: a.PersistentInstanceID,
 		CreatedAt:            a.CreatedAt.UTC(), UpdatedAt: a.UpdatedAt.UTC(),

@@ -57,6 +57,14 @@ export async function startApplicationRuntime(opts: { secretKey?: string; secret
     'name: probe\nversion: "0.1.0"\ndescription: Fixture extension\nops:\n  - name: echo\n    params: [value]\n')
   await writeFile(join(probe, 'main.star'),
     'def echo(value):\n    return {"value": value, "release": "v1"}\n')
+  // needsnet declares a base-capability dependency — installing it
+  // without Network makes the draft invalid until configured.
+  const needsnet = join(extRoot, 'needsnet', '0.1.0')
+  await mkdir(needsnet, { recursive: true })
+  await writeFile(join(needsnet, 'capability.yaml'),
+    'name: needsnet\nversion: "0.1.0"\ndescription: Fixture extension needing network\ndependencies: [net]\nops:\n  - name: ping\n    params: []\n')
+  await writeFile(join(needsnet, 'main.star'),
+    'def ping():\n    return {"pong": True}\n')
 
   const apiPort = await freePort()
   const vitePort = await freePort()

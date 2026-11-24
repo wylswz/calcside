@@ -7,6 +7,7 @@ import { fmtBytes } from '../format'
 import { Button, Confirm, Icon, Loading, Notice, RevealNew, SignalMark, SwapLabel } from './ui'
 import { SectionCard, SectionValue, sectionFingerprint, sectionPath, sectionStateLabel } from './SectionCard'
 import { NotebookGraph, type GraphStructure } from './NotebookGraph'
+import { NotebookAddSection, NotebookGraphPane, NotebookInsert, NotebookViewToggle, nextNotebookSectionName } from './NotebookChrome'
 import { useHeldOrder } from '../stableList'
 import './notebook.css'
 
@@ -416,8 +417,7 @@ export function Notebook({ id, inst, canRun, visible, resources, outlineOpen, on
         const fresh = await api.get<{ notebook?: NotebookData }>(nbPath(id))
         const rev = fresh.notebook?.revision ?? 0
         const taken = new Set((fresh.notebook?.sections ?? []).map((s) => s.name))
-        let name = 'untitled_section'
-        for (let n = 2; taken.has(name); n++) name = `untitled_section_${n}`
+        const name = nextNotebookSectionName(taken)
         try {
           // `code` is omitted: the API stores an empty section and the new
           // cell's editor takes the code (autosave persists it).
@@ -722,22 +722,11 @@ export function Notebook({ id, inst, canRun, visible, resources, outlineOpen, on
                 </Button>
               </>
             )}
-            {canEdit && (
-              <Button variant="ghost" size="xs" disabled={adding} onClick={() => void addSection()}>
-                <Icon name="plus" />Add section
-              </Button>
-            )}
+            {canEdit && <NotebookAddSection disabled={adding} onAdd={() => void addSection()} />}
           </div>
           <div className="nb-toolbar-side">
             <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />
-            <div className="seg-filters nb-view-toggle" role="group" aria-label="Notebook view">
-              <button type="button" aria-pressed={view === 'code'} onClick={() => goView('code')}>
-                Code
-              </button>
-              <button type="button" aria-pressed={view === 'graph'} onClick={() => goView('graph')}>
-                Graph
-              </button>
-            </div>
+            <NotebookViewToggle view={view} onChange={goView} />
             <Button variant="ghost" size="xs" className="nb-icon-btn nb-sections-btn"
               ref={sectionsBtnRef}
               aria-label="Sections" title="Sections"
@@ -813,11 +802,7 @@ export function Notebook({ id, inst, canRun, visible, resources, outlineOpen, on
       {empty ? (
         <div className="nb-empty">
           <p>No sections yet.</p>
-          {canEdit && (
-            <Button variant="ghost" size="xs" disabled={adding} onClick={() => void addSection()}>
-              <Icon name="plus" />Add section
-            </Button>
-          )}
+          {canEdit && <NotebookAddSection disabled={adding} onAdd={() => void addSection()} />}
         </div>
       ) : (
         <div className="nb-cards">
@@ -841,19 +826,8 @@ export function Notebook({ id, inst, canRun, visible, resources, outlineOpen, on
               />
               {/* Inserter after every cell — the row keeps its height
                   even without edit rights so cells never move (S3). */}
-              <div className="nb-insert">
-                {canEdit && (
-                  <Button
-                    variant="ghost" size="xs"
-                    className="nb-insert-btn"
-                    aria-label={`Insert section after ${meta.name}`}
-                    disabled={adding}
-                    onClick={() => void addSection(meta.name)}
-                  >
-                    <Icon name="plus" /><span>Add section</span>
-                  </Button>
-                )}
-              </div>
+              <NotebookInsert name={meta.name} disabled={adding}
+                onInsert={canEdit ? () => void addSection(meta.name) : undefined} />
             </Fragment>
           ))}
         </div>
@@ -863,7 +837,7 @@ export function Notebook({ id, inst, canRun, visible, resources, outlineOpen, on
 
       {/* Read-only dependency graph — same fixed box in both themes;
           follows polls live with an animated re-layout. */}
-      <div className="nb-graph-panel" hidden={view !== 'graph'}>
+      <NotebookGraphPane hidden={view !== 'graph'}>
         <NotebookGraph
           structure={graphStructure}
           metas={graphMetas}
@@ -877,7 +851,7 @@ export function Notebook({ id, inst, canRun, visible, resources, outlineOpen, on
           onRunSection={runOne}
           running={running}
         />
-      </div>
+      </NotebookGraphPane>
 
       {/* Reserved status bar: the one-line summary (title carries the
           full text — screen readers get the same via an sr-only twin so

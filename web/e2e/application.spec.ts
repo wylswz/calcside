@@ -35,6 +35,7 @@ async function waitReady(id: string, timeoutMs = 90_000) {
 async function startApplication(page: Page, name?: string) {
   await page.goto(`${viteURL}/applications/new`)
   if (name) await page.locator('#basics-name').fill(name)
+  await page.getByLabel('Source format').selectOption('script')
   await page.getByRole('button', { name: 'Continue to configuration' }).click()
 }
 
@@ -362,4 +363,71 @@ test('k) failed save shows "Couldn\'t save" + Retry and keeps the draft', async 
     const rr = await client.get(`/api/v1/applications/${id}`)
     return (await rr.json()).application.code
   }, { timeout: 10_000 }).toContain('"kept":1')
+})
+
+// Work views: Invoke lays out input/output beside request examples on a
+// wide pane and stacks them on a narrow one; Activity links each run to
+// the shared run detail, which stays usable at 390px.
+test('l) work views: Invoke layout, Activity -> Run detail, narrow safe', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const r = await client.post('/api/v1/applications', { data: { name: 'WorkViews' } })
+  const id = (await r.json()).application.id
+  // publish the scaffold via the preview -> publish API pair
+  const app = (await (await client.get(`/api/v1/applications/${id}`)).json()).application
+  const rev = await (await client.post(`/api/v1/applications/${id}/publish/preview`, { data: { version: app.version } })).json()
+  const pub = await client.post(`/api/v1/applications/${id}/publish`, {
+    data: { version: app.version, expected_base: rev.base?.digest ?? '', candidate: rev.candidate.digest },
+  })
+  expect(pub.status()).toBe(202)
+  await waitReady(id)
+  const inv = await client.post(`/api/v1/applications/${id}/invoke`, { data: {} })
+  expect(inv.status()).toBe(200)
+
+  // Invoke: input/output column sits left of the examples column.
+  await page.goto(`${viteURL}/applications/${id}?view=invoke`)
+  const invokePanel = page.getByRole('tabpanel', { name: 'Invoke', exact: true })
+  await expect(invokePanel.getByRole('button', { name: 'Invoke' })).toBeEnabled({ timeout: 15_000 })
+  const io = await invokePanel.locator('.app-invoke-io').boundingBox()
+  const ex = await invokePanel.locator('.app-invoke-examples').boundingBox()
+  expect(io).not.toBeNull(); expect(ex).not.toBeNull()
+  expect(io!.y).toBeLessThanOrEqual(ex!.y + 2)
+  expect(io!.x + io!.width).toBeLessThanOrEqual(ex!.x + 2)
+  expect(invokePanel.getByRole('heading', { name: 'Request examples' })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('invoke-desktop.png'), fullPage: true })
+
+  // stacked at 390px, no horizontal document overflow
+  await page.setViewportSize({ width: 390, height: 844 })
+  const ioN = await invokePanel.locator('.app-invoke-io').boundingBox()
+  const exN = await invokePanel.locator('.app-invoke-examples').boundingBox()
+  expect(ioN!.y + ioN!.height).toBeLessThanOrEqual(exN!.y + 2)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false)
+
+  // Activity: the run row links to the shared run detail.
+  await page.getByRole('tablist', { name: 'Application views' }).getByRole('tab', { name: 'Activity' }).click()
+  const runsRegion = page.getByRole('region', { name: 'Runs table' })
+  await expect(runsRegion).toBeVisible()
+  await runsRegion.getByRole('link', { name: 'succeeded' }).first().click()
+  await page.waitForURL(/\/applications\/app_[^/]+\/runs\/run_/)
+  await expect(page.getByRole('heading', { name: 'Run', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: '← Application activity' })).toBeVisible()
+  const steps = page.getByRole('region', { name: 'Steps table' })
+  await expect(steps).toBeVisible()
+  // the steps table scrolls inside its own region, never the document
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false)
+  const stepGeom = await steps.evaluate((el) => ({
+    region: el.getBoundingClientRect().width,
+    table: el.querySelector('table')!.getBoundingClientRect().width,
+    scrollW: el.scrollWidth, clientW: el.clientWidth,
+  }))
+  expect(stepGeom.region).toBeGreaterThan(0)
+  // at 390px the steps restack into labelled cells — no horizontal
+  // scroll needed inside the region, and the values stay in view
+  expect(stepGeom.scrollW).toBeLessThanOrEqual(stepGeom.clientW + 1)
+  await expect(steps.locator('td[data-label="Duration"]').first()).toBeInViewport()
+  await expect(steps.locator('td[data-label="Resolver"]').first()).toBeInViewport()
+  await page.screenshot({ path: testInfo.outputPath('run-detail-mobile.png'), fullPage: true })
+  // the crumb returns to the application's Activity view
+  await page.getByRole('link', { name: '← Application activity' }).click()
+  await page.waitForURL(/\/applications\/app_[^/]+\?view=activity/)
+  await expect(runsRegion).toBeVisible()
 })

@@ -113,7 +113,7 @@ body {
 /* ---- muted wells and trays: a flat tint, no inner shadow ---- */
 .segmented,
 .workspace-tabs,
-.instance-detail .seg-filters,
+.instance-detail .seg-filters:not(.nb-view-toggle),
 .spec-selection {
   background-color: var(--fill-muted);
   background-image: var(--well);
@@ -130,7 +130,7 @@ body {
 .selected-row:not(.is-empty):not(.is-removed),
 .segmented [role='tab'][aria-selected='true'],
 .workspace-tabs a[aria-current='page'],
-.instance-detail .seg-filters button[aria-pressed='true'] {
+.instance-detail .seg-filters:not(.nb-view-toggle) button[aria-pressed='true'] {
   background-color: rgb(var(--paper));
   background-image: var(--dome);
   border-color: var(--edge);
@@ -142,7 +142,7 @@ body {
 .selected-row,
 .segmented [role='tab'],
 .workspace-tabs a,
-.instance-detail .seg-filters button,
+.instance-detail .seg-filters:not(.nb-view-toggle) button,
 .input {
   transition:
     box-shadow 180ms var(--ease-damped),

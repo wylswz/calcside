@@ -32,7 +32,11 @@ import (
 // release-pinned SessionDeps/SessionCreation per call; this engine type
 // does not enforce release hashing or pinned specs itself.
 type ProgramConfig struct {
-	Entrypoint   string
+	Entrypoint string
+	// Notebook selects the EP-0025 notebook program shape: every
+	// source is an ordinary section, entry points are uniquely bound
+	// top-level functions, and Entrypoint must be empty.
+	Notebook     bool
 	Sources      map[string][]byte
 	Assets       map[string][]byte
 	InputSchema  json.RawMessage
@@ -99,6 +103,8 @@ type ProgramResult struct {
 // concurrent invokes safely.
 type Program struct {
 	entrypoint   string
+	notebookMode bool
+	notebook     *notebookProgram
 	sources      map[string][]byte // cloned sources kept for provenance
 	programs     map[string]*starlark.Program
 	assets       map[string][]byte
@@ -241,22 +247,30 @@ func (e *Engine) PrepareProgram(ctx context.Context, config ProgramConfig, deps 
 	}
 
 	// Compile every selected source once against this session's
-	// predeclared names.
-	programs := map[string]*starlark.Program{}
-	for _, name := range slices.Sorted(maps.Keys(prog.sources)) {
-		if perr := cancelledProgramErr(scope.ctx); perr != nil {
+	// predeclared names; notebook sections compile per-section against
+	// their graph-injected providers.
+	if prog.notebookMode {
+		if perr := prog.compileNotebook(scope.ctx, s); perr != nil {
 			res.Error = perr
 			return nil, res
 		}
-		_, pr, err := starlark.SourceProgramOptions(fileOpts, name, prog.sources[name], s.Predeclared.Has)
-		if err != nil {
-			res.Error = invalidProgramf("a selected source does not compile")
-			return nil, res
+	} else {
+		programs := map[string]*starlark.Program{}
+		for _, name := range slices.Sorted(maps.Keys(prog.sources)) {
+			if perr := cancelledProgramErr(scope.ctx); perr != nil {
+				res.Error = perr
+				return nil, res
+			}
+			_, pr, err := starlark.SourceProgramOptions(fileOpts, name, prog.sources[name], s.Predeclared.Has)
+			if err != nil {
+				res.Error = invalidProgramf("a selected source does not compile")
+				return nil, res
+			}
+			programs[name] = pr
 		}
-		programs[name] = pr
+		prog.programs = programs
 	}
-	prog.programs = programs
-	if perr := checkLoadGraph(programs, s.modules); perr != nil {
+	if perr := checkLoadGraph(prog.programs, s.modules); perr != nil {
 		res.Error = perr
 		return nil, res
 	}
@@ -267,7 +281,13 @@ func (e *Engine) PrepareProgram(ctx context.Context, config ProgramConfig, deps 
 		return nil, res
 	}
 	// Pure init: gate stays disarmed; denied calls fail the prepare.
-	globals, ierr := prog.initModules(scope.thread, s)
+	var globals starlark.StringDict
+	var ierr error
+	if prog.notebookMode {
+		globals, ierr = prog.initNotebook(scope.thread, s, "main")
+	} else {
+		globals, ierr = prog.initModules(scope.thread, s)
+	}
 	if ierr == nil {
 		ierr = checkEntry(globals, "main")
 	}
@@ -430,21 +450,42 @@ func (e *Engine) InvokeProgram(ctx context.Context, program *Program, input json
 	}
 
 	sscope := scope.sscope
-	globals, err := program.initModules(scope.thread, s)
-	if err == nil {
-		err = checkEntry(globals, "main")
+	var globals starlark.StringDict
+	if program.notebookMode {
+		// A handler entry resolves to its owning section; unknown or
+		// ambiguous names are rejected before any section runs.
+		if isHandler && program.notebook.entries[entry] == "" {
+			s.streamScope = nil
+			res.Error = progErr("invalid_program", "handler "+entry+" is not a top-level one-argument function")
+			return res
+		}
+		globals, err = program.initNotebook(scope.thread, s, entry)
+		if err == nil {
+			err = checkEntry(globals, entry)
+		}
+	} else {
+		globals, err = program.initModules(scope.thread, s)
+		if err == nil {
+			err = checkEntry(globals, "main")
+		}
 	}
 	if err != nil {
 		s.streamScope = nil
 		res.Error = initFailureErr(scope.ctx, scope.thread, scope.maxSteps)
 		return res
 	}
-	if isHandler && checkEntry(globals, entry) != nil {
+	if isHandler && !program.notebookMode && checkEntry(globals, entry) != nil {
 		res.Error = progErr("invalid_program", "handler "+entry+" is not a top-level one-argument function")
 		return res
 	}
-	deps.Interrupt.IsHandler = func(name string) bool {
-		return HandlerName(name) && checkEntry(globals, name) == nil
+	if program.notebookMode {
+		deps.Interrupt.IsHandler = func(name string) bool {
+			return HandlerName(name) && program.notebook.entries[name] != ""
+		}
+	} else {
+		deps.Interrupt.IsHandler = func(name string) bool {
+			return HandlerName(name) && checkEntry(globals, name) == nil
+		}
 	}
 
 	// Arm only around the entry call.
@@ -964,8 +1005,16 @@ func checkLoadGraph(programs map[string]*starlark.Program, ms *moduleSet) *Progr
 // config into an immutable Program.
 func validateProgramConfig(c ProgramConfig) (*Program, *ProgramError) {
 	entry := c.Entrypoint
-	if entry == "" {
-		entry = "main.star"
+	if c.Notebook {
+		// A notebook program is a graph of ordinary sections; entry
+		// points are function names, not a file.
+		if entry != "" {
+			return nil, invalidProgramf("notebook program cannot set entrypoint")
+		}
+	} else {
+		if entry == "" {
+			entry = "main.star"
+		}
 	}
 	if len(c.Sources) == 0 || len(c.Sources) > programMaxSources {
 		return nil, invalidProgramf("sources must be 1..%d files", programMaxSources)
@@ -973,11 +1022,13 @@ func validateProgramConfig(c ProgramConfig) (*Program, *ProgramError) {
 	if len(c.Sources)+len(c.Assets) > programMaxFiles {
 		return nil, invalidProgramf("sources and assets exceed %d files", programMaxFiles)
 	}
-	if err := checkReleaseName(entry, true); err != nil {
-		return nil, invalidProgramf("invalid entrypoint name")
-	}
-	if _, ok := c.Sources[entry]; !ok {
-		return nil, invalidProgramf("entrypoint is not among the selected sources")
+	if !c.Notebook {
+		if err := checkReleaseName(entry, true); err != nil {
+			return nil, invalidProgramf("invalid entrypoint name")
+		}
+		if _, ok := c.Sources[entry]; !ok {
+			return nil, invalidProgramf("entrypoint is not among the selected sources")
+		}
 	}
 
 	seen := map[string]string{}
@@ -1047,6 +1098,7 @@ func validateProgramConfig(c ProgramConfig) (*Program, *ProgramError) {
 
 	prog := &Program{
 		entrypoint:   entry,
+		notebookMode: c.Notebook,
 		sources:      make(map[string][]byte, len(c.Sources)),
 		assets:       make(map[string][]byte, len(c.Assets)),
 		inputSchema:  inSchema,

@@ -51,6 +51,7 @@ test('application mounts a published module through Settings', async ({ page }) 
   expect(dr.status()).toBe(200)
 
   await page.goto(`${viteURL}/applications/new`)
+  await page.getByLabel('Source format').selectOption('script')
   await page.getByRole('button', { name: 'Continue to configuration' }).click()
   await expect(page.getByRole('button', { name: 'Add module appdraft' })).toBeDisabled()
   await page.getByRole('button', { name: 'Add module apphello' }).click()

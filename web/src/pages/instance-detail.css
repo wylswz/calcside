@@ -1,43 +1,8 @@
 /* instance-detail.css — white base, cool neutrals, vivid functional accents.
    Colour tokens are global (index.css); only material aliases are local. */
 
-.instance-detail {
-  /* surface material comes from material.css */
-  --detail-work: rgb(var(--paper)); --detail-edge: var(--edge);
-  --detail-radius-surface: var(--radius-surface); --detail-radius-control: var(--radius-control); --detail-radius-inset: var(--radius-inset);
-  --detail-shadow-surface: var(--shadow-surface); --detail-shadow-control: var(--shadow-control); --detail-shadow-inset: var(--shadow-inset);
-  font-size: 14px; line-height: 22px;
-  /* the route fills the console canvas — panes scroll internally */
-  flex: 1; min-width: 0; min-height: 0;
-  display: flex; flex-direction: column;
-}
 
-/* type scale: body 14/22 · title 20/28 · section 18/26 · sub 14/22 · meta 12/18 */
-.instance-detail h1 { font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -0.02em; }
-.instance-detail h2 { font-size: 18px; line-height: 26px; font-weight: 600; }
-.instance-detail .side-col h2 { font-size: 16px; line-height: 22px; }
-.instance-detail .detail-meta { font-size: 12px; line-height: 18px; }
-/* mono only for code/identifiers */
-.instance-detail .detail-code, .instance-detail code,
-.instance-detail pre, .instance-detail .cm-editor, .instance-detail .artifact-name {
-  font-family: var(--font-mono); font-size: 13px; line-height: 20px; font-weight: 400;
-}
 
-/* header — compact identity row, no enclosing box, no heavy black rule */
-.instance-detail .detail-head {
-  flex: none;
-  display: flex; align-items: flex-start; gap: 8px 24px; flex-wrap: wrap;
-  padding: 8px 20px 10px;
-}
-.instance-detail .detail-id { min-width: 0; flex: 1; }
-.instance-detail .detail-id h1 {
-  margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.instance-detail .detail-desc {
-  margin: 2px 0 0; max-width: 72ch;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.instance-detail .detail-error { flex: none; padding: 0 20px 6px; }
 
 /* next-action — one reserved line under the identity row: a tinted
    signal, one-line title (and optional note), actions flush right.
@@ -77,15 +42,6 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
-/* view tab strip — Notebook | Activity + the inspector toggle at the
-   strip's right edge, a sibling of the tablist */
-.instance-detail .detail-views {
-  flex: none; display: flex; align-items: stretch; gap: 8px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--detail-edge);
-  background: var(--detail-work);
-}
-.instance-detail .detail-views .view-tabs { flex: 1; min-width: 0; border-bottom: 0; }
 .instance-detail .panel-toggle {
   align-self: center; flex: none;
   display: inline-flex; align-items: center; justify-content: center;
@@ -101,16 +57,6 @@
   flex: 1; min-height: 0; position: relative;
   display: grid; grid-template-columns: minmax(0, 1fr) auto;
 }
-.instance-detail .work-surface {
-  min-width: 0; min-height: 0;
-  display: flex; flex-direction: column;
-  background: var(--detail-work);
-}
-.instance-detail .work-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.instance-detail .work-panel[hidden] { display: none; }
-.instance-detail .work-panel-scroll { flex: 1; min-height: 0; overflow: auto; padding: 12px 16px; }
-.instance-detail .work-panel-scroll > * { flex: none; }
-.instance-detail .work-panel > .nb { flex: 1; min-height: 0; }
 
 /* inspector — a fixed-width rail at 1240px+, an overlay below that so
    it never squeezes the code panes; the body scrolls independently */
@@ -197,16 +143,18 @@
 }
 .instance-detail .tbl .num, .instance-detail .tbl td[data-num] { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 
-/* segmented run filter — inset track, one raised segment */
-.instance-detail .seg-filters {
+/* segmented run filter — inset track, one raised segment. The shared
+   notebook Code|Graph toggle (.nb-view-toggle) carries the identical
+   material from notebook.css and opts out of this geometry. */
+.instance-detail .seg-filters:not(.nb-view-toggle) {
   display: inline-flex; gap: 2px; border-radius: var(--detail-radius-control); padding: 2px;
 }
-.instance-detail .seg-filters button {
+.instance-detail .seg-filters:not(.nb-view-toggle) button {
   border: 1px solid transparent; border-radius: var(--detail-radius-inset); background: transparent;
   padding: 4px 10px; font-size: 13px; color: rgb(var(--sec)); cursor: pointer; min-height: 32px;
 }
-.instance-detail .seg-filters button { font-weight: 500; }
-.instance-detail .seg-filters button[aria-pressed='true'] { color: rgb(var(--ink)); }
+.instance-detail .seg-filters:not(.nb-view-toggle) button { font-weight: 500; }
+.instance-detail .seg-filters:not(.nb-view-toggle) button[aria-pressed='true'] { color: rgb(var(--ink)); }
 
 /* buttons — compact size here; material comes from material.css */
 .instance-detail [data-ui='button'] { font-size: 13px; height: 32px; min-height: 32px; padding: 0 12px; }
@@ -243,8 +191,6 @@
 .instance-detail .editor-toolbar { border-bottom: 1px solid var(--detail-edge); }
 
 @media (max-width: 900px) {
-  .instance-detail .detail-head { padding: 8px 12px 8px; }
-  .instance-detail .detail-views { padding: 0 6px; }
   /* the band keeps one reserved slot at narrow widths too (S3) */
   .instance-detail .next-action { padding: 6px 12px; height: 56px; }
   .instance-detail .next-actions { margin-left: 0; }
@@ -265,13 +211,3 @@
 .instance-detail .artifact-empty-icon { height: 16px; width: 16px; color: rgb(var(--sec)); }
 .instance-detail .editor-toolbar, .instance-detail .editor-footer { font-size: 12px; color: rgb(var(--sec)); }
 .instance-detail .call-detail dt { text-transform: none; font-size: 12px; letter-spacing: normal; }
-
-@media (max-width: 650px) {
-  /* the identity column and its actions never fight for one row —
-     actions take their own compact row, the title keeps full width */
-  .instance-detail .detail-head {
-    flex-direction: column; align-items: stretch; gap: 5px;
-  }
-  .instance-detail .detail-actions { margin-left: 0; gap: 4px; }
-  .instance-detail .detail-actions [data-ui='button'] { padding-inline: 8px; }
-}

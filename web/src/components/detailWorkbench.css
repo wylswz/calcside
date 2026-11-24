@@ -1,0 +1,98 @@
+/* detailWorkbench.css — shared IDE-style detail frame for the instance
+   and application routes: compact identity header, view tab strip and
+   viewport-filling panes that own their scrollers. Scoped to
+   .detail-workbench; instance-only chrome stays in instance-detail.css. */
+
+.detail-workbench {
+  /* surface material comes from material.css */
+  --detail-work: rgb(var(--paper)); --detail-edge: var(--edge);
+  --detail-radius-surface: var(--radius-surface); --detail-radius-control: var(--radius-control); --detail-radius-inset: var(--radius-inset);
+  --detail-shadow-surface: var(--shadow-surface); --detail-shadow-control: var(--shadow-control); --detail-shadow-inset: var(--shadow-inset);
+  font-size: 14px; line-height: 22px;
+  /* the route fills the console canvas — panes scroll internally */
+  flex: 1; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
+}
+
+/* type scale: body 14/22 · title 20/28 · section 18/26 · sub 14/22 · meta 12/18 */
+.detail-workbench h1 { font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -0.02em; }
+.detail-workbench h2 { font-size: 18px; line-height: 26px; font-weight: 600; }
+.detail-workbench .side-col h2 { font-size: 16px; line-height: 22px; }
+.detail-workbench .detail-meta { font-size: 12px; line-height: 18px; }
+/* mono only for code/identifiers */
+.detail-workbench .detail-code, .detail-workbench code,
+.detail-workbench pre, .detail-workbench .cm-editor, .detail-workbench .artifact-name {
+  font-family: var(--font-mono); font-size: 13px; line-height: 20px; font-weight: 400;
+}
+
+/* header — compact identity row, no enclosing box, no heavy black rule */
+.detail-workbench .detail-head {
+  flex: none;
+  display: flex; align-items: flex-start; gap: 8px 24px; flex-wrap: wrap;
+  padding: 8px 20px 10px;
+}
+.detail-workbench .detail-id { min-width: 0; flex: 1; }
+.detail-workbench .detail-id h1 {
+  margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.detail-workbench .detail-desc {
+  margin: 2px 0 0; max-width: 72ch;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.detail-workbench .detail-header-status { flex-wrap: wrap; min-width: 0; }
+.detail-workbench .detail-error { flex: none; padding: 0 20px 6px; }
+
+/* view tab strip — one row of tabs with optional strip actions at the
+   right edge */
+.detail-workbench .detail-views {
+  flex: none; display: flex; align-items: stretch; gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--detail-edge);
+  background: var(--detail-work);
+}
+.detail-workbench .detail-views .view-tabs { flex: 1; min-width: 0; border-bottom: 0; }
+
+/* view tabs — underline style, addressable via ?view= (C4). Plain
+   buttons use [data-on], Radix triggers use [data-state='active']. */
+.detail-workbench .view-tabs {
+  border-bottom: 1px solid var(--detail-edge);
+}
+.detail-workbench .view-tab {
+  border: 0; background: transparent; cursor: pointer;
+  padding: 8px 14px; font-size: 14px; font-weight: 500;
+  color: rgb(var(--sec)); border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.detail-workbench .view-tab[data-on='true'],
+.detail-workbench .view-tab[data-state='active'] { color: rgb(var(--ink)); border-bottom-color: rgb(var(--accent)); }
+.detail-workbench .view-tab:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }
+
+/* work surface + panes — each view owns its scroller (C2/C3) */
+.detail-workbench .work-surface {
+  min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
+  background: var(--detail-work);
+}
+.detail-workbench .work-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.detail-workbench .work-panel[hidden] { display: none; }
+.detail-workbench .work-panel-scroll { flex: 1; min-height: 0; overflow: auto; padding: 12px 16px; }
+.detail-workbench .work-panel-scroll > * { flex: none; }
+.detail-workbench .work-panel > .nb { flex: 1; min-height: 0; }
+
+/* application views stretch under the shared frame */
+.detail-workbench .app-detail-views { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+
+@media (max-width: 900px) {
+  .detail-workbench .detail-head { padding: 8px 12px 8px; }
+  .detail-workbench .detail-views { padding: 0 6px; }
+}
+
+@media (max-width: 650px) {
+  /* the identity column and its actions never fight for one row —
+     actions take their own compact row, the title keeps full width */
+  .detail-workbench .detail-head {
+    flex-direction: column; align-items: stretch; gap: 5px;
+  }
+  .detail-workbench .detail-actions { margin-left: 0; gap: 4px; }
+  .detail-workbench .detail-actions [data-ui='button'] { padding-inline: 8px; }
+}
