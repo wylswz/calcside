@@ -38,7 +38,7 @@ test('module create → source edit → debug run → publish → instance use',
   const fillCM = async (testid: string, text: string) => {
     const cm = page.getByTestId(testid).locator('.cm-content')
     await cm.click()
-    await page.keyboard.press('Meta+A')
+    await page.keyboard.press('ControlOrMeta+a')
     await page.keyboard.press('Delete')
     await page.keyboard.insertText(text)
   }

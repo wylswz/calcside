@@ -253,7 +253,8 @@ test.describe('visual audit', () => {
     await page.getByRole('button', { name: 'Test', exact: true }).click()
     await page.locator('#app-input').fill('{"name":"Playwright"}')
     await page.getByTestId('app-run').click()
-    await expect(page.locator('.app-out-pre:not(.app-call-out)')).toContainText('Playwright', { timeout: 30_000 })
+    const testPanel = page.getByRole('region', { name: 'Test notebook' })
+    await expect(testPanel.locator('.app-out-pre')).toContainText('Playwright', { timeout: 30_000 })
     await page.waitForTimeout(400)
     await shot(page, 'app-nb-testpanel-light')
     await page.emulateMedia({ colorScheme: 'dark' })
@@ -277,7 +278,7 @@ test.describe('visual audit', () => {
     const invokePanel = page.getByRole('tabpanel', { name: 'Invoke', exact: true })
     await invokePanel.locator('#app-call-input').fill('{"name": "UI"}')
     await invokePanel.getByRole('button', { name: 'Send' }).click()
-    await expect(page.locator('.app-call-out')).toContainText('Hello, UI!', { timeout: 30_000 })
+    await expect(invokePanel.locator('.app-invoke-output > .wb-pane-body > .app-out-pre')).toContainText('Hello, UI!', { timeout: 30_000 })
     await page.waitForTimeout(400)
     await shot(page, 'app-nb-invoke-done-light')
     await page.emulateMedia({ colorScheme: 'dark' })
@@ -296,7 +297,7 @@ test.describe('visual audit', () => {
   // input; the Test panel shows the Entry select and the debug note.
   test('debug run capture', async ({ page }) => {
     test.setTimeout(300_000)
-    const dbg = '/tmp/calcside-ui-audit/debug'
+    const dbg = join(OUT, 'debug')
     await mkdir(dbg, { recursive: true })
     const r = await rt.client.post('/api/v1/applications', {
       data: {

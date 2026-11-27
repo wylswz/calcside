@@ -125,7 +125,7 @@ test('notebook: create -> sections -> test main -> graph -> publish -> invoke', 
 	await expect(testPanel).toBeVisible()
 	await expect(testPanel.locator('.app-out-pre')).toContainText('Run to see output')
 	await page.getByTestId('app-run').click()
-	await expect(page.locator('.app-out-pre:not(.app-call-out)')).toContainText('Notebook world', { timeout: 30_000 })
+	await expect(page.locator('[aria-label="Test notebook"] .app-out-pre')).toContainText('Notebook world', { timeout: 30_000 })
 
 	// Saved graph carries the format -> main greet edge and entry labels.
 	const app = (await (await client.get(`/api/v1/applications/${id}`)).json()).application
@@ -164,11 +164,11 @@ test('notebook: create -> sections -> test main -> graph -> publish -> invoke', 
 	const invokeCard = page.getByRole('tabpanel', { name: 'Invoke', exact: true })
 	await expect(invokeCard.getByRole('button', { name: 'Send' })).toBeEnabled({ timeout: 10_000 })
 	await invokeCard.getByRole('button', { name: 'Send' }).click()
-	await expect(page.locator('.app-call-out')).toContainText('Notebook world', { timeout: 30_000 })
+	await expect(invokeCard.locator('.app-invoke-output > .wb-pane-body > .app-out-pre')).toContainText('Notebook world', { timeout: 30_000 })
 
 	// Back on the workbench, renaming the pinned main keeps its lock
 	// and label through the pre-save window.
-	await page.getByRole('tablist', { name: 'Application views' }).getByRole('tab', { name: 'Notebook' }).click()
+	await page.getByRole('tablist', { name: 'Application views' }).getByRole('tab', { name: 'Editor' }).click()
 	await page.getByRole('button', { name: 'Section main actions' }).click()
 	await page.getByRole('menuitem', { name: 'Rename…' }).click()
 	await page.getByLabel('Rename section main').fill('entry')
@@ -244,7 +244,7 @@ test('notebook: docked extension catalog installs and configures into the draft'
 		.fill('def main(input):\n    return ext.probe.echo(input["name"])')
 	await page.getByRole('button', { name: 'Test', exact: true }).click()
 	await page.getByTestId('app-run').click()
-	await expect(page.locator('.app-out-pre:not(.app-call-out)')).toContainText('"release":"v1"', { timeout: 30_000 })
+	await expect(page.locator('[aria-label="Test notebook"] .app-out-pre')).toContainText('"release":"v1"', { timeout: 30_000 })
 	const app = (await (await client.get(`/api/v1/applications/${id}`)).json()).application
 	expect(app.published_version ?? 0).toBe(0)
 
@@ -548,7 +548,7 @@ test('notebook layout: workbench fills the viewport and panes own scrolling', as
 	await expect(scroll).toBeVisible()
 	expect((await scroll.boundingBox())!.height).toBeGreaterThan(0)
 	expect(await scroll.evaluate((el) => getComputedStyle(el).overflowY)).toBe('auto')
-	await page.getByRole('tab', { name: 'Notebook' }).click()
+	await page.getByRole('tab', { name: 'Editor' }).click()
 	await expect(page.locator('[aria-label="Application section main"] .cm-content')).toBeVisible()
 })
 

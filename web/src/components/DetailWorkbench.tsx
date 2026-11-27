@@ -6,19 +6,18 @@ import './detailWorkbench.css'
 // title · id · status · actions) and a view tab strip above
 // viewport-filling panes that own their scrollers.
 
-export function DetailWorkbenchHeader({ backTo, backLabel, title, id, description, status, actions }: {
-  backTo: string
-  backLabel: string
+export function DetailWorkbenchHeader({ backTo, backLabel, breadcrumb, title, id, description, status, actions }: {
   title: string
   id: string
   description?: string
   status: ReactNode
   actions?: ReactNode
-}) {
+} & ({ backTo: string; backLabel: string; breadcrumb?: never } |
+  { breadcrumb: ReactNode; backTo?: never; backLabel?: never })) {
   return (
     <header className="detail-head">
-      <Link to={backTo} className="detail-crumb">{backLabel}</Link>
-      <h1 className="detail-title" title={title}>{title}</h1>
+      {backTo !== undefined ? <Link to={backTo} className="detail-crumb">{backLabel}</Link> : breadcrumb}
+      <h1 className="detail-title" title={title} aria-current={breadcrumb ? 'page' : undefined}>{title}</h1>
       {title !== id && <code className="detail-id" title={id}>{id}</code>}
       {description && <span className="detail-desc" title={description}>{description}</span>}
       <div className="detail-header-status">{status}</div>

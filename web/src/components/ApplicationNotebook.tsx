@@ -41,6 +41,8 @@ interface Props {
   /** this view is the one on screen — the code scroller can't be
       targeted while its Tabs panel is hidden (C2). */
   visible: boolean
+  settingsOpen: boolean
+  setSettingsOpen: (open: boolean) => void
   /** Settings content; the extension/module/policy catalogs dock in the
       side rail — parallel add entries (no in-settings duplication). */
   settings: (catalogTargets: NotebookCatalogTargets, openSettings: () => void, closeSettings: () => void) => ReactNode
@@ -246,12 +248,11 @@ function AppSectionCard({ sec, index, count, ids, movable, canDelete, canAdd, ex
   )
 }
 
-export function ApplicationNotebook({ sections, saved, extensions, readOnly, busy, canRun, onRunEntry, onPublish, onChange, test, testControls, saveStatus, settings, visible }: Props) {
+export function ApplicationNotebook({ sections, saved, extensions, readOnly, busy, canRun, onRunEntry, onPublish, onChange, test, testControls, saveStatus, settingsOpen, setSettingsOpen, settings, visible }: Props) {
   const [params, setParams] = useSearchParams()
   const view = params.get('nbview') === 'graph' ? 'graph' : 'code'
   const selected = params.get('section') ?? ''
 
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [testOpen, setTestOpen] = useState(false)
   const [rail, setRail] = useState<'sections' | NotebookCatalogKind | null>(
     () => window.matchMedia('(min-width: 740px)').matches ? 'sections' : null)
@@ -271,7 +272,7 @@ export function ApplicationNotebook({ sections, saved, extensions, readOnly, bus
   const closeSettings = useCallback(() => {
     setSettingsOpen(false)
     settingsButton.current?.focus({ preventScroll: true })
-  }, [])
+  }, [setSettingsOpen])
   // A gutter ▶ runs that entry: the Test panel opens (Code view, no
   // Settings) and the run fires with the panel's current input.
   const runEntry = useCallback((name: string) => {
@@ -282,7 +283,7 @@ export function ApplicationNotebook({ sections, saved, extensions, readOnly, bus
     requestAnimationFrame(() => testHead.current?.focus({ preventScroll: true }))
     onRunEntry(name)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, onRunEntry, canRun, readOnly])
+  }, [view, onRunEntry, canRun, readOnly, setSettingsOpen])
   const [dirFilter, setDirFilter] = useState('')
   const codeRef = useRef<HTMLDivElement | null>(null)
   const focusNext = useRef('')
@@ -355,7 +356,7 @@ export function ApplicationNotebook({ sections, saved, extensions, readOnly, bus
     captureScroll()
     setSettingsOpen(true)
     if (window.matchMedia('(max-width: 739px)').matches) setRail(null)
-  }, [captureScroll])
+  }, [captureScroll, setSettingsOpen])
 
   const patch = useCallback((id: string, code: string) => {
     onChange((cur) => cur.map((s) => (s.id === id ? { ...s, code } : s)))
@@ -632,7 +633,7 @@ export function ApplicationNotebook({ sections, saved, extensions, readOnly, bus
             <Button variant="ghost" size="xs" aria-expanded={testVisible}
               onClick={() => { setSettingsOpen(false); if (view === 'graph') goView('code'); setTestOpen((t) => !t) }}>Test</Button>
             <Button variant="ghost" size="xs" aria-pressed={settingsOpen} ref={settingsButton}
-              onClick={() => { if (!settingsOpen) captureScroll(); setSettingsOpen((s) => !s) }}>Settings</Button>
+              onClick={() => { if (!settingsOpen) captureScroll(); setSettingsOpen(!settingsOpen) }}>Settings</Button>
           </div>
           <div className="nb-toolbar-side">
             <NotebookViewToggle view={view} onChange={(v) => { setSettingsOpen(false); goView(v) }} />

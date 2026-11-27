@@ -93,7 +93,7 @@ test('autosave: Run section awaits the pending save and executes latest code', a
   // still pending; the run must flush it first (P3: runs execute saved
   // code, and the saved code must be what is on screen).
   await c.locator('.cm-content').click()
-  await page.keyboard.press('Meta+A')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.insertText('print("RUNS-LATEST")')
   await c.getByRole('button', { name: 'Run section' }).click()
 
@@ -175,7 +175,7 @@ test('conflict: a 409 save blocks Run until explicitly resolved (C2/F3)', async 
   })
 
   await c.locator('.cm-content').click()
-  await page.keyboard.press('Meta+A')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.insertText('x = "LOCAL-DRAFT"')
   await expect(c.getByText('Conflict', { exact: true })).toBeVisible({ timeout: 15_000 })
   await expect(c.getByText('This section changed elsewhere', { exact: false })).toBeVisible()
@@ -213,7 +213,7 @@ test('polling: a held autosave keeps the dirty draft across polls and view switc
   })
   try {
     await c.locator('.cm-content').click()
-    await page.keyboard.press('Meta+A')
+    await page.keyboard.press('ControlOrMeta+a')
     await page.keyboard.insertText('v = "DIRTY-DRAFT"')
     await expect(c.locator('.cm-content')).toContainText('DIRTY-DRAFT')
     // Wait past a notebook poll (5s) AND a section-detail poll (5s)…
@@ -1126,7 +1126,7 @@ test('graph C2: a dirty draft survives Code→Graph→Code', async ({ page }) =>
   const c = card(page, 'draft')
   await expect(c.locator('.cm-content')).toBeVisible()
   await c.locator('.cm-content').click()
-  await page.keyboard.press('Meta+A')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.insertText('x = 999')
   // The draft is genuinely unsaved when the view flips — the round trip
   // completes well inside the autosave debounce.

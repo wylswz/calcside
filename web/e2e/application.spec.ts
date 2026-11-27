@@ -68,7 +68,7 @@ test('a) create -> scaffold -> test -> publish -> ready -> live invoke', async (
   await expect(page.locator('[aria-label="Application section main"]')).toContainText('def main(input)')
 
   await runMain(page)
-  await expect(page.locator('.app-out-pre:not(.app-call-out)')).toContainText('Hello, world', { timeout: 30_000 })
+  await expect(page.locator('[aria-label="Test notebook"] .app-out-pre')).toContainText('Hello, world', { timeout: 30_000 })
 
   await publishViaDialog(page)
   await waitReady(id)
@@ -77,7 +77,7 @@ test('a) create -> scaffold -> test -> publish -> ready -> live invoke', async (
   const invokeCard = page.getByRole('tabpanel', { name: 'Invoke', exact: true })
   await expect(invokeCard.getByRole('button', { name: 'Send' })).toBeEnabled({ timeout: 10_000 })
   await invokeCard.getByRole('button', { name: 'Send' }).click()
-  await expect(page.locator('.app-call-out')).toContainText('Hello, world', { timeout: 30_000 })
+  await expect(invokeCard.locator('.app-invoke-output > .wb-pane-body > .app-out-pre')).toContainText('Hello, world', { timeout: 30_000 })
 })
 
 test('b) draft change stays unpublished until republish', async ({ page }) => {
@@ -100,7 +100,7 @@ test('b) draft change stays unpublished until republish', async ({ page }) => {
   // change the draft — published output must not move yet
   const code = await page.locator('[aria-label="Application section main"] .cm-content').first()
   await code.click()
-  await page.keyboard.press('Meta+A')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.type('def main(input): return {"message": "v2"}')
   await page.keyboard.press('ControlOrMeta+s')
   await expect.poll(async () => {
@@ -140,12 +140,12 @@ test('c) mid-save edits abort the chained publish', async ({ page }) => {
   })
   const cm = page.locator('[aria-label="Application section main"] .cm-content').first()
   await cm.click()
-  await page.keyboard.press('Meta+A')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.type('def main(input): return {"first":1}')
   const publish = page.getByRole('button', { name: 'Publish…' }).click()
   await page.waitForTimeout(80)
   await cm.click()
-  await page.keyboard.press('Meta+A')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.type('def main(input): return {"second":2}')
   await publish
   // the in-flight edit aborted the chain — the dialog must NOT open.
@@ -184,7 +184,7 @@ test('c2) input-only mid-save change aborts and keeps the input', async ({ page 
   })
   const cm = page.locator('[aria-label="Application section main"] .cm-content').first()
   await cm.click()
-  await page.keyboard.press('Meta+A')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.type('def main(input): return {"c":1}')
   const saveP = runMain(page)
   await page.waitForTimeout(80)
@@ -196,7 +196,7 @@ test('c2) input-only mid-save change aborts and keeps the input', async ({ page 
   await expect(page.locator('#app-input')).toHaveValue('{"changed":true}')
   // a follow-up Run works on the saved baseline
   await runMain(page)
-  await expect(page.locator('.app-out-pre:not(.app-call-out)')).toContainText('"c":1', { timeout: 30_000 })
+  await expect(page.locator('[aria-label="Test notebook"] .app-out-pre')).toContainText('"c":1', { timeout: 30_000 })
 })
 
 test('d) SPA navigation resets scope; B never receives A draft', async ({ page }) => {
@@ -214,7 +214,7 @@ test('d) SPA navigation resets scope; B never receives A draft', async ({ page }
   await page.goto(`${viteURL}/applications/${id1}`)
   const cm = page.locator('[aria-label="Application section main"] .cm-content').first()
   await cm.click()
-  await page.keyboard.press('Meta+A')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.type('def main(input): return {"from_a":1}')
   await openTest(page)
   await page.locator('#app-input').fill('{"name":"scoped-one"}')
@@ -249,7 +249,7 @@ test('e) external write + my save -> 409, edits retained, reload offered', async
   // my editor still holds version 1 — its save must conflict
   const cm = page.locator('[aria-label="Application section main"] .cm-content').first()
   await cm.click()
-  await page.keyboard.press('Meta+A')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.type('def main(input): return {"mine":1}')
   await page.keyboard.press('ControlOrMeta+s')
   await expect(page.getByText('Saved elsewhere')).toBeVisible({ timeout: 15_000 })
@@ -277,13 +277,13 @@ test('g) mobile populated layout, no horizontal overflow', async ({ page }) => {
   // change does not remount, so the populated state is preserved
   await page.goto(`${viteURL}/applications/${id}`)
   await runMain(page)
-  await expect(page.locator('.app-out-pre:not(.app-call-out)')).toContainText('Hello, world', { timeout: 30_000 })
+  await expect(page.locator('[aria-label="Test notebook"] .app-out-pre')).toContainText('Hello, world', { timeout: 30_000 })
   await page.setViewportSize({ width: 390, height: 844 })
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
   expect(overflow).toBe(false)
   await page.screenshot({ path: '/tmp/calcside-ep14-logs/application-ui-mobile.png', fullPage: true })
   await page.setViewportSize({ width: 1440, height: 1000 })
-  await expect(page.locator('.app-out-pre:not(.app-call-out)')).toContainText('Hello, world')
+  await expect(page.locator('[aria-label="Test notebook"] .app-out-pre')).toContainText('Hello, world')
   await page.screenshot({ path: '/tmp/calcside-ep14-logs/application-ui-desktop.png', fullPage: true })
 })
 
@@ -366,7 +366,7 @@ test('k) failed save shows "Couldn\'t save" + Retry and keeps the draft', async 
   })
   const cm = page.locator('[aria-label="Application section main"] .cm-content').first()
   await cm.click()
-  await page.keyboard.press('Meta+A')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.type('def main(input): return {"kept":1}')
   const saved = () => page.locator('.detail-head .swap-label > span[data-on="true"]', { hasText: 'Saved' })
   await expect(page.locator('.detail-head .swap-label > span[data-on="true"]', { hasText: "Couldn't save" })).toBeVisible({ timeout: 15_000 })
@@ -435,7 +435,9 @@ test('l) work views: Invoke layout, Activity -> Run detail, narrow safe', async 
   await runsRegion.getByRole('link', { name: 'succeeded' }).first().click()
   await page.waitForURL(/\/applications\/app_[^/]+\/runs\/run_/)
   await expect(page.getByRole('heading', { name: 'Run', exact: true })).toBeVisible()
-  await expect(page.getByRole('link', { name: /Activity/ })).toBeVisible()
+  const runLocation = page.getByRole('navigation', { name: 'Run location' })
+  const activityCrumb = runLocation.getByRole('link', { name: 'Activity', exact: true })
+  await expect(activityCrumb).toBeInViewport()
   const steps = page.getByRole('region', { name: 'Steps table' })
   await expect(steps).toBeVisible()
   // the steps table scrolls inside its own region, never the document
@@ -453,7 +455,11 @@ test('l) work views: Invoke layout, Activity -> Run detail, narrow safe', async 
   await expect(steps.locator('td[data-label="Resolver"]').first()).toBeInViewport()
   await page.screenshot({ path: testInfo.outputPath('run-detail-mobile.png'), fullPage: true })
   // the crumb returns to the application's Activity view
-  await page.getByRole('link', { name: /Activity/ }).click()
+  await activityCrumb.click()
   await page.waitForURL(/\/applications\/app_[^/]+\?view=activity/)
   await expect(runsRegion).toBeVisible()
+  await runsRegion.getByRole('link', { name: 'succeeded' }).first().click()
+  await runLocation.getByRole('link', { name: app.name, exact: true }).click()
+  await expect(page.getByRole('tab', { name: 'Editor', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('[aria-label="Application section main"] .cm-content')).toBeVisible()
 })

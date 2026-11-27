@@ -43,11 +43,11 @@ test('autosave: delayed PATCH + immediate publish reviews latest code', async ({
   page.on('request', (r) => { if (r.url().includes('/publish/preview')) previews.push(r.method()) })
 
   const cm = page.getByTestId('module-editor').locator('.cm-content')
-  await cm.click(); await page.keyboard.press('Meta+A'); await page.keyboard.insertText('x = "LATEST"')
+  await cm.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.insertText('x = "LATEST"')
   await firstPatch
   // edit AGAIN while first PATCH pending — serial queue keeps order
   try {
-    await cm.click(); await page.keyboard.press('Meta+A'); await page.keyboard.insertText('x = "LATEST2"')
+    await cm.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.insertText('x = "LATEST2"')
     await page.getByTestId('module-publish').click()
     await expect(page.getByTestId('module-publish')).toContainText('Preparing')
     expect(previews).toHaveLength(0)
@@ -188,7 +188,7 @@ test('C2: pending source and caller edits survive SPA navigation', async ({ page
   const url = `${rt.viteURL}/modules/${id}`
   const fill = async (testId: string, value: string) => {
     await page.getByTestId(testId).locator('.cm-content').click()
-    await page.keyboard.press('Meta+A')
+    await page.keyboard.press('ControlOrMeta+a')
     await page.keyboard.insertText(value)
   }
   await page.goto(url)

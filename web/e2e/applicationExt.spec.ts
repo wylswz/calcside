@@ -55,7 +55,7 @@ test('create application with ext -> blocked publish fails -> republish -> ready
   // write code that calls the pinned extension
   const cm = page.locator('[aria-label="Application section main"] .cm-content').first()
   await cm.click()
-  await page.keyboard.press('Meta+A')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.type('def main(input): return ext.probe.echo(input.get("name", "world"))')
 
   // block the artifact fetch BEFORE publish: with synchronous

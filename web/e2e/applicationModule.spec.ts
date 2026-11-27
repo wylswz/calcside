@@ -86,11 +86,11 @@ test('application mounts a published module through Settings', async ({ page }) 
   // The draft run resolves @apphello.
   const cm = page.locator('[aria-label="Application section main"] .cm-content').first()
   await cm.click()
-  await page.keyboard.press('Meta+A')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.insertText('load("@apphello/main.star", "greet")\ndef main(input):\n    return {"message": greet(input["name"])}\n')
   await page.getByRole('button', { name: 'Test', exact: true }).click()
   await page.getByTestId('app-run').click()
-  await expect(page.locator('.app-out-pre:not(.app-call-out)')).toContainText('hello world', { timeout: 60_000 })
+  await expect(page.locator('[aria-label="Test notebook"] .app-out-pre')).toContainText('hello world', { timeout: 60_000 })
 
   // Publish + invoke serve the pinned module too.
   await page.getByRole('button', { name: 'Publish…' }).click()

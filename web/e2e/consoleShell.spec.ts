@@ -131,9 +131,9 @@ test('console shell: drawer stays open on widen; one nav landmark; edits survive
     const mid = (await cr.json()).module.id
     await page.goto(`${rt.viteURL}/modules/${mid}`)
     const cm = page.getByTestId('module-editor').locator('.cm-content')
-    await cm.click(); await page.keyboard.press('Meta+A'); await page.keyboard.type('y = 2')
+    await cm.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.type('y = 2')
     const caller = page.getByTestId('debug-script').locator('.cm-content')
-    await caller.click(); await page.keyboard.press('Meta+A'); await page.keyboard.type('print("caller-marker")')
+    await caller.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.type('print("caller-marker")')
     // open drawer, Escape — both buffers preserved
     await page.getByLabel('Open navigation').click()
     await page.keyboard.press('Escape')

@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, getRun, cancelRun, retryRun, Interrupt, currentWorkspace, Application } from '../api'
 import { Button, Confirm, Loading, Notice, TimeLeft } from '../components/ui'
@@ -8,6 +8,7 @@ import { StatusCell, WorkView, WorkPane, WorkStatusbar } from '../components/App
 import { ResumeForm } from '../components/ResumeForm'
 import { InterruptContext } from '../components/InterruptContext'
 import { deadlineOf, fmtDateTime, resolverLabel, runPhase } from '../interrupts'
+import './application.css'
 
 // runDuration is wall time created→ended (or →last update while live).
 function runDuration(run: { created_at?: string; updated_at?: string; ended_at?: string }): string {
@@ -51,11 +52,12 @@ export default function RunDetail() {
 	const pending = phase?.phase === 'waiting' ? phase.interrupt : undefined
 	const runningHandler = phase?.phase === 'running' ? phase.handler : undefined
 	const deadline = pending ? deadlineOf(pending) : undefined
+	const loading = q.isLoading || appQ.isLoading
 
 	const progressRef = useRef<HTMLElement | null>(null)
 	const waitingHeight = useRef<{ runId: string; height: number } | null>(null)
 	useLayoutEffect(() => {
-		if (!pending || runId == null) return
+		if (loading || !pending || runId == null) return
 		const el = progressRef.current
 		if (!el) return
 		const measure = () => {
@@ -67,11 +69,26 @@ export default function RunDetail() {
 		const ro = new ResizeObserver(measure)
 		ro.observe(el)
 		return () => ro.disconnect()
-	}, [pending, runId])
+	}, [loading, pending, runId])
 
-	if (q.isLoading) return <Loading />
-	if (q.isError) return <div className="app-page"><Notice tone="warning">Could not load run: {(q.error as Error).message}</Notice></div>
-	if (!run) return <div className="app-page"><Notice tone="warning">Run not found.</Notice></div>
+	if (loading) return <Loading />
+	const appPath = `/applications/${appId}`
+	const breadcrumb = (
+		<nav className="app-run-location" aria-label="Run location">
+			<Link to={appPath} title="Open application editor">{appName || 'Application'}</Link>
+			<span aria-hidden="true">›</span>
+			<Link to={`${appPath}?view=activity`}>Activity</Link>
+			<span aria-hidden="true">›</span>
+		</nav>
+	)
+	if (q.isError || !run) {
+		return (
+			<div className="app-page detail-workbench">
+				<DetailWorkbenchHeader breadcrumb={breadcrumb} title="Run" id={runId ?? ''} status={null} />
+				<div className="detail-error"><Notice tone="warning">{q.isError ? `Could not load run: ${(q.error as Error).message}` : 'Run not found.'}</Notice></div>
+			</div>
+		)
+	}
 
 	const cancellable = run.status === 'waiting' || run.status === 'unknown'
 	const retryable = run.status === 'unknown'
@@ -83,8 +100,7 @@ export default function RunDetail() {
 		// the pane column owns the scroll, like the application detail
 		<div className="app-page detail-workbench">
 			<DetailWorkbenchHeader
-				backTo={`/applications/${appId}?view=activity`}
-				backLabel={appName ? `${appName} · Activity` : 'Application activity'}
+				breadcrumb={breadcrumb}
 				title="Run"
 				id={run.id}
 				status={<>

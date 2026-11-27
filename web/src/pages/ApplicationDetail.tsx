@@ -179,6 +179,18 @@ function Editor({ app, role, userID, qc }: Props) {
   const [reloadOpen, setReloadOpen] = useState<Application | null>(null)
   const [params, setParams] = useSearchParams()
   const activeView = params.get('view') === 'invoke' ? 'invoke' : params.get('view') === 'activity' ? 'activity' : 'develop'
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const goToView = (value: string) => {
+    const next = new URLSearchParams(params)
+    if (value === 'develop') {
+      next.delete('view')
+      next.delete('nbview')
+      setSettingsOpen(false)
+    } else {
+      next.set('view', value)
+    }
+    if (next.toString() !== params.toString()) setParams(next)
+  }
   const notebookSpecRef = useRef<SpecFormHandle>(null)
   // SpecForm remount key: bumped on reset so a corrupt stored spec is
   // re-parsed, never remounted while the user is editing.
@@ -681,15 +693,16 @@ function Editor({ app, role, userID, qc }: Props) {
         </div>
       )}
 
-      <Tabs.Root className="app-detail-views" value={activeView} onValueChange={(value) => {
-        const next = new URLSearchParams(params)
-        if (value === 'develop') next.delete('view')
-        else next.set('view', value)
-        setParams(next)
-      }}>
+      <Tabs.Root className="app-detail-views" value={activeView} onValueChange={goToView}>
       <DetailWorkbenchViews>
-        <Tabs.List className="view-tabs flex gap-1" aria-label="Application views">
-          <Tabs.Trigger className="view-tab" value="develop">Notebook</Tabs.Trigger>
+        <Tabs.List className="view-tabs app-section-tabs" aria-label="Application views">
+          <Tabs.Trigger className="view-tab" value="develop"
+            onClick={() => { if (activeView === 'develop') goToView('develop') }}>
+            <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m5.5 4.5-3.5 3.5 3.5 3.5m5-7 3.5 3.5-3.5 3.5" />
+            </svg>
+            Editor
+          </Tabs.Trigger>
           <Tabs.Trigger className="view-tab" value="invoke">Invoke</Tabs.Trigger>
           <Tabs.Trigger className="view-tab" value="activity">Activity</Tabs.Trigger>
         </Tabs.List>
@@ -711,6 +724,8 @@ function Editor({ app, role, userID, qc }: Props) {
           saveStatus={<SwapLabel show={saveState} options={['Saved', 'Saving…', 'Unsaved', "Couldn't save"]} />}
           test={testPanel}
           testControls={testControls}
+          settingsOpen={settingsOpen}
+          setSettingsOpen={setSettingsOpen}
           settings={(catalogTargets, openSettings, closeSettings) => (
             <SpecForm key={specKey} ref={notebookSpecRef} application workspaceId={app.workspace_id} initial={initialSpec} onSpecChange={onSpec}
               dockExtensionCatalog extensionCatalogTarget={catalogTargets.extensions}
@@ -841,6 +856,7 @@ function InvokeTabs({ appId, input, canEdit, onCreateKey, body }: {
   return (
     <Tabs.Root className="app-invoke-tabs" value={tab} onValueChange={(v) => setTab(v as 'body' | 'code' | 'auth')}>
       <header className="wb-pane-head">
+        <h3 className="wb-pane-title">Request</h3>
         <Tabs.List className="wb-head-tabs" aria-label="Request">
           <Tabs.Trigger value="body" className="wb-head-tab">Body</Tabs.Trigger>
           <Tabs.Trigger value="code" className="wb-head-tab">Code</Tabs.Trigger>
