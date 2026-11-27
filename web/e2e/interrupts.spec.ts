@@ -7,6 +7,9 @@ import { startApplicationRuntime, type ApplicationRuntime } from './applicationR
 // input kept), C4 (deep links).
 
 const WAITS = `def on_ok(h):
+    if h["event"].get("chain", False):
+        i = interrupt.new()
+        interrupt.wait(i["id"], handler="on_ok", context={"x": 2})
     return {"ok": h["event"]["approved"]}
 def main(input):
     i = interrupt.new()
@@ -199,7 +202,35 @@ test('f) invoke waiting phase; inbox context + per-interrupt drafts; in-place ou
 	const invokePanel = page.getByRole('tabpanel', { name: 'Invoke', exact: true })
 	await invokePanel.getByRole('button', { name: 'Send' }).click()
 	await expect(invokePanel.locator('.app-waiting')).toContainText('waiting', { timeout: 30_000 })
-	await expect(invokePanel.locator('.wb-pane-head .wb-status-cell')).toContainText('waiting')
+	const status = invokePanel.locator('.wb-pane-head .wb-status-cell')
+	const runHref = await invokePanel.getByRole('link', { name: 'Open run' }).getAttribute('href')
+	const runId = runHref!.split('/').pop()
+	const getRun = async () => (await (await client.get(`/api/v1/runs/${runId}`)).json())
+	const expectMetrics = async (phase: string, steps: number) => {
+		await expect.poll(async () => {
+			const { run } = await getRun()
+			return { status: run.status, steps: run.steps }
+		}).toEqual({ status: phase, steps })
+		const run = await getRun()
+		const duration = run.steps.reduce((total: number, step: { status: string; duration_ms: number }) =>
+			total + (step.status === 'succeeded' ? step.duration_ms : 0), 0)
+		await expect(status).toHaveText(`${phase} · ${duration}ms · ${steps} step${steps === 1 ? '' : 's'}`)
+	}
+	await expectMetrics('waiting', 1)
+	const resume = async (event: string) => {
+		await invokePanel.getByRole('textbox', { name: /EVENT/ }).fill(event)
+		await invokePanel.getByRole('button', { name: 'Resume', exact: true }).click()
+		await page.getByRole('dialog').getByRole('button', { name: 'Resume', exact: true }).click()
+	}
+	const firstInterrupt = (await getRun()).interrupts.find((i: { status: string }) => i.status === 'pending')
+	await resume('{"approved":true,"chain":true}')
+	await expectMetrics('waiting', 2)
+	const secondInterrupt = (await getRun()).interrupts.find((i: { status: string }) => i.status === 'pending')
+	expect(secondInterrupt.id).not.toBe(firstInterrupt.id)
+	await expect(invokePanel.locator(`#event-${secondInterrupt.id}`)).toHaveValue('{}')
+	await resume('{"approved":false}')
+	await expectMetrics('succeeded', 3)
+	await expect(invokePanel.locator('.app-invoke-output > .wb-pane-body > .app-out-pre')).toContainText('"ok":false')
 
 	// Inbox detail: labelled CONTEXT + RESUME URL blocks render.
 	await page.goto(`${viteURL}/inbox?interrupt=${a.int_id}`)
@@ -212,10 +243,10 @@ test('f) invoke waiting phase; inbox context + per-interrupt drafts; in-place ou
 	// Each interrupt keeps its own event draft — switching selection
 	// remounts the form instead of leaking the previous event.
 	await detail.locator(`#event-${a.int_id}`).fill('{"draft":"A"}')
-	await page.goto(`${viteURL}/inbox?interrupt=${b.int_id}`)
+	await page.getByRole('button', { name: new RegExp(b.run_id) }).click()
 	await expect(page.locator(`#event-${b.int_id}`)).toHaveValue('{}')
 	await page.locator(`#event-${b.int_id}`).fill('{"draft":"B"}')
-	await page.goto(`${viteURL}/inbox?interrupt=${a.int_id}`)
+	await page.getByRole('button', { name: new RegExp(a.run_id) }).click()
 	await expect(page.locator(`#event-${a.int_id}`)).toHaveValue('{"draft":"A"}')
 
 	// Resume in place: the detail flips to the resolved view with the

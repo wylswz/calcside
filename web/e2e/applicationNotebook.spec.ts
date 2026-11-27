@@ -413,8 +413,8 @@ test('notebook graph: Code / Graph interaction parity on desktop and narrow scre
 	expect(await headBox()).toEqual(headBefore)
 	expect(await statusBox()).toEqual(statusBefore)
 
-	// The shared toggle paints a real track + raised thumb on the active
-	// segment — the same material the instance notebook shows.
+	// The shared toggle distinguishes the track and active segment with
+	// flat fills and a hairline, not shadows or gradients.
 	const toggleBox = (await page.locator('.nb-view-toggle').boundingBox())!
 	const togglePaint = await page.locator('.nb-view-toggle').evaluate((el) => {
 		// settle the paint transition so computed styles are final, not mid-flight
@@ -425,16 +425,18 @@ test('notebook graph: Code / Graph interaction parity on desktop and narrow scre
 		const idle = getComputedStyle(el.querySelector("button[aria-pressed='false']")!)
 		return {
 			trackBg: track.backgroundColor, trackShadow: track.boxShadow,
-			activeShadow: active.boxShadow, activeBg: active.backgroundImage, activeBorder: active.borderTopColor,
-			idleShadow: idle.boxShadow, idleBg: idle.backgroundImage,
+			activeShadow: active.boxShadow, activeBg: active.backgroundColor, activeBorder: active.borderTopColor,
+			idleShadow: idle.boxShadow, idleBg: idle.backgroundColor, idleBorder: idle.borderTopColor,
+			backgroundImages: [track.backgroundImage, active.backgroundImage, idle.backgroundImage],
 		}
 	})
-	expect(togglePaint.trackBg).not.toBe('none')
-	expect(togglePaint.trackShadow).not.toBe('none')
-	expect(togglePaint.activeShadow).not.toBe('none')
-	expect(togglePaint.activeBg).not.toBe('none')
+	expect(togglePaint.trackBg).not.toBe(togglePaint.idleBg)
+	expect(togglePaint.trackShadow).toBe('none')
+	expect(togglePaint.activeShadow).toBe('none')
+	expect(togglePaint.activeBg).not.toBe(togglePaint.trackBg)
+	expect(togglePaint.activeBorder).not.toBe(togglePaint.idleBorder)
 	expect(togglePaint.idleShadow).toBe('none')
-	expect(togglePaint.idleBg).toBe('none')
+	expect(togglePaint.backgroundImages).toEqual(['none', 'none', 'none'])
 	// Selecting the other segment moves the thumb, never the track (S1).
 	await page.locator('.nb-view-toggle').getByRole('button', { name: 'Code' }).click()
 	expect(await page.locator('.nb-view-toggle').boundingBox()).toEqual(toggleBox)

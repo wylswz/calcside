@@ -509,7 +509,7 @@ function Editor({ app, role, userID, qc }: Props) {
   const devStreaming = !!run?.result.streaming
   const callStreaming = !!callRun?.result.streaming
   const devProg = useRunProgress(run?.run_id && !run.output_json && !run.result.error && !devStreaming ? run.run_id : undefined)
-  const callProg = useRunProgress(callRun?.run_id && !callRun.output_json && !callRun.result.error && !callStreaming ? callRun.run_id : undefined)
+  const callProg = useRunProgress(!callStreaming ? callRun?.run_id : undefined)
   const devPhase = devProg.phase
   const callPhase = callProg.phase
   const streamText = (sv: StreamView | null): string | null => {
@@ -584,7 +584,7 @@ function Editor({ app, role, userID, qc }: Props) {
   const callMs = callStepMs ?? callRun?.result.duration_ms
   const callStepsN = callProg.run?.steps
   const callMetric = callFailed ? (callErrCode ?? 'failed')
-    : callRun && callMs != null && callMs > 0
+    : callRun && callMs != null
       ? `${callMs}ms${callStepsN ? ` · ${callStepsN} step${callStepsN === 1 ? '' : 's'}` : ''}`
       : ''
   const ready = app.status === 'ready'
@@ -772,14 +772,16 @@ function Editor({ app, role, userID, qc }: Props) {
       <Tabs.Content value="invoke" forceMount hidden={activeView !== 'invoke'} className="work-panel app-view-panel app-invoke-panel">
       <WorkView>
         {/* Postman-style request bar: method · URL · release · Send */}
-        <div className="wb-toolbar">
+        <div className="wb-toolbar app-invoke-toolbar">
           <span className="wb-method">POST</span>
           <code className="wb-path" title={`${window.location.origin}/api/v1/applications/${app.id}/invoke`}>/api/v1/applications/{app.id}/invoke</code>
           <CopyButton text={`${window.location.origin}/api/v1/applications/${app.id}/invoke`} size="sm" />
-          {app.published_version > 0 && <span className="wb-pane-note">release v{app.published_version}</span>}
-          {ready
-            ? <span className="wb-toolbar-note">Published release · draft changes not used</span>
-            : <span className="wb-toolbar-note wb-toolbar-note-warn">{statusHint[app.status] ?? 'Not ready.'}</span>}
+          <div className="app-invoke-release">
+            {app.published_version > 0 && <span className="wb-pane-note">release v{app.published_version}</span>}
+            {ready
+              ? <span className="wb-toolbar-note">Published release · draft changes not used</span>
+              : <span className="wb-toolbar-note wb-toolbar-note-warn">{statusHint[app.status] ?? 'Not ready.'}</span>}
+          </div>
           <div className="wb-toolbar-side">
             <Button variant="primary" size="sm" onClick={onInvoke} disabled={busy !== '' || !ready || view === 'view' || corrupt}><SwapLabel show={busy === 'invoke' ? 'Sending…' : 'Send'} options={['Send', 'Sending…']} /></Button>
           </div>

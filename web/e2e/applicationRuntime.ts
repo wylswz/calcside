@@ -19,6 +19,7 @@ export interface ApplicationRuntime {
   blockArtifacts(block: boolean): void
   /** count of /internal/v1/ext/tree calls seen by the gate proxy */
   artifactFetches(): number
+  workerPID(): number
   restartWorker(emptyCache?: boolean): Promise<void>
   restartAPI(): Promise<void>
   close(): Promise<void>
@@ -174,6 +175,7 @@ export async function startApplicationRuntime(opts: { secretKey?: string; secret
     extensionDir: probe,
     blockArtifacts: (b) => { block = b },
     artifactFetches: () => extTreeCalls,
+    workerPID: () => worker.pid!,
     async restartWorker(emptyCache = true) {
       await stop(worker)
       if (emptyCache) await rm(join(dir, 'workercache'), { recursive: true, force: true })

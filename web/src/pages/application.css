@@ -72,12 +72,19 @@
 /* Invoke — request | response split; at ≤900px the view becomes the
    scroller and the panes stack with fixed minimum heights. */
 .detail-workbench .app-invoke-io { min-height: 0; }
+.detail-workbench .app-invoke-release { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.detail-workbench .app-invoke-release .wb-pane-note { flex: none; }
 @media (max-width: 900px) {
   .detail-workbench .app-invoke-panel .wb-view { overflow: auto; }
   .detail-workbench .app-invoke-io { flex: none; flex-direction: column; }
   .detail-workbench .app-invoke-io > .wb-pane + .wb-pane { border-left: 0; border-top: 1px solid var(--edge); }
   .detail-workbench .app-invoke-request { min-height: 240px; }
   .detail-workbench .app-invoke-output { min-height: 280px; }
+  .detail-workbench .app-invoke-toolbar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; }
+  .detail-workbench .app-invoke-release { grid-area: 2 / 1 / auto / -1; }
+}
+@media (min-width: 901px) {
+  .detail-workbench .app-invoke-output .resume-area { max-height: none; }
 }
 /* Invoke request tabs: each tab body is a flex child that fills the
    pane; the editor inside grows to the tabpanel's full height. */

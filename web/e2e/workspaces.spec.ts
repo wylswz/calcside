@@ -134,8 +134,12 @@ test('workspace switcher scopes the instance list', async ({ page }) => {
   await expect(page.locator('tbody tr', { hasText: personalId })).toHaveCount(0)
   // settings page
   await page.goto(`${consoleURL}/workspaces/${team.id}`)
-  await expect(page.getByText('e2e team').first()).toBeVisible()
-  await expect(page.getByText('members', { exact: false }).first()).toBeVisible()
+  await expect(page.locator('.ws-settings-name')).toHaveText('e2e team')
+  const settings = page.getByRole('navigation', { name: 'Workspace settings' })
+  await expect(settings.getByRole('link', { name: 'Members' })).toHaveAttribute('aria-current', 'page')
+  const panel = page.locator('.ws-settings-content')
+  await expect(panel.getByText('Members', { exact: true })).toBeVisible()
+  await expect(panel.getByRole('row', { name: /owner/ })).toBeVisible()
 })
 
 // Flow: creating an instance lands on its page with a compact connect
@@ -353,16 +357,6 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   await expect(page.getByText('no matching variables', { exact: true })).toBeVisible()
   await variableFilter.clear()
   await expect(page.getByText('no matching variables', { exact: true })).toHaveCount(0)
-  const tableType = await page.locator('[aria-label="Activity"] table').evaluate((table) => {
-    const header = getComputedStyle(table.querySelector('th')!)
-    const source = getComputedStyle(table.querySelector('.detail-code')!)
-    const when = getComputedStyle(table.querySelector('tbody tr td:nth-child(2)')!)
-    return { casing: header.textTransform, tracking: header.letterSpacing, source: source.fontFamily, when: when.fontFamily }
-  })
-  expect(tableType.casing).toBe('none')
-  expect(['normal', '0px']).toContain(tableType.tracking)
-  expect(tableType.source).toContain('IBM Plex Mono')
-  expect(tableType.when).toContain('IBM Plex Sans')
   // title wraps at word boundaries, not mid-word
   const h1 = page.getByRole('heading', { name: 'Research session' })
   expect(await h1.evaluate((el) => getComputedStyle(el).wordBreak)).toBe('normal')
@@ -399,18 +393,28 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
 
   // Review run expands the run and shows its calls
   await primary.click()
-  const detail = page.locator(`#run-${runId}`).locator('xpath=following-sibling::tr[1]')
+  const activity = page.getByRole('region', { name: 'Activity', exact: true })
+  const detail = activity.locator(`#run-${runId}`).locator('xpath=following-sibling::tr[1]')
   await expect(detail).toBeVisible()
   await expect(detail.getByText(/net\.|blocked\.example/).first()).toBeVisible()
-  // tables render inside the rounded envelope, including nested calls
-  const tblWrap = await page.evaluate(() => Array.from(
-    document.querySelectorAll('.instance-detail .tbl-wrap')).map((el) => {
-      const c = getComputedStyle(el)
-      return { r: c.borderRadius, ox: c.overflowX, oy: c.overflowY }
-    }))
+  const tableType = await activity.getByRole('table').first().evaluate((table) => {
+    const header = getComputedStyle(table.querySelector('th')!)
+    const source = getComputedStyle(table.querySelector('.detail-code')!)
+    const when = getComputedStyle(table.querySelector('tbody tr td:nth-child(2)')!)
+    return { casing: header.textTransform, tracking: header.letterSpacing, source: source.fontFamily, when: when.fontFamily }
+  })
+  expect(tableType.casing).toBe('none')
+  expect(['normal', '0px']).toContain(tableType.tracking)
+  expect(tableType.source).toContain('IBM Plex Mono')
+  expect(tableType.when).toContain('IBM Plex Sans')
+  // Flat workbench tables keep their own horizontal scroller, including nested calls.
+  const tblWrap = await activity.locator('.tbl-wrap').evaluateAll((tables) => tables.map((el) => {
+    const c = getComputedStyle(el)
+    return { r: c.borderRadius, ox: c.overflowX, oy: c.overflowY }
+  }))
   expect(tblWrap.length).toBeGreaterThan(0)
   for (const w of tblWrap) {
-    expect(w.r).toBe('8px')
+    expect(w.r).toBe('0px')
     expect(w.ox).toBe('auto')
     expect(w.oy).toBe('hidden')
   }
@@ -526,7 +530,7 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
     body: getComputedStyle(document.body).backgroundColor,
     title: getComputedStyle(document.querySelector('.next-title')!).color,
   }))
-  expect(dark.body).toBe('rgb(10, 16, 28)')
+  expect(dark.body).toBe('rgb(24, 35, 51)')
   expect(dark.title).toBe('rgb(241, 245, 249)')
   await page.screenshot({ path: testInfo.outputPath('detail-dark.png'), fullPage: true })
 })
@@ -706,11 +710,11 @@ test('new instance: palette controls stay put while adding and removing', async 
       ext2: page.locator('.extensions-block .ext-card').nth(2).locator('.ext-card-action'),
       ext3: page.locator('.extensions-block .ext-card').nth(3).locator('.ext-card-action'),
     }
-    // Document coordinates: Playwright may scroll a target into view to
-    // click it, which is the user's own scrolling, not layout movement.
+    // Content coordinates in the console's page scroller.
     const box = (l: ReturnType<typeof page.locator>) => l.evaluate((el) => {
       const b = el.getBoundingClientRect()
-      return { x: Math.round(b.x + window.scrollX), y: Math.round(b.y + window.scrollY), w: Math.round(b.width), h: Math.round(b.height) }
+      const scroller = el.closest('.console-main')!
+      return { x: Math.round(b.x + scroller.scrollLeft), y: Math.round(b.y + scroller.scrollTop), w: Math.round(b.width), h: Math.round(b.height) }
     })
     // Measured with the pointer still on the control just clicked: hover
     // and press feedback are paint-only, so nothing may move under it.
@@ -741,29 +745,15 @@ test('new instance: palette controls stay put while adding and removing', async 
 
     // removal keeps the next row in place behind an undo row
     const network = page.locator('[data-row="net"]')
-    const dbg = () => page.evaluate(() => {
-      const rail = document.querySelector('.spec-selection')!
-      const rs = rail.getBoundingClientRect()
-      return {
-        scrollY: window.scrollY,
-        rail: { y: Math.round(rs.y), h: Math.round(rs.height), pos: getComputedStyle(rail).position },
-        rows: Array.from(rail.querySelectorAll('.selected-row')).map((r) => {
-          const b = r.getBoundingClientRect()
-          const cs = getComputedStyle(r)
-          return { cls: r.className.replace('selected-row', '').trim() || 'row', y: Math.round(b.y), h: Math.round(b.height),
-            ch: cs.height, cmh: cs.minHeight, bs: cs.boxSizing, inBuilder: !!r.closest('.instance-builder'), text: (r.textContent || '').slice(0, 24) }
-        }),
-      }
-    })
-    console.log('BEFORE', JSON.stringify(await dbg()))
-    const top = (await box(network)).y
-    await page.getByRole('button', { name: 'Remove Files' }).click()
-    await expect(page.locator('.spec-selection .selected-row.is-removed')).toBeVisible()
-    console.log('AFTER', JSON.stringify(await dbg()))
-    expect((await box(network)).y).toBe(top)
-    await page.getByRole('button', { name: 'Undo' }).click()
+    const selection = page.locator('.spec-selection')
+    const rowTop = () => network.evaluate((el) => Math.round(el.getBoundingClientRect().top - el.closest('.spec-selection')!.getBoundingClientRect().top))
+    const top = await rowTop()
+    await selection.getByRole('button', { name: 'Remove Files' }).click()
+    await expect(selection.locator('.selected-row.is-removed')).toBeVisible()
+    expect(await rowTop()).toBe(top)
+    await selection.getByRole('button', { name: 'Undo' }).click()
     await expect(page.locator('[data-row="fs"]')).toHaveCount(1)
-    expect((await box(network)).y).toBe(top)
+    expect(await rowTop()).toBe(top)
   }
 })
 

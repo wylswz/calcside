@@ -53,7 +53,7 @@ function card(page: import('@playwright/test').Page, name: string) {
 // lost runtime by killing exactly the child this test's instance owns.
 function instanceChildPids(): number[] {
   try {
-    const out = execFileSync('pgrep', ['-f', '__instance'], { encoding: 'utf8' })
+    const out = execFileSync('pgrep', ['-P', String(rt.workerPID()), '-f', '__instance'], { encoding: 'utf8' })
     return out.split('\n').map((s) => parseInt(s.trim(), 10)).filter((n) => Number.isFinite(n) && n > 0)
   } catch {
     return [] // pgrep exits 1 on no matches

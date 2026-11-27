@@ -96,6 +96,7 @@ test('section shortcuts switch views and Request focus is keyboard-only', async 
   await auth.click()
   await expect(auth).toHaveCSS('outline-style', 'none')
   await page.keyboard.press('ArrowLeft')
+  await expect(request.getByRole('tab', { name: 'Code' })).toBeFocused()
   await page.keyboard.press('ArrowRight')
   await expect(auth).toBeFocused()
   await expect(auth).toHaveCSS('outline-style', 'solid')

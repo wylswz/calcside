@@ -246,6 +246,23 @@ test.describe('visual audit', () => {
       await shot(page, `${name}-dark`)
     }
 
+    if (modId) {
+      const moduleSettings = page.getByRole('tab', { name: 'Settings', exact: true })
+      await moduleSettings.click()
+      await expect(page.getByText('Extensions & runtime')).toBeVisible()
+      await shot(page, 'module-settings-dark')
+      await page.emulateMedia({ colorScheme: 'light' })
+      await page.reload()
+      await moduleSettings.click()
+      await expect(page.getByText('Extensions & runtime')).toBeVisible()
+      await shot(page, 'module-settings-light')
+      await page.setViewportSize(MOBILE)
+      await shot(page, 'module-settings-mobile-light')
+      await page.getByRole('tab', { name: 'Source', exact: true }).click()
+      await expect(page.getByTestId('module-editor')).toBeVisible()
+      await shot(page, 'module-source-mobile-light')
+    }
+
     // Notebook with the Test panel open and a test run executed.
     await page.setViewportSize(DESKTOP)
     await page.emulateMedia({ colorScheme: 'light' })

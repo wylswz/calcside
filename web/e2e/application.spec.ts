@@ -78,6 +78,7 @@ test('a) create -> scaffold -> test -> publish -> ready -> live invoke', async (
   await expect(invokeCard.getByRole('button', { name: 'Send' })).toBeEnabled({ timeout: 10_000 })
   await invokeCard.getByRole('button', { name: 'Send' }).click()
   await expect(invokeCard.locator('.app-invoke-output > .wb-pane-body > .app-out-pre')).toContainText('Hello, world', { timeout: 30_000 })
+  await expect(invokeCard.locator('.app-invoke-output .wb-status-cell')).toHaveText(/^succeeded · \d+ms · 1 step$/)
 })
 
 test('b) draft change stays unpublished until republish', async ({ page }) => {
@@ -314,15 +315,15 @@ test('h) guide -> configuration carries basics, Back keeps them', async ({ page 
   await expect(page.locator('tr').filter({ hasText: 'GuideGreeter' })).toContainText('Says hello')
 })
 
-test('h2) guide diagram moves and stops under reduced motion (P4)', async ({ page }) => {
+test('h2) the application guide is static with or without reduced motion (P4)', async ({ page }) => {
   await page.goto(`${viteURL}/applications/new`)
-  const edge = page.locator('.create-diagram .cf-edge').first()
-  const packet = page.locator('.create-diagram .cf-packet').first()
-  await expect.poll(() => edge.evaluate((el) => getComputedStyle(el).animationName)).not.toBe('none')
-  await expect.poll(() => packet.evaluate((el) => getComputedStyle(el).opacity)).toBe('1')
-  await page.emulateMedia({ reducedMotion: 'reduce' })
-  await expect.poll(() => edge.evaluate((el) => getComputedStyle(el).animationName)).toBe('none')
-  await expect.poll(() => packet.evaluate((el) => getComputedStyle(el).opacity)).toBe('0')
+  const guide = page.getByRole('complementary', { name: 'About applications' })
+  for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+    await page.emulateMedia({ reducedMotion })
+    await expect(guide).toBeVisible()
+    await expect(guide).toContainText('Publish a version when the code is ready to serve.')
+    expect(await guide.evaluate((el) => el.getAnimations({ subtree: true }).length)).toBe(0)
+  }
 })
 
 test('i) applications list Delete removes the row after confirm', async ({ page }) => {
@@ -425,6 +426,10 @@ test('l) work views: Invoke layout, Activity -> Run detail, narrow safe', async 
   await page.setViewportSize({ width: 390, height: 844 })
   const reqN = await invokePanel.locator('.app-invoke-request').boundingBox()
   const outputN = await invokePanel.locator('.app-invoke-output').boundingBox()
+  const method = (await invokePanel.locator('.wb-method').boundingBox())!
+  const send = (await invokePanel.getByRole('button', { name: 'Send' }).boundingBox())!
+  expect(method.y).toBeGreaterThanOrEqual(send.y)
+  expect(method.y + method.height).toBeLessThanOrEqual(send.y + send.height)
   expect(reqN!.y + reqN!.height).toBeLessThanOrEqual(outputN!.y + 2)
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false)
 
