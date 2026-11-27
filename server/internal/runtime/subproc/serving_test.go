@@ -41,8 +41,7 @@ func TestServingPrepareInvoke(t *testing.T) {
 	s := newSupervisor(t, nil)
 	prep := supPrep("rep_1", `counter = [0]
 def main(input):
-    counter[0] += 1
-    return {"n": counter[0], "seed": fs.read("seed.txt")}
+    return {"n": counter[0] + 1, "seed": fs.read("seed.txt")}
 `, map[string][]byte{"seed.txt": []byte("v")})
 	resp, err := s.Prepare(context.Background(), prep)
 	if err != nil || resp.Result.Error != nil {

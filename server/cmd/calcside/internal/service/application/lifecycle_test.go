@@ -110,14 +110,13 @@ func lifecycleService(t *testing.T) (*Service, store.Store, *lifecycleHook, serv
 func TestRealDraftLifecycle(t *testing.T) {
 	s, st, rt, actor := lifecycleService(t)
 	ctx := context.Background()
-	code := "def main(input): return input"
-	v, err := s.Create(ctx, actor, CreateRequest{Code: &code})
+	v, err := s.Create(ctx, actor, CreateRequest{Sections: mainSec("def main(input): return input")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	id := v.Application.ID
 	input := json.RawMessage(`{"arbitrary":{"n":9007199254740993}}`)
-	out, err := s.Test(ctx, actor, id, 1, input)
+	out, err := s.Test(ctx, actor, id, 1, input, "")
 	if err != nil || out.Result.Error != nil || out.OutputJSON != string(input) {
 		t.Fatalf("precise dynamic object: result=%+v err=%v", out, err)
 	}
@@ -129,7 +128,7 @@ func TestRealDraftLifecycle(t *testing.T) {
 		t.Fatalf("test unexpectedly published: %+v, %v", app, err)
 	}
 	for _, bad := range []string{`[]`, `42`, `null`} {
-		out, err := s.Test(ctx, actor, id, 1, json.RawMessage(bad))
+		out, err := s.Test(ctx, actor, id, 1, json.RawMessage(bad), "")
 		if err != nil || out.Result.Error == nil || out.Result.Error.Code != "invalid_input" || out.OutputJSON != "" {
 			t.Fatalf("default object accepted %s: %+v, %v", bad, out, err)
 		}
@@ -147,7 +146,7 @@ func TestRealDraftLifecycle(t *testing.T) {
 		string(rel.Program.OutputSchema) != `{}` {
 		t.Fatalf("release default contracts: %+v, %v", rel, err)
 	}
-	updated, err := s.Update(ctx, actor, id, UpdateRequest{Version: 1, Code: code + "\n"})
+	updated, err := s.Update(ctx, actor, id, UpdateRequest{Version: 1, Sections: mainSec("def main(input): return input\n")})
 	if err != nil || updated.Application.Version != 2 {
 		t.Fatalf("update: %+v, %v", updated, err)
 	}
@@ -170,7 +169,7 @@ func TestInvalidProgramsCannotPublish(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s, st, rt, actor := lifecycleService(t)
 			ctx := context.Background()
-			v, err := s.Create(ctx, actor, CreateRequest{Code: &tc.code, Spec: json.RawMessage(tc.spec)})
+			v, err := s.Create(ctx, actor, CreateRequest{Sections: mainSec(tc.code), Spec: json.RawMessage(tc.spec)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -178,7 +177,7 @@ func TestInvalidProgramsCannotPublish(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := s.Test(ctx, actor, v.Application.ID, 1, json.RawMessage(`{}`))
+			result, err := s.Test(ctx, actor, v.Application.ID, 1, json.RawMessage(`{}`), "")
 			if err != nil || result.Result.Error == nil {
 				t.Fatalf("invalid draft not reported: %+v, %v", result, err)
 			}
@@ -208,7 +207,7 @@ func TestUncertainPrepareIsCleaned(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt.gate.fail.Store(true)
-	if _, err := s.Test(ctx, actor, v.Application.ID, 1, json.RawMessage(`{}`)); err == nil ||
+	if _, err := s.Test(ctx, actor, v.Application.ID, 1, json.RawMessage(`{}`), ""); err == nil ||
 		strings.Contains(err.Error(), "gate") {
 		t.Fatalf("transport error was lost or leaked: %v", err)
 	}

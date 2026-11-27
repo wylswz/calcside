@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, AuditEvent, Instance, wsPath } from '../api'
 import { callOutcome } from '../activity'
-import { Button, Field, PageHeader, inputCls } from '../components/ui'
+import { Button, ListPage, inputCls } from '../components/ui'
 import { CallRows } from '../components/CallTable'
 
 const PAGE = 50
@@ -50,25 +50,22 @@ export default function Audit() {
   const prev = () => setPage(Math.max(0, page - 1))
 
   return (
-    <div>
-      <PageHeader title="Audit" />
-      <div className="mb-6 flex flex-wrap items-end gap-3">
-        <Field label="Instance ID"><input className={inputCls + ' !w-64 font-mono'} value={instFilter} onChange={(e) => { setInstFilter(e.target.value); setPage(0); setCursors([undefined]) }} placeholder="ins_…" /></Field>
-        <Field label="Exec ID"><input className={inputCls + ' !w-64 font-mono'} value={execFilter} onChange={(e) => { setExecFilter(e.target.value); setPage(0); setCursors([undefined]) }} placeholder="exe_…" /></Field>
-        <Field label="Outcome">
-          <select className={inputCls + ' !w-40'} value={outcome} onChange={(e) => setOutcome(e.target.value as OutcomeFilter)}>
-            <option value="all">All</option>
-            <option value="denied">Denied</option>
-            <option value="failed">Failed</option>
-          </select>
-        </Field>
-      </div>
+    <ListPage title="Audit" count={events.length}
+      toolbar={<>
+        <input className={inputCls + ' !h-[26px] !w-56 !py-0 font-mono'} value={instFilter} onChange={(e) => { setInstFilter(e.target.value); setPage(0); setCursors([undefined]) }} placeholder="Instance ID ins_…" aria-label="Instance ID" />
+        <input className={inputCls + ' !h-[26px] !w-56 !py-0 font-mono'} value={execFilter} onChange={(e) => { setExecFilter(e.target.value); setPage(0); setCursors([undefined]) }} placeholder="Exec ID exe_…" aria-label="Exec ID" />
+        <select className={inputCls + ' !h-[26px] !w-32 !py-0'} value={outcome} onChange={(e) => setOutcome(e.target.value as OutcomeFilter)} aria-label="Outcome">
+          <option value="all">All outcomes</option>
+          <option value="denied">Denied</option>
+          <option value="failed">Failed</option>
+        </select>
+      </>}
+      status={<>
+        <Button size="xs" onClick={prev} disabled={page === 0}>← Prev</Button>
+        <span className="font-mono">page {page + 1}{hasNext ? ' · more' : ''}</span>
+        <Button size="xs" onClick={next} disabled={!hasNext}>Next →</Button>
+      </>}>
       <CallRows events={events} instances={instances} showInstance />
-      <div className="mt-4 flex items-center gap-3 text-xs">
-        <Button size="sm" onClick={prev} disabled={page === 0}>← Prev</Button>
-        <span className="font-mono text-sec">page {page + 1}</span>
-        <Button size="sm" onClick={next} disabled={!hasNext}>Next →</Button>
-      </div>
-    </div>
+    </ListPage>
   )
 }

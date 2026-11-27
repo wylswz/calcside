@@ -6,7 +6,7 @@ import { CreateGuide } from '../components/CreateGuide'
 import { SpecForm, type SpecFormHandle } from '../components/SpecForm'
 import { KeyValueRows } from '../components/SpecSections'
 import { sameRows, type InstanceDraft, type DraftError, type InstanceSpec } from '../instanceDraft'
-import { Button, Field, inputCls, Loading, Notice, PageHeader, SwapLabel } from '../components/ui'
+import { Button, Field, inputCls, Loading, Notice, SwapLabel } from '../components/ui'
 import './create-flow.css'
 
 type Step = 'basics' | 'config'
@@ -98,23 +98,23 @@ export default function NewApplication() {
 
   return (
     <div className="instance-builder">
-      <PageHeader title="New application">
+      <div className="list-toolbar create-toolbar">
+        <h1 className="list-title">New application</h1>
         {step === 'config' && (name.trim() || description.trim()) && (
-          <span>{name.trim() || 'Untitled application'}{description.trim() ? ` — ${description.trim()}` : ''}</span>
+          <span className="create-toolbar-name">{name.trim() || 'Untitled application'}{description.trim() ? ` — ${description.trim()}` : ''}</span>
         )}
-      </PageHeader>
-
-      <nav className="create-steps" aria-label="Create steps">
-        <button type="button" className="create-step" data-state={step === 'basics' ? 'current' : 'done'}
-          aria-current={step === 'basics' ? 'step' : undefined} onClick={() => { if (step === 'config') goBasics() }}>
-          <span className="create-step-num">1</span> Basics
-        </button>
-        <span className="create-step-line" aria-hidden="true" />
-        <button type="button" className="create-step" data-state={step === 'config' ? 'current' : 'todo'}
-          aria-current={step === 'config' ? 'step' : undefined} onClick={() => { if (step === 'basics') goConfig() }}>
-          <span className="create-step-num">2</span> Configuration
-        </button>
-      </nav>
+        <nav className="create-steps" aria-label="Create steps">
+          <button type="button" className="create-step" data-state={step === 'basics' ? 'current' : 'done'}
+            aria-current={step === 'basics' ? 'step' : undefined} onClick={() => { if (step === 'config') goBasics() }}>
+            <span className="create-step-num">1</span> Basics
+          </button>
+          <span className="create-step-line" aria-hidden="true" />
+          <button type="button" className="create-step" data-state={step === 'config' ? 'current' : 'todo'}
+            aria-current={step === 'config' ? 'step' : undefined} onClick={() => { if (step === 'basics') goConfig() }}>
+            <span className="create-step-num">2</span> Configuration
+          </button>
+        </nav>
+      </div>
 
       {step === 'basics' && (
         <div className="create-basics-layout">

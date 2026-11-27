@@ -1,10 +1,23 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getRun, cancelRun, retryRun, Interrupt, currentWorkspace } from '../api'
-import { Button, Confirm, Loading, Notice, PageHeader, TimeLeft } from '../components/ui'
+import { api, getRun, cancelRun, retryRun, Interrupt, currentWorkspace, Application } from '../api'
+import { Button, Confirm, Loading, Notice, TimeLeft } from '../components/ui'
+import { DetailWorkbenchHeader } from '../components/DetailWorkbench'
+import { StatusCell, WorkView, WorkPane, WorkStatusbar } from '../components/ApplicationWorkView'
 import { ResumeForm } from '../components/ResumeForm'
-import { deadlineOf, interruptTitle, resolverLabel, runPhase } from '../interrupts'
+import { InterruptContext } from '../components/InterruptContext'
+import { deadlineOf, fmtDateTime, resolverLabel, runPhase } from '../interrupts'
+import './application.css'
+
+// runDuration is wall time created→ended (or →last update while live).
+function runDuration(run: { created_at?: string; updated_at?: string; ended_at?: string }): string {
+	const a = run.created_at ? new Date(run.created_at).getTime() : NaN
+	const b = run.ended_at ? new Date(run.ended_at).getTime() : run.updated_at ? new Date(run.updated_at).getTime() : NaN
+	if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return '—'
+	const ms = b - a
+	return ms < 1000 ? `${ms}ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
+}
 
 // One durable run (EP-0016): status header with deadline, Cancel/Retry
 // actions behind named Confirms (F2), the pending interrupt with a
@@ -25,6 +38,13 @@ export default function RunDetail() {
 		refetchInterval: (q) => (q.state.data && runPhase(q.state.data).phase === 'running' ? 1000 : 5000),
 		enabled: runId != null,
 	})
+	const appQ = useQuery({
+		queryKey: ['application', appId],
+		queryFn: () => api.get<{ application: Application }>(`/api/v1/applications/${appId}`).then((r) => r.application),
+		enabled: appId != null,
+		retry: false,
+	})
+	const appName = appQ.data?.name ?? ''
 	const run = q.data?.run
 	const steps = q.data?.steps ?? []
 	const intrs = q.data?.interrupts ?? []
@@ -32,11 +52,12 @@ export default function RunDetail() {
 	const pending = phase?.phase === 'waiting' ? phase.interrupt : undefined
 	const runningHandler = phase?.phase === 'running' ? phase.handler : undefined
 	const deadline = pending ? deadlineOf(pending) : undefined
+	const loading = q.isLoading || appQ.isLoading
 
 	const progressRef = useRef<HTMLElement | null>(null)
 	const waitingHeight = useRef<{ runId: string; height: number } | null>(null)
 	useLayoutEffect(() => {
-		if (!pending || runId == null) return
+		if (loading || !pending || runId == null) return
 		const el = progressRef.current
 		if (!el) return
 		const measure = () => {
@@ -48,11 +69,26 @@ export default function RunDetail() {
 		const ro = new ResizeObserver(measure)
 		ro.observe(el)
 		return () => ro.disconnect()
-	}, [pending, runId])
+	}, [loading, pending, runId])
 
-	if (q.isLoading) return <Loading />
-	if (q.isError) return <Notice tone="warning">Could not load run: {(q.error as Error).message}</Notice>
-	if (!run) return <Notice tone="warning">Run not found.</Notice>
+	if (loading) return <Loading />
+	const appPath = `/applications/${appId}`
+	const breadcrumb = (
+		<nav className="app-run-location" aria-label="Run location">
+			<Link to={appPath} title="Open application editor">{appName || 'Application'}</Link>
+			<span aria-hidden="true">›</span>
+			<Link to={`${appPath}?view=activity`}>Activity</Link>
+			<span aria-hidden="true">›</span>
+		</nav>
+	)
+	if (q.isError || !run) {
+		return (
+			<div className="app-page detail-workbench">
+				<DetailWorkbenchHeader breadcrumb={breadcrumb} title="Run" id={runId ?? ''} status={null} />
+				<div className="detail-error"><Notice tone="warning">{q.isError ? `Could not load run: ${(q.error as Error).message}` : 'Run not found.'}</Notice></div>
+			</div>
+		)
+	}
 
 	const cancellable = run.status === 'waiting' || run.status === 'unknown'
 	const retryable = run.status === 'unknown'
@@ -60,82 +96,99 @@ export default function RunDetail() {
 	const reserved = phase?.phase === 'running' && remembered != null && remembered.runId === runId ? remembered.height : undefined
 
 	return (
-		<div className="app-page">
-			<PageHeader title={
-				<span>Run <span className={`app-status app-status-${run.status}`}>{run.status}</span></span>
-			} actions={<>
-				{cancellable && <Button variant="danger" size="sm" onClick={() => setConfirm('cancel')}>Cancel run</Button>}
-				{retryable && <Button size="sm" onClick={() => setConfirm('retry')}>Retry step</Button>}
-			</>} />
-			<p className="app-dim">
-				<Link to={`/applications/${appId}`} className="link">← {appId}</Link> ·{' '}
-				<span className="app-mono">{run.id}</span>
-				{deadline && <> · <TimeLeft expiresAt={deadline} /></>}
-			</p>
-			{err !== '' && <Notice tone="warning">{err}</Notice>}
+		// a real workbench route: the frame fills the console canvas and
+		// the pane column owns the scroll, like the application detail
+		<div className="app-page detail-workbench">
+			<DetailWorkbenchHeader
+				breadcrumb={breadcrumb}
+				title="Run"
+				id={run.id}
+				status={<>
+					<StatusCell status={run.status} />
+					{deadline && <TimeLeft expiresAt={deadline} />}
+				</>}
+				actions={<>
+					{cancellable && <Button variant="danger" size="sm" onClick={() => setConfirm('cancel')}>Cancel run</Button>}
+					{retryable && <Button size="sm" onClick={() => setConfirm('retry')}>Retry step</Button>}
+				</>} />
+			<dl className="kv-strip">
+				<div><dt>Application</dt><dd>{appName || appId}</dd></div>
+				<div><dt>Trigger</dt><dd>{run.trigger}</dd></div>
+				<div><dt>Release</dt><dd><code>{run.release_id}</code></dd></div>
+				<div><dt>Started</dt><dd>{run.created_at ? fmtDateTime(run.created_at) : '—'}</dd></div>
+				<div><dt>Duration</dt><dd>{runDuration(run)}</dd></div>
+				<div><dt>Steps</dt><dd>{steps.length || run.steps}</dd></div>
+			</dl>
+			{err !== '' && <div className="detail-error"><Notice tone="warning">{err}</Notice></div>}
 
+			<WorkView scroll>
+			{run.status === 'failed' && run.error_code && (
+				<div className="wb-pane-notice"><Notice tone="warning">Run failed — {run.error_code}</Notice></div>
+			)}
 			{run.streaming && (
-				<section className="app-card">
-					<div className="app-card-head"><span className="app-card-title">Output</span></div>
-					<div className="app-card-body">
-						<p className="app-dim">Stream not retained · {run.stream_items ?? 0} item{(run.stream_items ?? 0) === 1 ? '' : 's'} · {run.stream_bytes ?? 0} bytes</p>
-					</div>
-				</section>
+				<WorkPane title="Output">
+					<p className="app-dim wb-note-pad">Stream not retained · {run.stream_items ?? 0} item{(run.stream_items ?? 0) === 1 ? '' : 's'} · {run.stream_bytes ?? 0} bytes</p>
+				</WorkPane>
 			)}
 			{run.status === 'succeeded' && run.output_json && (
-				<section className="app-card">
-					<div className="app-card-head"><span className="app-card-title">Output</span></div>
-					<div className="app-card-body"><pre className="app-out-pre">{run.output_json}</pre></div>
-				</section>
-			)}
-			{run.status === 'failed' && run.error_code && (
-				<Notice tone="warning">Run failed — {run.error_code}</Notice>
+				<WorkPane title="Output">
+					<pre className="wb-code wb-cap">{run.output_json}</pre>
+				</WorkPane>
 			)}
 
 			{(pending || phase?.phase === 'running') && (
-				<section className="app-card" data-testid="run-progress" ref={progressRef} style={reserved === undefined ? undefined : { minHeight: reserved }}>
-					<div className="app-card-head"><span className="app-card-title">{pending ? `Waiting on — ${interruptTitle(pending)}` : `Running — ${runningHandler ?? 'handler'}`}</span></div>
-					<div className="app-card-body">
-						{pending?.context_json && <pre className="app-out-pre mt-2">{pending.context_json}</pre>}
-						{pending?.resume_url && <p className="text-xs text-sec mt-2"><span className="app-mono">POST {pending.resume_url}</span></p>}
+				<WorkPane data-testid="run-progress" ref={progressRef}
+					style={reserved === undefined ? undefined : { minHeight: reserved }}
+					title={pending
+						? <>Waiting · <code className="wb-pane-mono">{pending.handler ?? 'interrupt'}</code></>
+						: <>Running · <code className="wb-pane-mono">{runningHandler ?? 'handler'}</code></>}>
+					<div className="wb-note-pad grid gap-2">
+						{pending && <InterruptContext interrupt={pending} />}
 						{pending ? (
 							pending.can_resume ? (
-								<ResumeForm interrupt={pending}
+								<ResumeForm key={pending.id} interrupt={pending}
 									scope={{ userId: me?.user.id ?? '', workspaceId: ws }}
 									onResumed={() => qc.invalidateQueries({ queryKey: ['run', runId] })} />
 							) : (
 								<p className="text-sm text-body">Waiting to be resumed.</p>
 							)
 						) : (
-							// S3: the card keeps its box while the handler runs.
+							// S3: the pane keeps its box while the handler runs.
 							<p className="text-sm text-body" aria-live="polite">Running {runningHandler ?? 'handler'}…</p>
 						)}
 					</div>
-				</section>
+				</WorkPane>
 			)}
 
-			<section className="app-card">
-				<div className="app-card-head"><span className="app-card-title">Steps</span></div>
-				<div className="app-card-body">
-					<table className="tbl">
-						<thead>
-							<tr><th>Seq</th><th>Attempt</th><th>Entry</th><th>Status</th><th>Duration</th><th>Resolver</th></tr>
+			<WorkPane title="Steps">
+				<div role="region" aria-label="Steps table" tabIndex={0}>
+					<table className="tbl wb-table app-step-table" role="table">
+						<thead role="rowgroup">
+							<tr role="row"><th role="columnheader" className="wb-col-num">Seq</th><th role="columnheader" className="wb-col-num">Attempt</th><th role="columnheader">Entry</th><th role="columnheader">Status</th><th role="columnheader" className="wb-col-num">Duration</th><th role="columnheader">Resolver</th><th role="columnheader">Error</th></tr>
 						</thead>
-						<tbody>
+						<tbody role="rowgroup">
 							{steps.map((s) => (
-								<tr key={`${s.seq}/${s.attempt}`}>
-									<td className="text-xs">{s.seq}</td>
-									<td className="text-xs">{s.attempt}</td>
-									<td className="text-xs">{s.entry}</td>
-									<td><span className={`app-status app-status-${s.status}`}>{s.status}</span>{s.error_code ? ` · ${s.error_code}` : ''}</td>
-									<td className="text-xs text-sec">{s.duration_ms}ms</td>
-									<td className="text-xs text-sec">{s.interrupt_id ? (intrs.find((i: Interrupt) => i.id === s.interrupt_id)?.resolved_by ? resolverLabel(intrs.find((i) => i.id === s.interrupt_id)!) : s.interrupt_id) : '—'}</td>
+								<tr role="row" key={`${s.seq}/${s.attempt}`}>
+									<td role="cell" className="text-xs wb-col-num" data-label="Seq">{s.seq}</td>
+									<td role="cell" className="text-xs wb-col-num" data-label="Attempt">{s.attempt}</td>
+									<td role="cell" className="text-xs" data-label="Entry">{s.entry}</td>
+									<td role="cell" data-label="Status"><StatusCell status={s.status} /></td>
+									<td role="cell" className="text-xs text-sec wb-col-num" data-label="Duration">{s.duration_ms}ms</td>
+									<td role="cell" className="text-xs text-sec wb-mono" data-label="Resolver">{s.interrupt_id ? (intrs.find((i: Interrupt) => i.id === s.interrupt_id)?.resolved_by ? resolverLabel(intrs.find((i) => i.id === s.interrupt_id)!) : s.interrupt_id) : '—'}</td>
+									<td role="cell" className="text-xs text-sec wb-mono" data-label="Error">{s.error_code ?? '—'}</td>
 								</tr>
 							))}
 						</tbody>
 					</table>
 				</div>
-			</section>
+			</WorkPane>
+			</WorkView>
+			<WorkStatusbar>
+				<StatusCell status={run.status} />
+				<span className="wb-status-num">{steps.length} step{steps.length === 1 ? '' : 's'}</span>
+				<span className="wb-grow" />
+				<span className="text-sec">{run.created_at ? fmtDateTime(run.created_at) : ''}</span>
+			</WorkStatusbar>
 
 			{confirm === 'cancel' && (
 				<Confirm tone="danger" title={`Cancel run ${run.id}?`} confirm="Cancel run" pending="Cancelling…"

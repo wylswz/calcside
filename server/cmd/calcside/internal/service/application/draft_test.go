@@ -34,7 +34,7 @@ func TestDraftKeepsSelectors(t *testing.T) {
 	}
 
 	spec := `{"modules":{"m":{"name":"strkit","version":0}}}`
-	app, err := svc.Create(ctx, a, CreateRequest{Name: "app", Code: ptr("def main(i): return i"), Spec: json.RawMessage(spec)})
+	app, err := svc.Create(ctx, a, CreateRequest{Name: "app", Sections: mainSec("def main(i): return i"), Spec: json.RawMessage(spec)})
 	if err != nil {
 		t.Fatal(err)
 	}

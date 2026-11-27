@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, wsPath, Instance, workspaces, currentWorkspace } from '../api'
-import { Button, Field, inputCls, Loading, Notice, PageHeader } from '../components/ui'
+import { Button, Field, inputCls, Loading, Notice } from '../components/ui'
 import { CreateGuide } from '../components/CreateGuide'
 
 import { SpecForm, type SpecFormHandle } from '../components/SpecForm'
@@ -135,23 +135,23 @@ export default function NewInstance() {
 
   return (
     <div className="instance-builder">
-      <PageHeader title={from ? 'Create similar' : 'New instance'}>
+      <div className="list-toolbar create-toolbar">
+        <h1 className="list-title">{from ? 'Create similar' : 'New instance'}</h1>
         {step === 'config' && (name.trim() || description.trim()) && (
-          <span>{name.trim() || 'Untitled instance'}{description.trim() ? ` — ${description.trim()}` : ''}</span>
+          <span className="create-toolbar-name">{name.trim() || 'Untitled instance'}{description.trim() ? ` — ${description.trim()}` : ''}</span>
         )}
-      </PageHeader>
-
-      <nav className="create-steps" aria-label="Create steps">
-        <button type="button" className="create-step" data-state={step === 'basics' ? 'current' : 'done'}
-          aria-current={step === 'basics' ? 'step' : undefined} onClick={() => { if (step === 'config') goBasics() }}>
-          <span className="create-step-num">1</span> Basics
-        </button>
-        <span className="create-step-line" aria-hidden="true" />
-        <button type="button" className="create-step" data-state={step === 'config' ? 'current' : 'todo'}
-          aria-current={step === 'config' ? 'step' : undefined} onClick={() => { if (step === 'basics') goConfig() }}>
-          <span className="create-step-num">2</span> Configuration
-        </button>
-      </nav>
+        <nav className="create-steps" aria-label="Create steps">
+          <button type="button" className="create-step" data-state={step === 'basics' ? 'current' : 'done'}
+            aria-current={step === 'basics' ? 'step' : undefined} onClick={() => { if (step === 'config') goBasics() }}>
+            <span className="create-step-num">1</span> Basics
+          </button>
+          <span className="create-step-line" aria-hidden="true" />
+          <button type="button" className="create-step" data-state={step === 'config' ? 'current' : 'todo'}
+            aria-current={step === 'config' ? 'step' : undefined} onClick={() => { if (step === 'basics') goConfig() }}>
+            <span className="create-step-num">2</span> Configuration
+          </button>
+        </nav>
+      </div>
 
       {step === 'basics' && (
         <div className="create-basics-layout">

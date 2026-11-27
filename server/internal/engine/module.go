@@ -30,7 +30,7 @@ import (
 // Compiled module programs live on the Session: instance sessions
 // build them at create, program sessions per call. The init cache is
 // keyed "alias/file" and persists for the session's life (instance
-// execs) or the invocation's (program init), matching initModules.
+// execs) or the invocation's (program init).
 // Module init inherits the caller's gate state, step budget and
 // cancellation — there is no separate budget or arming.
 

@@ -58,30 +58,28 @@ export function ResumeForm({ interrupt: i, scope, onResumed }: {
 			})
 			.finally(() => setBusy(false))
 	}
-	const submitLabel = busy ? 'Resuming…' : resumed ? 'Resumed — running handler…' : 'Resume'
+	const submitLabel = busy ? 'Resuming…' : resumed ? 'Resumed…' : 'Resume'
 
 	return (
-		<div>
+		<div className="resume-form">
 			{alreadyBy !== null && (
 				<Notice tone="neutral">Already resumed by {alreadyBy.label}{alreadyBy.at ? ` at ${fmtDateTime(alreadyBy.at)}` : ''}</Notice>
 			)}
 			{err !== '' && <Notice tone="warning">{err}</Notice>}
-			<div className="mt-2">
-				<label className="app-label" htmlFor={`event-${i.id}`}>Event (JSON object)</label>
-				<textarea id={`event-${i.id}`} className="app-area" rows={4} spellCheck={false}
-					value={event} disabled={readOnly}
-					onChange={(e) => { setEvent(e.target.value); persist(e.target.value) }} />
-				<div className="mt-2 flex items-center gap-2">
-					<Button variant="primary" disabled={readOnly}
-						onClick={() => {
-							const p = eventParse(event)
-							if (!p.ok) { setErr(p.message); return }
-							setConfirmEv({ json: p.json })
-						}}>
-						<SwapLabel show={submitLabel} options={['Resume', 'Resuming…', 'Resumed — running handler…']} />
-					</Button>
-				</div>
+			<div className="resume-head">
+				<label className="resume-title" htmlFor={`event-${i.id}`}>EVENT · JSON object</label>
+				<Button variant="primary" size="sm" disabled={readOnly}
+					onClick={() => {
+						const p = eventParse(event)
+						if (!p.ok) { setErr(p.message); return }
+						setConfirmEv({ json: p.json })
+					}}>
+					<SwapLabel show={submitLabel} options={['Resume', 'Resuming…', 'Resumed…']} />
+				</Button>
 			</div>
+			<textarea id={`event-${i.id}`} className="resume-area" rows={4} spellCheck={false}
+				value={event} disabled={readOnly}
+				onChange={(e) => { setEvent(e.target.value); persist(e.target.value) }} />
 			{confirmEv && (
 				<Confirm title={`Resume ${i.id}?`} confirm="Resume" pending="Resuming…"
 					action={() => submit(confirmEv.json)}

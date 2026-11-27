@@ -2065,13 +2065,23 @@ export interface components {
         RawJSON: unknown;
         /** @enum {string} */
         ApplicationStatus: "draft" | "preparing" | "ready" | "degraded" | "disabled";
+        ApplicationSection: {
+            id: string;
+            code: string;
+        };
         Application: {
             id: string;
             workspace_id: string;
             user_id: string;
             name: string;
-            /** @description main.star source */
-            code: string;
+            /** @description notebook program sections */
+            sections: components["schemas"]["ApplicationSection"][];
+            /** @description saved-draft dependency graph, detail responses only */
+            notebook_graph?: components["schemas"]["NotebookGraph"];
+            /** @description section ID -> statically visible entry function names, detail responses only */
+            notebook_entries?: {
+                [key: string]: string[];
+            };
             /** @description normalized boundary spec (JSON object, refs only) */
             spec: components["schemas"]["RawJSON"];
             /** @description verbatim stored spec text — high-precision numbers stay exact; use this, never re-serialize spec */
@@ -2102,8 +2112,8 @@ export interface components {
         };
         ApplicationCreateRequest: {
             name?: string;
-            /** @description omitted/null = scaffold */
-            code?: string | null;
+            /** @description notebook program sections; omitted/null = scaffold a single main section */
+            sections?: components["schemas"]["ApplicationSection"][];
             spec?: components["schemas"]["RawJSON"];
             input_schema?: string | null;
             /** @description omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema */
@@ -2113,7 +2123,8 @@ export interface components {
             /** Format: int64 */
             version: number;
             name: string;
-            code: string;
+            /** @description notebook program sections */
+            sections: components["schemas"]["ApplicationSection"][];
             spec?: components["schemas"]["RawJSON"];
             input_schema?: string | null;
             /** @description omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema */
@@ -2135,8 +2146,10 @@ export interface components {
         ApplicationTestRequest: {
             /** Format: int64 */
             version: number;
-            /** @description raw JSON input for main(input) */
+            /** @description raw JSON input for main(input); explicit null stays literal bytes */
             input?: components["schemas"]["RawJSON"];
+            /** @description entry function to run. Omitted or "main" runs main(input) with the input schema as a recorded test run. Any other top-level one-argument function runs as a debug call: the input is any bounded JSON value passed verbatim (no input schema, no handler-context object), the output is bounded and secret-redacted but not validated against the output schema, and no run is recorded — interrupt.* ops are unavailable. Debug entries exist only on this endpoint; public invoke always runs main. */
+            entry?: string;
         };
         ApplicationRunResponse: {
             result: unknown;

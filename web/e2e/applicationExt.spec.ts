@@ -53,9 +53,9 @@ test('create application with ext -> blocked publish fails -> republish -> ready
   expect(app0.spec.capabilities.ext.probe.source).toBe('fixture/probe@0.1.0')
 
   // write code that calls the pinned extension
-  const cm = page.locator('.app-cm .cm-content').first()
+  const cm = page.locator('[aria-label="Application section main"] .cm-content').first()
   await cm.click()
-  await page.keyboard.press('Meta+A')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.type('def main(input): return ext.probe.echo(input.get("name", "world"))')
 
   // block the artifact fetch BEFORE publish: with synchronous
@@ -125,7 +125,7 @@ test('artifact persists across worker restart with empty cache', async () => {
   const put = await client.put(`/api/v1/applications/${id}`, {
     data: {
       version: a0.version, name: 'Persist',
-      code: 'def main(input): return ext.probe.echo(input.get("name", "world"))',
+      sections: [{ id: 'main', code: 'def main(input): return ext.probe.echo(input.get("name", "world"))' }],
       spec: a0.spec,
     },
   })
@@ -206,7 +206,10 @@ test('call examples tabs show real request shapes', async ({ page }) => {
   await page.goto(`${viteURL}/applications/${id}`)
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: viteURL })
   await page.getByRole('tablist', { name: 'Application views' }).getByRole('tab', { name: 'Invoke', exact: true }).click()
-  const examples = page.locator('.app-examples')
+  // examples live in the request pane's Code tab
+  const invokePanel = page.getByRole('tabpanel', { name: 'Invoke', exact: true })
+  await invokePanel.getByRole('tab', { name: 'Code', exact: true }).click()
+  const examples = invokePanel.locator('.app-examples')
   await examples.scrollIntoViewIfNeeded()
   await page.getByRole('tab', { name: 'curl', exact: true }).focus()
   await page.keyboard.press('ArrowRight')
@@ -223,7 +226,7 @@ test('call examples tabs show real request shapes', async ({ page }) => {
     const height = await panel.evaluate((el) => el.getBoundingClientRect().height)
     panelHeight ??= height
     expect(Math.abs(height - panelHeight)).toBeLessThanOrEqual(1)
-    await panel.getByRole('button').click()
+    await examples.getByRole('button').click()
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(body)
     // S1/S4: copy feedback changes paint/text, never the panel box.
     expect(Math.abs(await panel.evaluate((el) => el.getBoundingClientRect().height) - panelHeight)).toBeLessThanOrEqual(1)

@@ -98,7 +98,7 @@ func newEnv(t *testing.T, cipher *vaultcipher.Cipher, maxSteps int) *tenv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app, err := store.NewApplication(store.PersonalWorkspaceID(u.ID), u.ID, "app", "code",
+	app, err := store.NewApplication(store.PersonalWorkspaceID(u.ID), u.ID, "app", []store.ApplicationSection{{ID: "main", Code: "def main(i): return i"}},
 		json.RawMessage(`{}`), nil, nil, rNow)
 	if err != nil {
 		t.Fatal(err)

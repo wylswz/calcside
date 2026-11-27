@@ -5,6 +5,7 @@ import { api, ApiError, Instance, Notebook, NotebookSectionMeta, NotebookSection
 import { AutosaveQueue, type AutosaveState } from '../autosave'
 import { readPendingDraft, writePendingDraft, type PendingDraft } from '../pendingDraft'
 import { Button, Confirm, Icon, Menu, MenuItem, MenuSeparator, SwapLabel } from './ui'
+import { NotebookCollapse } from './NotebookChrome'
 import { useStarlarkEditor } from './editor'
 import { cmTheme } from './codemirror'
 import { fmtTime, relTime } from '../format'
@@ -399,17 +400,7 @@ export function SectionCard({ id, inst, meta, order, incarnation, canRun, busy, 
           ) : null}
           <div className="nb-card-actions">
             <SaveStatus st={as} onRetry={retrySave} />
-            <Button
-              variant="ghost" size="xs" className="nb-icon-btn nb-collapse"
-              aria-expanded={codeOpen}
-              aria-label={`${codeOpen ? 'Collapse' : 'Expand'} ${name} code`}
-              onClick={() => setCodeOpen((o) => !o)}
-            >
-              <span className="nb-chevs" aria-hidden>
-                <Icon name="chevron" className="nb-chev nb-chev-down" />
-                <Icon name="chevron" className="nb-chev nb-chev-right" />
-              </span>
-            </Button>
+            <NotebookCollapse name={name} open={codeOpen} onToggle={() => setCodeOpen((o) => !o)} />
             {canEdit && (
               <Menu trigger={
                 <Button variant="ghost" size="xs" className="nb-icon-btn" aria-label={`Section ${name} actions`}>

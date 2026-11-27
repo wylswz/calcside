@@ -176,7 +176,7 @@ export default function Providers({ bare }: { bare?: boolean }) {
 
   return (
     <div>
-      {bare && <div className="mb-4 flex items-center justify-between"><p className="text-xs text-sec" /><Button variant="primary" disabled={!canEdit} onClick={() => setShowNew(true)}>New provider</Button></div>}
+      {bare && <div className="ws-pane-bar"><span className="ws-pane-title">LLM providers</span><span className="ws-pane-actions"><Button variant="primary" disabled={!canEdit} onClick={() => setShowNew(true)}>New provider</Button></span></div>}
       {!bare && <PageHeader title="LLM providers" actions={canEdit && <Button variant="primary" onClick={() => setShowNew(true)}>New provider</Button>} />}
       <div className="tbl-wrap">
         <table className="tbl">

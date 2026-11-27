@@ -12,7 +12,7 @@ export function LimitsSection({ draft, set }: {
   set: Patch
 }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-3">
+    <div className="spec-limit-fields grid gap-3 sm:grid-cols-3">
       {(['exec_timeout_ms', 'max_steps', 'max_output_bytes'] as const).map((key) => <Field key={key} label={key}>
         <input className={inputCls} type="number" min="1" value={draft.limits[key] ?? ''} placeholder="Server default" onChange={(e) => {
           const limits = { ...draft.limits }; if (e.target.value === '') delete limits[key]; else limits[key] = Number(e.target.value); set({ limits })
@@ -35,7 +35,7 @@ export function KeyValueRows({ title, addText, idPrefix, rows, onChange }: {
   return (
     <div>
       <div className="mb-3 flex justify-between"><h4 className="font-semibold text-ink">{title}</h4><button type="button" className="text-btn" onClick={() => onChange([...rows, { k: '', v: '' }])}>{addText}</button></div>
-      {rows.map((row, i) => <div key={i} className="mb-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+      {rows.map((row, i) => <div key={i} className="spec-kv-row mb-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
         <input aria-label={`${idPrefix} name ${i + 1}`} className={inputCls} value={row.k} onChange={(e) => onChange(rows.map((r, j) => j === i ? { ...r, k: e.target.value } : r))} />
         <input aria-label={`${idPrefix} value ${i + 1}`} className={inputCls} value={row.v} onChange={(e) => onChange(rows.map((r, j) => j === i ? { ...r, v: e.target.value } : r))} />
         <button type="button" className="text-btn" aria-label={`Remove ${idPrefix} ${i + 1}`} onClick={() => onChange(rows.filter((_, j) => j !== i))}>Remove</button>

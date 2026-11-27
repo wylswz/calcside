@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import * as Tabs from '@radix-ui/react-tabs'
 import CodeMirror from '@uiw/react-codemirror'
 import { api, wsPath, workspaces, type ExtensionInfo } from '../api'
 import { AutosaveQueue, type AutosaveState } from '../autosave'
 import { readPendingDraft, writePendingDraft, type PendingDraft } from '../pendingDraft'
-import { CopyBlock } from '../components/MCP'
-import { Button, Confirm, Loading, Notice, PageHeader, SectionTitle, SwapLabel } from '../components/ui'
+import { CopyButton } from '../components/MCP'
+import { Button, Confirm, Loading, Notice, SectionTitle, SwapLabel } from '../components/ui'
+import { DetailWorkbenchHeader } from '../components/DetailWorkbench'
 import { PublishReviewDialog } from '../components/PublishReviewDialog'
 import { SpecForm, type SpecFormHandle } from '../components/SpecForm'
 import { cmTheme } from '../components/codemirror'
@@ -74,6 +76,7 @@ function ModuleEditor({ id }: { id: string }) {
   const [pubBusy, setPubBusy] = useState(false)
   const [pubErr, setPubErr] = useState('')
   const [depRemove, setDepRemove] = useState<string | null>(null)
+  const [modView, setModView] = useState<'source' | 'settings'>('source')
   const [confirmModReload, setConfirmModReload] = useState(false)
   const [recoveredModule, setRecoveredModule] = useState<PendingDraft<ModuleDraft> | null>(null)
   const [recoverModuleConfirm, setRecoverModuleConfirm] = useState<'restore' | 'discard' | null>(null)
@@ -211,19 +214,23 @@ function ModuleEditor({ id }: { id: string }) {
 
   return (
     <div className="app-page">
-      <div className="module-head"><PageHeader title={m.name}
-        actions={<div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-mute">draft v{m.draft_version}{m.latest_version ? ` · published v${m.latest_version}` : ''}</span>
-          <Link to="/modules" className="text-xs text-sec hover:underline">← Modules</Link>
-          {canEdit && saveStatus && (
-            <span className="text-xs text-mute" data-testid="module-save-status">
-              <SwapLabel show={saveStatus} options={['Saved', 'Saving…', 'Unsaved', "Couldn't save"] as const} />
-            </span>
-          )}
-          {canEdit && modState?.error && (
-            <Button size="sm" onClick={() => { void modQ.current?.retry().catch(() => undefined) }}>Retry</Button>
-          )}
-          {canEdit && (
+      {/* header only — the shared detail-workbench identity row; the
+          rest of the page keeps its own layout */}
+      <div className="detail-workbench module-head">
+        <DetailWorkbenchHeader backTo="/modules" backLabel="Modules"
+          title={m.name} id={m.id}
+          status={<>
+            <span className="text-xs text-mute">draft v{m.draft_version}{m.latest_version ? ` · published v${m.latest_version}` : ''}</span>
+            {canEdit && saveStatus && (
+              <span className="text-xs text-mute" data-testid="module-save-status">
+                <SwapLabel show={saveStatus} options={['Saved', 'Saving…', 'Unsaved', "Couldn't save"] as const} />
+              </span>
+            )}
+            {canEdit && modState?.error && (
+              <Button size="sm" onClick={() => { void modQ.current?.retry().catch(() => undefined) }}>Retry</Button>
+            )}
+          </>}
+          actions={canEdit ? (
             <Button size="sm" variant="primary" disabled={modConflict || pubBusy || debugBusy || !!recoveredModule}
               onClick={async () => {
                 setPubBusy(true); setPubErr('')
@@ -235,8 +242,8 @@ function ModuleEditor({ id }: { id: string }) {
               }} data-testid="module-publish">
               <SwapLabel show={pubBusy ? 'Preparing…' : 'Publish…'} options={['Publish…', 'Preparing…'] as const} />
             </Button>
-          )}
-        </div>} /></div>
+          ) : undefined} />
+      </div>
       {modConflict && (
         <Notice tone="warning">
           Module draft changed elsewhere.{' '}
@@ -269,41 +276,58 @@ function ModuleEditor({ id }: { id: string }) {
       )}
       {modState?.error && !modConflict && <Notice tone="warning">{modState.error.message}</Notice>}
       {pubErr && <Notice tone="warning">{pubErr}</Notice>}
-      <section className="module-identity rounded border border-line bg-panel p-3">
-        <CopyBlock text={refExample} mono />
-      </section>
-      <div className="module-workbench grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-        <section className="min-w-0 rounded border border-line bg-panel p-3">
-          <SectionTitle>Module source</SectionTitle>
-          <div className="mb-2 flex flex-wrap gap-1" data-testid="module-files">
-            {Object.keys(files).filter((f) => f !== 'module.yaml').map((f) => (
-              <button key={f} onClick={() => setActive(f)}
-                className={`rounded border px-2 py-0.5 text-xs ${f === active ? 'border-accent bg-accent-10' : 'border-line text-sec hover:bg-hover'}`}>
-                {f}
-              </button>
-            ))}
+      <Tabs.Root value={modView} onValueChange={(v) => setModView(v as 'source' | 'settings')}>
+      <Tabs.List className="module-views" aria-label="Module views">
+        <Tabs.Trigger value="source" className="module-view-tab">Source</Tabs.Trigger>
+        <Tabs.Trigger value="settings" className="module-view-tab">Settings</Tabs.Trigger>
+      </Tabs.List>
+      <Tabs.Content value="source" forceMount hidden={modView !== 'source'} className="module-source">
+        <div className="module-source-bar">
+          <code className="module-load">{refExample}</code>
+          <CopyButton text={refExample} size="sm" />
+        </div>
+        <div className="module-split">
+          <section className="module-pane">
+            <div className="module-pane-head" data-testid="module-files">
+              {Object.keys(files).filter((f) => f !== 'module.yaml').map((f) => (
+                <button key={f} onClick={() => setActive(f)}
+                  className={`module-file-tab${f === active ? ' is-active' : ''}`}>
+                  {f}
+                </button>
+              ))}
+            </div>
+            <div className="module-pane-body" data-testid="module-editor" aria-label="Module source editor">
+              <ModuleCodeMirror value={files[active] ?? ''} readOnly={!canEdit || modConflict || pubBusy || reviewOpen || debugBusy || !!recoveredModule} height="100%"
+                specText={specText} workspaceId={m.workspace_id}
+                onChange={(v) => {
+                  const next = { ...filesRef.current, [active]: v }
+                  filesRef.current = next
+                  setFiles(next)
+                  pushModule(next)
+                }} />
+            </div>
+          </section>
+          <div className="module-side">
+            <DebugWorkspace key={`dw-${debugEpoch}`} id={id} draftVersion={m.draft_version} workspaceId={m.workspace_id}
+              debug={dq.data?.debug} modDirty={modState?.dirty ?? false} modConflict={modConflict}
+              flushModule={() => modQ.current?.flush() ?? null}
+              locked={pubBusy || reviewOpen}
+              configurationError={configError}
+              canEdit={canEdit} specRef={runtimeRef}
+              specText={specText} configRevision={configRevision} onBusyChange={setDebugBusy}
+              onEpochChange={() => setDebugEpoch((e) => e + 1)}
+              onPendingChange={(f) => { dbgPending.current = f }} />
           </div>
-          <div data-testid="module-editor" aria-label="Module source editor" className="module-cm">
-            <ModuleCodeMirror value={files[active] ?? ''} readOnly={!canEdit || modConflict || pubBusy || reviewOpen || debugBusy || !!recoveredModule} height="var(--module-source-h, 500px)"
-              specText={specText} workspaceId={m.workspace_id}
-              onChange={(v) => {
-                const next = { ...filesRef.current, [active]: v }
-                filesRef.current = next
-                setFiles(next)
-                pushModule(next)
-              }} />
-          </div>
-        </section>
-        <DebugWorkspace key={`dw-${debugEpoch}`} id={id} draftVersion={m.draft_version} workspaceId={m.workspace_id}
-          debug={dq.data?.debug} modDirty={modState?.dirty ?? false} modConflict={modConflict}
-          flushModule={() => modQ.current?.flush() ?? null}
-          locked={pubBusy || reviewOpen}
-          configurationError={configError}
-          canEdit={canEdit} specRef={runtimeRef}
-          specText={specText} configRevision={configRevision} onBusyChange={setDebugBusy}
-          onEpochChange={() => setDebugEpoch((e) => e + 1)}
-          onPendingChange={(f) => { dbgPending.current = f }} />
-      </div>
+        </div>
+      </Tabs.Content>
+      <Tabs.Content value="settings" forceMount hidden={modView !== 'settings'} className="module-settings">
+        <DebugRuntime key={`dr-${debugEpoch}`} id={id} workspaceId={m.workspace_id} debug={dq.data?.debug}
+          canEdit={canEdit && !debugBusy && !pubBusy && !reviewOpen} specRef={runtimeRef} fixedExtensions={reqs?.ext ?? EMPTY_DEPS}
+          depsDisabled={!canEdit || modConflict || pubBusy || reviewOpen || debugBusy || !!recoveredModule}
+          onAddDep={addDep} onSwitchDep={switchDep} onRemoveDep={(alias) => setDepRemove(alias)}
+          onSpecText={setSpecText} onValidationChange={setConfigError} onConfigChange={() => setConfigRevision((r) => r + 1)} />
+      </Tabs.Content>
+      </Tabs.Root>
       {depRemove && (
         <Confirm title={`Remove ${depRemove}?`} tone="danger" confirm="Remove" pending="Removing…"
           action={async () => { removeDep(depRemove); setDepRemove(null) }}
@@ -311,11 +335,6 @@ function ModuleEditor({ id }: { id: string }) {
           Remove the static dependency {depRemove}?
         </Confirm>
       )}
-      <DebugRuntime key={`dr-${debugEpoch}`} id={id} workspaceId={m.workspace_id} debug={dq.data?.debug}
-        canEdit={canEdit && !debugBusy && !pubBusy && !reviewOpen} specRef={runtimeRef} fixedExtensions={reqs?.ext ?? EMPTY_DEPS}
-        depsDisabled={!canEdit || modConflict || pubBusy || reviewOpen || debugBusy || !!recoveredModule}
-        onAddDep={addDep} onSwitchDep={switchDep} onRemoveDep={(alias) => setDepRemove(alias)}
-        onSpecText={setSpecText} onValidationChange={setConfigError} onConfigChange={() => setConfigRevision((r) => r + 1)} />
       {reviewOpen && m && reviewVer !== null && (
         <PublishReviewDialog resource="modules" id={id} version={reviewVer} onClose={() => setReviewOpen(false)}
           onPublished={() => { setReviewOpen(false); void qc.invalidateQueries({ queryKey: ['module', id] }); void qc.invalidateQueries({ queryKey: ['modules'] }) }} />
@@ -457,8 +476,8 @@ function DebugWorkspace({ id, draftVersion, workspaceId, debug, modDirty, modCon
   if (!debug && script === null) return <Notice tone="warning">Debug settings unavailable.</Notice>
   const scriptText = script ?? debug?.script ?? ''
   return (
-    <section className="flex min-w-0 flex-col gap-3">
-      <div className="rounded border border-line bg-panel p-3">
+    <section className="module-debug">
+      <div className="module-card">
         <SectionTitle aside={canEdit && <div className="flex items-center gap-2">
           {dbgState?.saving && <span className="text-xs text-mute">Saving…</span>}
           {dbgState?.error && !conflict && <span className="text-xs text-error">Couldn't save</span>}
@@ -515,7 +534,7 @@ function DebugWorkspace({ id, draftVersion, workspaceId, debug, modDirty, modCon
             onChange={(v) => { setScript(v); if (result) setOutdated(true); dbgQ.current?.update({ script: v, specText: latestSpecRef.current }) }} />
         </div>
       </div>
-      <div className="rounded border border-line bg-panel p-3" data-testid="debug-result" style={{ minHeight: 200 }}>
+      <div className="module-card" data-testid="debug-result" style={{ minHeight: 200 }}>
         <SectionTitle aside={canEdit && result && (
           <Button size="sm" disabled={running} onClick={() => { setResult(null); setErr(''); setOutdated(false) }}>Clear output</Button>
         )}>stdout</SectionTitle>
@@ -580,7 +599,7 @@ function DebugRuntime({ id, workspaceId, debug, canEdit, specRef, fixedExtension
   }, [debug, onSpecText, seed])
   if (!debug) return null
   return (
-    <section className="mt-3 rounded border border-line bg-panel p-3" data-testid="module-deps">
+    <section className="module-card module-deps" data-testid="module-deps">
       <SectionTitle>Extensions & runtime</SectionTitle>
       {incomplete && <Notice tone="neutral">Debug configuration incomplete.</Notice>}
       <fieldset disabled={!canEdit} className="m-0 min-w-0 border-0 p-0">

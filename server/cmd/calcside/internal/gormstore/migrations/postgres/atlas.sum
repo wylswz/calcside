@@ -1,4 +1,4 @@
-h1:IL1yRrB4Sye4MHhmBIR6Hz1vGFuvHwD1Q1LW8I1Zp48=
+h1:iVWG4WDlA+yu4lnt0dD29uVXuW91ftDX5hQ3zAoXnmI=
 20261024133846_baseline.sql h1:cYviU1KtYydrKONP+xg8QnZmAWd5gabTwjmxneXO2fM=
 20261027160000_serving_foundation.sql h1:5xJFUfrqZUT0jArX/gbPt617albD2nZozvk+Wni488s=
 20261028090000_applications.sql h1:5/rwoNyK1g9Op8m9zBqj8JxooGvJGSEOJlpc38D8OOE=
@@ -15,3 +15,5 @@ h1:IL1yRrB4Sye4MHhmBIR6Hz1vGFuvHwD1Q1LW8I1Zp48=
 20261110120954_extension_versions.sql h1:5cJMahmhEVWhL8CuBOJ+esFAM9lY5tPzuX3DJyn3hIY=
 20261112000000_instance_notebooks.sql h1:b13mGtN+ge4uLpwRbBbsaXDFJzMPrqO6CXrIOix9snk=
 20261113085505_execution_displays.sql h1:PIBSbmiv90DO1ofP/9WIKA5xW2n1M1tu46nY2/0xfLo=
+20261124142542_application_notebook_sections.sql h1:EfGaAa/klpaYAS+h5ruW7Or2QELsl1bgboAVbk+4Gf0=
+20261125014542_drop_application_script_code.sql h1:GvT1gPE3yUk48GXfGu5mVNauBgr4usRotMqo+qss65Y=

@@ -84,12 +84,13 @@ test('application mounts a published module through Settings', async ({ page }) 
   await expect(page.locator('[data-row="mod:apphello"]')).toHaveCount(1)
 
   // The draft run resolves @apphello.
-  const cm = page.locator('.app-cm .cm-content').first()
+  const cm = page.locator('[aria-label="Application section main"] .cm-content').first()
   await cm.click()
-  await page.keyboard.press('Meta+A')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.insertText('load("@apphello/main.star", "greet")\ndef main(input):\n    return {"message": greet(input["name"])}\n')
-  await page.getByRole('button', { name: 'Run', exact: true }).click()
-  await expect(page.locator('.app-out-pre:not(.app-call-out)')).toContainText('hello world', { timeout: 60_000 })
+  await page.getByRole('button', { name: 'Test', exact: true }).click()
+  await page.getByTestId('app-run').click()
+  await expect(page.locator('[aria-label="Test notebook"] .app-out-pre')).toContainText('hello world', { timeout: 60_000 })
 
   // Publish + invoke serve the pinned module too.
   await page.getByRole('button', { name: 'Publish…' }).click()
@@ -120,6 +121,8 @@ test('application mounts a published module through Settings', async ({ page }) 
   expect(String((await inv2.json()).output_json)).toContain('hello still')
 
   // A confirmed removal drops only the named mount.
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.getByRole('tab', { name: 'Dependencies' }).click()
   await page.getByRole('button', { name: 'Remove module apphelp2' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Remove' }).click()
   await expect.poll(async () => JSON.stringify((await appSpec(id)).modules ?? {}), { timeout: 15_000 })

@@ -345,11 +345,6 @@ func TestProgramConfigErrors(t *testing.T) {
 	}{
 		{"syntax", func(c *ProgramConfig) { c.Sources["main.star"] = []byte("def (:") }},
 		{"no sources", func(c *ProgramConfig) { c.Sources = nil }},
-		{"entrypoint absent", func(c *ProgramConfig) { c.Entrypoint = "other.star" }},
-		{"entrypoint not star", func(c *ProgramConfig) {
-			c.Entrypoint = "main.txt"
-			c.Sources["main.txt"] = c.Sources["main.star"]
-		}},
 		{"source absolute", func(c *ProgramConfig) { c.Sources["/abs.star"] = []byte("x=1") }},
 		{"source traversal", func(c *ProgramConfig) { c.Sources["a/../b.star"] = []byte("x=1") }},
 		{"source dotdot", func(c *ProgramConfig) { c.Sources[".."] = []byte("x=1") }},
@@ -377,68 +372,6 @@ func TestProgramConfigErrors(t *testing.T) {
 	}
 }
 
-func TestProgramLoads(t *testing.T) {
-	e := New(4)
-	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
-
-	bad := func(cfg ProgramConfig, id string) {
-		t.Helper()
-		_, res := e.PrepareProgram(context.Background(), cfg, deps, creation, ProgramCall{ID: id})
-		if res.Error == nil || res.Error.Code != "invalid_program" {
-			t.Fatalf("expected invalid_program for %s, got %+v", id, res.Error)
-		}
-	}
-
-	// Nested selected file loads and initializes once.
-	cfg := greetConfig()
-	// Two modules both loading the same dep share its globals: if the
-	// dep re-initialized, each would see an empty list.
-	cfg.Sources["lib/c.star"] = []byte(`shared = []
-GREETING = "hi"`)
-	cfg.Sources["a.star"] = []byte(`load("lib/c.star", "shared")
-shared.append("a")
-x = 1`)
-	cfg.Sources["b.star"] = []byte(`load("lib/c.star", "shared")
-shared.append("b")
-y = 1`)
-	cfg.Sources["main.star"] = []byte(`load("a.star", "x")
-load("b.star", "y")
-load("lib/c.star", "shared", "GREETING")
-def main(input):
-    return {"greeting": GREETING + " " + input["name"], "tag_count": len(shared)}
-`)
-	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "ld-ok"})
-	out := e.InvokeProgram(context.Background(), p, json.RawMessage(`{"name":"x"}`), deps, creation, ProgramCall{ID: "ld-ok-inv"})
-	if out.Error != nil {
-		t.Fatalf("invoke: %+v", out.Error)
-	}
-	if !strings.Contains(string(out.Output), `"tag_count":2`) {
-		t.Fatalf("module not initialized exactly once: %s", out.Output)
-	}
-
-	// Missing / cycle / traversal / external loads all fail.
-	for _, tc := range []struct {
-		name string
-		src  string
-	}{
-		{"missing", `load("nope.star", "x")`},
-		{"cycle-a", `load("b.star", "x")`}, // paired with b.star below
-		{"absolute", `load("/abs.star", "x")`},
-		{"traversal", `load("../x.star", "x")`},
-		{"file-url", `load("file:///etc/passwd", "x")`},
-		{"net", `load("https://x.invalid/a.star", "x")`},
-		{"no-ext", `load("lib/defs.txt", "x")`},
-	} {
-		cfg := greetConfig()
-		cfg.Sources["main.star"] = []byte(tc.src + "\ndef main(input):\n    return {}")
-		if tc.name == "cycle-a" {
-			cfg.Sources["b.star"] = []byte(`load("main.star", "main")
-x = 1`)
-		}
-		bad(cfg, "ld-"+tc.name)
-	}
-}
-
 func TestProgramFreshState(t *testing.T) {
 	e := New(4)
 	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
@@ -447,12 +380,11 @@ func TestProgramFreshState(t *testing.T) {
 	cfg.Assets = map[string][]byte{"counter.txt": []byte("seed")}
 	cfg.Sources["main.star"] = []byte(`counter = [0]
 def main(input):
-    counter[0] += 1
     seed = fs.read("counter.txt")
     scratch_seen = fs.exists("scratch.txt")
     fs.write("counter.txt", "mutated")
     fs.write("scratch.txt", "x")
-    return {"n": counter[0], "seed": seed, "scratch_seen": scratch_seen}
+    return {"n": counter[0] + 1, "seed": seed, "scratch_seen": scratch_seen}
 `)
 	p, _ := prepare(t, e, cfg, deps, creation, ProgramCall{ID: "fs-prep"})
 	for i, id := range []string{"fs-1", "fs-2", "fs-3"} {
@@ -1113,7 +1045,6 @@ func TestProgramConfigBounds(t *testing.T) {
 	}
 	tooMany := greetConfig()
 	tooMany.Sources = mk(65, func(i int) string { return fmt.Sprintf("s%d.star", i) })
-	tooMany.Entrypoint = "s0.star"
 	_, r := e.PrepareProgram(context.Background(), tooMany, deps, creation, ProgramCall{ID: "b1"})
 	if r.Error == nil || r.Error.Code != "invalid_program" {
 		t.Fatalf("65 sources: %+v", r.Error)

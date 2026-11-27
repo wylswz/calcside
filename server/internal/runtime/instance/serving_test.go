@@ -161,10 +161,9 @@ func TestReplicaPrepareInvoke(t *testing.T) {
 	// counter globals and VFS must reset every invoke.
 	req := prepReq(n, prepareBundle(`counter = [0]
 def main(input):
-    counter[0] += 1
     seed = fs.read("seed.txt")
     fs.write("seed.txt", "mutated")
-    return {"n": counter[0], "seed": seed}
+    return {"n": counter[0] + 1, "seed": seed}
 `, map[string][]byte{"seed.txt": []byte("orig")}))
 	resp, err := n.m.Prepare(context.Background(), req)
 	if err != nil {
@@ -771,5 +770,42 @@ def on_ok(ctx):
 	}
 	if !strings.Contains(string(out2.Result.Output), `"status":"ok"`) {
 		t.Fatalf("handler output: %s", out2.Result.Output)
+	}
+}
+
+func TestReplicaNotebookPrepareInvoke(t *testing.T) {
+	now := time.Now()
+	n := newNode(t, Options{Limits: defaultLimits()}, &now)
+	// A notebook bundle: entry.star's main uses a helper defined in
+	// the lexically-later lib.star section — no load(), no entrypoint.
+	bundle := runtime.ProgramBundle{
+		Sources: map[string][]byte{
+			"entry.star": []byte(`def main(input):
+    return {"msg": greet(input["name"])}
+`),
+			"lib.star": []byte(`def greet(name):
+    return "hi " + name
+`),
+		},
+		InputSchema:  json.RawMessage(`{}`),
+		OutputSchema: json.RawMessage(`{}`),
+	}
+	req := prepReq(n, bundle)
+	resp, err := n.m.Prepare(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Result.Error != nil {
+		t.Fatalf("prepare: %+v", resp.Result.Error)
+	}
+	out, err := n.m.Invoke(context.Background(), invokeReq(req, `{"name":"ann"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Result.Error != nil {
+		t.Fatalf("invoke: %+v", out.Result.Error)
+	}
+	if string(out.Result.Output) != `{"msg":"hi ann"}` {
+		t.Fatalf("output: %s", out.Result.Output)
 	}
 }

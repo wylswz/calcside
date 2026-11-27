@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -20,21 +21,32 @@ const PrefixApplication IDPrefix = "app_"
 // records which draft version the persistent instance currently serves
 // (0 = never published).
 type Application struct {
-	ID                   string          `json:"id"`
-	WorkspaceID          string          `json:"workspace_id"`
-	UserID               string          `json:"user_id"`
-	Name                 string          `json:"name"`
-	Code                 string          `json:"code"`
-	Spec                 json.RawMessage `json:"spec"`
-	InputSchema          json.RawMessage `json:"input_schema,omitempty"`
-	OutputSchema         json.RawMessage `json:"output_schema,omitempty"`
-	Version              int64           `json:"version"`
-	PublishedVersion     int64           `json:"published_version"`
-	PersistentInstanceID string          `json:"persistent_instance_id,omitempty"`
-	CreatedAt            time.Time       `json:"created_at"`
-	UpdatedAt            time.Time       `json:"updated_at"`
-	DeletedAt            *time.Time      `json:"deleted_at,omitempty"`
+	ID                   string               `json:"id"`
+	WorkspaceID          string               `json:"workspace_id"`
+	UserID               string               `json:"user_id"`
+	Name                 string               `json:"name"`
+	Sections             []ApplicationSection `json:"sections"`
+	Spec                 json.RawMessage      `json:"spec"`
+	InputSchema          json.RawMessage      `json:"input_schema,omitempty"`
+	OutputSchema         json.RawMessage      `json:"output_schema,omitempty"`
+	Version              int64                `json:"version"`
+	PublishedVersion     int64                `json:"published_version"`
+	PersistentInstanceID string               `json:"persistent_instance_id,omitempty"`
+	CreatedAt            time.Time            `json:"created_at"`
+	UpdatedAt            time.Time            `json:"updated_at"`
+	DeletedAt            *time.Time           `json:"deleted_at,omitempty"`
 }
+
+// ApplicationSection is one notebook program section; ID is the
+// section identifier used as the internal source path stem.
+type ApplicationSection struct {
+	ID   string `json:"id"`
+	Code string `json:"code"`
+}
+
+// applicationSectionID is the section-ID grammar shared by the store
+// boundary and the API contract.
+var applicationSectionID = regexp.MustCompile(`^[a-z][a-z0-9_]{0,47}$`)
 
 // DefaultApplicationSchema is the unconstrained-object schema applied
 // at publish when a side was never given a contract.
@@ -79,8 +91,20 @@ func ValidateApplication(a *Application) error {
 	if !utf8.ValidString(name) || name == "" || strings.TrimSpace(name) == "" || utf8.RuneCountInString(name) > 128 {
 		return fmt.Errorf("%w: name required, max 128 runes", ErrInvalidServingRecord)
 	}
-	if !utf8.ValidString(a.Code) || len(a.Code) > 128<<10 {
-		return fmt.Errorf("%w: code must be UTF-8 under 128 KiB", ErrInvalidServingRecord)
+	if len(a.Sections) == 0 || len(a.Sections) > 64 {
+		return fmt.Errorf("%w: application requires 1..64 sections", ErrInvalidServingRecord)
+	}
+	seen := map[string]bool{}
+	total := 0
+	for _, section := range a.Sections {
+		if !applicationSectionID.MatchString(section.ID) || seen[section.ID] || !utf8.ValidString(section.Code) {
+			return fmt.Errorf("%w: invalid notebook section", ErrInvalidServingRecord)
+		}
+		seen[section.ID] = true
+		total += len(section.Code)
+		if total > 128<<10 {
+			return fmt.Errorf("%w: notebook source exceeds 128 KiB", ErrInvalidServingRecord)
+		}
 	}
 	if len(a.Spec) > 0 {
 		if len(a.Spec) > 64<<10 {
@@ -108,12 +132,12 @@ func ValidateApplication(a *Application) error {
 }
 
 // NewApplication constructs a version-1 draft.
-func NewApplication(workspaceID, userID, name, code string, spec, inSchema, outSchema json.RawMessage, now time.Time) (*Application, error) {
+func NewApplication(workspaceID, userID, name string, sections []ApplicationSection, spec, inSchema, outSchema json.RawMessage, now time.Time) (*Application, error) {
 	if len(spec) == 0 {
 		spec = json.RawMessage(`{}`)
 	}
 	a := &Application{
-		WorkspaceID: workspaceID, UserID: userID, Name: name, Code: code,
+		WorkspaceID: workspaceID, UserID: userID, Name: name, Sections: sections,
 		Spec:         append(json.RawMessage(nil), spec...),
 		InputSchema:  append(json.RawMessage(nil), inSchema...),
 		OutputSchema: append(json.RawMessage(nil), outSchema...),

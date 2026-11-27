@@ -43,11 +43,11 @@ test('autosave: delayed PATCH + immediate publish reviews latest code', async ({
   page.on('request', (r) => { if (r.url().includes('/publish/preview')) previews.push(r.method()) })
 
   const cm = page.getByTestId('module-editor').locator('.cm-content')
-  await cm.click(); await page.keyboard.press('Meta+A'); await page.keyboard.insertText('x = "LATEST"')
+  await cm.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.insertText('x = "LATEST"')
   await firstPatch
   // edit AGAIN while first PATCH pending — serial queue keeps order
   try {
-    await cm.click(); await page.keyboard.press('Meta+A'); await page.keyboard.insertText('x = "LATEST2"')
+    await cm.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.insertText('x = "LATEST2"')
     await page.getByTestId('module-publish').click()
     await expect(page.getByTestId('module-publish')).toContainText('Preparing')
     expect(previews).toHaveLength(0)
@@ -71,6 +71,7 @@ test('autosave: dep-only add publishes without debug creds', async ({ page }) =>
   })
   const id = (await cr.json()).module.id
   await page.goto(`${rt.viteURL}/modules/${id}`)
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click()
   await expect(page.getByTestId('module-deps')).toBeVisible()
   await page.getByTestId('module-deps').getByRole('button', { name: 'Add needkey 0.1.0' }).click()
   await expect.poll(async () => {
@@ -110,6 +111,7 @@ test('autosave: dep remove publishes the deletion', async ({ page }) => {
   })
   const id = (await cr.json()).module.id
   await page.goto(`${rt.viteURL}/modules/${id}`)
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click()
   await page.getByTestId('module-deps').getByRole('button', { name: 'Add probe 0.1.0' }).click()
   await expect.poll(async () => {
     const g = await rt.client.get(`/api/v1/modules/${id}`)
@@ -153,6 +155,7 @@ test('dep remove: cancel keeps row order, confirm drops only the dep (C2/C3/F2)'
   })
   const id = (await cr.json()).module.id
   await page.goto(`${rt.viteURL}/modules/${id}`)
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click()
   const deps = page.getByTestId('module-deps')
   // Two fixed deps plus a non-dep capability (Files) so the summary
   // mixes managed and unmanaged rows.
@@ -185,7 +188,7 @@ test('C2: pending source and caller edits survive SPA navigation', async ({ page
   const url = `${rt.viteURL}/modules/${id}`
   const fill = async (testId: string, value: string) => {
     await page.getByTestId(testId).locator('.cm-content').click()
-    await page.keyboard.press('Meta+A')
+    await page.keyboard.press('ControlOrMeta+a')
     await page.keyboard.insertText(value)
   }
   await page.goto(url)

@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, wsPath } from '../api'
 import { useRole } from '../workspace'
-import { Button, Confirm, Loading, Notice, PageHeader, RevealNew, Modal, Field, inputCls, SwapLabel } from '../components/ui'
+import { Button, Confirm, ListPage, Loading, Notice, RevealNew, Modal, Field, inputCls, SwapLabel } from '../components/ui'
 import { useHeldOrder } from '../stableList'
 
 export type Module = {
@@ -62,14 +62,17 @@ export default function Modules() {
   }
 
   return (
-    <div className="app-page">
-      <PageHeader title="Modules"
-        actions={canEdit && <Button variant="primary" onClick={() => setCreating(true)}>New module</Button>} />
+    <ListPage title="Modules" count={held.rows.length}
+      actions={<>
+        {held.arrived > 0 && <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />}
+        {canEdit && <Button variant="primary" onClick={() => setCreating(true)}>New module</Button>}
+      </>}>
       {q.isLoading && <Loading />}
       {q.isError && <Notice tone="warning">Could not load modules: {(q.error as Error).message}</Notice>}
-      {held.arrived > 0 && <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />}
-      {q.data && held.rows.length === 0 && held.arrived === 0 && (
-        <p className="app-dim">No modules yet. {canEdit && <button className="link text-accent" onClick={() => setCreating(true)}>Create the first one.</button>}</p>
+      {held.rows.length === 0 && held.arrived === 0 && !q.isLoading && (
+        <div className="flex h-full flex-col items-center justify-center gap-3 py-16">
+          <p className="text-sm text-sec">No modules yet. {canEdit && <button className="link text-accent" onClick={() => setCreating(true)}>Create the first one.</button>}</p>
+        </div>
       )}
       {held.rows.length > 0 && (
         <div className="tbl-wrap">
@@ -121,6 +124,6 @@ export default function Modules() {
           Delete <b>{deleting.name}</b>? This cannot be undone.
         </Confirm>
       )}
-    </div>
+    </ListPage>
   )
 }

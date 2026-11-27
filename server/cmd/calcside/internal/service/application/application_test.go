@@ -9,6 +9,8 @@ import (
 
 	"calcside/internal/extartifact"
 
+	runsvc "calcside/cmd/calcside/internal/service/run"
+
 	_ "calcside/cmd/calcside/internal/gormstore"
 	"calcside/cmd/calcside/internal/service"
 	"calcside/cmd/calcside/internal/service/access"
@@ -61,7 +63,9 @@ func TestCreateDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Application.Name != "Untitled application" || v.Application.Code != scaffold ||
+	if v.Application.Name != "Untitled application" ||
+		len(v.Application.Sections) != 1 || v.Application.Sections[0].ID != "main" ||
+		v.Application.Sections[0].Code != scaffold ||
 		v.Status != "draft" || v.Application.Version != 1 {
 		t.Fatalf("defaults: %+v", v)
 	}
@@ -76,18 +80,22 @@ func TestUpdateCASAndValidation(t *testing.T) {
 	v, _ := svc.Create(context.Background(), a, CreateRequest{Name: "x"})
 	id := v.Application.ID
 	// stale version
-	if _, err := svc.Update(context.Background(), a, id, UpdateRequest{Version: 9, Code: "x"}); err == nil {
+	if _, err := svc.Update(context.Background(), a, id, UpdateRequest{Version: 9, Sections: mainSec("x")}); err == nil {
 		t.Fatal("stale version accepted")
+	}
+	// sections are required — notebook-only applications
+	if _, err := svc.Update(context.Background(), a, id, UpdateRequest{Version: 1, Name: "x"}); err == nil {
+		t.Fatal("update without sections accepted")
 	}
 	// plaintext secret in spec is rejected
 	bad := json.RawMessage(`{"secrets":{"tok":{"value":"plaintext","source":"inline"}}}`)
 	if _, err := svc.Update(context.Background(), a, id,
-		UpdateRequest{Version: 1, Spec: bad}); err == nil {
+		UpdateRequest{Version: 1, Sections: mainSec("def main(i): return i"), Spec: bad}); err == nil {
 		t.Fatal("plaintext secret accepted")
 	}
 	// vault ref is normalized and accepted
 	ref := json.RawMessage(`{"ttl_seconds":300}`)
-	v2, err := svc.Update(context.Background(), a, id, UpdateRequest{Version: 1, Spec: ref, Code: "def main(i): return i"})
+	v2, err := svc.Update(context.Background(), a, id, UpdateRequest{Version: 1, Spec: ref, Sections: mainSec("def main(i): return i")})
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -99,8 +107,8 @@ func TestUpdateCASAndValidation(t *testing.T) {
 func TestPublishAndInvoke(t *testing.T) {
 	svc, st := newSvc(t)
 	a := ownerActor(st)
-	code := "def main(input): return input"
-	v, _ := svc.Create(context.Background(), a, CreateRequest{Name: "svc", Code: &code})
+	v, _ := svc.Create(context.Background(), a, CreateRequest{Name: "svc",
+		Sections: mainSec("def main(input): return input")})
 	id := v.Application.ID
 	if _, err := svc.Publish(context.Background(), a, id, 9); err == nil {
 		t.Fatal("stale publish accepted")
@@ -118,7 +126,7 @@ func TestPublishAndInvoke(t *testing.T) {
 		t.Fatal("schema persisted before publish")
 	}
 	// invoke routes to the replica publish prepared
-	rv, err := svc.Test(context.Background(), a, id, 1, json.RawMessage(`{"name":"x"}`))
+	rv, err := svc.Test(context.Background(), a, id, 1, json.RawMessage(`{"name":"x"}`), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,11 +201,11 @@ func TestApplicationModuleSnapshot(t *testing.T) {
 
 	spec := json.RawMessage(`{"modules":{"m":{"name":"strkit"}}}`)
 	code := "load(\"@m/u.star\", \"x\")\ndef main(i):\n    return {\"v\": x}\n"
-	v, err := svc.Create(ctx, a, CreateRequest{Code: &code, Spec: spec})
+	v, err := svc.Create(ctx, a, CreateRequest{Sections: mainSec(code), Spec: spec})
 	if err != nil {
 		t.Fatal(err)
 	}
-	rv, err := svc.Test(ctx, a, v.Application.ID, 1, json.RawMessage(`{}`))
+	rv, err := svc.Test(ctx, a, v.Application.ID, 1, json.RawMessage(`{}`), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +233,7 @@ func TestReviewedPublish(t *testing.T) {
 	a := ownerActor(st)
 	ctx := context.Background()
 	v, err := svc.Create(ctx, a, CreateRequest{Name: "rev",
-		Code:         ptr(`def main(i): return i`),
+		Sections:     mainSec(`def main(i): return i`),
 		InputSchema:  json.RawMessage(`{"type":"object"}`),
 		OutputSchema: json.RawMessage(`{"type":"object"}`)})
 	if err != nil {
@@ -270,3 +278,85 @@ func TestReviewedPublish(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+func mainSec(code string) []store.ApplicationSection {
+	return []store.ApplicationSection{{ID: "main", Code: code}}
+}
+
+// Debug entries: any bounded JSON input, no schema checks, and no run
+// bookkeeping — ListRuns stays empty while a main test records one.
+func TestDebugEntry(t *testing.T) {
+	svc, st := newSvc(t)
+	a := ownerActor(st)
+	ctx := context.Background()
+	runs, err := runsvc.New(runsvc.Options{
+		Store: st, Runtime: svc.o.Runtime, Sandbox: svc.o.Sandbox, Access: svc.o.Access,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.o.Runs = runs
+
+	code := `def double(x):
+    return x * 2
+def main(input):
+    return {"echo": input}
+`
+	v, err := svc.Create(ctx, a, CreateRequest{Name: "dbg", Sections: mainSec(code)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := v.Application.ID
+
+	// Bad entry names are rejected before any work.
+	for _, bad := range []string{"_private", "2x", "has-dash", "a b"} {
+		if _, err := svc.Test(ctx, a, id, 1, json.RawMessage(`21`), bad); err == nil ||
+			err.(*service.Error).Code != types.ErrCodeBadRequest {
+			t.Fatalf("entry %q: %v", bad, err)
+		}
+	}
+
+	// Debug run: non-object input verbatim, output unvalidated.
+	rv, err := svc.Test(ctx, a, id, 1, json.RawMessage(`21`), "double")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rv.Result.Error != nil || rv.OutputJSON != "42" {
+		t.Fatalf("debug run: %+v", rv)
+	}
+	if rv.RunID != "" {
+		t.Fatalf("debug run recorded a run: %+v", rv)
+	}
+	list, err := st.ListRuns(ctx, store.RunFilter{WorkspaceID: a.WorkspaceID, ApplicationID: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("debug run recorded %d runs", len(list))
+	}
+
+	// Unknown entry reaches the engine as an invalid_program result.
+	rv, err = svc.Test(ctx, a, id, 1, json.RawMessage(`21`), "ghost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rv.Result.Error == nil || rv.Result.Error.Code != "invalid_program" {
+		t.Fatalf("unknown entry: %+v", rv.Result)
+	}
+
+	// main still records a run and applies the schemas.
+	rv, err = svc.Test(ctx, a, id, 1, json.RawMessage(`{"a":1}`), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rv.RunID == "" {
+		t.Fatal("main test recorded no run")
+	}
+	list, err = st.ListRuns(ctx, store.RunFilter{WorkspaceID: a.WorkspaceID, ApplicationID: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("main test runs: %d", len(list))
+	}
+}

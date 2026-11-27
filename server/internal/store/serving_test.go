@@ -39,15 +39,6 @@ func TestNewServingReleaseStable(t *testing.T) {
 	if a.ID != b.ID {
 		t.Fatal("identical content must dedup to one id")
 	}
-	// Empty entrypoint defaults to main.star and hashes like the
-	// explicit form.
-	prog := tBundle()
-	c := mkRel(t, tSpec(), prog)
-	prog.Entrypoint = "main.star"
-	d := mkRel(t, tSpec(), prog)
-	if c.ID != d.ID {
-		t.Fatal("default entrypoint must equal explicit")
-	}
 }
 
 func TestNewServingReleaseRoleBoundary(t *testing.T) {
@@ -140,16 +131,9 @@ func TestNewServingReleaseValidation(t *testing.T) {
 			_, err := NewServingRelease("ws_1", "u", tSpec(), runtime.PolicyBundle{}, p, tNow)
 			return err
 		},
-		"missing_entrypoint": func() error {
-			p := tBundle()
-			p.Entrypoint = "nope.star"
-			_, err := NewServingRelease("ws_1", "u", tSpec(), runtime.PolicyBundle{}, p, tNow)
-			return err
-		},
 		"benign_dotdot_name": func() error {
 			p := tBundle()
 			p.Sources = map[string][]byte{"main.star": []byte("x"), "foo..bar": []byte("y")}
-			p.Entrypoint = "main.star"
 			_, err := NewServingRelease("ws_1", "u", tSpec(), runtime.PolicyBundle{}, p, tNow)
 			return err
 		},

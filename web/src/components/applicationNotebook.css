@@ -1,0 +1,242 @@
+/* applicationNotebook.css — notebook workbench for applications.
+   Reuses the shared nb-* presentation; this file only lays out the
+   application-specific docked sidebar, utility panel and footer. */
+
+.nb.app-notebook-workbench {
+  display: grid;
+  /* rail | explorer | notebook panes */
+  grid-template-columns: 40px auto minmax(0, 1fr);
+  /* toolbar | workbench | utility | footer */
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  /* fills the shared work-panel — pane scrollers own the viewport */
+  flex: 1; height: auto; min-height: 0;
+  background: rgb(var(--paper));
+  overflow: hidden;
+}
+
+.nb.app-notebook-workbench .nb-head { grid-column: 1 / -1; grid-row: 1; }
+
+/* left activity rail — Sections/Extensions toggles; spans the full
+   workbench height (rows 2–3) down to the status bar like a VS Code
+   activity bar */
+.appnb-rail {
+  grid-column: 1; grid-row: 2 / span 2;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 8px 0; min-height: 0;
+  border-right: 1px solid var(--edge);
+}
+.appnb-rail [aria-pressed='true'] { color: rgb(var(--accent)); }
+
+/* secondary panel docked beside the rail (VS Code-style); spans rows
+   2–3 so it reaches the status bar even while the Test panel is open */
+.appnb-explorer {
+  grid-column: 2; grid-row: 2 / span 2;
+  width: 280px; min-height: 0;
+  display: flex; flex-direction: column;
+  background: rgb(var(--paper));
+  border-right: 1px solid var(--edge);
+}
+.appnb-explorer[hidden] { display: none; }
+.appnb-pane {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+}
+.appnb-pane[hidden] { display: none; }
+.appnb-catalog {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: 8px;
+}
+.appnb-catalog .ext-grid { grid-template-columns: minmax(0, 1fr); }
+.appnb-catalog .ext-results { min-height: 0; }
+.appnb-catalog .ext-toolbar { flex-wrap: wrap; }
+.appnb-catalog-note { margin: 8px; font-size: 12px; color: rgb(var(--sec)); }
+
+/* entry label chips — static hints from the latest save */
+.appnb-entry {
+  font-size: 11px; line-height: 16px; white-space: nowrap;
+  color: rgb(var(--accent));
+  border: 1px solid rgb(var(--accent) / 0.4); border-radius: 4px; padding: 0 5px;
+}
+.appnb-dir-entry {
+  flex: none; font-size: 10px; color: rgb(var(--accent));
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 45%;
+}
+
+.nb.app-notebook-workbench .nb-code { grid-column: 3; grid-row: 2; }
+.nb.app-notebook-workbench .nb-graph-panel { grid-column: 3; grid-row: 2; }
+.appnb-note { margin: 0; font-size: 11px; color: rgb(var(--mute));
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* pending sections can't be graph-selected — saved structure only */
+.nb.app-notebook-workbench .nb-dir-row:disabled { opacity: 0.5; cursor: default; }
+
+/* cells keep mounted editors; collapse hides paint only */
+.app-notebook-workbench .nb-editor[hidden] { display: none; }
+
+/* drag handle lives in the left gutter; main is pinned and has none */
+.appnb-drag {
+  cursor: grab; touch-action: none;
+  color: rgb(var(--mute));
+}
+.appnb-drag:active { cursor: grabbing; }
+
+/* drop indicator: a line on the target edge, geometry unchanged */
+.nb-card.appnb-drop-before { box-shadow: 0 -2px 0 0 rgb(var(--accent)); }
+.nb-card.appnb-drop-after { box-shadow: 0 2px 0 0 rgb(var(--accent)); }
+
+/* inline rename form in the card header */
+.appnb-rename-form {
+  display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;
+}
+.appnb-rename-form input { flex: 1; min-width: 0; height: 26px; }
+.appnb-err { margin: 0; font-size: 11px; color: rgb(var(--danger)); }
+
+/* Settings workspace — a sibling of Code/Graph, not a bottom drawer.
+   32px toolbar head (title · Form|JSON segmented · close) over
+   underline category tabs; content keeps its own measure. */
+.appnb-settings {
+  grid-column: 3; grid-row: 2;
+  min-height: 0; overflow-y: auto;
+  background: rgb(var(--paper));
+}
+.appnb-settings[hidden] { display: none; }
+
+.appnb-settings-shell {
+  container-type: inline-size;
+  max-width: 960px; margin-inline: auto;
+  padding: 0 16px 32px;
+}
+.appnb-settings-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px 16px; height: 32px;
+  border-bottom: 1px solid var(--edge);
+  position: sticky; top: 0; background: rgb(var(--paper)); z-index: 1;
+}
+.appnb-settings-title { margin: 0; font-size: 13px; font-weight: 600; color: rgb(var(--ink)); }
+/* Form | JSON — one fixed segmented control in the toolbar head;
+   geometry identical in both modes (S3/S4). */
+.appnb-settings-mode {
+  display: inline-flex; gap: 2px; padding: 2px; flex: none;
+  border-radius: var(--radius-control); background: var(--fill-muted);
+}
+.appnb-settings-mode button {
+  border: 1px solid transparent; border-radius: var(--radius-inset);
+  background: transparent; padding: 2px 10px; min-height: 22px;
+  font-size: 12px; font-weight: 500; color: rgb(var(--sec)); cursor: pointer;
+}
+.appnb-settings-mode button[aria-pressed='true'] {
+  color: rgb(var(--ink)); background: rgb(var(--paper));
+  border-color: var(--edge); box-shadow: var(--shadow-control);
+}
+.appnb-settings-mode button:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.appnb-settings-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.appnb-settings-nav {
+  display: flex; gap: 4px; flex-wrap: nowrap;
+  padding: 0 8px;
+  margin: 0 0 16px; overflow-x: auto;
+}
+.appnb-settings-nav .view-tab { flex: none; }
+.appnb-settings-json { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.appnb-settings-json[hidden] { display: none; }
+.appnb-settings-json textarea { width: 100%; }
+.appnb-settings-content { min-width: 0; display: flex; flex-direction: column; }
+.appnb-settings-content[hidden] { display: none; }
+.app-page .appnb-settings-content > .app-fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+/* heading | controls band per topic */
+.appnb-setting-group {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.36fr) minmax(0, 1fr);
+  gap: 16px 24px; padding-block: 20px;
+  border-top: 1px solid var(--edge);
+}
+.appnb-setting-heading h3 { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; }
+.appnb-setting-heading p { margin: 4px 0 0; font-size: 12px; line-height: 18px; color: rgb(var(--sec)); max-width: 36ch; }
+.appnb-setting-controls {
+  display: grid; gap: 12px; min-width: 0; align-content: start;
+  container-type: inline-size;
+}
+@container (max-width: 640px) {
+  .appnb-setting-group { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+}
+@container (max-width: 480px) {
+  .appnb-setting-controls .spec-limit-fields,
+  .appnb-setting-controls .spec-kv-row { grid-template-columns: minmax(0, 1fr); }
+}
+.appnb-settings .app-schema textarea { width: 100%; margin-top: 10px; }
+
+/* utility row under the editor column only */
+.appnb-utility {
+  grid-column: 3; grid-row: 3;
+  border-top: 1px solid var(--edge);
+  background: rgb(var(--paper));
+  max-height: 40vh; overflow-y: auto;
+}
+.appnb-utility[hidden] { display: none; }
+.appnb-utility-panel { padding: 10px 16px; }
+.appnb-utility-panel[hidden] { display: none; }
+/* the utility head is the Test panel's single head row: TEST title ·
+   Entry select · note · Run — a 32px wb-pane-head like every pane */
+.appnb-utility-head {
+  height: 32px; padding: 0 12px; gap: 8px;
+}
+.appnb-utility-head .nb-outline-title { margin: 0; flex: none; }
+.appnb-utility-head .wb-pane-actions { margin-left: auto; }
+.app-test-controls {
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+}
+.app-test-controls .app-entry-label { flex: none; }
+.app-test-controls .app-entry-select {
+  flex: 0 1 auto; width: auto; max-width: 160px; height: 24px; min-height: 24px;
+  padding: 0 22px 0 8px; font-size: 12px;
+}
+.app-test-controls .app-entry-note {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+
+.nb.app-notebook-workbench .nb-statusbar { grid-column: 1 / -1; grid-row: 4; }
+.appnb-statusbar .nb-status-text + .appnb-note { margin-left: 8px; }
+
+@media (max-width: 739px) {
+  .nb.app-notebook-workbench {
+    grid-template-columns: minmax(0, 1fr);
+    /* toolbar | rail | work panes | utility | status */
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+    height: auto; min-height: 0;
+  }
+  .appnb-rail {
+    grid-column: 1; grid-row: 2;
+    flex-direction: row; justify-content: flex-start;
+    padding: 4px 8px;
+    border-right: 0; border-bottom: 1px solid var(--edge);
+  }
+  /* the explorer overlays the work pane like the instance outline —
+     toggling it never resizes code, graph or settings (S3) */
+  .appnb-explorer {
+    position: absolute; z-index: 30;
+    grid-column: 1 / -1; grid-row: 3;
+    justify-self: start; inset-block: 0; inset-inline-start: 0;
+    width: min(280px, 100%); max-height: 100%; height: 100%;
+    border-right: 1px solid var(--edge);
+    box-shadow: var(--shadow-float);
+  }
+  .nb.app-notebook-workbench .nb-code,
+  .nb.app-notebook-workbench .nb-graph-panel { grid-column: 1; grid-row: 3; min-height: 0; }
+  .appnb-settings { grid-column: 1; grid-row: 3; }
+  .appnb-settings-nav { overflow-x: auto; }
+  .appnb-utility { grid-column: 1; grid-row: 4; max-height: 34dvh; }
+  .nb.app-notebook-workbench .nb-statusbar { grid-column: 1; grid-row: 5; }
+}
+
+/* per-entry run markers in the section CodeMirror gutter — the
+   leftmost gutter (~16px), paint-only hover, fixed column via spacer */
+.appnb-entry-gutter { width: 18px; }
+.appnb-entry-gutter .cm-gutterElement { display: flex; align-items: center; justify-content: center; }
+.appnb-entry-run {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0; border: 0; background: none;
+  cursor: pointer; color: rgb(var(--mute));
+}
+.appnb-entry-run svg { width: 9px; height: 9px; fill: currentColor; }
+.appnb-entry-run:hover { color: rgb(var(--accent)); }
+.appnb-entry-run:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; }
+.appnb-entry-run-spacer { width: 16px; height: 16px; }

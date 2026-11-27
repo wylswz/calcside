@@ -53,7 +53,7 @@ function card(page: import('@playwright/test').Page, name: string) {
 // lost runtime by killing exactly the child this test's instance owns.
 function instanceChildPids(): number[] {
   try {
-    const out = execFileSync('pgrep', ['-f', '__instance'], { encoding: 'utf8' })
+    const out = execFileSync('pgrep', ['-P', String(rt.workerPID()), '-f', '__instance'], { encoding: 'utf8' })
     return out.split('\n').map((s) => parseInt(s.trim(), 10)).filter((n) => Number.isFinite(n) && n > 0)
   } catch {
     return [] // pgrep exits 1 on no matches
@@ -93,7 +93,7 @@ test('autosave: Run section awaits the pending save and executes latest code', a
   // still pending; the run must flush it first (P3: runs execute saved
   // code, and the saved code must be what is on screen).
   await c.locator('.cm-content').click()
-  await page.keyboard.press('Meta+A')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.insertText('print("RUNS-LATEST")')
   await c.getByRole('button', { name: 'Run section' }).click()
 
@@ -175,7 +175,7 @@ test('conflict: a 409 save blocks Run until explicitly resolved (C2/F3)', async 
   })
 
   await c.locator('.cm-content').click()
-  await page.keyboard.press('Meta+A')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.insertText('x = "LOCAL-DRAFT"')
   await expect(c.getByText('Conflict', { exact: true })).toBeVisible({ timeout: 15_000 })
   await expect(c.getByText('This section changed elsewhere', { exact: false })).toBeVisible()
@@ -213,7 +213,7 @@ test('polling: a held autosave keeps the dirty draft across polls and view switc
   })
   try {
     await c.locator('.cm-content').click()
-    await page.keyboard.press('Meta+A')
+    await page.keyboard.press('ControlOrMeta+a')
     await page.keyboard.insertText('v = "DIRTY-DRAFT"')
     await expect(c.locator('.cm-content')).toContainText('DIRTY-DRAFT')
     // Wait past a notebook poll (5s) AND a section-detail poll (5s)…
@@ -991,7 +991,7 @@ test('screenshots: notebook desktop/mobile × light/dark', async ({ page }) => {
     // 155px total and the title keeps a comfortable width.
     const headH = (await page.locator('.detail-head').boundingBox())!.height
     expect(headH).toBeLessThan(155)
-    const h1W = (await page.locator('.detail-id h1').boundingBox())!.width
+    const h1W = (await page.locator('.detail-title').boundingBox())!.width
     expect(h1W).toBeGreaterThan(240)
     // The gutter run control is top-aligned with its cell, not stretched
     // to mid-cell: its top sits within 16px of the card's top edge.
@@ -1126,7 +1126,7 @@ test('graph C2: a dirty draft survives Code→Graph→Code', async ({ page }) =>
   const c = card(page, 'draft')
   await expect(c.locator('.cm-content')).toBeVisible()
   await c.locator('.cm-content').click()
-  await page.keyboard.press('Meta+A')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.insertText('x = 999')
   // The draft is genuinely unsaved when the view flips — the round trip
   // completes well inside the autosave debounce.

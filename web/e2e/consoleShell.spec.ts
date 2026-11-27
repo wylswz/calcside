@@ -13,40 +13,25 @@ const noOverflow = async (page: Page) =>
     return docOK && mainOK
   })
 
-test('console shell: desktop header, drawer nav, account menu', async ({ page }) => {
+test('console shell: desktop activity bar, account menu', async ({ page }) => {
   const rt = await startApplicationRuntime()
   try {
     await page.setViewportSize({ width: 1440, height: 900 })
     const cr = await rt.client.post('/api/v1/modules', { data: { name: 'm1', files: { 'main.star': 'x = 1' } } })
     const mid = (await cr.json()).module.id
     await page.goto(`${rt.viteURL}/modules/${mid}`)
-    // one shell everywhere: no sidebar aside; the hamburger is the only
-    // navigation entry at desktop width too.
+    // one shell everywhere: no sidebar aside; on desktop the persistent
+    // activity bar is the navigation — no hamburger.
     await expect(page.locator('aside.shell-sidebar')).toHaveCount(0)
-    const open = page.getByLabel('Open navigation')
-    await expect(open).toBeVisible()
-    await expect(open).toHaveAttribute('aria-haspopup', 'dialog')
-    await expect(open).toHaveAttribute('aria-expanded', 'false')
-    // header has no top nav links
-    const header = page.locator('header.console-header')
-    for (const l of ['Instances', 'Applications', 'Modules', 'Inbox', 'Audit']) {
-      await expect(header.getByRole('link', { name: l, exact: true })).toHaveCount(0)
-    }
-    await open.click()
-    const dlg = page.getByRole('dialog')
-    await expect(dlg).toBeVisible()
-    await expect(open).toHaveAttribute('aria-expanded', 'true')
-    await page.waitForTimeout(250) // entrance animation settles
-    const nav = dlg.getByRole('navigation', { name: 'Primary' })
-    await expect(nav).toBeVisible()
-    // all six destinations in the drawer
+    await expect(page.getByLabel('Open navigation')).toBeHidden()
+    const bar = page.locator('nav.shell-activity')
+    await expect(bar).toBeVisible()
+    // all six destinations in the activity bar, icon-only with tooltips
     for (const l of ['Instances', 'Applications', 'Modules', 'Inbox', 'Audit', 'Workspace']) {
-      await expect(nav.getByRole('link', { name: l })).toBeVisible()
+      await expect(bar.getByRole('link', { name: l })).toBeVisible()
     }
-    // groups
-    for (const g of ['Build & run', 'Observe', 'Manage']) {
-      await expect(page.locator('.shell-group-label', { hasText: g })).toBeVisible()
-    }
+    // the activity bar is the Primary nav landmark
+    const nav = bar
     // active state on nested module detail
     await expect(nav.getByRole('link', { name: 'Modules' })).toHaveAttribute('aria-current', 'page')
     // S1: nav link box unchanged under hover
@@ -61,17 +46,25 @@ test('console shell: desktop header, drawer nav, account menu', async ({ page })
       expect(hrefs, `missing ${h}`).toContain(h)
     }
     // real colors — rgb() computed, so invalid token CSS can't slip
-    const drawerBg = await page.locator("[data-ui='dialog-surface']").evaluate((el) => getComputedStyle(el).backgroundColor)
-    expect(drawerBg).toMatch(/^rgba?\(/)
+    const barBg = await bar.evaluate((el) => getComputedStyle(el).backgroundColor)
+    expect(barBg).toMatch(/^rgba?\(/)
     const activeBg = await mod.evaluate((el) => getComputedStyle(el).backgroundColor)
     expect(activeBg).toMatch(/^rgba?\(/)
     await page.screenshot({ path: '/tmp/calcside-shell-desktop.png' })
-    await page.keyboard.press('Escape')
-    await expect(dlg).toHaveCount(0)
 
-    // .console-main is the page scroller; the header stays fixed.
+    // activity bar navigates
+    await nav.getByRole('link', { name: 'Applications' }).click()
+    await expect(page).toHaveURL(/applications/)
+
+    // .console-main is the page scroller; the header stays fixed. Seed
+    // enough rows that the list actually overflows the short viewport.
+    for (let i = 0; i < 12; i++) {
+      await rt.client.post('/api/v1/applications', { data: { name: `scroll-${i}` } })
+    }
+    await page.reload()
     const main = page.locator('.console-main')
     await page.setViewportSize({ width: 1440, height: 480 })
+    const header = page.locator('header.console-header')
     const headerBox = await header.boundingBox()
     await expect.poll(async () =>
       main.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
@@ -80,9 +73,8 @@ test('console shell: desktop header, drawer nav, account menu', async ({ page })
     expect(await page.evaluate(() => window.scrollY)).toBe(0)
     expect(await header.boundingBox()).toEqual(headerBox)
     // navigating to a different pathname resets the pane scroll
-    await open.click()
-    await page.getByRole('dialog').getByRole('link', { name: 'Applications' }).click()
-    await expect(page).toHaveURL(/applications/)
+    await nav.getByRole('link', { name: 'Instances' }).click()
+    await expect(page).toHaveURL(/\/$/)
     await expect.poll(async () => main.evaluate((el) => el.scrollTop)).toBe(0)
 
     // account menu → Profile
@@ -139,9 +131,9 @@ test('console shell: drawer stays open on widen; one nav landmark; edits survive
     const mid = (await cr.json()).module.id
     await page.goto(`${rt.viteURL}/modules/${mid}`)
     const cm = page.getByTestId('module-editor').locator('.cm-content')
-    await cm.click(); await page.keyboard.press('Meta+A'); await page.keyboard.type('y = 2')
+    await cm.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.type('y = 2')
     const caller = page.getByTestId('debug-script').locator('.cm-content')
-    await caller.click(); await page.keyboard.press('Meta+A'); await page.keyboard.type('print("caller-marker")')
+    await caller.click(); await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.type('print("caller-marker")')
     // open drawer, Escape — both buffers preserved
     await page.getByLabel('Open navigation').click()
     await page.keyboard.press('Escape')

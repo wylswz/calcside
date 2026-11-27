@@ -134,8 +134,12 @@ test('workspace switcher scopes the instance list', async ({ page }) => {
   await expect(page.locator('tbody tr', { hasText: personalId })).toHaveCount(0)
   // settings page
   await page.goto(`${consoleURL}/workspaces/${team.id}`)
-  await expect(page.getByText('e2e team').first()).toBeVisible()
-  await expect(page.getByText('members', { exact: false }).first()).toBeVisible()
+  await expect(page.locator('.ws-settings-name')).toHaveText('e2e team')
+  const settings = page.getByRole('navigation', { name: 'Workspace settings' })
+  await expect(settings.getByRole('link', { name: 'Members' })).toHaveAttribute('aria-current', 'page')
+  const panel = page.locator('.ws-settings-content')
+  await expect(panel.getByText('Members', { exact: true })).toBeVisible()
+  await expect(panel.getByRole('row', { name: /owner/ })).toBeVisible()
 })
 
 // Flow: creating an instance lands on its page with a compact connect
@@ -198,7 +202,7 @@ test('new instance: add/configure/remove Files and Network, review reflects', as
   await expect(page.locator('[data-row="net"] .selected-status')).toHaveText('api.example.com, other.com · GET')
   await expect(page.locator('[data-row="fs"] .selected-status')).toHaveText('2.00 KiB')
   await page.getByRole('button', { name: 'Remove Files' }).click()
-  await expect(page.getByText('Files removed')).toBeVisible()
+  await expect(page.locator('.spec-selection .selected-row.is-removed')).toBeVisible()
   const [created] = await Promise.all([
     page.waitForResponse((r) => r.url().endsWith('/api/v1/instances') && r.request().method() === 'POST'),
     page.getByRole('button', { name: 'Create instance' }).click(),
@@ -353,16 +357,6 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   await expect(page.getByText('no matching variables', { exact: true })).toBeVisible()
   await variableFilter.clear()
   await expect(page.getByText('no matching variables', { exact: true })).toHaveCount(0)
-  const tableType = await page.locator('[aria-label="Activity"] table').evaluate((table) => {
-    const header = getComputedStyle(table.querySelector('th')!)
-    const source = getComputedStyle(table.querySelector('.detail-code')!)
-    const when = getComputedStyle(table.querySelector('tbody tr td:nth-child(2)')!)
-    return { casing: header.textTransform, tracking: header.letterSpacing, source: source.fontFamily, when: when.fontFamily }
-  })
-  expect(tableType.casing).toBe('none')
-  expect(['normal', '0px']).toContain(tableType.tracking)
-  expect(tableType.source).toContain('IBM Plex Mono')
-  expect(tableType.when).toContain('IBM Plex Sans')
   // title wraps at word boundaries, not mid-word
   const h1 = page.getByRole('heading', { name: 'Research session' })
   expect(await h1.evaluate((el) => getComputedStyle(el).wordBreak)).toBe('normal')
@@ -374,14 +368,13 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   // env name rendered whole; its value never leaks into the boundary
   await expect(page.getByText('DOMAIN_NAME_REALLY_LONG_VALUE')).toBeVisible()
   await expect(page.getByText('NEVER_RENDER_THIS')).toHaveCount(0)
-  // cool paper desk — no beige regression
+  // cool flat desk — surface body under a solid paper header
   const base = await page.evaluate(() => ({
     body: getComputedStyle(document.body).backgroundColor,
     header: getComputedStyle(document.querySelector('.console-header')!).backgroundColor,
   }))
-  expect(base.body).toBe('rgb(245, 247, 251)')
-  // frosted desk-toned header over the paper desk
-  expect(base.header).toMatch(/^rgba\(245, 247, 251, 0\.\d+\)$/)
+  expect(base.body).toBe('rgb(249, 250, 252)')
+  expect(base.header).toBe('rgb(255, 255, 255)')
   // no page overflow on desktop
   const dw = await page.evaluate(() => ({ s: document.documentElement.scrollWidth, i: window.innerWidth }))
   expect(dw.s).toBeLessThanOrEqual(dw.i)
@@ -400,18 +393,28 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
 
   // Review run expands the run and shows its calls
   await primary.click()
-  const detail = page.locator(`#run-${runId}`).locator('xpath=following-sibling::tr[1]')
+  const activity = page.getByRole('region', { name: 'Activity', exact: true })
+  const detail = activity.locator(`#run-${runId}`).locator('xpath=following-sibling::tr[1]')
   await expect(detail).toBeVisible()
   await expect(detail.getByText(/net\.|blocked\.example/).first()).toBeVisible()
-  // tables render inside the rounded envelope, including nested calls
-  const tblWrap = await page.evaluate(() => Array.from(
-    document.querySelectorAll('.instance-detail .tbl-wrap')).map((el) => {
-      const c = getComputedStyle(el)
-      return { r: c.borderRadius, ox: c.overflowX, oy: c.overflowY }
-    }))
+  const tableType = await activity.getByRole('table').first().evaluate((table) => {
+    const header = getComputedStyle(table.querySelector('th')!)
+    const source = getComputedStyle(table.querySelector('.detail-code')!)
+    const when = getComputedStyle(table.querySelector('tbody tr td:nth-child(2)')!)
+    return { casing: header.textTransform, tracking: header.letterSpacing, source: source.fontFamily, when: when.fontFamily }
+  })
+  expect(tableType.casing).toBe('none')
+  expect(['normal', '0px']).toContain(tableType.tracking)
+  expect(tableType.source).toContain('IBM Plex Mono')
+  expect(tableType.when).toContain('IBM Plex Sans')
+  // Flat workbench tables keep their own horizontal scroller, including nested calls.
+  const tblWrap = await activity.locator('.tbl-wrap').evaluateAll((tables) => tables.map((el) => {
+    const c = getComputedStyle(el)
+    return { r: c.borderRadius, ox: c.overflowX, oy: c.overflowY }
+  }))
   expect(tblWrap.length).toBeGreaterThan(0)
   for (const w of tblWrap) {
-    expect(w.r).toBe('8px')
+    expect(w.r).toBe('0px')
     expect(w.ox).toBe('auto')
     expect(w.oy).toBe('hidden')
   }
@@ -527,7 +530,7 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
     body: getComputedStyle(document.body).backgroundColor,
     title: getComputedStyle(document.querySelector('.next-title')!).color,
   }))
-  expect(dark.body).toBe('rgb(10, 16, 28)')
+  expect(dark.body).toBe('rgb(24, 35, 51)')
   expect(dark.title).toBe('rgb(241, 245, 249)')
   await page.screenshot({ path: testInfo.outputPath('detail-dark.png'), fullPage: true })
 })
@@ -707,11 +710,11 @@ test('new instance: palette controls stay put while adding and removing', async 
       ext2: page.locator('.extensions-block .ext-card').nth(2).locator('.ext-card-action'),
       ext3: page.locator('.extensions-block .ext-card').nth(3).locator('.ext-card-action'),
     }
-    // Document coordinates: Playwright may scroll a target into view to
-    // click it, which is the user's own scrolling, not layout movement.
+    // Content coordinates in the console's page scroller.
     const box = (l: ReturnType<typeof page.locator>) => l.evaluate((el) => {
       const b = el.getBoundingClientRect()
-      return { x: Math.round(b.x + window.scrollX), y: Math.round(b.y + window.scrollY), w: Math.round(b.width), h: Math.round(b.height) }
+      const scroller = el.closest('.console-main')!
+      return { x: Math.round(b.x + scroller.scrollLeft), y: Math.round(b.y + scroller.scrollTop), w: Math.round(b.width), h: Math.round(b.height) }
     })
     // Measured with the pointer still on the control just clicked: hover
     // and press feedback are paint-only, so nothing may move under it.
@@ -742,13 +745,15 @@ test('new instance: palette controls stay put while adding and removing', async 
 
     // removal keeps the next row in place behind an undo row
     const network = page.locator('[data-row="net"]')
-    const top = (await box(network)).y
-    await page.getByRole('button', { name: 'Remove Files' }).click()
-    await expect(page.getByText('Files removed')).toBeVisible()
-    expect((await box(network)).y).toBe(top)
-    await page.getByRole('button', { name: 'Undo' }).click()
+    const selection = page.locator('.spec-selection')
+    const rowTop = () => network.evaluate((el) => Math.round(el.getBoundingClientRect().top - el.closest('.spec-selection')!.getBoundingClientRect().top))
+    const top = await rowTop()
+    await selection.getByRole('button', { name: 'Remove Files' }).click()
+    await expect(selection.locator('.selected-row.is-removed')).toBeVisible()
+    expect(await rowTop()).toBe(top)
+    await selection.getByRole('button', { name: 'Undo' }).click()
     await expect(page.locator('[data-row="fs"]')).toHaveCount(1)
-    expect((await box(network)).y).toBe(top)
+    expect(await rowTop()).toBe(top)
   }
 })
 
@@ -1071,13 +1076,13 @@ test('opening a dialog does not shift the page under it (S6)', async () => {
     await expect(page.getByRole('navigation', { name: 'Workspace settings' })).toBeVisible()
     await page.addStyleTag({ content: '::-webkit-scrollbar { width: 15px; height: 15px } ::-webkit-scrollbar-thumb { background: #999 } body { min-height: 200vh }' })
     expect(await page.evaluate(() => window.innerWidth - document.documentElement.clientWidth)).toBeGreaterThan(0)
-    const where = () => page.evaluate(() => ['main', '.console-header-inner', 'h1, [role="tablist"], .workspace-tabs'].map((s) => {
+    const where = () => page.evaluate(() => ['main', '.console-header-inner', '.ws-pane-bar'].map((s) => {
       const b = document.querySelector(s)!.getBoundingClientRect()
       return [s, Math.round(b.x), Math.round(b.width)]
     }))
     await expect(page.locator('main')).toBeVisible()
     await expect(page.locator('.console-header-inner')).toBeVisible()
-    await expect(page.locator('h1, [role="tablist"], .workspace-tabs').first()).toBeVisible()
+    await expect(page.locator('.ws-pane-bar')).toBeVisible()
     const before = await where()
     await page.getByRole('button', { name: 'New policy' }).click()
     await expect(page.getByRole('dialog', { name: 'New policy' })).toBeVisible()
@@ -1089,35 +1094,35 @@ test('opening a dialog does not shift the page under it (S6)', async () => {
   }
 })
 
-// The material is real CSS, not a screenshot impression: raised faces are
-// lit by a soft radial gradient (no bevels), fields are flat wells, and
-// pressing changes the face while it is held.
-test('console material: raised controls, inset wells, pressed state', async ({ page }) => {
+// The material is real CSS, not a screenshot impression: flat accent
+// primaries, hairline-separated flat fields and panes, and pressing
+// repaints the control's fill while it is held.
+test('console material: flat controls, hairline fields, pressed state', async ({ page }) => {
   await page.goto(`${consoleURL}/instances/new?step=config`)
   const style = (sel: string) => page.locator(sel).first().evaluate((el) => {
     const s = getComputedStyle(el)
-    return { image: s.backgroundImage, shadow: s.boxShadow, radius: s.borderTopLeftRadius }
+    return { image: s.backgroundImage, shadow: s.boxShadow, radius: s.borderTopLeftRadius, bg: s.backgroundColor }
   })
   const create = await style('[data-ui="button"][data-variant="primary"]')
-  expect(create.image).toContain('radial-gradient')
-  expect(create.shadow).toContain('inset')
-  expect(create.radius).toBe('8px')
+  expect(create.image).toBe('none')
+  expect(create.shadow).toBe('none')
+  expect(create.bg).toBe('rgb(37, 99, 235)')
+  expect(create.radius).toBe('3px')
   const input = await style('.input')
   expect(input.image).toBe('none')
-  expect(input.shadow).toMatch(/inset/)
-  expect(input.radius).toBe('8px')
+  expect(input.shadow).toBe('none')
+  expect(input.radius).toBe('3px')
   const panel = await style('.builder-work-panel')
   expect(panel.image).toBe('none')
-  expect(panel.radius).toBe('12px')
   const tray = await style('.spec-selection')
-  expect(tray.shadow).toMatch(/inset/)
-  // pressed: gradient and shadow change while held
+  expect(tray.shadow).toBe('none')
+  // pressed: the fill repaints while held
   const files = page.locator('.ability-choice').first()
   const box = (await files.boundingBox())!
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-  const hover = await files.evaluate((el) => getComputedStyle(el).backgroundImage)
+  const hover = await files.evaluate((el) => getComputedStyle(el).backgroundColor)
   await page.mouse.down()
-  await expect.poll(() => files.evaluate((el) => getComputedStyle(el).backgroundImage)).not.toBe(hover)
+  await expect.poll(() => files.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe(hover)
   await page.mouse.up()
 })
 
@@ -1134,7 +1139,7 @@ test('new instance: picker version switch is silent', async ({ page }) => {
   const assertSplitGeometry = async () => {
     // S1: the caret lives fully inside the shared pill, the pill width is
     // identical across cards, the label never overflows its segment, and
-    // the card keeps its 76px height.
+    // the flat rows keep a uniform height.
     const split = await card.locator('.ext-split').boundingBox()
     const caret = await card.locator('.ext-card-caret').boundingBox()
     expect(caret!.x).toBeGreaterThanOrEqual(split!.x)
@@ -1143,8 +1148,9 @@ test('new instance: picker version switch is silent', async ({ page }) => {
     expect(singleSplit!.width).toEqual(split!.width)
     const fits = await card.locator('.ext-card-action').evaluate((el) => el.scrollWidth <= el.clientWidth + 1)
     expect(fits).toBe(true)
-    expect((await card.boundingBox())!.height).toEqual(76)
-    expect((await singleCard.boundingBox())!.height).toEqual(76)
+    const cardH = (await card.boundingBox())!.height
+    expect(cardH).toBeGreaterThan(0)
+    expect((await singleCard.boundingBox())!.height).toBe(cardH)
   }
   for (const width of [1440, 375]) {
     await page.setViewportSize({ width, height: 900 })

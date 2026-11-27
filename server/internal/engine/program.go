@@ -27,12 +27,13 @@ import (
 )
 
 // ProgramConfig is the trusted, release-shaped description of a serving
-// program: the selected sources (entrypoint among them), bounded assets,
-// the two contract schemas and the JSON budgets. Callers later supply
+// program: the selected section sources, bounded assets, the two
+// contract schemas and the JSON budgets. Every program is a notebook
+// program (EP-0025): sources are ordinary sections and entry points are
+// uniquely bound top-level functions. Callers later supply
 // release-pinned SessionDeps/SessionCreation per call; this engine type
 // does not enforce release hashing or pinned specs itself.
 type ProgramConfig struct {
-	Entrypoint   string
 	Sources      map[string][]byte
 	Assets       map[string][]byte
 	InputSchema  json.RawMessage
@@ -59,6 +60,11 @@ type ProgramCall struct {
 	// top-level one-argument function) and the input is the full
 	// handler context object.
 	Entry string
+	// Debug marks a Test-endpoint debug call on a non-main entry: the
+	// input is any bounded JSON value (no handler-context object) and
+	// the output skips schema validation. Debug is ignored for main
+	// and is never set by public invoke.
+	Debug bool
 	// RunID, Step and Interrupts carry the run identity and the
 	// pre-reserved interrupt slots the constructor ops may claim.
 	RunID       string
@@ -98,7 +104,7 @@ type ProgramResult struct {
 // sessions, gates, secrets, hooks or live deps, so one Program serves
 // concurrent invokes safely.
 type Program struct {
-	entrypoint   string
+	notebook     *notebookProgram
 	sources      map[string][]byte // cloned sources kept for provenance
 	programs     map[string]*starlark.Program
 	assets       map[string][]byte
@@ -240,23 +246,14 @@ func (e *Engine) PrepareProgram(ctx context.Context, config ProgramConfig, deps 
 		return nil, res
 	}
 
-	// Compile every selected source once against this session's
-	// predeclared names.
-	programs := map[string]*starlark.Program{}
-	for _, name := range slices.Sorted(maps.Keys(prog.sources)) {
-		if perr := cancelledProgramErr(scope.ctx); perr != nil {
-			res.Error = perr
-			return nil, res
-		}
-		_, pr, err := starlark.SourceProgramOptions(fileOpts, name, prog.sources[name], s.Predeclared.Has)
-		if err != nil {
-			res.Error = invalidProgramf("a selected source does not compile")
-			return nil, res
-		}
-		programs[name] = pr
+	// Compile every section once against this session's predeclared
+	// names; sections compile per-section against their graph-injected
+	// providers.
+	if perr := prog.compileNotebook(scope.ctx, s); perr != nil {
+		res.Error = perr
+		return nil, res
 	}
-	prog.programs = programs
-	if perr := checkLoadGraph(programs, s.modules); perr != nil {
+	if perr := checkLoadGraph(prog.programs, s.modules); perr != nil {
 		res.Error = perr
 		return nil, res
 	}
@@ -267,7 +264,7 @@ func (e *Engine) PrepareProgram(ctx context.Context, config ProgramConfig, deps 
 		return nil, res
 	}
 	// Pure init: gate stays disarmed; denied calls fail the prepare.
-	globals, ierr := prog.initModules(scope.thread, s)
+	globals, ierr := prog.initNotebook(scope.thread, s, "main")
 	if ierr == nil {
 		ierr = checkEntry(globals, "main")
 	}
@@ -363,7 +360,10 @@ func (e *Engine) InvokeProgram(ctx context.Context, program *Program, input json
 		res.Error = progErr("invalid_input", "input is not valid bounded JSON")
 		return res
 	}
-	if isHandler {
+	// A debug call takes any bounded JSON value verbatim; a real
+	// handler step requires the full handler-context object.
+	debug := isHandler && call.Debug
+	if isHandler && !debug {
 		obj, ok := decoded.(map[string]any)
 		if !ok {
 			res.Error = progErr("invalid_input", "input does not match the contract")
@@ -430,21 +430,24 @@ func (e *Engine) InvokeProgram(ctx context.Context, program *Program, input json
 	}
 
 	sscope := scope.sscope
-	globals, err := program.initModules(scope.thread, s)
+	// A handler entry resolves to its owning section; unknown or
+	// ambiguous names are rejected before any section runs.
+	if isHandler && program.notebook.entries[entry] == "" {
+		s.streamScope = nil
+		res.Error = progErr("invalid_program", "handler "+entry+" is not a top-level one-argument function")
+		return res
+	}
+	globals, err := program.initNotebook(scope.thread, s, entry)
 	if err == nil {
-		err = checkEntry(globals, "main")
+		err = checkEntry(globals, entry)
 	}
 	if err != nil {
 		s.streamScope = nil
 		res.Error = initFailureErr(scope.ctx, scope.thread, scope.maxSteps)
 		return res
 	}
-	if isHandler && checkEntry(globals, entry) != nil {
-		res.Error = progErr("invalid_program", "handler "+entry+" is not a top-level one-argument function")
-		return res
-	}
 	deps.Interrupt.IsHandler = func(name string) bool {
-		return HandlerName(name) && checkEntry(globals, name) == nil
+		return HandlerName(name) && program.notebook.entries[name] != ""
 	}
 
 	// Arm only around the entry call.
@@ -556,8 +559,10 @@ func (e *Engine) InvokeProgram(ctx context.Context, program *Program, input json
 	if _, err := serving.DecodeJSON([]byte(red), program.limits); err != nil {
 		return fail("redacted output is not valid JSON")
 	}
-	if err := program.outputSchema.Validate([]byte(red)); err != nil {
-		return fail("redacted output does not match the contract")
+	if !debug {
+		if err := program.outputSchema.Validate([]byte(red)); err != nil {
+			return fail("redacted output does not match the contract")
+		}
 	}
 	res.Output = json.RawMessage(red)
 	return res
@@ -607,8 +612,10 @@ func (e *Engine) consumeStreamOutput(scope *callScope, host *capinterrupt.Host, 
 		if _, err := serving.DecodeJSON([]byte(red), p.limits); err != nil {
 			return progErr("invalid_output", "redacted output is not valid JSON")
 		}
-		if err := p.outputSchema.Validate([]byte(red)); err != nil {
-			return progErr("invalid_output", "redacted output does not match the contract")
+		if !(call.Debug && call.Entry != "" && call.Entry != "main") {
+			if err := p.outputSchema.Validate([]byte(red)); err != nil {
+				return progErr("invalid_output", "redacted output does not match the contract")
+			}
 		}
 		if res.StreamItems+1 > streamMaxItems || res.StreamBytes+int64(len(red)) > streamMaxBytes {
 			return progErr("invalid_output", "stream output exceeds the result limit")
@@ -829,23 +836,7 @@ func (s *callScope) redactedStdout() string {
 	return red
 }
 
-// initModules loads the entrypoint and everything it reaches via the
-// unified two-namespace resolver: bundle sources keep their ordinary
-// load() namespace while attached module trees serve @ mounts (when
-// the session has none, a bare per-invocation set resolves only the
-// bundle). Every selected source — bundle or module — initializes at
-// most once per invocation. The gate stays whatever the caller left
-// it -- callers run this disarmed.
-func (p *Program) initModules(thread *starlark.Thread, s *Session) (starlark.StringDict, error) {
-	ms := s.modules
-	if ms == nil {
-		ms = &moduleSet{cache: map[string]starlark.StringDict{}, inited: map[string]bool{}}
-	}
-	thread.Load = ms.loadFunc(s.Predeclared, p.programs)
-	return thread.Load(thread, p.entrypoint)
-}
-
-// checkEntry verifies the entrypoint globals define name as a function
+// checkEntry verifies the entry globals define name as a function
 // of exactly one positional parameter.
 func checkEntry(globals starlark.StringDict, name string) error {
 	v, ok := globals[name]
@@ -963,21 +954,11 @@ func checkLoadGraph(programs map[string]*starlark.Program, ms *moduleSet) *Progr
 // contract schemas and defensively clones the sources, assets and
 // config into an immutable Program.
 func validateProgramConfig(c ProgramConfig) (*Program, *ProgramError) {
-	entry := c.Entrypoint
-	if entry == "" {
-		entry = "main.star"
-	}
 	if len(c.Sources) == 0 || len(c.Sources) > programMaxSources {
 		return nil, invalidProgramf("sources must be 1..%d files", programMaxSources)
 	}
 	if len(c.Sources)+len(c.Assets) > programMaxFiles {
 		return nil, invalidProgramf("sources and assets exceed %d files", programMaxFiles)
-	}
-	if err := checkReleaseName(entry, true); err != nil {
-		return nil, invalidProgramf("invalid entrypoint name")
-	}
-	if _, ok := c.Sources[entry]; !ok {
-		return nil, invalidProgramf("entrypoint is not among the selected sources")
 	}
 
 	seen := map[string]string{}
@@ -1046,7 +1027,6 @@ func validateProgramConfig(c ProgramConfig) (*Program, *ProgramError) {
 	}
 
 	prog := &Program{
-		entrypoint:   entry,
 		sources:      make(map[string][]byte, len(c.Sources)),
 		assets:       make(map[string][]byte, len(c.Assets)),
 		inputSchema:  inSchema,
