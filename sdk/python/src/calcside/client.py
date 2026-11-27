@@ -541,6 +541,89 @@ class Client:
     def delete_secret(self, secret_id: str) -> None:
         self._req("DELETE", f"/api/v1/secrets/{secret_id}")
 
+    # -- application releases (EP-0026) --------------------------------------
+
+    def check_release(self, app_id: str, version: int) -> dict[str, Any]:
+        """Structured release readiness findings for the current draft."""
+        return self._req(
+            "POST",
+            f"/api/v1/applications/{quote(app_id, safe='')}/release/check",
+            json={"version": version},
+        ).json()
+
+    def preview_publish(self, app_id: str, version: int) -> dict[str, Any]:
+        """Compute the digest-bound publish preview against the live base."""
+        return self._req(
+            "POST",
+            f"/api/v1/applications/{quote(app_id, safe='')}/publish/preview",
+            json={"version": version},
+        ).json()
+
+    def publish(
+        self,
+        app_id: str,
+        version: int,
+        *,
+        expected_base: str,
+        candidate: str,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """Publish a reviewed candidate digest."""
+        body: dict[str, Any] = {
+            "version": version,
+            "expected_base": expected_base,
+            "candidate": candidate,
+        }
+        if note is not None:
+            body["note"] = note
+        return self._req(
+            "POST",
+            f"/api/v1/applications/{quote(app_id, safe='')}/publish",
+            json=body,
+        ).json()["application"]
+
+    def list_releases(self, app_id: str) -> dict[str, Any]:
+        """List immutable application releases and live pointer status."""
+        return self._req(
+            "GET", f"/api/v1/applications/{quote(app_id, safe='')}/releases"
+        ).json()
+
+    def compare_releases(
+        self, app_id: str, base: int, head: int | str
+    ) -> dict[str, Any]:
+        """Compare two release sequences or a release against 'draft'."""
+        return self._req(
+            "GET",
+            f"/api/v1/applications/{quote(app_id, safe='')}/releases/compare",
+            params={"base": base, "head": str(head)},
+        ).json()
+
+    def restore_release(self, app_id: str, seq: int, version: int) -> dict[str, Any]:
+        """Copy an immutable historical release into the draft under CAS."""
+        return self._req(
+            "POST",
+            f"/api/v1/applications/{quote(app_id, safe='')}/releases/{seq}/restore",
+            json={"version": version},
+        ).json()["application"]
+
+    def rollback_release(
+        self,
+        app_id: str,
+        seq: int,
+        *,
+        expected_base: str,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically repoint live traffic to an existing release sequence."""
+        body: dict[str, Any] = {"expected_base": expected_base}
+        if note is not None:
+            body["note"] = note
+        return self._req(
+            "POST",
+            f"/api/v1/applications/{quote(app_id, safe='')}/releases/{seq}/rollback",
+            json=body,
+        ).json()["application"]
+
 
 class AsyncClient:
     """Async calcside API client (same surface as ``Client``)."""
@@ -805,3 +888,95 @@ class AsyncClient:
 
     async def delete_secret(self, secret_id: str) -> None:
         await self._req("DELETE", f"/api/v1/secrets/{secret_id}")
+
+    # -- application releases (EP-0026) --------------------------------------
+
+    async def check_release(self, app_id: str, version: int) -> dict[str, Any]:
+        return (
+            await self._req(
+                "POST",
+                f"/api/v1/applications/{quote(app_id, safe='')}/release/check",
+                json={"version": version},
+            )
+        ).json()
+
+    async def preview_publish(self, app_id: str, version: int) -> dict[str, Any]:
+        return (
+            await self._req(
+                "POST",
+                f"/api/v1/applications/{quote(app_id, safe='')}/publish/preview",
+                json={"version": version},
+            )
+        ).json()
+
+    async def publish(
+        self,
+        app_id: str,
+        version: int,
+        *,
+        expected_base: str,
+        candidate: str,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "version": version,
+            "expected_base": expected_base,
+            "candidate": candidate,
+        }
+        if note is not None:
+            body["note"] = note
+        return (
+            await self._req(
+                "POST",
+                f"/api/v1/applications/{quote(app_id, safe='')}/publish",
+                json=body,
+            )
+        ).json()["application"]
+
+    async def list_releases(self, app_id: str) -> dict[str, Any]:
+        return (
+            await self._req(
+                "GET", f"/api/v1/applications/{quote(app_id, safe='')}/releases"
+            )
+        ).json()
+
+    async def compare_releases(
+        self, app_id: str, base: int, head: int | str
+    ) -> dict[str, Any]:
+        return (
+            await self._req(
+                "GET",
+                f"/api/v1/applications/{quote(app_id, safe='')}/releases/compare",
+                params={"base": base, "head": str(head)},
+            )
+        ).json()
+
+    async def restore_release(
+        self, app_id: str, seq: int, version: int
+    ) -> dict[str, Any]:
+        return (
+            await self._req(
+                "POST",
+                f"/api/v1/applications/{quote(app_id, safe='')}/releases/{seq}/restore",
+                json={"version": version},
+            )
+        ).json()["application"]
+
+    async def rollback_release(
+        self,
+        app_id: str,
+        seq: int,
+        *,
+        expected_base: str,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"expected_base": expected_base}
+        if note is not None:
+            body["note"] = note
+        return (
+            await self._req(
+                "POST",
+                f"/api/v1/applications/{quote(app_id, safe='')}/releases/{seq}/rollback",
+                json=body,
+            )
+        ).json()["application"]

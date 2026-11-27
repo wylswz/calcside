@@ -9,8 +9,12 @@ import '@fontsource/ibm-plex-sans/latin-700.css'
 import '@fontsource/ibm-plex-mono/latin-400.css'
 import '@fontsource/ibm-plex-mono/latin-500.css'
 import App from './App'
+import { initTheme } from './theme'
+import { TooltipProvider } from './ui/core'
 import './index.css'
 import './material.css'
+
+initTheme()
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
@@ -19,9 +23,11 @@ const qc = new QueryClient({
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={qc}>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
+      <TooltipProvider delayDuration={300} skipDelayDuration={120}>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </TooltipProvider>
     </QueryClientProvider>
   </React.StrictMode>,
 )

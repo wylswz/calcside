@@ -4,34 +4,35 @@
 
 
 
-/* next-action — one reserved line under the identity row: a tinted
-   signal, one-line title (and optional note), actions flush right.
-   Never wraps on desktop; the strip is a hairline band, not a card. */
+/* next-action — one reserved line under the identity row: a semantic
+   icon, one-line title (and optional note), actions flush right.
+   Flush hairline band (border-bottom only, zero radius — never a card
+   sandwiched between .detail-head and .detail-views). */
 .instance-detail .next-action {
   flex: none;
   display: flex; flex-wrap: nowrap; align-items: center; gap: 8px;
   height: 28px; box-sizing: border-box;
   background: var(--detail-work); padding: 0 16px; margin: 0;
-  border-block: 1px solid var(--detail-edge);
+  border: 0; border-bottom: 1px solid var(--detail-edge); border-radius: 0;
 }
 .instance-detail .next-signal {
-  width: 18px; height: 18px; flex-shrink: 0;
-  border-radius: var(--detail-radius-control); display: grid; place-items: center;
+  width: 16px; height: 16px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
 }
-.instance-detail .next-signal.denied { background: rgb(var(--danger) / 0.08); color: rgb(var(--danger)); }
-.instance-detail .next-signal.expiring { background: rgb(var(--warn-text) / 0.1); color: rgb(var(--warn-text)); }
-.instance-detail .next-signal.connect { background: rgb(var(--accent) / 0.1); color: rgb(var(--accent)); }
-.instance-detail .next-signal.neutral { background: rgb(var(--sec) / 0.1); color: rgb(var(--sec)); }
+.instance-detail .next-signal.denied { color: rgb(var(--danger)); }
+.instance-detail .next-signal.expiring { color: rgb(var(--warn-text)); }
+.instance-detail .next-signal.connect { color: rgb(var(--accent)); }
+.instance-detail .next-signal.neutral { color: rgb(var(--mute)); }
 .instance-detail .next-body {
   min-width: 0; flex: 1;
-  display: flex; align-items: baseline; gap: 8px;
+  display: flex; align-items: center; gap: 8px;
 }
-.instance-detail .next-title {
-  font-size: 13px; line-height: 20px; font-weight: 500; color: rgb(var(--ink));
+.instance-detail .next-action .next-title {
+  font-size: 12px; line-height: 18px; font-weight: 500; color: rgb(var(--ink));
   margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .instance-detail .next-text {
-  font-size: 12px; line-height: 20px; color: rgb(var(--body)); margin: 0;
+  font-size: 12px; line-height: 18px; color: rgb(var(--sec)); margin: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
 }
 .instance-detail .next-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: none; }

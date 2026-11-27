@@ -51,6 +51,29 @@ The recurring pattern across low-code and high-code platforms is a deliberate tr
 5. **Rollback is a release-pointer or draft operation, not time travel.** It cannot undo external side effects already performed by the bad release.
 6. **Environments are a later layer.** dev/staging/prod promotion, canary traffic, and external Git promotion are important, but they must not block a correct single-live-release interaction.
 
+## Deep dive: lessons from Hex
+
+Among existing products, **Hex** is the closest structural analog to Calcside: both center on a **DAG-backed reactive/dependency notebook** that authors iterate on in a mutable draft and then **publish** into an isolated, consumer-facing **application**. Studying Hex's publishing, versioning, and component-reuse flows surfaces specific interaction patterns that should shape EP-0026 — as well as places where Calcside must deliberately diverge because it serves governed, capability-bounded APIs and agents rather than BI dashboards.
+
+| Dimension | Hex pattern | Calcside equivalent | Decision for EP-0026 |
+|---|---|---|---|
+| **Draft vs Live separation** | Mutable *Notebook* view vs immutable *Published App*; Publish button highlights when unpublished edits exist. | Application *Editor* draft vs *Live release* (`persistent_instances.release_id`). | **Adopt:** make draft-vs-live unmistakable in header, Editor, Invoke, and History; distinguish source edits from policy/pin drift. |
+| **Fresh-kernel publish preview** | Clicking *Publish* boots a clean kernel and runs the DAG top-to-bottom (*Restart and run all*), catching hidden-state bugs before flipping live. | Fresh-session **Verification run** initializing the `main(input)` closure via EP-0025's execution path. | **Adopt:** fresh-session verification is part of the publish dialog itself, not a separate manual ritual; stale/editor runs never count as publish evidence. |
+| **Localized failure & DAG propagation** | Preview errors highlight the failing cell and mark downstream dependents blocked/stale so authors see root cause immediately. | EP-0025 step trace (`init` / `entry` / `output_schema`) + DAG diagnostics. | **Adopt:** verification failures map back to the owning section, phase, and error category with a one-click jump to that section. |
+| **Input defaults for one-click preview** | Typed input widgets carry default values so Publish Preview runs immediately without hand-pasting JSON. | `input_schema` + saved verification input(s) (replacing today's hardcoded `{"name": "world"}`). | **Adopt:** default verification to the last successful input or schema example so verification is one click; record input name/hash in evidence. |
+| **Human-readable diffs** | Avoids raw `.ipynb` JSON dumps; shows readable logic/structure changes against the last published version. | EP-0018 semantic summary + per-section Starlark diffs (`@codemirror/merge`). | **Adopt:** replace the current raw `JSON.stringify` snapshot dump in `PublishReviewDialog` with categorized semantic changes (widening first) and section-level code diffs. |
+| **Chronological version history** | *History & versions* timeline separates autosave checkpoints, manual named versions, and published versions; supports inspect and *Restore*. | `application_releases` history tab with publisher, note, digest, verification badge, compare, *Restore into draft*, and *Rollback live*. | **Adopt (scoped):** v1 ships immutable published release history with compare, restore-into-draft, and rollback-live; named draft checkpoints remain a v2 layer. |
+| **Reusable component propagation** | Publishing a new *Component* version never silently mutates downstream published apps; updates land in the app's draft and require republish. | Workspace Modules (`spec.modules`) + Extensions + Workspace Policies. | **Adopt:** upstream module/extension/policy updates never silently change live traffic; surface pin/policy drift explicitly in Readiness and Review. |
+| **Consumer/API surface** | Published apps and Public API (`runProject`) always target the published version, decoupled from draft work. | Invoke view + `/api/v1/applications/{id}/invoke`. | **Adopt:** Invoke shows live release `vN`, short digest, and contract-change notice; never reads draft state. |
+| **BI layout, caching & schedules** | Drag-and-drop App Builder layout, SQL query result cache (and bypass toggles), PDF snapshots, recurring schedules. | Headless JSON/stream API + Starlark capability Gate + Rego policies + human interrupts. | **Diverge:** no visual dashboard layout builder or query cache; invest that complexity into **boundary/grant-widening review**, **digest-bound TOCTOU safety**, and **interrupt-safe release pinning**. |
+
+### Key product takeaways from Hex
+
+1. **Make "clean-room execution" feel native, not bureaucratic.** Hex succeeds because clean-kernel execution is built straight into the Publish modal with immediate feedback (`Running…` → `Publish version`). If Calcside makes verification a separate detour outside the publish flow, users will treat it as friction; putting readiness + one-click verification + semantic diff into one cohesive dialog makes safe publishing the path of least resistance.
+2. **Never dump raw serialized artifacts as a "diff".** Hex's readable project diffs are a core reason teams trust Publish Preview. Calcside's current `PublishReviewDialog` renders raw `JSON.stringify(rev.base)` / `JSON.stringify(rev.candidate)` blocks; upgrading this to structured semantic cards + per-section code diffs is a prerequisite for EP-0026 to feel production-grade.
+3. **Treat dependency & policy drift as first-class release events.** Just as Hex keeps Component updates explicit so a library change cannot silently break a live app, Calcside must distinguish three states clearly: *clean* (draft == live), *draft modified* (author edited sections/schemas/spec), and *resolved drift* (workspace policy text or unpinned dependency changed since live was built).
+4. **Separate "undo an incident" from "repair the draft".** Hex's *Restore* copies an older version into the working draft, which is ideal for repair but adds steps during an outage. Calcside keeps both: **Rollback live** (atomic pointer move for incidents, recorded in history) and **Restore into draft** (copy into draft for repair and re-verification).
+
 ## Definitions
 
 - **Draft** — the mutable application notebook, schemas, spec, policies and module references currently being edited.
@@ -213,8 +236,10 @@ Verification is deliberately narrower than a full test framework:
 
 - It runs against the exact candidate digest, in a fresh session, through the application notebook execution path from EP-0025.
 - It starts from `main(input)` with a selected input. Direct handler debug runs remain a development tool, not release verification.
+- **Input ergonomics (Hex lesson):** the dialog pre-selects the last successful verification/test input, falling back to an example derived from `input_schema` (or `{}` when no schema is set) rather than an unrelated hardcoded placeholder. Users can edit the input inline before clicking **Run verification**; the run records the input name and SHA-256 hash so reviewers know exactly what was exercised.
+- **Section-level failure localization (Hex + EP-0025):** when verification fails, the result identifies the failing phase (`init`, `entry`, or `output_schema`), the owning section ID, and the classified error, and links to the EP-0025 step graph trace showing executed vs failed vs unreached sections. In the console, clicking the failing section jumps directly to that card in the notebook editor.
 - It uses the candidate's resolved boundary. Secret plaintext is never shown; verification does not prove credentials are correct unless the run actually uses them.
-- It records bounded evidence: input name/hash, output schema validation result, duration, steps, error category, capability/effect summary, and candidate digest.
+- It records bounded evidence: input name/hash, output schema validation result, duration, steps, error category, failing section/phase (if any), capability/effect summary, and candidate digest.
 - It is not a replay. External calls are real unless a future fixture/mocking mode exists. The UI labels this honestly as `live-effect verification`.
 - If the run waits on an interrupt, verification result is `waiting`, not success. The user may resume it as part of verification; publishing a release whose only verification is still waiting is blocked in v1.
 - Long-running/streaming verification is bounded by the application's normal limits.
@@ -247,20 +272,22 @@ Semantics:
 
 - Header state is one of `No live release`, `Live vN · ready`, `Live vN · preparing`, `Live vN · issues`.
 - The primary action is **Review & publish** whenever the user can configure the application. It is disabled only while a check/publish request is in flight.
-- The unpublished-changes badge means the draft candidate differs from live after considering source and resolved drift, not merely unsaved editor keystrokes.
+- The unpublished-changes badge means the draft candidate differs from live after considering source and resolved drift, not merely unsaved editor keystrokes. When the draft itself is unchanged but workspace policies or pinned dependencies drifted, the badge/summary says `policy/dependency drift` rather than implying edited code.
 
 ### Review & publish dialog
 
+The current `PublishReviewDialog` (which renders raw `category/path` lines and `<details>` JSON snapshot dumps) must be replaced by a structured, human-readable release review flow.
+
 Layout, in order:
 
-1. **Release summary** — base, candidate, verification state, activation expectation.
-2. **Readiness** — blockers first, warnings second, each with one jump action.
-3. **Verification** — selected input, Run verification, latest result, link to trace.
-4. **Changes** — EP-0018 semantic summary and file/section diffs.
+1. **Release summary** — base (`vN` or `First release`), candidate short digest, drift-only notice if applicable, verification state, activation expectation.
+2. **Readiness** — blockers first, warnings second, each with a concise fix hint and one jump action to the owning section or settings field.
+3. **Verification** — selected/editable input (pre-populated from last successful run or schema example), **Run verification** (`SwapLabel`: `Run verification` / `Verifying…`), latest result (`passed · 182ms · 3 steps` or failing section + phase + error), and link to the EP-0025 step trace.
+4. **Changes** — EP-0018 semantic summary grouped by risk (boundary widening badges first, then contracts, entries/handlers, policies/pins, sources) plus expandable per-section Starlark unified diffs rendered with `@codemirror/merge` (never raw JSON snapshot dumps by default; raw candidate JSON, if kept for debugging, sits behind an explicit secondary disclosure).
 5. **Publish note** — optional but recommended, max 500 chars.
-6. **Primary action** — `Publish` / `Publishing…` in a reserved-width label.
+6. **Primary action** — `Publish` / `Publishing…` in a reserved-width `SwapLabel`.
 
-The dialog never hides blockers inside tabs. It preserves note and selected input after a 409 or transient failure.
+The dialog never hides blockers inside tabs. It preserves note and selected input after a 409 or transient failure, and guards dirty-note dismissal via the shared `Modal` primitive (`C2`/`P2`).
 
 ### Post-publish state
 
@@ -273,13 +300,21 @@ The success state is not a toast alone. The dialog transitions to a compact comp
 
 ### History
 
-The application detail gains/uses a History tab:
+The application detail gains a dedicated **History** tab (peer to Editor / Invoke / Activity, addressable via `?view=history`, `C4`):
 
-- rows: sequence, publisher, note, published time, digest, verification badge, activation state;
-- compare any two rows;
-- restore into draft;
-- rollback live for users with configure access;
+- chronological timeline rows (`useHeldOrder`, `S5`): sequence (`v5`), `Live` badge on the active pointer, publisher, note, published time, short digest, verification badge (`verified` / `override` / `rollback`), activation state;
+- compare any two rows (reusing the same semantic + `@codemirror/merge` diff view read-only);
+- **Restore into draft** (with `Confirm` when draft has unsaved/diverged changes, `F2`);
+- **Rollback live** for users with configure access (with named `Confirm` stating exact consequences: future invokes switch to `vN`, existing runs/interrupts and external effects are unchanged, `F2`);
 - run history remains in Activity and is never conflated with release history.
+
+### Interaction-stability contract
+
+All EP-0026 console surfaces must preserve `docs/interaction-stability.md`:
+- `S1`/`S4`: paint-only states; `SwapLabel` on `Review & publish`, `Run verification`, `Publish`, and post-publish status transitions.
+- `S3`/`S5`: fixed-slot readiness/verification result rows so checking or verifying never jumps the Publish footer; `useHeldOrder` + `RevealNew` on the History table.
+- `C2`/`P2`: shared `Modal` and `Confirm` primitives; dirty-note discard guard; 409 conflict keeps typed note and input and offers explicit **Refresh review** (never silent retry).
+- `F2`/`F3`: explicit `Confirm` on rollback and overwrite-restore; honest `preparing` / `live_with_issues` / `verification failed` states.
 
 ## API and SDK implications
 
@@ -320,12 +355,14 @@ Python SDK exposes `check_release`, `verify_release`, `preview_publish`, `publis
 
 ## Delivery slices
 
+> **Scoping note:** Single-input ad-hoc `verify` is superseded by dedicated **Application Test Case Management** (supporting strong expected outputs and multi-turn `interrupt` steps) in a separate PR. The initial EP-0026 PR delivers slices 1, 3 (readiness + semantic/code diff + publish), 4, 5, and 6 cleanly without `/release/verify`.
+
 1. **Readiness model:** server-side check operation for graph/entry/schema/boundary/candidate construction; structured findings.
-2. **Verification run:** candidate-bound fresh-session verification with one input; store bounded evidence and expose it in API/UI.
-3. **Release dialog integration:** combine readiness + verification + EP-0018 review/publish; preserve notes and handle 409 refresh.
+2. **Test-case verification (follow-up PR):** multi-turn application test cases (inputs, expected `interrupt` turns and resume inputs, strong output assertions) executed against the candidate before publish.
+3. **Release dialog integration:** combine readiness + EP-0018 semantic/code review/publish; preserve notes and handle 409 refresh.
 4. **Activation state:** expose preparing/ready/issues in header, dialog completion and history.
 5. **History operations:** release metadata, comparison, restore into draft, rollback-live transaction.
-6. **SDK/API parity:** typed operations and errors for agents/CI.
+6. **SDK/API parity:** typed operations (`check_release`, `preview_publish`, `publish`, `list_releases`, `compare_releases`, `restore_release`, `rollback_release`) and errors for agents/CI.
 
 ## References
 

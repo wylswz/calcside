@@ -328,16 +328,24 @@ type applicationReleaseRow struct {
 	DraftVersion  int64     `gorm:"column:draft_version"`
 	PublishedBy   string    `gorm:"column:published_by"`
 	Note          string    `gorm:"column:note"`
+	RollbackOfSeq *int64    `gorm:"column:rollback_of_seq"`
 	PublishedAt   time.Time `gorm:"column:published_at"`
 }
 
 func (applicationReleaseRow) TableName() string { return "application_releases" }
 
 func (r *applicationReleaseRow) toDomain() *store.ApplicationRelease {
+	var rb *int64
+	if r.RollbackOfSeq != nil {
+		s := *r.RollbackOfSeq
+		rb = &s
+	}
 	return &store.ApplicationRelease{
 		ApplicationID: r.ApplicationID, WorkspaceID: r.WorkspaceID, Seq: r.Seq,
 		ReleaseID: r.ReleaseID, DraftVersion: r.DraftVersion,
-		PublishedBy: r.PublishedBy, Note: r.Note, PublishedAt: r.PublishedAt.UTC(),
+		PublishedBy: r.PublishedBy, Note: r.Note,
+		RollbackOfSeq: rb,
+		PublishedAt:   r.PublishedAt.UTC(),
 	}
 }
 
@@ -538,12 +546,14 @@ func (d *sqlDB) publishReviewedLocked(ctx context.Context, workspaceID, id strin
 			hist = &store.ApplicationRelease{
 				ApplicationID: id, WorkspaceID: workspaceID, Seq: seq,
 				ReleaseID: check.ID, DraftVersion: expectedDraft,
-				PublishedBy: publishedBy, Note: note, PublishedAt: now.UTC(),
+				PublishedBy: publishedBy, Note: note,
+				PublishedAt: now.UTC(),
 			}
 			hr := &applicationReleaseRow{
 				ApplicationID: id, WorkspaceID: workspaceID, Seq: seq,
 				ReleaseID: check.ID, DraftVersion: expectedDraft,
-				PublishedBy: publishedBy, Note: note, PublishedAt: now.UTC(),
+				PublishedBy: publishedBy, Note: note,
+				PublishedAt: now.UTC(),
 			}
 			if err := tx.Create(hr).Error; err != nil {
 				return mapWriteErr(err)
@@ -553,6 +563,104 @@ func (d *sqlDB) publishReviewedLocked(ctx context.Context, workspaceID, id strin
 			return err
 		}
 		return nil
+	})
+	return pin, hist, err
+}
+
+func (d *sqlDB) RollbackApplicationRelease(ctx context.Context, workspaceID, appID string, targetSeq int64, expectedBase, publishedBy, note string, now time.Time) (*store.PersistentInstance, *store.ApplicationRelease, error) {
+	if workspaceID == "" || appID == "" || targetSeq < 1 || publishedBy == "" || !utf8.ValidString(publishedBy) {
+		return nil, nil, store.ErrInvalidServingRecord
+	}
+	if note != "" && (!utf8.ValidString(note) || utf8.RuneCountInString(note) > 500) {
+		return nil, nil, store.ErrInvalidServingRecord
+	}
+	var pin *store.PersistentInstance
+	var hist *store.ApplicationRelease
+	err := d.workspaceWrite(ctx, workspaceID, func(tx *sqlDB) error {
+		return tx.g.WithContext(ctx).Transaction(func(gtx *gorm.DB) error {
+			pin, hist = nil, nil
+			if err := (&sqlDB{g: gtx}).LockWorkspace(ctx, workspaceID); err != nil {
+				return err
+			}
+			if err := gtx.Exec("UPDATE applications SET version = version WHERE id = ?", appID).Error; err != nil {
+				return err
+			}
+			row, err := gorm.G[applicationRow](gtx, clause.Locking{Strength: "UPDATE"}).
+				Where("id = ? AND workspace_id = ? AND deleted_at IS NULL", appID, workspaceID).Take(ctx)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return store.ErrNotFound
+			}
+			if err != nil {
+				return err
+			}
+			var curReleaseID string
+			if row.PersistentInstanceID != "" {
+				cur, err := gorm.G[persistentInstanceRow](gtx).
+					Where("id = ? AND workspace_id = ?", row.PersistentInstanceID, workspaceID).Take(ctx)
+				if err != nil {
+					return err
+				}
+				curReleaseID = cur.ReleaseID
+			}
+			if curReleaseID != expectedBase {
+				return store.ErrApplicationBaseConflict
+			}
+			targetRow, err := gorm.G[applicationReleaseRow](gtx).
+				Where("application_id = ? AND workspace_id = ? AND seq = ?", appID, workspaceID, targetSeq).Take(ctx)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return store.ErrNotFound
+			}
+			if err != nil {
+				return err
+			}
+			rel, err := (&sqlDB{g: gtx}).GetServingRelease(ctx, workspaceID, targetRow.ReleaseID)
+			if err != nil {
+				return err
+			}
+			if rel.ID == curReleaseID {
+				return store.ErrConflict
+			}
+			var changed bool
+			pin, changed, err = d.publishLocked(ctx, gtx, &row, rel, now)
+			if err != nil {
+				return err
+			}
+			if !changed {
+				return store.ErrConflict
+			}
+			last, lerr := gorm.G[applicationReleaseRow](gtx).
+				Where("application_id = ?", appID).Order("seq DESC").Take(ctx)
+			seq := int64(1)
+			switch {
+			case lerr == nil:
+				seq = last.Seq + 1
+			case !errors.Is(lerr, gorm.ErrRecordNotFound):
+				return lerr
+			}
+			rbSeq := targetSeq
+			hist = &store.ApplicationRelease{
+				ApplicationID: appID, WorkspaceID: workspaceID, Seq: seq,
+				ReleaseID: rel.ID, DraftVersion: targetRow.DraftVersion,
+				PublishedBy: publishedBy, Note: note,
+				RollbackOfSeq: &rbSeq,
+				PublishedAt:   now.UTC(),
+			}
+			hr := &applicationReleaseRow{
+				ApplicationID: appID, WorkspaceID: workspaceID, Seq: seq,
+				ReleaseID: rel.ID, DraftVersion: targetRow.DraftVersion,
+				PublishedBy: publishedBy, Note: note,
+				RollbackOfSeq: &rbSeq,
+				PublishedAt:   now.UTC(),
+			}
+			if err := gtx.Create(hr).Error; err != nil {
+				return mapWriteErr(err)
+			}
+			return gtx.Model(&applicationRow{}).Where("id = ?", appID).Updates(map[string]any{
+				"published_version":      targetRow.DraftVersion,
+				"persistent_instance_id": pin.ID,
+				"updated_at":             now.UTC(),
+			}).Error
+		})
 	})
 	return pin, hist, err
 }

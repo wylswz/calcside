@@ -102,27 +102,48 @@ func (e APIErrorCode) Valid() bool {
 	}
 }
 
+// Defines values for ApplicationReleaseCheckResponseStatus.
+const (
+	ApplicationReleaseCheckResponseStatusBlocked  ApplicationReleaseCheckResponseStatus = "blocked"
+	ApplicationReleaseCheckResponseStatusReady    ApplicationReleaseCheckResponseStatus = "ready"
+	ApplicationReleaseCheckResponseStatusWarnings ApplicationReleaseCheckResponseStatus = "warnings"
+)
+
+// Valid indicates whether the value is a known member of the ApplicationReleaseCheckResponseStatus enum.
+func (e ApplicationReleaseCheckResponseStatus) Valid() bool {
+	switch e {
+	case ApplicationReleaseCheckResponseStatusBlocked:
+		return true
+	case ApplicationReleaseCheckResponseStatusReady:
+		return true
+	case ApplicationReleaseCheckResponseStatusWarnings:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ApplicationStatus.
 const (
-	Degraded  ApplicationStatus = "degraded"
-	Disabled  ApplicationStatus = "disabled"
-	Draft     ApplicationStatus = "draft"
-	Preparing ApplicationStatus = "preparing"
-	Ready     ApplicationStatus = "ready"
+	ApplicationStatusDegraded  ApplicationStatus = "degraded"
+	ApplicationStatusDisabled  ApplicationStatus = "disabled"
+	ApplicationStatusDraft     ApplicationStatus = "draft"
+	ApplicationStatusPreparing ApplicationStatus = "preparing"
+	ApplicationStatusReady     ApplicationStatus = "ready"
 )
 
 // Valid indicates whether the value is a known member of the ApplicationStatus enum.
 func (e ApplicationStatus) Valid() bool {
 	switch e {
-	case Degraded:
+	case ApplicationStatusDegraded:
 		return true
-	case Disabled:
+	case ApplicationStatusDisabled:
 		return true
-	case Draft:
+	case ApplicationStatusDraft:
 		return true
-	case Preparing:
+	case ApplicationStatusPreparing:
 		return true
-	case Ready:
+	case ApplicationStatusReady:
 		return true
 	default:
 		return false
@@ -504,6 +525,27 @@ func (e PolicyKind) Valid() bool {
 	}
 }
 
+// Defines values for ReleaseFindingSeverity.
+const (
+	Blocker ReleaseFindingSeverity = "blocker"
+	Info    ReleaseFindingSeverity = "info"
+	Warning ReleaseFindingSeverity = "warning"
+)
+
+// Valid indicates whether the value is a known member of the ReleaseFindingSeverity enum.
+func (e ReleaseFindingSeverity) Valid() bool {
+	switch e {
+	case Blocker:
+		return true
+	case Info:
+		return true
+	case Warning:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ReviewChangeCategory.
 const (
 	Contract     ReviewChangeCategory = "contract"
@@ -794,6 +836,55 @@ type ApplicationPublishRequest struct {
 	ExpectedBase *string `json:"expected_base"`
 	Note         *string `json:"note,omitempty"`
 	Version      int64   `json:"version"`
+}
+
+// ApplicationReleaseCheckRequest defines model for ApplicationReleaseCheckRequest.
+type ApplicationReleaseCheckRequest struct {
+	Version int64 `json:"version"`
+}
+
+// ApplicationReleaseCheckResponse defines model for ApplicationReleaseCheckResponse.
+type ApplicationReleaseCheckResponse struct {
+	Candidate  *string                               `json:"candidate,omitempty"`
+	Findings   []ReleaseFinding                      `json:"findings"`
+	HasDrift   bool                                  `json:"has_drift"`
+	LiveDigest *string                               `json:"live_digest,omitempty"`
+	LiveSeq    *int64                                `json:"live_seq,omitempty"`
+	Status     ApplicationReleaseCheckResponseStatus `json:"status"`
+}
+
+// ApplicationReleaseCheckResponseStatus defines model for ApplicationReleaseCheckResponse.Status.
+type ApplicationReleaseCheckResponseStatus string
+
+// ApplicationReleaseEntry defines model for ApplicationReleaseEntry.
+type ApplicationReleaseEntry struct {
+	DraftVersion  int64     `json:"draft_version"`
+	IsLive        bool      `json:"is_live"`
+	Note          string    `json:"note"`
+	PublishedAt   time.Time `json:"published_at"`
+	PublishedBy   string    `json:"published_by"`
+	ReleaseId     string    `json:"release_id"`
+	RollbackOfSeq *int64    `json:"rollback_of_seq,omitempty"`
+	Seq           int64     `json:"seq"`
+}
+
+// ApplicationReleaseListResponse defines model for ApplicationReleaseListResponse.
+type ApplicationReleaseListResponse struct {
+	LiveReleaseId *string                   `json:"live_release_id,omitempty"`
+	LiveSeq       *int64                    `json:"live_seq,omitempty"`
+	Releases      []ApplicationReleaseEntry `json:"releases"`
+	Status        ApplicationStatus         `json:"status"`
+}
+
+// ApplicationReleaseRestoreRequest defines model for ApplicationReleaseRestoreRequest.
+type ApplicationReleaseRestoreRequest struct {
+	Version int64 `json:"version"`
+}
+
+// ApplicationReleaseRollbackRequest defines model for ApplicationReleaseRollbackRequest.
+type ApplicationReleaseRollbackRequest struct {
+	ExpectedBase *string `json:"expected_base"`
+	Note         *string `json:"note,omitempty"`
 }
 
 // ApplicationResponse defines model for ApplicationResponse.
@@ -1864,6 +1955,19 @@ type PublishReview struct {
 // RawJSON raw JSON preserved byte-for-byte; never re-parsed by the API tier
 type RawJSON = json.RawMessage
 
+// ReleaseFinding defines model for ReleaseFinding.
+type ReleaseFinding struct {
+	Category string                 `json:"category"`
+	Code     string                 `json:"code"`
+	Fix      *string                `json:"fix,omitempty"`
+	Message  string                 `json:"message"`
+	Section  *string                `json:"section,omitempty"`
+	Severity ReleaseFindingSeverity `json:"severity"`
+}
+
+// ReleaseFindingSeverity defines model for ReleaseFinding.Severity.
+type ReleaseFindingSeverity string
+
 // ResourceUsages The instance's own cgroup v2 accounting, in bytes. Absent when the instance has no group of its own (cgroups unavailable or no per-instance memory cap configured on the worker).
 type ResourceUsages struct {
 	// MemoryMax memory.max; 0 means unlimited
@@ -2263,6 +2367,12 @@ type DeleteApplicationParams struct {
 	Version int64 `form:"version" json:"version"`
 }
 
+// CompareApplicationReleasesParams defines parameters for CompareApplicationReleases.
+type CompareApplicationReleasesParams struct {
+	Base int64  `form:"base" json:"base"`
+	Head string `form:"head" json:"head"`
+}
+
 // ListRunsParams defines parameters for ListRuns.
 type ListRunsParams struct {
 	Before *string `form:"before,omitempty" json:"before,omitempty"`
@@ -2469,6 +2579,15 @@ type PublishApplicationJSONRequestBody = ApplicationPublishRequest
 
 // PreviewApplicationPublishJSONRequestBody defines body for PreviewApplicationPublish for application/json ContentType.
 type PreviewApplicationPublishJSONRequestBody = ApplicationPublishPreviewRequest
+
+// CheckApplicationReleaseJSONRequestBody defines body for CheckApplicationRelease for application/json ContentType.
+type CheckApplicationReleaseJSONRequestBody = ApplicationReleaseCheckRequest
+
+// RestoreApplicationReleaseJSONRequestBody defines body for RestoreApplicationRelease for application/json ContentType.
+type RestoreApplicationReleaseJSONRequestBody = ApplicationReleaseRestoreRequest
+
+// RollbackApplicationReleaseJSONRequestBody defines body for RollbackApplicationRelease for application/json ContentType.
+type RollbackApplicationReleaseJSONRequestBody = ApplicationReleaseRollbackRequest
 
 // TestApplicationJSONRequestBody defines body for TestApplication for application/json ContentType.
 type TestApplicationJSONRequestBody = ApplicationTestRequest
@@ -2680,6 +2799,21 @@ type ServerInterface interface {
 
 	// (POST /api/v1/applications/{id}/publish/preview)
 	PreviewApplicationPublish(c *gin.Context, id IdPath)
+
+	// (POST /api/v1/applications/{id}/release/check)
+	CheckApplicationRelease(c *gin.Context, id IdPath)
+
+	// (GET /api/v1/applications/{id}/releases)
+	ListApplicationReleases(c *gin.Context, id IdPath)
+
+	// (GET /api/v1/applications/{id}/releases/compare)
+	CompareApplicationReleases(c *gin.Context, id IdPath, params CompareApplicationReleasesParams)
+
+	// (POST /api/v1/applications/{id}/releases/{seq}/restore)
+	RestoreApplicationRelease(c *gin.Context, id IdPath, seq int64)
+
+	// (POST /api/v1/applications/{id}/releases/{seq}/rollback)
+	RollbackApplicationRelease(c *gin.Context, id IdPath, seq int64)
 
 	// (GET /api/v1/applications/{id}/runs)
 	ListRuns(c *gin.Context, id IdPath, params ListRunsParams)
@@ -3175,6 +3309,168 @@ func (siw *ServerInterfaceWrapper) PreviewApplicationPublish(c *gin.Context) {
 	}
 
 	siw.Handler.PreviewApplicationPublish(c, id)
+}
+
+// CheckApplicationRelease operation middleware
+func (siw *ServerInterfaceWrapper) CheckApplicationRelease(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CheckApplicationRelease(c, id)
+}
+
+// ListApplicationReleases operation middleware
+func (siw *ServerInterfaceWrapper) ListApplicationReleases(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListApplicationReleases(c, id)
+}
+
+// CompareApplicationReleases operation middleware
+func (siw *ServerInterfaceWrapper) CompareApplicationReleases(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CompareApplicationReleasesParams
+
+	// ------------- Required query parameter "base" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "base", c.Request.URL.Query(), &params.Base, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter base: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Required query parameter "head" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "head", c.Request.URL.Query(), &params.Head, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter head: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CompareApplicationReleases(c, id, params)
+}
+
+// RestoreApplicationRelease operation middleware
+func (siw *ServerInterfaceWrapper) RestoreApplicationRelease(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "seq" -------------
+	var seq int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "seq", c.Param("seq"), &seq, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter seq: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RestoreApplicationRelease(c, id, seq)
+}
+
+// RollbackApplicationRelease operation middleware
+func (siw *ServerInterfaceWrapper) RollbackApplicationRelease(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "seq" -------------
+	var seq int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "seq", c.Param("seq"), &seq, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter seq: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RollbackApplicationRelease(c, id, seq)
 }
 
 // ListRuns operation middleware
@@ -5531,6 +5827,11 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.PUT(options.BaseURL+"/api/v1/applications/:id", wrapper.UpdateApplication)
 	router.POST(options.BaseURL+"/api/v1/applications/:id/publish/preview", wrapper.PreviewApplicationPublish)
 	router.POST(options.BaseURL+"/api/v1/applications/:id/publish", wrapper.PublishApplication)
+	router.POST(options.BaseURL+"/api/v1/applications/:id/release/check", wrapper.CheckApplicationRelease)
+	router.GET(options.BaseURL+"/api/v1/applications/:id/releases", wrapper.ListApplicationReleases)
+	router.GET(options.BaseURL+"/api/v1/applications/:id/releases/compare", wrapper.CompareApplicationReleases)
+	router.POST(options.BaseURL+"/api/v1/applications/:id/releases/:seq/restore", wrapper.RestoreApplicationRelease)
+	router.POST(options.BaseURL+"/api/v1/applications/:id/releases/:seq/rollback", wrapper.RollbackApplicationRelease)
 	router.POST(options.BaseURL+"/api/v1/applications/:id/test", wrapper.TestApplication)
 	router.POST(options.BaseURL+"/api/v1/applications/:id/invoke", wrapper.InvokeApplication)
 	router.GET(options.BaseURL+"/api/v1/modules", wrapper.ListModules)
@@ -6189,6 +6490,416 @@ func (response PreviewApplicationPublish404JSONResponse) VisitPreviewApplication
 type PreviewApplicationPublish409JSONResponse ErrorEnvelope
 
 func (response PreviewApplicationPublish409JSONResponse) VisitPreviewApplicationPublishResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckApplicationReleaseRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *CheckApplicationReleaseJSONRequestBody
+}
+
+type CheckApplicationReleaseResponseObject interface {
+	VisitCheckApplicationReleaseResponse(w http.ResponseWriter) error
+}
+
+type CheckApplicationRelease200JSONResponse ApplicationReleaseCheckResponse
+
+func (response CheckApplicationRelease200JSONResponse) VisitCheckApplicationReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckApplicationRelease400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CheckApplicationRelease400JSONResponse) VisitCheckApplicationReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckApplicationRelease401JSONResponse ErrorEnvelope
+
+func (response CheckApplicationRelease401JSONResponse) VisitCheckApplicationReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckApplicationRelease403JSONResponse ErrorEnvelope
+
+func (response CheckApplicationRelease403JSONResponse) VisitCheckApplicationReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckApplicationRelease404JSONResponse ErrorEnvelope
+
+func (response CheckApplicationRelease404JSONResponse) VisitCheckApplicationReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckApplicationRelease409JSONResponse ErrorEnvelope
+
+func (response CheckApplicationRelease409JSONResponse) VisitCheckApplicationReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListApplicationReleasesRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type ListApplicationReleasesResponseObject interface {
+	VisitListApplicationReleasesResponse(w http.ResponseWriter) error
+}
+
+type ListApplicationReleases200JSONResponse ApplicationReleaseListResponse
+
+func (response ListApplicationReleases200JSONResponse) VisitListApplicationReleasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListApplicationReleases401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListApplicationReleases401JSONResponse) VisitListApplicationReleasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListApplicationReleases404JSONResponse ErrorEnvelope
+
+func (response ListApplicationReleases404JSONResponse) VisitListApplicationReleasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompareApplicationReleasesRequestObject struct {
+	Id     IdPath `json:"id"`
+	Params CompareApplicationReleasesParams
+}
+
+type CompareApplicationReleasesResponseObject interface {
+	VisitCompareApplicationReleasesResponse(w http.ResponseWriter) error
+}
+
+type CompareApplicationReleases200JSONResponse PublishReview
+
+func (response CompareApplicationReleases200JSONResponse) VisitCompareApplicationReleasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompareApplicationReleases400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CompareApplicationReleases400JSONResponse) VisitCompareApplicationReleasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompareApplicationReleases401JSONResponse ErrorEnvelope
+
+func (response CompareApplicationReleases401JSONResponse) VisitCompareApplicationReleasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompareApplicationReleases403JSONResponse ErrorEnvelope
+
+func (response CompareApplicationReleases403JSONResponse) VisitCompareApplicationReleasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompareApplicationReleases404JSONResponse ErrorEnvelope
+
+func (response CompareApplicationReleases404JSONResponse) VisitCompareApplicationReleasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreApplicationReleaseRequestObject struct {
+	Id   IdPath `json:"id"`
+	Seq  int64  `json:"seq"`
+	Body *RestoreApplicationReleaseJSONRequestBody
+}
+
+type RestoreApplicationReleaseResponseObject interface {
+	VisitRestoreApplicationReleaseResponse(w http.ResponseWriter) error
+}
+
+type RestoreApplicationRelease200JSONResponse ApplicationResponse
+
+func (response RestoreApplicationRelease200JSONResponse) VisitRestoreApplicationReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreApplicationRelease400JSONResponse struct{ ErrorJSONResponse }
+
+func (response RestoreApplicationRelease400JSONResponse) VisitRestoreApplicationReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreApplicationRelease401JSONResponse ErrorEnvelope
+
+func (response RestoreApplicationRelease401JSONResponse) VisitRestoreApplicationReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreApplicationRelease403JSONResponse ErrorEnvelope
+
+func (response RestoreApplicationRelease403JSONResponse) VisitRestoreApplicationReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreApplicationRelease404JSONResponse ErrorEnvelope
+
+func (response RestoreApplicationRelease404JSONResponse) VisitRestoreApplicationReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestoreApplicationRelease409JSONResponse ErrorEnvelope
+
+func (response RestoreApplicationRelease409JSONResponse) VisitRestoreApplicationReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackApplicationReleaseRequestObject struct {
+	Id   IdPath `json:"id"`
+	Seq  int64  `json:"seq"`
+	Body *RollbackApplicationReleaseJSONRequestBody
+}
+
+type RollbackApplicationReleaseResponseObject interface {
+	VisitRollbackApplicationReleaseResponse(w http.ResponseWriter) error
+}
+
+type RollbackApplicationRelease202JSONResponse ApplicationResponse
+
+func (response RollbackApplicationRelease202JSONResponse) VisitRollbackApplicationReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackApplicationRelease400JSONResponse struct{ ErrorJSONResponse }
+
+func (response RollbackApplicationRelease400JSONResponse) VisitRollbackApplicationReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackApplicationRelease401JSONResponse ErrorEnvelope
+
+func (response RollbackApplicationRelease401JSONResponse) VisitRollbackApplicationReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackApplicationRelease403JSONResponse ErrorEnvelope
+
+func (response RollbackApplicationRelease403JSONResponse) VisitRollbackApplicationReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackApplicationRelease404JSONResponse ErrorEnvelope
+
+func (response RollbackApplicationRelease404JSONResponse) VisitRollbackApplicationReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackApplicationRelease409JSONResponse ErrorEnvelope
+
+func (response RollbackApplicationRelease409JSONResponse) VisitRollbackApplicationReleaseResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -12103,6 +12814,21 @@ type StrictServerInterface interface {
 	// (POST /api/v1/applications/{id}/publish/preview)
 	PreviewApplicationPublish(ctx context.Context, request PreviewApplicationPublishRequestObject) (PreviewApplicationPublishResponseObject, error)
 
+	// (POST /api/v1/applications/{id}/release/check)
+	CheckApplicationRelease(ctx context.Context, request CheckApplicationReleaseRequestObject) (CheckApplicationReleaseResponseObject, error)
+
+	// (GET /api/v1/applications/{id}/releases)
+	ListApplicationReleases(ctx context.Context, request ListApplicationReleasesRequestObject) (ListApplicationReleasesResponseObject, error)
+
+	// (GET /api/v1/applications/{id}/releases/compare)
+	CompareApplicationReleases(ctx context.Context, request CompareApplicationReleasesRequestObject) (CompareApplicationReleasesResponseObject, error)
+
+	// (POST /api/v1/applications/{id}/releases/{seq}/restore)
+	RestoreApplicationRelease(ctx context.Context, request RestoreApplicationReleaseRequestObject) (RestoreApplicationReleaseResponseObject, error)
+
+	// (POST /api/v1/applications/{id}/releases/{seq}/rollback)
+	RollbackApplicationRelease(ctx context.Context, request RollbackApplicationReleaseRequestObject) (RollbackApplicationReleaseResponseObject, error)
+
 	// (GET /api/v1/applications/{id}/runs)
 	ListRuns(ctx context.Context, request ListRunsRequestObject) (ListRunsResponseObject, error)
 
@@ -12653,6 +13379,160 @@ func (sh *strictHandler) PreviewApplicationPublish(ctx *gin.Context, id IdPath) 
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(PreviewApplicationPublishResponseObject); ok {
 		if err := validResponse.VisitPreviewApplicationPublishResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CheckApplicationRelease operation middleware
+func (sh *strictHandler) CheckApplicationRelease(ctx *gin.Context, id IdPath) {
+	var request CheckApplicationReleaseRequestObject
+
+	request.Id = id
+
+	var body CheckApplicationReleaseJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.CheckApplicationRelease(ctx, request.(CheckApplicationReleaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CheckApplicationRelease")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(CheckApplicationReleaseResponseObject); ok {
+		if err := validResponse.VisitCheckApplicationReleaseResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListApplicationReleases operation middleware
+func (sh *strictHandler) ListApplicationReleases(ctx *gin.Context, id IdPath) {
+	var request ListApplicationReleasesRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListApplicationReleases(ctx, request.(ListApplicationReleasesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListApplicationReleases")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ListApplicationReleasesResponseObject); ok {
+		if err := validResponse.VisitListApplicationReleasesResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CompareApplicationReleases operation middleware
+func (sh *strictHandler) CompareApplicationReleases(ctx *gin.Context, id IdPath, params CompareApplicationReleasesParams) {
+	var request CompareApplicationReleasesRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.CompareApplicationReleases(ctx, request.(CompareApplicationReleasesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CompareApplicationReleases")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(CompareApplicationReleasesResponseObject); ok {
+		if err := validResponse.VisitCompareApplicationReleasesResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RestoreApplicationRelease operation middleware
+func (sh *strictHandler) RestoreApplicationRelease(ctx *gin.Context, id IdPath, seq int64) {
+	var request RestoreApplicationReleaseRequestObject
+
+	request.Id = id
+	request.Seq = seq
+
+	var body RestoreApplicationReleaseJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.RestoreApplicationRelease(ctx, request.(RestoreApplicationReleaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RestoreApplicationRelease")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(RestoreApplicationReleaseResponseObject); ok {
+		if err := validResponse.VisitRestoreApplicationReleaseResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RollbackApplicationRelease operation middleware
+func (sh *strictHandler) RollbackApplicationRelease(ctx *gin.Context, id IdPath, seq int64) {
+	var request RollbackApplicationReleaseRequestObject
+
+	request.Id = id
+	request.Seq = seq
+
+	var body RollbackApplicationReleaseJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.RollbackApplicationRelease(ctx, request.(RollbackApplicationReleaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RollbackApplicationRelease")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(RollbackApplicationReleaseResponseObject); ok {
+		if err := validResponse.VisitRollbackApplicationReleaseResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

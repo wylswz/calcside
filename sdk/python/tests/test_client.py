@@ -213,3 +213,54 @@ def test_async_artifacts(server):
                 await c.delete_instance(iid)
 
     asyncio.run(scenario())
+
+
+def test_application_release_lifecycle(server):
+    with Client(base_url=server) as c:
+        created = c._req(
+            "POST",
+            "/api/v1/applications",
+            json={
+                "name": "SDKReleaseApp",
+                "sections": [
+                    {
+                        "id": "main",
+                        "code": 'def main(inp):\n    return {"greet": inp["who"]}\n',
+                    }
+                ],
+            },
+        ).json()["application"]
+        app_id = created["id"]
+
+        ck = c.check_release(app_id, 1)
+        assert ck["status"] == "ready"
+
+        prev1 = c.preview_publish(app_id, 1)
+        cand1 = prev1["candidate"]["digest"]
+        c.publish(app_id, 1, expected_base="", candidate=cand1, note="v1")
+
+        # Update draft -> publish v2 -> rollback to v1 -> restore v1 into draft
+        c._req(
+            "PUT",
+            f"/api/v1/applications/{app_id}",
+            json={
+                "version": 1,
+                "name": "SDKReleaseApp",
+                "sections": [{"id": "main", "code": "def main(inp):\n    return 2\n"}],
+            },
+        )
+        prev2 = c.preview_publish(app_id, 2)
+        cand2 = prev2["candidate"]["digest"]
+        c.publish(app_id, 2, expected_base=cand1, candidate=cand2, note="v2")
+
+        diff = c.compare_releases(app_id, 1, 2)
+        assert diff["identical"] is False
+
+        c.rollback_release(app_id, 1, expected_base=cand2, note="rollback to v1")
+        rels = c.list_releases(app_id)
+        assert rels["live_release_id"] == cand1
+        assert rels["releases"][0]["rollback_of_seq"] == 1
+        assert rels["releases"][0]["is_live"] is True
+
+        restored = c.restore_release(app_id, 1, 2)
+        assert restored["version"] == 3

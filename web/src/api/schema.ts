@@ -645,6 +645,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/applications/{id}/release/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["checkApplicationRelease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/applications/{id}/releases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listApplicationReleases"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/applications/{id}/releases/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["compareApplicationReleases"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/applications/{id}/releases/{seq}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restoreApplicationRelease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/applications/{id}/releases/{seq}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["rollbackApplicationRelease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/applications/{id}/test": {
         parameters: {
             query?: never;
@@ -2468,6 +2548,58 @@ export interface components {
             debug_version?: number;
             module_sum?: string;
         };
+        ApplicationReleaseCheckRequest: {
+            /** Format: int64 */
+            version: number;
+        };
+        ReleaseFinding: {
+            code: string;
+            /** @enum {string} */
+            severity: "blocker" | "warning" | "info";
+            category: string;
+            section?: string;
+            message: string;
+            fix?: string;
+        };
+        ApplicationReleaseCheckResponse: {
+            candidate?: string;
+            /** Format: int64 */
+            live_seq?: number;
+            live_digest?: string;
+            has_drift: boolean;
+            /** @enum {string} */
+            status: "ready" | "warnings" | "blocked";
+            findings: components["schemas"]["ReleaseFinding"][];
+        };
+        ApplicationReleaseEntry: {
+            /** Format: int64 */
+            seq: number;
+            release_id: string;
+            /** Format: int64 */
+            draft_version: number;
+            published_by: string;
+            note: string;
+            /** Format: int64 */
+            rollback_of_seq?: number;
+            is_live: boolean;
+            /** Format: date-time */
+            published_at: string;
+        };
+        ApplicationReleaseListResponse: {
+            status: components["schemas"]["ApplicationStatus"];
+            live_release_id?: string;
+            /** Format: int64 */
+            live_seq?: number;
+            releases: components["schemas"]["ApplicationReleaseEntry"][];
+        };
+        ApplicationReleaseRestoreRequest: {
+            /** Format: int64 */
+            version: number;
+        };
+        ApplicationReleaseRollbackRequest: {
+            expected_base: string;
+            note?: string;
+        };
     };
     responses: {
         /** @description error envelope */
@@ -3942,6 +4074,154 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
+    checkApplicationRelease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationReleaseCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description structured release readiness findings for the current draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationReleaseCheckResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    listApplicationReleases: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description immutable published release history, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationReleaseListResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    compareApplicationReleases: {
+        parameters: {
+            query: {
+                base: number;
+                head: string;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description semantic and source diff between two releases or a release and draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishReview"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    restoreApplicationRelease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+                seq: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationReleaseRestoreRequest"];
+            };
+        };
+        responses: {
+            /** @description restored historical release into mutable draft under CAS */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    rollbackApplicationRelease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+                seq: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationReleaseRollbackRequest"];
+            };
+        };
+        responses: {
+            /** @description live release pointer rolled back; replica preparation proceeds asynchronously */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
     testApplication: {
         parameters: {
             query?: never;
@@ -5171,3 +5451,5 @@ export const applicationStatusValues: ReadonlyArray<FlattenedDeepRequired<compon
 export const reviewChangeCategoryValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ReviewChange"]["category"]> = ["sources", "contract", "grants", "rules", "inputs", "requirements"];
 export const reviewChangeKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ReviewChange"]["kind"]> = ["added", "removed", "modified"];
 export const reviewChangeDirectionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ReviewChange"]["direction"]> = ["widening", "narrowing", "changed"];
+export const releaseFindingSeverityValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ReleaseFinding"]["severity"]> = ["blocker", "warning", "info"];
+export const applicationReleaseCheckResponseStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ApplicationReleaseCheckResponse"]["status"]> = ["ready", "warnings", "blocked"];

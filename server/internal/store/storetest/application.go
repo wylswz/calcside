@@ -408,4 +408,31 @@ func applicationReviewedSuite(t *testing.T, s store.Store) {
 		t.Fatalf("history lost: %v %v", rels, err)
 	}
 
+	// EP-0026: atomic live-pointer rollback appends monotonic history with rollback_of_seq.
+	a3, err := store.NewApplication("ws_1", u.ID, "svc3", secs(""), json.RawMessage(`{"ttl_seconds":300}`), nil, nil, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateApplication(ctx, a3); err != nil {
+		t.Fatal(err)
+	}
+	relA := mkRel("def main(i): return 'a'")
+	relB := mkRel("def main(i): return 'b'")
+	_, hA, err := s.PublishReviewedApplication(ctx, "ws_1", a3.ID, 1, "", relA, u.ID, "first", time.Now())
+	if err != nil || hA == nil || hA.Seq != 1 {
+		t.Fatalf("first publish: %+v err=%v", hA, err)
+	}
+	_, hB, err := s.PublishReviewedApplication(ctx, "ws_1", a3.ID, 1, relA.ID, relB, u.ID, "second", time.Now())
+	if err != nil || hB == nil || hB.Seq != 2 {
+		t.Fatalf("second publish: %+v err=%v", hB, err)
+	}
+	// Rollback live pointer to seq 1 -> creates seq 3 with rollback_of_seq=1.
+	if _, _, err := s.RollbackApplicationRelease(ctx, "ws_1", a3.ID, 1, "wrong_base", u.ID, "rb", time.Now()); !errors.Is(err, store.ErrApplicationBaseConflict) {
+		t.Fatalf("rollback stale base: %v", err)
+	}
+	rbPin, rbHist, err := s.RollbackApplicationRelease(ctx, "ws_1", a3.ID, 1, relB.ID, u.ID, "revert to v1", time.Now())
+	if err != nil || rbPin.ReleaseID != relA.ID || rbHist == nil || rbHist.Seq != 3 || rbHist.RollbackOfSeq == nil || *rbHist.RollbackOfSeq != 1 {
+		t.Fatalf("rollback: pin=%+v hist=%+v err=%v", rbPin, rbHist, err)
+	}
+
 }

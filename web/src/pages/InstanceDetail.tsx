@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Circle, Clock, Link2, XCircle } from 'lucide-react'
 import { api, Instance, Execution, APIKey, SharedInstance, workspaces, InstanceInspect } from '../api'
 import { instanceDescription, instanceTitle } from '../activity'
 import { nextStep } from '../nextStep'
@@ -26,19 +27,9 @@ const media = (q: string) => window.matchMedia(q).matches
 
 // NextSignal renders the small semantic marker for each next-step state —
 // hollow circle ended, clock expiring, X denied, link connect/waiting.
-function NextSignal({ kind }: { kind: 'neutral' | 'expiring' | 'denied' | 'connect' }) {
-  const path = {
-    neutral: 'M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z',
-    expiring: 'M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z M12 8v4l3 2',
-    denied: 'M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z M9.5 9.5l5 5 M14.5 9.5l-5 5',
-    connect: 'M9 15l6-6 M11 7h3a3 3 0 0 1 0 6h-2 M13 17h-3a3 3 0 0 1 0-6h2',
-  }[kind]
-  return (
-    <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      {path.split(' M').map((d, i) => <path key={i} d={(i ? 'M' : '') + d} />)}
-    </svg>
-  )
+function NextSignal({ kind, size = 14 }: { kind: 'neutral' | 'expiring' | 'denied' | 'connect'; size?: number }) {
+  const Cmp = kind === 'expiring' ? Clock : kind === 'denied' ? XCircle : kind === 'connect' ? Link2 : Circle
+  return <Cmp width={size} height={size} strokeWidth={1.6} className="shrink-0" aria-hidden="true" />
 }
 
 // The instance page is a workbench: a compact identity row, a one-line

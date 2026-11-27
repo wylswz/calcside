@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Blocks } from 'lucide-react'
 import { api, wsPath } from '../api'
 import { useRole } from '../workspace'
 import { Button, Confirm, ListPage, Loading, Notice, RevealNew, Modal, Field, inputCls, SwapLabel } from '../components/ui'
+import { EmptyState } from '../ui/core'
 import { useHeldOrder } from '../stableList'
 
 export type Module = {
@@ -70,9 +72,12 @@ export default function Modules() {
       {q.isLoading && <Loading />}
       {q.isError && <Notice tone="warning">Could not load modules: {(q.error as Error).message}</Notice>}
       {held.rows.length === 0 && held.arrived === 0 && !q.isLoading && (
-        <div className="flex h-full flex-col items-center justify-center gap-3 py-16">
-          <p className="text-sm text-sec">No modules yet. {canEdit && <button className="link text-accent" onClick={() => setCreating(true)}>Create the first one.</button>}</p>
-        </div>
+        <EmptyState
+          icon={<Blocks className="h-5 w-5" strokeWidth={1.5} />}
+          title="No modules yet"
+          description="Modules are versioned, reusable Starlark libraries that can be pinned and loaded into instances and applications."
+          action={canEdit ? <Button variant="primary" onClick={() => setCreating(true)}>New module</Button> : undefined}
+        />
       )}
       {held.rows.length > 0 && (
         <div className="tbl-wrap">
@@ -91,7 +96,9 @@ export default function Modules() {
                     {m.has_unpublished_changes && <span className="text-mute"> · unpublished</span>}
                   </td>
                   <td className="text-right">
-                    {canEdit && <Button size="sm" variant="danger" onClick={() => setDeleting(m)}>Delete</Button>}
+                    {canEdit && (
+                      <Button variant="ghost" size="xs" className="text-sec hover:text-danger" onClick={() => setDeleting(m)}>Delete</Button>
+                    )}
                   </td>
                 </tr>
               ))}

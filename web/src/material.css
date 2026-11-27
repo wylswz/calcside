@@ -39,7 +39,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --desk: 13 20 33;
     --edge: rgba(255, 255, 255, 0.1);
     --edge-strong: rgba(255, 255, 255, 0.16);
@@ -49,6 +49,17 @@
     --glass-strong: rgba(20 31 49, 0.96);
     --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.4), 0 14px 36px -18px rgba(0, 0, 0, 0.8);
   }
+}
+
+:root[data-theme='dark'] {
+  --desk: 13 20 33;
+  --edge: rgba(255, 255, 255, 0.1);
+  --edge-strong: rgba(255, 255, 255, 0.16);
+  --fill-muted: rgb(26 37 55);
+  --fill-muted-hover: rgb(32 45 64);
+  --glass: rgba(12 19 31, 0.92);
+  --glass-strong: rgba(20 31 49, 0.96);
+  --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.4), 0 14px 36px -18px rgba(0, 0, 0, 0.8);
 }
 
 body {
@@ -61,7 +72,7 @@ body {
   background-color: rgb(var(--paper));
   border-bottom-color: var(--edge);
 }
-[data-ui='dialog-surface'], [data-ui='menu'] {
+[data-ui='dialog-surface'], [data-ui='menu'], [data-ui='popover'] {
   background-color: var(--glass-strong);
   -webkit-backdrop-filter: var(--frost);
   backdrop-filter: var(--frost);
@@ -69,10 +80,10 @@ body {
   box-shadow: var(--shadow-float);
 }
 
-/* ---- surfaces: paper panels, hairline edge, no shadow ---- */
+/* ---- surfaces: paper panels, hairline edge, no shadow ----
+   Workbench panes (.next-action, .work-surface) are flush hairline
+   strips and must NEVER receive card borders or border-radius. */
 .builder-work-panel,
-.instance-detail .next-action,
-.instance-detail .work-surface,
 .settings-card {
   background-color: rgb(var(--paper));
   border: 1px solid var(--edge);
@@ -86,7 +97,6 @@ body {
 .instance-detail .seg-filters:not(.nb-view-toggle),
 .spec-selection {
   background-color: var(--fill-muted);
-  background-image: var(--well, none);
   border: 1px solid var(--edge);
   border-radius: var(--radius-control);
 }
@@ -148,8 +158,9 @@ body {
 [data-ui='button'][data-variant='primary']:hover:not(:disabled) { background-color: rgb(var(--accent) / 0.88); }
 [data-ui='button'][data-variant='primary']:active:not(:disabled) { background-color: rgb(var(--accent) / 0.75); }
 @media (prefers-color-scheme: dark) {
-  [data-ui='button'][data-variant='primary'] { color: #08111f; }
+  :root:not([data-theme='light']) [data-ui='button'][data-variant='primary'] { color: #08111f; }
 }
+:root[data-theme='dark'] [data-ui='button'][data-variant='primary'] { color: #08111f; }
 /* danger: the same flat control, only the colour marks it destructive (S1) */
 [data-ui='button'][data-variant='danger'] {
   color: rgb(var(--danger));
@@ -283,11 +294,37 @@ button[data-ui='button'][data-size='sm'] {
 [data-ui='menu-item'][data-tone='danger'][data-highlighted] { background: rgb(var(--danger) / 0.08); }
 [data-ui='menu-separator'] { height: 1px; margin: 6px -6px; background: var(--edge); }
 
+/* ---- tooltip & popover ---- */
+[data-ui='tooltip'] {
+  z-index: 70;
+  max-width: 320px;
+  padding: 4px 8px;
+  border-radius: var(--radius-control);
+  background: rgb(var(--ink));
+  color: rgb(var(--paper));
+  font-size: 12px;
+  line-height: 16px;
+  box-shadow: var(--shadow-float);
+  pointer-events: none;
+  word-break: break-word;
+}
+[data-ui='popover'] {
+  z-index: 65;
+  max-width: min(440px, calc(100vw - 24px));
+  padding: 12px;
+  border-radius: var(--radius-surface);
+  color: rgb(var(--body));
+  font-size: 12px;
+  line-height: 18px;
+}
+
 /* ---- motion: damped entrances, none when reduced motion is asked ---- */
 @media (prefers-reduced-motion: no-preference) {
   [data-ui='dialog-overlay'][data-state='open'] { animation: material-fade 180ms var(--ease-damped); }
   [data-ui='dialog-surface'][data-state='open'] { animation: material-rise 280ms var(--ease-damped); }
-  [data-ui='menu'][data-state='open'] { animation: material-drop 220ms var(--ease-damped); transform-origin: var(--radix-dropdown-menu-content-transform-origin); }
+  [data-ui='menu'][data-state='open'],
+  [data-ui='popover'][data-state='open'] { animation: material-drop 220ms var(--ease-damped); transform-origin: var(--radix-dropdown-menu-content-transform-origin, var(--radix-popover-content-transform-origin)); }
+  [data-ui='tooltip'][data-state='delayed-open'] { animation: material-fade 140ms var(--ease-damped); }
   .selected-row:not(.is-empty):not(.is-removed) { animation: material-settle 280ms var(--ease-damped); }
 }
 @media (prefers-reduced-motion: reduce) {
