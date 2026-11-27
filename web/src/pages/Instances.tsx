@@ -1,9 +1,11 @@
 
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Terminal } from 'lucide-react'
 import { api, SharedInstance, Instance, wsPath } from '../api'
 import { useRole } from '../workspace'
 import { Button, Confirm, ListPage, Loading, InstanceStatus, RevealNew } from '../components/ui'
+import { EmptyState } from '../ui/core'
 import { attentionText, expiringSoon } from '../nextStep'
 import { allowedSummary, instanceDescription, instanceTitle } from '../activity'
 import { fmtTime, relTime } from '../format'
@@ -58,10 +60,12 @@ export default function Instances() {
       </>}>
       {isLoading && <Loading />}
       {data && all.length === 0 && (
-        <div className="flex h-full flex-col items-center justify-center gap-3 py-16">
-          <p className="text-sm text-sec">No instances yet.</p>
-          {role != null && role !== 'viewer' && <Button variant="primary" onClick={() => nav('/instances/new')}>New instance</Button>}
-        </div>
+        <EmptyState
+          icon={<Terminal className="h-5 w-5" strokeWidth={1.5} />}
+          title="No instances yet"
+          description="Instances are live Starlark sandboxes with persistent globals and /work storage for interactive work and agent supervision."
+          action={role != null && role !== 'viewer' ? <Button variant="primary" onClick={() => nav('/instances/new')}>New instance</Button> : undefined}
+        />
       )}
       {all.length > 0 && groups.filter(([, g]) => g.length).map(([label, g]) => (
         <section key={label}>
@@ -89,7 +93,9 @@ export default function Instances() {
                     </td>
                     <td className="whitespace-nowrap text-xs text-sec" title={fmtTime(i.last_active_at)}>{relTime(i.last_active_at)}</td>
                     <td className="text-right">
-                      {i.status === 'running' && canEdit && <Button size="sm" variant="danger" onClick={() => setEnding(i)}>End</Button>}
+                      {i.status === 'running' && canEdit && (
+                        <Button variant="ghost" size="xs" className="text-sec hover:text-danger" onClick={() => setEnding(i)}>End</Button>
+                      )}
                     </td>
                   </tr>
                 )

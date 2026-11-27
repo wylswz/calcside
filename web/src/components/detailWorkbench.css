@@ -192,12 +192,13 @@
 .detail-workbench .wb-statusbar .wb-grow { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .detail-workbench .wb-status-num { font-variant-numeric: tabular-nums; }
 
-/* status dot — .nb-dir-dot paint semantics */
+/* status dot — five-state semantic palette */
 .detail-workbench .wb-dot {
   width: 7px; height: 7px; flex: none; display: inline-block; border-radius: 50%;
   background: rgb(var(--mute));
 }
-.detail-workbench .wb-dot[data-tone='ok'] { background: rgb(var(--accent)); }
+.detail-workbench .wb-dot[data-tone='ok'] { background: rgb(var(--live)); }
+.detail-workbench .wb-dot[data-tone='active'] { background: rgb(var(--accent)); }
 .detail-workbench .wb-dot[data-tone='warn'] { background: rgb(var(--warn-text)); }
 .detail-workbench .wb-dot[data-tone='err'] { background: rgb(var(--danger)); }
 .detail-workbench .wb-status-cell { display: inline-flex; align-items: center; gap: 6px; }

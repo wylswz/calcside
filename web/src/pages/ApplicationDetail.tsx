@@ -2,12 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import * as Tabs from '@radix-ui/react-tabs'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, ApiError, Application, Run, postApplication, workspaces } from '../api'
+import { Activity as ActivityIcon, Code2, History as HistoryIcon, Send } from 'lucide-react'
+import { api, ApiError, Application, Run, postApplication, workspaces, wsPath } from '../api'
+import type { components } from '../api/schema'
 import { applicationDescription } from '../activity'
-import { Button, Confirm, Field, Loading, Notice, RevealNew, SwapLabel, inputCls } from '../components/ui'
+import { Button, Confirm, Field, Loading, Menu, MenuItem, Notice, RevealNew, SwapLabel, inputCls } from '../components/ui'
 import { DetailWorkbenchHeader, DetailWorkbenchViews } from '../components/DetailWorkbench'
 import { StatusCell, WorkView, WorkStatusbar } from '../components/ApplicationWorkView'
 import { PublishReviewDialog } from '../components/PublishReviewDialog'
+import { ReleaseHistory } from '../components/ReleaseHistory'
 import { useApplicationEditor } from '../components/editor'
 import { useRunProgress, WaitHead } from '../components/RunProgress'
 import { ResumeForm } from '../components/ResumeForm'
@@ -21,12 +24,16 @@ import { useHeldOrder } from '../stableList'
 import { fmtDateTime, type RunPhase } from '../interrupts'
 import { ApplicationNotebook } from '../components/ApplicationNotebook'
 import { entryFunctions } from '../entryFunctions'
+import { JsonEditor, formatJson, validateJson } from '../ui/JsonEditor'
 
 const appSections = [
-  { value: 'develop', label: 'Editor', key: '1', icon: 'm5.5 4.5-3.5 3.5 3.5 3.5m5-7 3.5 3.5-3.5 3.5' },
-  { value: 'invoke', label: 'Invoke', key: '2', icon: 'm2.5 2 11 6-11 6 2-6-2-6Zm2 6H9' },
-  { value: 'activity', label: 'Activity', key: '3', icon: 'M1.5 8h3l2-4 3 8 2-4h3' },
+  { value: 'develop', label: 'Editor', key: '1', Icon: Code2 },
+  { value: 'invoke', label: 'Invoke', key: '2', Icon: Send },
+  { value: 'activity', label: 'Activity', key: '3', Icon: ActivityIcon },
+  { value: 'history', label: 'History', key: '4', Icon: HistoryIcon },
 ] as const
+
+type ReleaseList = components['schemas']['ApplicationReleaseListResponse']
 
 type Draft = {
   name: string
@@ -184,7 +191,15 @@ function Editor({ app, role, userID, qc }: Props) {
   const [published, setPublished] = useState(false)
   const [reloadOpen, setReloadOpen] = useState<Application | null>(null)
   const [params, setParams] = useSearchParams()
-  const activeView = params.get('view') === 'invoke' ? 'invoke' : params.get('view') === 'activity' ? 'activity' : 'develop'
+  const rawView = params.get('view')
+  const activeView = rawView === 'invoke' || rawView === 'activity' || rawView === 'history' ? rawView : 'develop'
+  const relQ = useQuery({
+    queryKey: ['app-releases', app.id],
+    queryFn: () => api.get<ReleaseList>(wsPath(`/api/v1/applications/${encodeURIComponent(app.id)}/releases`)),
+    refetchInterval: app.status === 'preparing' ? 2000 : 10000,
+    retry: false,
+  })
+  const liveSeq = relQ.data?.live_seq
   const [settingsOpen, setSettingsOpen] = useState(false)
   const sectionTabs = useRef<HTMLDivElement>(null)
   const goToView = useCallback((value: string) => {
@@ -614,10 +629,19 @@ function Editor({ app, role, userID, qc }: Props) {
   const testPanel = (
     <div className="app-draft-test">
       <div className="app-draft-input wb-pane">
-        <div className="wb-pane-head"><span className="wb-pane-title">Input</span></div>
+        <div className="wb-pane-head">
+          <span className="wb-pane-title">Input</span>
+          <span className="wb-pane-actions">
+            <Button variant="ghost" size="xs" disabled={view === 'view' || !!validateJson(draft.input)}
+              onClick={() => { const r = formatJson(draft.input); if (r.formatted !== undefined) edit({ input: r.formatted }) }}>Format</Button>
+          </span>
+        </div>
         <div className="wb-pane-body">
           <textarea id="app-input" className="app-area wb-code wb-grow" spellCheck={false}
             value={draft.input} onChange={(e) => edit({ input: e.target.value })} />
+          {validateJson(draft.input) && (
+            <p className="wb-pane-note wb-note-pad text-warn-text" role="alert">JSON syntax: {validateJson(draft.input)}</p>
+          )}
         </div>
       </div>
       <div className="app-out wb-pane">
@@ -654,10 +678,14 @@ function Editor({ app, role, userID, qc }: Props) {
         Custom {side === 'in' ? 'input' : 'output'} schema
       </label>
       {(side === 'in' ? draft.inOn : draft.outOn) && (
-        <textarea className="app-area" rows={6} spellCheck={false} disabled={view === 'view'}
-          aria-label={`${side} schema JSON`}
+        <JsonEditor
+          ariaLabel={`${side} schema JSON`}
+          readOnly={view === 'view'}
+          minHeight="120px"
+          maxHeight="260px"
           value={side === 'in' ? draft.inText : draft.outText}
-          onChange={(e) => edit(side === 'in' ? { inText: e.target.value } : { outText: e.target.value })} />
+          onChange={(val) => edit(side === 'in' ? { inText: val } : { outText: val })}
+        />
       )}
     </div>
   ))
@@ -673,18 +701,43 @@ function Editor({ app, role, userID, qc }: Props) {
       )}
       {reviewOpen && (
         <PublishReviewDialog resource="applications" id={app.id} version={reviewVer}
+          onJumpSection={(sec) => {
+            const next = new URLSearchParams(params)
+            next.delete('view')
+            next.delete('nbview')
+            next.set('section', sec)
+            setSettingsOpen(false)
+            setParams(next)
+          }}
+          onOpenSettings={() => {
+            const next = new URLSearchParams(params)
+            next.delete('view')
+            setSettingsOpen(true)
+            setParams(next)
+          }}
           onClose={() => setReviewOpen(false)}
           onPublished={() => {
             setReviewOpen(false)
             setPublished(true)
             qc.invalidateQueries({ queryKey: ['application', app.id] })
             qc.invalidateQueries({ queryKey: ['applications'] })
+            qc.invalidateQueries({ queryKey: ['app-releases', app.id] })
           }} />
       )}
       {published && (
-        <Notice><SwapLabel
-          show={app.status === 'preparing' ? 'Published — deploying. Invoke becomes available when status is ready.' : 'Published.'}
-          options={['Published — deploying. Invoke becomes available when status is ready.', 'Published.']} /></Notice>
+        <div className="flex flex-wrap items-center gap-3 text-xs text-body">
+          <StatusCell status={app.status} />
+          <span>
+            <SwapLabel
+              show={app.status === 'preparing' ? 'Published — preparing replicas…' : liveSeq ? `Published v${liveSeq} · ready` : 'Published.'}
+              options={liveSeq ? ['Published — preparing replicas…', `Published v${liveSeq} · ready`, 'Published.'] : ['Published — preparing replicas…', 'Published.']}
+            />
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <Button size="xs" variant="primary" disabled={!ready} onClick={() => goToView('invoke')}>Send test invoke</Button>
+            <Button size="xs" variant="ghost" onClick={() => goToView('history')}>Open release history</Button>
+          </div>
+        </div>
       )}
     </>
   )
@@ -694,12 +747,21 @@ function Editor({ app, role, userID, qc }: Props) {
         title={draft.name || 'Application'} id={app.id}
         description={applicationDescription(app) || undefined}
         status={<>
-          <StatusCell status={app.status} />
+          <StatusCell status={app.status} suffix={liveSeq ? ` · v${liveSeq}` : ''} />
           {app.has_unpublished_changes && <span className="app-dim">unpublished changes</span>}{' '}
           <span className="app-dim"><SwapLabel show={saveState} options={['Saved', 'Saving…', 'Unsaved', "Couldn't save"]} /></span>{' '}
           {saveFailed && view === 'edit' && <Button size="xs" onClick={saveNow} disabled={busy !== ''}>Retry</Button>}
         </>}
-        actions={view === 'edit' ? <Button variant="danger" size="sm" onClick={() => setDelOpen(true)}>Delete</Button> : undefined} />
+        actions={view === 'edit' ? (
+          <>
+            <Button variant="primary" size="sm" data-testid="app-publish" onClick={onPublish} disabled={!canRun}>
+              <SwapLabel show={busy === 'publish' ? 'Publishing…' : 'Publish…'} options={['Publish…', 'Publishing…']} />
+            </Button>
+            <Menu trigger={<Button size="sm">More ▾</Button>}>
+              <MenuItem tone="danger" onSelect={() => setDelOpen(true)}>Delete application…</MenuItem>
+            </Menu>
+          </>
+        ) : undefined} />
       {/* P5/F3: invocation and background-save failures stay visible in every view. */}
       {(warn || storeFailed || corrupt) && (
         <div className="detail-error">
@@ -717,13 +779,11 @@ function Editor({ app, role, userID, qc }: Props) {
       <Tabs.Root className="app-detail-views" value={activeView} onValueChange={goToView}>
       <DetailWorkbenchViews>
         <Tabs.List ref={sectionTabs} className="view-tabs app-section-tabs" aria-label="Application views">
-          {appSections.map(({ value, label, key, icon }) => (
+          {appSections.map(({ value, label, key, Icon }) => (
             <Tabs.Trigger key={value} className="view-tab" value={value} title={`${label} (Alt+${key})`}
               aria-keyshortcuts={`Alt+${key}`}
               onClick={value === 'develop' ? () => { if (activeView === 'develop') goToView(value) } : undefined}>
-              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-                <path d={icon} />
-              </svg>
+              <Icon strokeWidth={1.5} aria-hidden="true" />
               {label}
             </Tabs.Trigger>
           ))}
@@ -827,6 +887,29 @@ function Editor({ app, role, userID, qc }: Props) {
         <WorkView>
           <RunsTable appId={app.id} />
         </WorkView>
+      </Tabs.Content>
+      <Tabs.Content value="history" className="work-panel app-view-panel">
+        {activeView === 'history' && (
+          <ReleaseHistory
+            appId={app.id}
+            active
+            draftVersion={base.version}
+            hasUnsavedDraft={fpDirty}
+            canConfigure={view === 'edit' && !corrupt}
+            onRestored={async () => {
+              const fresh = (await api.get<{ application: Application }>(`/api/v1/applications/${app.id}`)).application
+              const next: Saved = { draft: draftOf(fresh), version: fresh.version, fp: fp(draftOf(fresh)) }
+              setDraft(next.draft)
+              setBase(next)
+              persist(scope, next)
+              specSeen.current = false
+              setSpecErrs([])
+              setInitialSpec(parseSpec(next.draft.spec))
+              setSpecKey((k) => k + 1)
+              goToView('develop')
+            }}
+          />
+        )}
       </Tabs.Content>
       </Tabs.Root>
 

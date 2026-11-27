@@ -14,26 +14,24 @@
   border: 1px solid rgb(var(--edge)); border-radius: var(--radius-inset);
   background: rgb(var(--paper)); color: rgb(var(--ink)); box-sizing: border-box;
 }
-/* Shared detail-workbench frame: the views strip + panels own the viewport. */
+/* Shared detail-workbench frame: flush underline tabs on the view-strip
+   hairline — never a bordered rounded rectangle between two straight lines. */
 .detail-workbench .app-view-panel[hidden] { display: none; }
 .detail-workbench .detail-views .view-tabs.app-section-tabs {
-  flex: 0 1 auto; display: flex; align-items: center; gap: 2px;
-  margin-block: 4px; padding: 2px; border: 1px solid var(--detail-edge);
-  background: rgb(var(--surface)); border-radius: var(--radius-control);
+  flex: 1 1 auto; display: flex; align-items: stretch; gap: 2px;
+  margin: 0; padding: 0; border: 0; background: transparent; border-radius: 0;
 }
 .detail-workbench .app-section-tabs .view-tab {
-  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
-  margin: 0; border: 0; border-radius: var(--radius-control); font-weight: 600;
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px;
+  margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+  font-weight: 500; color: rgb(var(--sec)); background: transparent;
 }
-.detail-workbench .app-section-tabs .view-tab svg { width: 14px; height: 14px; }
-.detail-workbench .app-section-tabs .view-tab:hover { background: rgb(var(--accent) / 0.1); color: rgb(var(--ink)); }
+.detail-workbench .app-section-tabs .view-tab svg { width: 14px; height: 14px; flex: none; }
+.detail-workbench .app-section-tabs .view-tab:hover { color: rgb(var(--ink)); background: transparent; }
 .detail-workbench .app-section-tabs .view-tab[data-state='active'] {
-  background: rgb(var(--accent)); color: rgb(var(--paper));
+  color: rgb(var(--ink)); border-bottom-color: rgb(var(--accent)); background: transparent;
 }
-.detail-workbench .app-section-tabs .view-tab:focus-visible { outline-offset: 1px; }
-.detail-workbench .app-section-tabs .view-tab[data-state='active']:focus-visible {
-  outline: 1px solid rgb(var(--paper)); outline-offset: -3px;
-}
+.detail-workbench .app-section-tabs .view-tab:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: -2px; }
 
 .detail-workbench .app-run-location {
   display: flex; align-items: center; gap: 6px; min-width: 0;

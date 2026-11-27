@@ -25,7 +25,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     color-scheme: dark;
     --paper: 18 28 44;
     --surface: 24 35 51;
@@ -42,6 +42,24 @@
     --live: 52 211 153;
     --warn-text: 251 146 60;
   }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --paper: 18 28 44;
+  --surface: 24 35 51;
+  --code: 12 20 33;
+  --ink: 241 245 249;
+  --body: 203 213 225;
+  --sec: 154 168 186;
+  --mute: 128 145 166;
+  --line: 45 59 80;
+  --line-strong: 67 84 107;
+  --accent: 96 165 250;
+  --danger: 251 113 133;
+  --warn: 251 146 60;
+  --live: 52 211 153;
+  --warn-text: 251 146 60;
 }
 
 @layer base {
@@ -241,7 +259,7 @@
     content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px;
     border-radius: 1px; background: rgb(var(--accent)); opacity: 0;
   }
-  .ws-settings-link:hover { color: rgb(var(--ink)); background: rgb(var(--fill-muted)); }
+  .ws-settings-link:hover { color: rgb(var(--ink)); background: var(--fill-muted); }
   .ws-settings-link.is-active { color: rgb(var(--ink)); background: rgb(var(--accent) / 0.07); }
   .ws-settings-link.is-active::before { opacity: 1; }
   .ws-settings-content { flex: 1; min-width: 0; padding: 0 16px 24px; }
@@ -395,7 +413,7 @@
 .ext-split {
   display: inline-flex; align-items: stretch; width: 128px; flex-shrink: 0;
   border: 1px solid var(--edge); border-radius: var(--radius-control);
-  background-color: rgb(var(--paper)); background-image: var(--dome);
+  background-color: rgb(var(--paper));
   box-shadow: var(--shadow-control); overflow: hidden; min-height: 32px;
   transition: box-shadow 180ms var(--ease-damped), background-color 160ms var(--ease-damped),
     border-color 160ms var(--ease-damped), color 160ms var(--ease-damped);

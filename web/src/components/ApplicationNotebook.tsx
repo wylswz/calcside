@@ -8,7 +8,7 @@ import type { Application, NotebookSectionMeta } from '../api'
 import { cmTheme } from './codemirror'
 import { NotebookGraph } from './NotebookGraph'
 import { NotebookAddSection, NotebookCollapse, NotebookGraphPane, NotebookInsert, NotebookViewToggle, nextNotebookSectionName, type NotebookCatalogKind, type NotebookCatalogTargets } from './NotebookChrome'
-import { Button, Confirm, Icon, Menu, MenuItem, MenuSeparator, SwapLabel, inputCls } from './ui'
+import { Button, Confirm, Icon, Menu, MenuItem, MenuSeparator, inputCls } from './ui'
 import './notebook.css'
 import './applicationNotebook.css'
 
@@ -207,8 +207,8 @@ function AppSectionCard({ sec, index, count, ids, movable, canDelete, canAdd, ex
               <input className={inputCls} value={renText} maxLength={48} autoFocus
                 aria-label={`Rename section ${sec.id}`}
                 onChange={(e) => { setRenText(e.target.value); setRenErr('') }}
-                onKeyDown={(e) => { if (e.key === 'Escape') setRenaming(false) }}
-                onBlur={() => setRenaming(false)} />
+                onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); setRenaming(false) } }}
+                onBlur={() => { if (!renErr) submitRename() }} />
               {renErr && <p className="appnb-err" role="alert">{renErr}</p>}
             </form>
           ) : (
@@ -248,7 +248,7 @@ function AppSectionCard({ sec, index, count, ids, movable, canDelete, canAdd, ex
   )
 }
 
-export function ApplicationNotebook({ sections, saved, extensions, readOnly, busy, canRun, onRunEntry, onPublish, onChange, test, testControls, saveStatus, settingsOpen, setSettingsOpen, settings, visible }: Props) {
+export function ApplicationNotebook({ sections, saved, extensions, readOnly, canRun, onRunEntry, onChange, test, testControls, saveStatus, settingsOpen, setSettingsOpen, settings, visible }: Props) {
   const [params, setParams] = useSearchParams()
   const view = params.get('nbview') === 'graph' ? 'graph' : 'code'
   const selected = params.get('section') ?? ''
@@ -637,9 +637,6 @@ export function ApplicationNotebook({ sections, saved, extensions, readOnly, bus
           </div>
           <div className="nb-toolbar-side">
             <NotebookViewToggle view={view} onChange={(v) => { setSettingsOpen(false); goView(v) }} />
-            <Button variant="primary" size="xs" data-testid="app-publish" onClick={onPublish} disabled={readOnly || !canRun}>
-              <SwapLabel show={busy === 'publish' ? 'Publishing…' : 'Publish…'} options={['Publish…', 'Publishing…']} />
-            </Button>
           </div>
         </div>
       </div>

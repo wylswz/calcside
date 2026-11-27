@@ -1109,6 +1109,124 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
+  /api/v1/applications/{id}/release/check:
+    post:
+      operationId: checkApplicationRelease
+      tags: [applications]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplicationReleaseCheckRequest'
+      responses:
+        '200':
+          description: structured release readiness findings for the current draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationReleaseCheckResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/applications/{id}/releases:
+    get:
+      operationId: listApplicationReleases
+      tags: [applications]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: immutable published release history, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationReleaseListResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/applications/{id}/releases/compare:
+    get:
+      operationId: compareApplicationReleases
+      tags: [applications]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: base
+          in: query
+          required: true
+          schema: { type: integer, format: int64, minimum: 0, description: base release seq; 0 = empty base }
+        - name: head
+          in: query
+          required: true
+          schema: { type: string, description: release seq number or "draft" }
+      responses:
+        '200':
+          description: semantic and source diff between two releases or a release and draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishReview'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/applications/{id}/releases/{seq}/restore:
+    post:
+      operationId: restoreApplicationRelease
+      tags: [applications]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: seq
+          in: path
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplicationReleaseRestoreRequest'
+      responses:
+        '200':
+          description: restored historical release into mutable draft under CAS
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /api/v1/applications/{id}/releases/{seq}/rollback:
+    post:
+      operationId: rollbackApplicationRelease
+      tags: [applications]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: seq
+          in: path
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplicationReleaseRollbackRequest'
+      responses:
+        '202':
+          description: live release pointer rolled back; replica preparation proceeds asynchronously
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
   /api/v1/applications/{id}/test:
     post:
       operationId: testApplication
@@ -3720,6 +3838,72 @@ components:
         draft_version: { type: integer, format: int64 }
         debug_version: { type: integer, format: int64 }
         module_sum: { type: string }
+    ApplicationReleaseCheckRequest:
+      type: object
+      required: [version]
+      properties:
+        version: { type: integer, format: int64, minimum: 1 }
+    ReleaseFinding:
+      type: object
+      required: [code, severity, category, message]
+      properties:
+        code: { type: string }
+        severity:
+          type: string
+          enum: [blocker, warning, info]
+        category: { type: string }
+        section: { type: string }
+        message: { type: string }
+        fix: { type: string }
+    ApplicationReleaseCheckResponse:
+      type: object
+      required: [has_drift, status, findings]
+      properties:
+        candidate: { type: string }
+        live_seq: { type: integer, format: int64 }
+        live_digest: { type: string }
+        has_drift: { type: boolean }
+        status:
+          type: string
+          enum: [ready, warnings, blocked]
+        findings:
+          type: array
+          items: { $ref: '#/components/schemas/ReleaseFinding' }
+    ApplicationReleaseEntry:
+      type: object
+      required: [seq, release_id, draft_version, published_by, note, is_live, published_at]
+      properties:
+        seq: { type: integer, format: int64 }
+        release_id: { type: string }
+        draft_version: { type: integer, format: int64 }
+        published_by: { type: string }
+        note: { type: string }
+        rollback_of_seq: { type: integer, format: int64 }
+        is_live: { type: boolean }
+        published_at: { type: string, format: date-time }
+    ApplicationReleaseListResponse:
+      type: object
+      required: [status, releases]
+      properties:
+        status: { $ref: '#/components/schemas/ApplicationStatus' }
+        live_release_id: { type: string }
+        live_seq: { type: integer, format: int64 }
+        releases:
+          type: array
+          items: { $ref: '#/components/schemas/ApplicationReleaseEntry' }
+    ApplicationReleaseRestoreRequest:
+      type: object
+      required: [version]
+      properties:
+        version: { type: integer, format: int64, minimum: 1 }
+    ApplicationReleaseRollbackRequest:
+      type: object
+      required: [expected_base]
+      properties:
+        expected_base:
+          type: string
+          x-go-type: '*string'
+        note: { type: string, maxLength: 500 }
 security:
   - bearerAuth: []
   - cookieAuth: []

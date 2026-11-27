@@ -20,12 +20,10 @@ export function WorkStatusbar({ children }: { children: ReactNode }) {
 }
 
 // Shared status → dot tone for applications, runs, and steps.
-export type StatusTone = 'ok' | 'warn' | 'err' | 'mute'
+import { semanticToneOf, type SemanticTone } from '../ui/core'
+export type StatusTone = SemanticTone
 export function statusTone(status: string): StatusTone {
-  if (status === 'ready' || status === 'succeeded') return 'ok'
-  if (status === 'failed') return 'err'
-  if (status === 'disabled' || status === 'unknown') return 'mute'
-  return 'warn'
+  return semanticToneOf(status)
 }
 
 export function StatusCell({ status, suffix }: { status: string; suffix?: ReactNode }) {

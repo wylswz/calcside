@@ -186,6 +186,9 @@ type ApplicationStore interface {
 
 	ListApplicationReleases(ctx context.Context, workspaceID, appID string) ([]*ApplicationRelease, error)
 	GetApplicationRelease(ctx context.Context, workspaceID, appID string, seq int64) (*ApplicationRelease, error)
+
+	// EP-0026: atomic live-pointer rollback to an existing immutable release.
+	RollbackApplicationRelease(ctx context.Context, workspaceID, appID string, targetSeq int64, expectedBase, publishedBy, note string, now time.Time) (*PersistentInstance, *ApplicationRelease, error)
 }
 
 // ApplicationRelease is one immutable reviewed-publish history entry:
@@ -199,7 +202,15 @@ type ApplicationRelease struct {
 	DraftVersion  int64     `json:"draft_version"`
 	PublishedBy   string    `json:"published_by"`
 	Note          string    `json:"note"`
+	RollbackOfSeq *int64    `json:"rollback_of_seq,omitempty"`
 	PublishedAt   time.Time `json:"published_at"`
 }
 
-func (r *ApplicationRelease) Clone() *ApplicationRelease { out := *r; return &out }
+func (r *ApplicationRelease) Clone() *ApplicationRelease {
+	out := *r
+	if r.RollbackOfSeq != nil {
+		seq := *r.RollbackOfSeq
+		out.RollbackOfSeq = &seq
+	}
+	return &out
+}
