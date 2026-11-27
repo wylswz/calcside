@@ -18,8 +18,8 @@ PR #49 is a checkpoint, not a release candidate. See [console user stories](cons
 - [x] Verify workspace assertions target the visible panel without dropping behavior coverage.
 - [x] Verify the entire interrupt journey: Invoke reports the actual run phase and metrics, Inbox shows Context and a result in place, and switching or chaining interrupts never carries one interrupt's event draft into the next.
 - [x] Run the visual sweep (`VISUAL_AUDIT=1`) and review desktop light/dark and 390px mobile.
-- [ ] Get the full Playwright suite green with its configured single worker. The save-conflict scenario timed out loading the application in the first run but passed both independently and in the next run. The second run exposed a Request-tab focus race and a Notebook test counting subprocesses outside its own worker. Both scenarios passed independently after the tests were fixed. A two-worker attempt hit contention for Atlas's SQLite migration lock.
-- [ ] Review the final diff and verify generated code, migrations, and CI on the exact PR head. Do not merge while verification is incomplete.
+- [x] Run the full Playwright suite with its configured single worker and the visual audit enabled: 160 passed at `c9a9f8a`.
+- [x] Review the final code diff and verify generated code, migrations, and CI: all six PR checks passed at `c9a9f8a`.
 
 ## Before releasing
 
