@@ -3,7 +3,7 @@
 - **Status:** Draft
 - **Created:** 2026-11-27
 - **Area:** application notebook, publish service, run verification, release history, console, SDK/MCP
-- **Related:** [EP-0018](0018-reviewable-publish.md), [EP-0025](0025-application-notebooks.md), [EP-0027](0027-playground-application-promotion.md), [docs/console-user-stories.md](../console-user-stories.md), [docs/interaction-stability.md](../interaction-stability.md)
+- **Related:** [EP-0018](0018-reviewable-publish.md), [EP-0025](0025-application-notebooks.md), [docs/console-user-stories.md](../console-user-stories.md), [docs/interaction-stability.md](../interaction-stability.md)
 
 ## Summary
 
@@ -11,7 +11,7 @@ This proposal defines the product interaction for answering: **how does a notebo
 
 The unit being published is an **application notebook draft**: ordinary sections, one public `main(input)`, optional interrupt handler functions, schemas, execution boundary, and resolved dependencies. Publishing creates an immutable release and moves the application's live pointer to it. The release interaction is not a bare button; it is a short production-readiness flow:
 
-1. **Check** the draft: graph validity, entry functions, schemas, boundary completeness, and unresolved promotion findings.
+1. **Check** the draft: graph validity, entry functions, schemas and boundary completeness.
 2. **Verify** it in a fresh execution session, because application invokes never inherit playground or editor state.
 3. **Review** the exact resolved candidate against the currently live release using EP-0018's digest-bound review.
 4. **Publish** atomically: the immutable release exists first, then the live pointer moves.
@@ -204,7 +204,6 @@ Initial categories:
 | Boundary | missing secret reference, unpublished/missing module, unresolvable extension pin, invalid policy | boundary narrowing that may reduce functionality |
 | Candidate build | normalization/pinning failure, digest mismatch | drift-only candidate identical in source but changed in pins/policies |
 | Verification | verification failure; missing or stale verification on the normal publish path | explicit recorded verification override, if retained |
-| Promotion findings | unresolved blocker inherited from promotion | acknowledged warnings, such as diagnostic plots removed |
 
 V1 policy: structural blockers cannot publish. Verification failure blocks publish. Missing or stale verification blocks the normal publish path. If an override is kept at all, it must be explicit, require a written rationale, and be recorded in release history; it is never a quiet checkbox. The default product direction is mandatory fresh-candidate verification, with fixture/mocking support making that safer over time.
 
@@ -316,7 +315,7 @@ Python SDK exposes `check_release`, `verify_release`, `preview_publish`, `publis
 - Multi-person approval, required reviewers, comments, or branch protection inside calcside.
 - Full saved-test suite management. One verification run is the minimal proof; regression suites are the next proposal/increment.
 - Automatic semantic versioning. Human-readable major/minor/patch labels can be notes/metadata later; they are not needed for correctness.
-- Undocumented or implicit conversion of playground state into releases. That is EP-0027.
+- Automatic conversion of playground state into releases; any future application-editing or agent workflow must define that provenance separately.
 - Undoing external effects through rollback.
 
 ## Delivery slices
