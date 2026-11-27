@@ -1,14 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { getRun, Interrupt } from '../api'
-import { interruptTitle, runPhase, RunPhase } from '../interrupts'
-import { ResumeForm } from './ResumeForm'
-import { SwapLabel } from './ui'
+import { getRun, Interrupt, RunDetail, RunStep } from '../api'
+import { deadlineOf, interruptTitle, runPhase, RunPhase } from '../interrupts'
+import { SwapLabel, TimeLeft } from './ui'
 
 // useRunProgress polls one run and derives its phase. Poll cadence
 // follows the phase (S4): fast while a handler is running, slower while
 // waiting, stopped once terminal.
-export function useRunProgress(runId?: string): { phase?: RunPhase } {
+export function useRunProgress(runId?: string): { phase?: RunPhase; run?: RunDetail; steps?: RunStep[] } {
 	const q = useQuery({
 		queryKey: ['run', runId],
 		queryFn: () => getRun(runId!),
@@ -20,56 +19,54 @@ export function useRunProgress(runId?: string): { phase?: RunPhase } {
 			return p === 'running' ? 1000 : p === 'waiting' ? 3000 : false
 		},
 	})
-	return { phase: q.data ? runPhase(q.data) : undefined }
+	return { phase: q.data ? runPhase(q.data) : undefined, run: q.data?.run, steps: q.data?.steps }
 }
 
-// RunProgress renders one run's live phase in a fixed region (S3/S4):
-// waiting shows the interrupt plus an optional inline resume form,
-// running shows a state label, terminal shows the outcome. The parent
-// reads the same phase via useRunProgress for its Output area.
-export function RunProgress({ runId, appId, scope, inline, fallbackWaiting }: {
-	runId: string
-	appId: string
-	scope: { userId: string; workspaceId: string }
-	inline?: boolean
-	fallbackWaiting?: { interrupt_id: string }
-}) {
-	const { phase } = useRunProgress(runId)
-	const link = <Link className="link text-xs" to={`/applications/${appId}/runs/${runId}`}>Open run</Link>
-	if (phase?.phase === 'waiting') {
+// WaitHead renders only the 28px strip head (tone dot · label · Open
+// run) for a live run phase. Output panes place it directly under
+// their head, then the (bounded) output pre, then the resume form —
+// the form owns the remaining height instead of being pushed to the
+// pane bottom.
+export function WaitHead({ phase, runId, appId }: { phase: RunPhase; runId: string; appId: string }) {
+	const link = <Link className="app-waiting-link" to={`/applications/${appId}/runs/${runId}`}>Open run</Link>
+	if (phase.phase === 'succeeded') return null
+	if (phase.phase === 'waiting') {
 		const i = phase.interrupt as Interrupt
+		const dl = deadlineOf(i)
 		return (
 			<div className="app-waiting" aria-live="polite">
-				<p className="text-sm font-medium text-body">Waiting — {interruptTitle(i)}</p>
-				{inline && i.can_resume && <ResumeForm interrupt={i} scope={scope} />}
-				{link}
+				<div className="app-waiting-head">
+					<span className="app-waiting-dot" data-tone="warn" />
+					<span className="app-waiting-text">
+						waiting · {interruptTitle(i)}
+						{dl && <> · <TimeLeft expiresAt={dl} /></>}
+					</span>
+					{link}
+				</div>
 			</div>
 		)
 	}
-	if (phase?.phase === 'running') {
-		const label = `Running ${phase.handler ?? 'handler'}…`
+	if (phase.phase === 'running') {
+		const label = `running · ${phase.handler ?? 'handler'}`
 		return (
 			<div className="app-waiting" aria-live="polite">
-				<p className="text-sm font-medium text-body"><SwapLabel show={label} options={[label, 'Resumed — running handler…']} /></p>
-				{link}
+				<div className="app-waiting-head">
+					<span className="app-waiting-dot" data-tone="ok" />
+					<span className="app-waiting-text">
+						<SwapLabel show={label} options={[label, 'resumed · running handler']} />
+					</span>
+					{link}
+				</div>
 			</div>
 		)
 	}
-	if (phase && phase.phase !== 'succeeded') {
-		return (
-			<div className="app-waiting" aria-live="polite">
-				<p className="text-sm font-medium text-body">{phase.phase}{phase.errorCode ? `: ${phase.errorCode}` : ''}</p>
+	return (
+		<div className="app-waiting" aria-live="polite">
+			<div className="app-waiting-head">
+				<span className="app-waiting-dot" data-tone="err" />
+				<span className="app-waiting-text">{phase.phase}{phase.errorCode ? ` · ${phase.errorCode}` : ''}</span>
 				{link}
 			</div>
-		)
-	}
-	if (fallbackWaiting) {
-		return (
-			<div className="app-waiting" aria-live="polite">
-				<p className="text-sm font-medium text-body">Waiting — {fallbackWaiting.interrupt_id}</p>
-				{link}
-			</div>
-		)
-	}
-	return null
+		</div>
+	)
 }

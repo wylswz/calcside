@@ -2,8 +2,8 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
 import { startApplicationRuntime, type ApplicationRuntime } from './applicationRuntime'
 
 // EP-0025 notebook applications under real Vite + scratch API/SQLite:
-// UI create (Source format = Notebook) -> section editing with entry
-// labels -> saved dependency graph -> Test main -> publish -> invoke,
+// UI create -> section editing with entry
+// labels -> saved dependency graph -> Run -> publish -> invoke,
 // plus a pinned-release handler resume across republish.
 
 let rt: ApplicationRuntime
@@ -47,7 +47,6 @@ async function publish(id: string, version: number) {
 test('notebook: create -> sections -> test main -> graph -> publish -> invoke', async ({ page }) => {
 	await page.goto(`${viteURL}/applications/new`)
 	await page.locator('#basics-name').fill('NbGreeter')
-	await expect(page.getByLabel('Source format')).toHaveValue('notebook')
 	await page.getByRole('button', { name: 'Continue to configuration' }).click()
 	await page.getByRole('button', { name: 'Create application' }).click()
 	await page.waitForURL(/\/applications\/app_/)
@@ -119,9 +118,9 @@ test('notebook: create -> sections -> test main -> graph -> publish -> invoke', 
 	await page.getByRole('button', { name: 'Remove', exact: true }).click()
 	await expect.poll(savedOrder, { timeout: 15_000 }).toEqual(['format', 'main'])
 
-	// Pinned main's gutter play opens the Test panel — navigation only,
-	// the output placeholder stays until Test main is clicked.
-	await page.getByRole('button', { name: 'Open Test main' }).click()
+	// The toolbar Test button opens the Test panel —
+	// the output placeholder stays until Run is clicked.
+	await page.getByRole('button', { name: 'Test', exact: true }).click()
 	const testPanel = page.getByRole('region', { name: 'Test notebook' })
 	await expect(testPanel).toBeVisible()
 	await expect(testPanel.locator('.app-out-pre')).toContainText('Run to see output')
@@ -163,8 +162,8 @@ test('notebook: create -> sections -> test main -> graph -> publish -> invoke', 
 	await waitReady(id)
 	await page.getByRole('tablist', { name: 'Application views' }).getByRole('tab', { name: 'Invoke' }).click()
 	const invokeCard = page.getByRole('tabpanel', { name: 'Invoke', exact: true })
-	await expect(invokeCard.getByRole('button', { name: 'Invoke' })).toBeEnabled({ timeout: 10_000 })
-	await invokeCard.getByRole('button', { name: 'Invoke' }).click()
+	await expect(invokeCard.getByRole('button', { name: 'Send' })).toBeEnabled({ timeout: 10_000 })
+	await invokeCard.getByRole('button', { name: 'Send' }).click()
 	await expect(page.locator('.app-call-out')).toContainText('Notebook world', { timeout: 30_000 })
 
 	// Back on the workbench, renaming the pinned main keeps its lock
@@ -315,14 +314,14 @@ test('notebook: docked extension catalog installs and configures into the draft'
 
 test('notebook: pinned release resumes the published handler after republish', async () => {
 	const create = await client.post('/api/v1/applications', {
-		data: { name: 'NbWait', notebook: true },
+		data: { name: 'NbWait' },
 	})
 	expect(create.status(), `create: ${await create.text()}`).toBe(200)
 	// CreateRequest seeds a scaffold main section — replace via update.
 	let app = (await create.json()).application
 	const put = await client.put(`/api/v1/applications/${app.id}`, {
 		data: {
-			version: app.version, name: app.name, code: '', spec: app.spec,
+			version: app.version, name: app.name, spec: app.spec,
 			sections: [
 				{ id: 'main', code: 'def main(input):\n    i = interrupt.new()\n    interrupt.wait(i["id"], handler="done", context={})\n    return {"unreachable": True}\n' },
 				{ id: 'handlers', code: 'def done(ctx):\n    return {"marker": "old"}\n' },
@@ -344,7 +343,7 @@ test('notebook: pinned release resumes the published handler after republish', a
 	// Republish a changed handler — the waiting run stays pinned to v1.
 	const put2 = await client.put(`/api/v1/applications/${id}`, {
 		data: {
-			version: app.version, name: app.name, code: '', spec: app.spec,
+			version: app.version, name: app.name, spec: app.spec,
 			sections: [
 				{ id: 'main', code: 'def main(input):\n    i = interrupt.new()\n    interrupt.wait(i["id"], handler="done", context={})\n    return {"unreachable": True}\n' },
 				{ id: 'handlers', code: 'def done(ctx):\n    return {"marker": "new"}\n' },
@@ -369,7 +368,7 @@ test('notebook: pinned release resumes the published handler after republish', a
 
 test('notebook graph: Code / Graph interaction parity on desktop and narrow screens', async ({ page }) => {
 	const create = await client.post('/api/v1/applications', {
-		data: { name: 'NbGraph', notebook: true },
+		data: { name: 'NbGraph' },
 	})
 	expect(create.status(), `create: ${await create.text()}`).toBe(200)
 	const app = (await create.json()).application
@@ -377,7 +376,7 @@ test('notebook graph: Code / Graph interaction parity on desktop and narrow scre
 	const filler = (n: number) => Array.from({ length: 20 }, (_, i) => `pad${n}_${i} = ${i}`).join('\n')
 	const put = await client.put(`/api/v1/applications/${app.id}`, {
 		data: {
-			version: app.version, name: app.name, code: '', spec: app.spec,
+			version: app.version, name: app.name, spec: app.spec,
 			sections: [
 				{ id: 'first', code: `x = 1\n${filler(1)}\n` },
 				{ id: 'middle', code: `y = x + 1\n${filler(2)}\n` },
@@ -517,7 +516,7 @@ test('notebook graph: Code / Graph interaction parity on desktop and narrow scre
 
 test('notebook layout: workbench fills the viewport and panes own scrolling', async ({ page }) => {
 	const create = await client.post('/api/v1/applications', {
-		data: { name: 'NbLayout', notebook: true },
+		data: { name: 'NbLayout' },
 	})
 	expect(create.status(), `create: ${await create.text()}`).toBe(200)
 	const id = (await create.json()).application.id
@@ -545,9 +544,52 @@ test('notebook layout: workbench fills the viewport and panes own scrolling', as
 
 	// Activity owns its own scroller inside the shared work-panel.
 	await page.getByRole('tab', { name: 'Activity' }).click()
-	const scroll = page.locator('.work-panel-scroll:visible')
+	const scroll = page.getByRole('region', { name: 'Runs table' })
 	await expect(scroll).toBeVisible()
 	expect((await scroll.boundingBox())!.height).toBeGreaterThan(0)
+	expect(await scroll.evaluate((el) => getComputedStyle(el).overflowY)).toBe('auto')
 	await page.getByRole('tab', { name: 'Notebook' }).click()
 	await expect(page.locator('[aria-label="Application section main"] .cm-content')).toBeVisible()
+})
+
+// Debug entries: every top-level one-argument function gets a gutter ▶
+// that runs it verbatim (no input schema, no run record); main keeps
+// the contract path.
+test('notebook: gutter run on a non-main entry is a debug run', async ({ page }) => {
+	const r = await client.post('/api/v1/applications', {
+		data: {
+			name: 'NbDebug',
+			sections: [{ id: 'main', code: 'def double(x):\n    return x * 2\n\ndef main(input):\n    return {"echo": input}\n' }],
+		},
+	})
+	expect(r.ok(), await r.text()).toBeTruthy()
+	const id = (await r.json()).application.id
+	await page.goto(`${viteURL}/applications/${id}`)
+	const sec = page.locator('[aria-label="Application section main"] .cm-content')
+	await expect(sec).toContainText('def double(x)')
+	// The markers render inside .cm-gutters, which CodeMirror marks
+	// aria-hidden — target the buttons by their label attribute.
+	await expect(page.locator('button[aria-label="Run double"]')).toBeVisible()
+	await expect(page.locator('button[aria-label="Run main"]')).toBeVisible()
+
+	// The gutter marks both entries; clicking "Run double" fires a
+	// debug run with the Test panel's current input.
+	await page.getByRole('button', { name: 'Test', exact: true }).click()
+	const testPanel = page.getByRole('region', { name: 'Test notebook' })
+	await expect(testPanel).toBeVisible()
+	await page.locator('#app-input').fill('21')
+	await page.locator('button[aria-label="Run double"]').click()
+	await expect(testPanel.locator('#app-entry')).toHaveValue('double')
+	await expect(testPanel.locator('.app-out-pre')).toContainText('42', { timeout: 30_000 })
+	await expect(testPanel).toContainText('debug run, not recorded')
+
+	// No run was recorded for the debug call.
+	const runs = await (await client.get(`/api/v1/applications/${id}/runs`)).json()
+	expect(runs.runs ?? []).toHaveLength(0)
+
+	// Selecting main and running uses the contract path as before.
+	await testPanel.locator('#app-entry').selectOption('main')
+	await page.locator('#app-input').fill('{"name":"ui"}')
+	await page.getByTestId('app-run').click()
+	await expect(testPanel.locator('.app-out-pre')).toContainText('"echo"', { timeout: 30_000 })
 })

@@ -991,7 +991,7 @@ test('screenshots: notebook desktop/mobile × light/dark', async ({ page }) => {
     // 155px total and the title keeps a comfortable width.
     const headH = (await page.locator('.detail-head').boundingBox())!.height
     expect(headH).toBeLessThan(155)
-    const h1W = (await page.locator('.detail-id h1').boundingBox())!.width
+    const h1W = (await page.locator('.detail-title').boundingBox())!.width
     expect(h1W).toBeGreaterThan(240)
     // The gutter run control is top-aligned with its cell, not stretched
     // to mid-cell: its top sits within 16px of the card's top edge.

@@ -12,7 +12,6 @@ import (
 // nbConfig builds a notebook ProgramConfig from name->source pairs.
 func nbConfig(sources map[string]string) ProgramConfig {
 	cfg := ProgramConfig{
-		Notebook:     true,
 		Sources:      map[string][]byte{},
 		InputSchema:  json.RawMessage(`{"type":"object"}`),
 		OutputSchema: json.RawMessage(`{"type":"object"}`),
@@ -224,6 +223,13 @@ b_val = a_val_2
 			"a.star": `a_val_2 = b_val
 `,
 		},
+		"bundle load": {
+			"main.star": `load("b.star", "x")
+def main(input):
+    return {"v": x}
+`,
+			"b.star": `x = 1`,
+		},
 		"no main": {
 			"only.star": `def handler(ctx):
     return {}
@@ -289,19 +295,6 @@ func TestNotebookMountExport(t *testing.T) {
 	}
 }
 
-func TestNotebookEntrypointRejected(t *testing.T) {
-	e := New(4)
-	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
-	cfg := nbConfig(map[string]string{"main.star": `def main(input):
-    return {}
-`})
-	cfg.Entrypoint = "main.star"
-	_, res := e.PrepareProgram(context.Background(), cfg, deps, creation, ProgramCall{ID: "nb-ep"})
-	if res.Error == nil || res.Error.Code != "invalid_program" {
-		t.Fatalf("notebook + entrypoint accepted: %+v", res.Error)
-	}
-}
-
 func TestNotebookUnknownHandlerEntry(t *testing.T) {
 	e := New(4)
 	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
@@ -310,5 +303,91 @@ func TestNotebookUnknownHandlerEntry(t *testing.T) {
 		deps, creation, ProgramCall{ID: "nb-gh", Entry: "ghost", RunID: "run_1", Step: 1})
 	if res.Error == nil || res.Error.Code != "invalid_program" {
 		t.Fatalf("unknown handler entry: %+v", res.Error)
+	}
+}
+
+// Debug entries (Test endpoint only): a non-main entry takes any
+// bounded JSON input verbatim and its output skips schema validation;
+// Debug is ignored for main and never relaxes entry resolution.
+func TestNotebookDebugEntry(t *testing.T) {
+	e := New(4)
+	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
+	p, _ := prepare(t, e, nbConfig(map[string]string{
+		"a_main.star": `def main(input):
+    return {"msg": "hi " + input["name"]}
+`,
+		"d_debug.star": `def double(x):
+    return x * 2
+`,
+	}), deps, creation, ProgramCall{ID: "nb-dbg-prep"})
+
+	// Non-object input is passed verbatim; numeric output violates the
+	// object output schema but debug skips validation.
+	out := e.InvokeProgram(context.Background(), p, json.RawMessage(`21`),
+		deps, creation, ProgramCall{ID: "nb-dbg-1", Entry: "double", Debug: true})
+	if out.Error != nil {
+		t.Fatalf("debug invoke: %+v", out.Error)
+	}
+	if string(out.Output) != `42` {
+		t.Fatalf("debug output: %s", out.Output)
+	}
+
+	// Without Debug the same entry still requires a context object.
+	out = e.InvokeProgram(context.Background(), p, json.RawMessage(`21`),
+		deps, creation, ProgramCall{ID: "nb-dbg-2", Entry: "double"})
+	if out.Error == nil || out.Error.Code != "invalid_input" {
+		t.Fatalf("handler without context object: %+v", out.Error)
+	}
+
+	// Debug on main changes nothing: the input and output schemas
+	// still apply.
+	out = e.InvokeProgram(context.Background(), p, json.RawMessage(`{"name":"x"}`),
+		deps, creation, ProgramCall{ID: "nb-dbg-3", Debug: true})
+	if out.Error != nil {
+		t.Fatalf("main with debug flag: %+v", out.Error)
+	}
+
+	// Unknown debug entries resolve like unknown handler entries.
+	out = e.InvokeProgram(context.Background(), p, json.RawMessage(`21`),
+		deps, creation, ProgramCall{ID: "nb-dbg-4", Entry: "ghost", Debug: true})
+	if out.Error == nil || res2code(out.Error) != "invalid_program" {
+		t.Fatalf("unknown debug entry: %+v", out.Error)
+	}
+}
+
+func res2code(e *ProgramError) string {
+	if e == nil {
+		return ""
+	}
+	return e.Code
+}
+
+// A debug run that produces output violating a custom output schema
+// still succeeds, while main keeps enforcing the same schema.
+func TestNotebookDebugSkipsOutputSchema(t *testing.T) {
+	e := New(4)
+	deps, creation := progEnv(t, &spyFactory{}, nil, nil, nil)
+	p, _ := prepare(t, e, nbConfig(map[string]string{
+		"a_main.star": `def main(input):
+    return 42
+`,
+		"d_debug.star": `def debug(x):
+    return 42
+`,
+	}), deps, creation, ProgramCall{ID: "nb-ds-prep"})
+
+	out := e.InvokeProgram(context.Background(), p, json.RawMessage(`null`),
+		deps, creation, ProgramCall{ID: "nb-ds-1", Entry: "debug", Debug: true})
+	if out.Error != nil {
+		t.Fatalf("debug invoke: %+v", out.Error)
+	}
+	if string(out.Output) != `42` {
+		t.Fatalf("debug output: %s", out.Output)
+	}
+
+	out = e.InvokeProgram(context.Background(), p, json.RawMessage(`{"name":"x"}`),
+		deps, creation, ProgramCall{ID: "nb-ds-2"})
+	if out.Error == nil || out.Error.Code != "invalid_output" {
+		t.Fatalf("main output schema bypassed: %+v", out.Error)
 	}
 }

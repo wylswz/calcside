@@ -34,7 +34,7 @@ test('app reviewed publish: preview -> publish -> invoke -> stale -> refresh -> 
   const cr = await client.post('/api/v1/applications', {
     data: {
       name: 'Greeter',
-      code: 'load("@m/u.star", "hello")\ndef main(input): return hello(input.get("name","world"))',
+      sections: [{ id: 'main', code: 'load("@m/u.star", "hello")\ndef main(input): return hello(input.get("name","world"))' }],
       input_schema: '{"type":"object"}',
       output_schema: '{"type":"string"}',
       spec: { modules: { m: { name: 'strkit', version: 0 } } },
@@ -65,7 +65,7 @@ test('app reviewed publish: preview -> publish -> invoke -> stale -> refresh -> 
   // an old preview.
   const app1 = (await (await client.get(`/api/v1/applications/${app.id}`)).json()).application
   const put1 = await client.put(`/api/v1/applications/${app.id}`, {
-    data: { version: app1.version, name: 'Greeter', code: 'load("@m/u.star", "hello")\ndef main(input): return hello("NEW:"+input.get("name","world"))',
+    data: { version: app1.version, name: 'Greeter', sections: [{ id: 'main', code: 'load("@m/u.star", "hello")\ndef main(input): return hello("NEW:"+input.get("name","world"))' }],
       input_schema: '{"type":"object"}', output_schema: '{"type":"string"}' },
   })
   expect(put1.status(), await put1.text()).toBe(200)
@@ -83,7 +83,7 @@ test('app reviewed publish: preview -> publish -> invoke -> stale -> refresh -> 
   // Mutate the draft between preview and publish → 409 stays open.
   const app2 = (await (await client.get(`/api/v1/applications/${app.id}`)).json()).application
   const put2 = await client.put(`/api/v1/applications/${app.id}`, {
-    data: { version: app2.version, name: 'Greeter', code: 'load("@m/u.star", "hello")\ndef main(input): return hello("NEW2:"+input.get("name","world"))',
+    data: { version: app2.version, name: 'Greeter', sections: [{ id: 'main', code: 'load("@m/u.star", "hello")\ndef main(input): return hello("NEW2:"+input.get("name","world"))' }],
       input_schema: '{"type":"object"}', output_schema: '{"type":"string"}' },
   })
   expect(put2.status(), await put2.text()).toBe(200)

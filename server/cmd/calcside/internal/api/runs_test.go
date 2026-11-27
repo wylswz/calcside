@@ -24,7 +24,7 @@ def main(input):
 
 // mkApp creates an application and returns its id.
 func mkApp(e *env, cookies []*http.Cookie, code string) string {
-	body := `{"name":"w", "code": ` + jsonStr(code) + `}`
+	body := `{"name":"w", "sections": [{"id":"main","code":` + jsonStr(code) + `}]}`
 	c, m, _ := e.req("POST", "/api/v1/applications", body,
 		map[string]string{"X-Requested-With": "calcside"}, cookies)
 	if c != 200 {

@@ -198,7 +198,7 @@ test('new instance: add/configure/remove Files and Network, review reflects', as
   await expect(page.locator('[data-row="net"] .selected-status')).toHaveText('api.example.com, other.com · GET')
   await expect(page.locator('[data-row="fs"] .selected-status')).toHaveText('2.00 KiB')
   await page.getByRole('button', { name: 'Remove Files' }).click()
-  await expect(page.getByText('Files removed')).toBeVisible()
+  await expect(page.locator('.spec-selection .selected-row.is-removed')).toBeVisible()
   const [created] = await Promise.all([
     page.waitForResponse((r) => r.url().endsWith('/api/v1/instances') && r.request().method() === 'POST'),
     page.getByRole('button', { name: 'Create instance' }).click(),
@@ -374,14 +374,13 @@ test('instance detail: quiet surfaces retain supervision flow', async ({ page },
   // env name rendered whole; its value never leaks into the boundary
   await expect(page.getByText('DOMAIN_NAME_REALLY_LONG_VALUE')).toBeVisible()
   await expect(page.getByText('NEVER_RENDER_THIS')).toHaveCount(0)
-  // cool paper desk — no beige regression
+  // cool flat desk — surface body under a solid paper header
   const base = await page.evaluate(() => ({
     body: getComputedStyle(document.body).backgroundColor,
     header: getComputedStyle(document.querySelector('.console-header')!).backgroundColor,
   }))
-  expect(base.body).toBe('rgb(245, 247, 251)')
-  // frosted desk-toned header over the paper desk
-  expect(base.header).toMatch(/^rgba\(245, 247, 251, 0\.\d+\)$/)
+  expect(base.body).toBe('rgb(249, 250, 252)')
+  expect(base.header).toBe('rgb(255, 255, 255)')
   // no page overflow on desktop
   const dw = await page.evaluate(() => ({ s: document.documentElement.scrollWidth, i: window.innerWidth }))
   expect(dw.s).toBeLessThanOrEqual(dw.i)
@@ -742,9 +741,25 @@ test('new instance: palette controls stay put while adding and removing', async 
 
     // removal keeps the next row in place behind an undo row
     const network = page.locator('[data-row="net"]')
+    const dbg = () => page.evaluate(() => {
+      const rail = document.querySelector('.spec-selection')!
+      const rs = rail.getBoundingClientRect()
+      return {
+        scrollY: window.scrollY,
+        rail: { y: Math.round(rs.y), h: Math.round(rs.height), pos: getComputedStyle(rail).position },
+        rows: Array.from(rail.querySelectorAll('.selected-row')).map((r) => {
+          const b = r.getBoundingClientRect()
+          const cs = getComputedStyle(r)
+          return { cls: r.className.replace('selected-row', '').trim() || 'row', y: Math.round(b.y), h: Math.round(b.height),
+            ch: cs.height, cmh: cs.minHeight, bs: cs.boxSizing, inBuilder: !!r.closest('.instance-builder'), text: (r.textContent || '').slice(0, 24) }
+        }),
+      }
+    })
+    console.log('BEFORE', JSON.stringify(await dbg()))
     const top = (await box(network)).y
     await page.getByRole('button', { name: 'Remove Files' }).click()
-    await expect(page.getByText('Files removed')).toBeVisible()
+    await expect(page.locator('.spec-selection .selected-row.is-removed')).toBeVisible()
+    console.log('AFTER', JSON.stringify(await dbg()))
     expect((await box(network)).y).toBe(top)
     await page.getByRole('button', { name: 'Undo' }).click()
     await expect(page.locator('[data-row="fs"]')).toHaveCount(1)
@@ -1071,13 +1086,13 @@ test('opening a dialog does not shift the page under it (S6)', async () => {
     await expect(page.getByRole('navigation', { name: 'Workspace settings' })).toBeVisible()
     await page.addStyleTag({ content: '::-webkit-scrollbar { width: 15px; height: 15px } ::-webkit-scrollbar-thumb { background: #999 } body { min-height: 200vh }' })
     expect(await page.evaluate(() => window.innerWidth - document.documentElement.clientWidth)).toBeGreaterThan(0)
-    const where = () => page.evaluate(() => ['main', '.console-header-inner', 'h1, [role="tablist"], .workspace-tabs'].map((s) => {
+    const where = () => page.evaluate(() => ['main', '.console-header-inner', '.ws-pane-bar'].map((s) => {
       const b = document.querySelector(s)!.getBoundingClientRect()
       return [s, Math.round(b.x), Math.round(b.width)]
     }))
     await expect(page.locator('main')).toBeVisible()
     await expect(page.locator('.console-header-inner')).toBeVisible()
-    await expect(page.locator('h1, [role="tablist"], .workspace-tabs').first()).toBeVisible()
+    await expect(page.locator('.ws-pane-bar')).toBeVisible()
     const before = await where()
     await page.getByRole('button', { name: 'New policy' }).click()
     await expect(page.getByRole('dialog', { name: 'New policy' })).toBeVisible()
@@ -1089,35 +1104,35 @@ test('opening a dialog does not shift the page under it (S6)', async () => {
   }
 })
 
-// The material is real CSS, not a screenshot impression: raised faces are
-// lit by a soft radial gradient (no bevels), fields are flat wells, and
-// pressing changes the face while it is held.
-test('console material: raised controls, inset wells, pressed state', async ({ page }) => {
+// The material is real CSS, not a screenshot impression: flat accent
+// primaries, hairline-separated flat fields and panes, and pressing
+// repaints the control's fill while it is held.
+test('console material: flat controls, hairline fields, pressed state', async ({ page }) => {
   await page.goto(`${consoleURL}/instances/new?step=config`)
   const style = (sel: string) => page.locator(sel).first().evaluate((el) => {
     const s = getComputedStyle(el)
-    return { image: s.backgroundImage, shadow: s.boxShadow, radius: s.borderTopLeftRadius }
+    return { image: s.backgroundImage, shadow: s.boxShadow, radius: s.borderTopLeftRadius, bg: s.backgroundColor }
   })
   const create = await style('[data-ui="button"][data-variant="primary"]')
-  expect(create.image).toContain('radial-gradient')
-  expect(create.shadow).toContain('inset')
-  expect(create.radius).toBe('8px')
+  expect(create.image).toBe('none')
+  expect(create.shadow).toBe('none')
+  expect(create.bg).toBe('rgb(37, 99, 235)')
+  expect(create.radius).toBe('3px')
   const input = await style('.input')
   expect(input.image).toBe('none')
-  expect(input.shadow).toMatch(/inset/)
-  expect(input.radius).toBe('8px')
+  expect(input.shadow).toBe('none')
+  expect(input.radius).toBe('3px')
   const panel = await style('.builder-work-panel')
   expect(panel.image).toBe('none')
-  expect(panel.radius).toBe('12px')
   const tray = await style('.spec-selection')
-  expect(tray.shadow).toMatch(/inset/)
-  // pressed: gradient and shadow change while held
+  expect(tray.shadow).toBe('none')
+  // pressed: the fill repaints while held
   const files = page.locator('.ability-choice').first()
   const box = (await files.boundingBox())!
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-  const hover = await files.evaluate((el) => getComputedStyle(el).backgroundImage)
+  const hover = await files.evaluate((el) => getComputedStyle(el).backgroundColor)
   await page.mouse.down()
-  await expect.poll(() => files.evaluate((el) => getComputedStyle(el).backgroundImage)).not.toBe(hover)
+  await expect.poll(() => files.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe(hover)
   await page.mouse.up()
 })
 
@@ -1134,7 +1149,7 @@ test('new instance: picker version switch is silent', async ({ page }) => {
   const assertSplitGeometry = async () => {
     // S1: the caret lives fully inside the shared pill, the pill width is
     // identical across cards, the label never overflows its segment, and
-    // the card keeps its 76px height.
+    // the flat rows keep a uniform height.
     const split = await card.locator('.ext-split').boundingBox()
     const caret = await card.locator('.ext-card-caret').boundingBox()
     expect(caret!.x).toBeGreaterThanOrEqual(split!.x)
@@ -1143,8 +1158,9 @@ test('new instance: picker version switch is silent', async ({ page }) => {
     expect(singleSplit!.width).toEqual(split!.width)
     const fits = await card.locator('.ext-card-action').evaluate((el) => el.scrollWidth <= el.clientWidth + 1)
     expect(fits).toBe(true)
-    expect((await card.boundingBox())!.height).toEqual(76)
-    expect((await singleCard.boundingBox())!.height).toEqual(76)
+    const cardH = (await card.boundingBox())!.height
+    expect(cardH).toBeGreaterThan(0)
+    expect((await singleCard.boundingBox())!.height).toBe(cardH)
   }
   for (const width of [1440, 375]) {
     await page.setViewportSize({ width, height: 900 })

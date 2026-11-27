@@ -25,8 +25,7 @@ type Application struct {
 	WorkspaceID          string               `json:"workspace_id"`
 	UserID               string               `json:"user_id"`
 	Name                 string               `json:"name"`
-	Code                 string               `json:"code"`
-	Sections             []ApplicationSection `json:"sections,omitempty"`
+	Sections             []ApplicationSection `json:"sections"`
 	Spec                 json.RawMessage      `json:"spec"`
 	InputSchema          json.RawMessage      `json:"input_schema,omitempty"`
 	OutputSchema         json.RawMessage      `json:"output_schema,omitempty"`
@@ -92,24 +91,19 @@ func ValidateApplication(a *Application) error {
 	if !utf8.ValidString(name) || name == "" || strings.TrimSpace(name) == "" || utf8.RuneCountInString(name) > 128 {
 		return fmt.Errorf("%w: name required, max 128 runes", ErrInvalidServingRecord)
 	}
-	if !utf8.ValidString(a.Code) || len(a.Code) > 128<<10 {
-		return fmt.Errorf("%w: code must be UTF-8 under 128 KiB", ErrInvalidServingRecord)
+	if len(a.Sections) == 0 || len(a.Sections) > 64 {
+		return fmt.Errorf("%w: application requires 1..64 sections", ErrInvalidServingRecord)
 	}
-	if a.Sections != nil {
-		if a.Code != "" || len(a.Sections) == 0 || len(a.Sections) > 64 {
-			return fmt.Errorf("%w: notebook requires 1..64 sections and no script code", ErrInvalidServingRecord)
+	seen := map[string]bool{}
+	total := 0
+	for _, section := range a.Sections {
+		if !applicationSectionID.MatchString(section.ID) || seen[section.ID] || !utf8.ValidString(section.Code) {
+			return fmt.Errorf("%w: invalid notebook section", ErrInvalidServingRecord)
 		}
-		seen := map[string]bool{}
-		total := 0
-		for _, section := range a.Sections {
-			if !applicationSectionID.MatchString(section.ID) || seen[section.ID] || !utf8.ValidString(section.Code) {
-				return fmt.Errorf("%w: invalid notebook section", ErrInvalidServingRecord)
-			}
-			seen[section.ID] = true
-			total += len(section.Code)
-			if total > 128<<10 {
-				return fmt.Errorf("%w: notebook source exceeds 128 KiB", ErrInvalidServingRecord)
-			}
+		seen[section.ID] = true
+		total += len(section.Code)
+		if total > 128<<10 {
+			return fmt.Errorf("%w: notebook source exceeds 128 KiB", ErrInvalidServingRecord)
 		}
 	}
 	if len(a.Spec) > 0 {
@@ -138,12 +132,12 @@ func ValidateApplication(a *Application) error {
 }
 
 // NewApplication constructs a version-1 draft.
-func NewApplication(workspaceID, userID, name, code string, spec, inSchema, outSchema json.RawMessage, now time.Time) (*Application, error) {
+func NewApplication(workspaceID, userID, name string, sections []ApplicationSection, spec, inSchema, outSchema json.RawMessage, now time.Time) (*Application, error) {
 	if len(spec) == 0 {
 		spec = json.RawMessage(`{}`)
 	}
 	a := &Application{
-		WorkspaceID: workspaceID, UserID: userID, Name: name, Code: code,
+		WorkspaceID: workspaceID, UserID: userID, Name: name, Sections: sections,
 		Spec:         append(json.RawMessage(nil), spec...),
 		InputSchema:  append(json.RawMessage(nil), inSchema...),
 		OutputSchema: append(json.RawMessage(nil), outSchema...),

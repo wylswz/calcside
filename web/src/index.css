@@ -65,8 +65,8 @@
 
 @layer components {
   .input {
-    @apply w-full border border-line bg-paper px-2.5 py-1.5 text-sm text-ink transition-colors placeholder:text-mute hover:border-line-strong focus:border-accent focus:outline-none disabled:opacity-50;
-    height: 36px;
+    @apply w-full border border-line bg-paper px-2.5 py-1.5 text-[13px] leading-[18px] text-ink transition-colors placeholder:text-mute hover:border-line-strong focus:border-accent focus:outline-none disabled:opacity-50;
+    height: 28px;
   }
   textarea.input { height: auto; }
   select.input {
@@ -95,9 +95,9 @@
   }
 
   .tbl-wrap {
-    @apply overflow-x-auto border border-line;
-    border-radius: var(--radius-control);
-    overflow-y: hidden;
+    @apply overflow-x-auto;
+    border-top: 1px solid rgb(var(--line));
+    border-bottom: 1px solid rgb(var(--line));
   }
   .tbl {
     @apply w-full;
@@ -105,10 +105,10 @@
     font-variant-numeric: tabular-nums;
   }
   .tbl th {
-    @apply whitespace-nowrap border-b border-line bg-surface px-3 py-2 text-left text-xs font-medium normal-case tracking-normal text-sec;
+    @apply whitespace-nowrap border-b border-line bg-surface px-3 py-1.5 text-left text-xs font-medium normal-case tracking-normal text-sec;
   }
   .tbl td {
-    @apply border-b border-line px-3 py-2.5 align-middle;
+    @apply border-b border-line px-3 py-2 align-middle;
   }
   .tbl-compact {
     font-size: 12px; line-height: 18px;
@@ -125,6 +125,138 @@
   }
   .tbl tr.row-open {
     @apply bg-surface;
+  }
+  /* selected row in dense lists: accent left bar + tint (inset box-shadow
+     keeps the row's box stable, S1) */
+  .tbl tr.row-selected {
+    background: rgb(var(--accent) / 0.06);
+    box-shadow: inset 2px 0 0 rgb(var(--accent));
+  }
+}
+
+@layer components {
+  /* ListPage: 40px toolbar over full-bleed content; the scroller is the
+     shell's .console-main, so the body just flows. */
+  .list-page { display: flex; flex-direction: column; min-height: 100%; }
+  .list-toolbar {
+    display: flex; align-items: center; gap: 12px; height: 40px; flex: none;
+    padding: 0 16px; border-bottom: 1px solid rgb(var(--line));
+  }
+  .list-title { font-size: 14px; font-weight: 600; color: rgb(var(--ink)); white-space: nowrap; }
+  .list-count { font-size: 12px; color: rgb(var(--sec)); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .list-toolbar .list-filters { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .list-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .list-body { flex: 1; min-height: 0; }
+  /* group sub-headers inside a list (Instances' Live/Ended/Shared) */
+  .list-group-head {
+    display: flex; align-items: center; height: 28px; padding: 0 16px;
+    font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+    color: rgb(var(--sec));
+  }
+  /* first/last cells carry the page's 16px edge padding */
+  .list-body .tbl th:first-child, .list-body .tbl td:first-child { padding-left: 16px; }
+  .list-body .tbl th:last-child, .list-body .tbl td:last-child { padding-right: 16px; }
+  .list-status {
+    display: flex; align-items: center; gap: 12px; height: 28px; flex: none;
+    padding: 0 16px; border-top: 1px solid rgb(var(--line));
+    font-size: 12px; color: rgb(var(--sec));
+  }
+  /* key/value strip under detail headers (Run detail, Inbox) */
+  .kv-strip {
+    flex: none; display: flex; flex-wrap: wrap; gap: 4px 24px;
+    margin: 0; padding: 6px 16px; border-bottom: 1px solid rgb(var(--line));
+    font-size: 12px;
+  }
+  .kv-strip > div { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .kv-strip dt { color: rgb(var(--mute)); font-size: 11px; white-space: nowrap; }
+  .kv-strip dd { margin: 0; color: rgb(var(--body)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kv-strip code { font-family: var(--font-mono); font-size: 11px; }
+
+  /* InterruptContext: labelled CONTEXT / RESUME URL blocks shared by
+     the Inbox detail pane and run detail waiting pane. */
+  .int-ctx { border-bottom: 1px solid rgb(var(--line)); }
+  .int-ctx-block + .int-ctx-block { border-top: 1px solid rgb(var(--line)); }
+  .int-ctx-head {
+    display: flex; align-items: center; gap: 8px; height: 28px;
+    padding: 0 12px; border-bottom: 1px solid rgb(var(--line));
+  }
+  .int-ctx-head .text-btn { margin-left: auto; }
+  .int-ctx-title {
+    font-size: 11px; font-weight: 600; letter-spacing: .05em;
+    text-transform: uppercase; color: rgb(var(--mute));
+  }
+  .int-ctx-pre {
+    margin: 0; padding: 8px 12px; max-height: 180px; overflow: auto;
+    font-family: var(--font-mono); font-size: 12px; line-height: 18px;
+    color: rgb(var(--body)); background: rgb(var(--code));
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+
+  /* ResumeForm: pane-native compact layout — 28px sub-head with the
+     primary action right, flush mono textarea below. */
+  .resume-form { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .resume-form > :not(.resume-head):not(.resume-area) { flex: none; }
+  .resume-head {
+    display: flex; align-items: center; gap: 8px; height: 28px; flex: none;
+    font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+    color: rgb(var(--mute));
+  }
+  .resume-head > :last-child { margin-left: auto; }
+  .resume-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .resume-area {
+    flex: 1; min-height: 120px; max-height: 240px; margin: 0; padding: 10px 12px;
+    font-family: var(--font-mono); font-size: 13px; line-height: 20px;
+    color: rgb(var(--body)); background: rgb(var(--code));
+    border: 0; border-radius: 0; box-shadow: none; outline: none;
+    resize: vertical; overflow: auto;
+  }
+  .resume-area:focus, .resume-area:focus-visible {
+    outline: 2px solid rgb(var(--accent)); outline-offset: -2px;
+  }
+  .resume-area:disabled { opacity: 0.6; }
+  /* narrow panes: the head may wrap so the action never overlaps the label */
+  @media (max-width: 640px) {
+    .resume-head { height: auto; min-height: 28px; flex-wrap: wrap; padding: 4px 0; row-gap: 4px; }
+  }
+
+  /* Workspace settings: header strip + left settings nav (VS Code style) */
+  .ws-settings { display: flex; flex-direction: column; min-height: 100%; }
+  .ws-settings-head {
+    display: flex; align-items: baseline; gap: 10px; height: 40px; flex: none;
+    padding: 0 16px; border-bottom: 1px solid rgb(var(--line));
+  }
+  .ws-settings-name { font-size: 14px; font-weight: 600; color: rgb(var(--ink)); }
+  .ws-settings-id { font-size: 12px; color: rgb(var(--mute)); font-family: var(--font-mono); }
+  .ws-settings-body { flex: 1; min-height: 0; display: flex; }
+  .ws-settings-nav {
+    width: 200px; flex: none; display: flex; flex-direction: column; gap: 1px;
+    padding: 8px; border-right: 1px solid rgb(var(--line));
+  }
+  .ws-settings-link {
+    position: relative; display: flex; align-items: center; height: 30px;
+    padding: 0 10px 0 12px; border-radius: var(--radius-control);
+    font-size: 13px; color: rgb(var(--sec));
+  }
+  .ws-settings-link::before {
+    content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px;
+    border-radius: 1px; background: rgb(var(--accent)); opacity: 0;
+  }
+  .ws-settings-link:hover { color: rgb(var(--ink)); background: rgb(var(--fill-muted)); }
+  .ws-settings-link.is-active { color: rgb(var(--ink)); background: rgb(var(--accent) / 0.07); }
+  .ws-settings-link.is-active::before { opacity: 1; }
+  .ws-settings-content { flex: 1; min-width: 0; padding: 0 16px 24px; }
+  /* sub-page pane bar inside workspace settings — same 40px row as
+     .list-toolbar but without the border (the content column pads) */
+  .ws-pane-bar { display: flex; align-items: center; gap: 12px; height: 40px; }
+  .ws-pane-title { font-size: 14px; font-weight: 600; color: rgb(var(--ink)); }
+  .ws-pane-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  @media (max-width: 900px) {
+    .ws-settings-body { flex-direction: column; }
+    .ws-settings-nav {
+      width: auto; flex-direction: row; overflow-x: auto;
+      padding: 6px 8px; border-right: 0; border-bottom: 1px solid rgb(var(--line));
+    }
+    .ws-settings-link { height: 32px; white-space: nowrap; }
   }
 }
 
@@ -162,8 +294,8 @@
 .is-warn { color: rgb(var(--warn-text)); }
 
 .spec-tabs { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; scroll-margin-top: 16px; }
-.segmented { display: inline-flex; gap: 4px; padding: 4px; max-width: 100%; overflow-x: auto; border-radius: var(--radius-surface); }
-.segmented [role='tab'] { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border: 1px solid transparent; border-radius: var(--radius-control); font-size: 14px; color: rgb(var(--sec)); white-space: nowrap; }
+.segmented { display: inline-flex; gap: 2px; padding: 2px; max-width: 100%; overflow-x: auto; }
+.segmented [role='tab'] { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid transparent; border-radius: var(--radius-control); font-size: 13px; color: rgb(var(--sec)); white-space: nowrap; }
 .segmented [role='tab']:hover { color: rgb(var(--ink)); }
 .segmented [role='tab'] { font-weight: 500; }
 .segmented [role='tab'][aria-selected='true'] { color: rgb(var(--accent)); }
@@ -216,7 +348,7 @@
 .config-item-title { font-size: 14px; font-weight: 600; color: rgb(var(--ink)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .config-item-summary { margin-top: 1px; font-size: 12px; color: rgb(var(--sec)); overflow-wrap: anywhere; }
 .config-item-body { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgb(var(--line)); }
-.configuration-card { padding: 12px 14px; border: 1px solid rgb(var(--line)); border-radius: 9px; background: rgb(var(--paper)); }
+.configuration-card { padding: 8px 10px; border: 1px solid rgb(var(--line)); border-radius: var(--radius-control); background: rgb(var(--paper)); }
 
 .spec-selection {
   display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; padding: 16px;
@@ -227,7 +359,7 @@
 .selected-list { display: grid; gap: 6px; }
 .selected-row {
   display: flex; align-items: center; gap: 8px; height: 56px; padding: 0 10px 0 8px; min-width: 0;
-  border: 1px solid transparent; border-radius: 9px;
+  border: 1px solid transparent; border-radius: var(--radius-control);
 }
 .selected-row.is-empty { padding-left: 14px; border-style: dashed; border-color: rgb(var(--line-strong)); }
 .selected-row.is-removed { justify-content: space-between; padding: 0 14px; border-style: dashed; border-color: rgb(var(--line-strong)); background: transparent; font-size: 13px; color: rgb(var(--sec)); }

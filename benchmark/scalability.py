@@ -180,7 +180,8 @@ class Experiment:
             }}}, 200),
         ]:
             app = self.request("POST", "/api/v1/applications", {
-                "name": f"scalability-{workload}", "code": code, "spec": spec,
+                "name": f"scalability-{workload}",
+                "sections": [{"id": "main", "code": code}], "spec": spec,
             })["application"]
             path = f"/api/v1/applications/{app['id']}"
             preview = self.request("POST", path + "/publish/preview", {"version": 1})
@@ -192,7 +193,7 @@ class Experiment:
             self.fixtures[workload] = {
                 "app_id": app["id"], "pin_id": app["persistent_instance_id"], "answer": answer,
                 "input": {} if workload == "cpu" else {"url": self.delay_url},
-                "code": code, "spec": spec,
+                "spec": spec,
             }
         notebook = self.request("POST", "/api/v1/instances", {
             "ttl_seconds": 7200, "capabilities": {"fs": {}},

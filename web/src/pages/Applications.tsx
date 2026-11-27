@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, wsPath, Application } from '../api'
 import { applicationDescription } from '../activity'
 import { useRole } from '../workspace'
-import { Button, Confirm, Loading, Notice, PageHeader, RevealNew } from '../components/ui'
+import { Button, Confirm, ListPage, Loading, Notice, RevealNew } from '../components/ui'
 import { useHeldOrder } from '../stableList'
 
 // Applications are durable named functions — a different thing from
@@ -24,14 +24,17 @@ export default function Applications() {
   const held = useHeldOrder(q.data?.applications.map((a) => ({ a })) ?? undefined, ({ a }) => ({ key: a.id, slot: 'apps' }))
 
   return (
-    <div className="app-page">
-      <PageHeader title="Applications"
-        actions={<Button variant="primary" onClick={() => nav('/applications/new')}>New application</Button>} />
+    <ListPage title="Applications" count={held.rows.length}
+      actions={<>
+        {held.arrived > 0 && <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />}
+        {canEdit && <Button variant="primary" onClick={() => nav('/applications/new')}>New application</Button>}
+      </>}>
       {q.isLoading && <Loading />}
       {q.isError && <Notice tone="warning">Could not load applications: {(q.error as Error).message}</Notice>}
-      {held.arrived > 0 && <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />}
-      {q.data && held.rows.length === 0 && held.arrived === 0 && (
-        <p className="app-dim">No applications yet. <Link to="/applications/new" className="text-accent">Create the first one.</Link></p>
+      {held.rows.length === 0 && held.arrived === 0 && !q.isLoading && (
+        <div className="flex h-full flex-col items-center justify-center gap-3 py-16">
+          <p className="text-sm text-sec">No applications yet. <Link to="/applications/new" className="text-accent">Create the first one.</Link></p>
+        </div>
       )}
       {held.rows.length > 0 && (
         <div className="tbl-wrap">
@@ -48,7 +51,7 @@ export default function Applications() {
                       <Link to={`/applications/${a.id}`} className="link font-medium">{a.name}</Link>
                       {description && <div className="mt-0.5 max-w-[420px] truncate text-xs text-sec" title={description}>{description}</div>}
                     </td>
-                    <td><span className={`app-status app-status-${a.status}`}>{a.status}</span></td>
+                    <td><AppStatus status={a.status} /></td>
                     <td className="text-xs text-sec">
                       v{a.version}
                       {a.has_unpublished_changes && <span className="text-mute"> · unpublished</span>}
@@ -73,6 +76,17 @@ export default function Applications() {
           <p className="text-sm text-body">Its deployment and keys stop working.</p>
         </Confirm>
       )}
-    </div>
+    </ListPage>
+  )
+}
+
+// AppStatus: one status vocabulary — dot + text like StatusCell.
+function AppStatus({ status }: { status: string }) {
+  const dot = status === 'ready' ? 'bg-live' : status === 'degraded' ? 'bg-warn' : 'bg-mute'
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs text-sec">
+      <span className={`inline-block h-1.5 w-1.5 rounded-full ${dot}`} />
+      {status}
+    </span>
   )
 }

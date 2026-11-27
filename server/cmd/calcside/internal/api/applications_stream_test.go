@@ -49,7 +49,7 @@ func mkStreamApp(e *env, cookies []*http.Cookie, code, outSchema string) string 
 		out = outSchema
 	}
 	payload, _ := json.Marshal(map[string]any{
-		"name": "sapp", "code": code,
+		"name": "sapp", "sections": []map[string]any{{"id": "main", "code": code}},
 		"input_schema": `{"type":"object"}`, "output_schema": out,
 		"spec": map[string]any{"capabilities": map[string]any{"io": map[string]any{}}},
 	})
@@ -268,7 +268,7 @@ func mkAppNoOutSchema(e *env, cookies []*http.Cookie, code string) string {
 	e.t.Helper()
 	csrf := map[string]string{"X-Requested-With": "calcside"}
 	payload, _ := json.Marshal(map[string]any{
-		"name": "sapp", "code": code,
+		"name": "sapp", "sections": []map[string]any{{"id": "main", "code": code}},
 		"input_schema": `{"type":"object"}`,
 		"spec":         map[string]any{"capabilities": map[string]any{"io": map[string]any{}}},
 	})
@@ -319,7 +319,7 @@ func TestApplicationStreamDefaultOutputSchema(t *testing.T) {
 	delApp(e, cookies, id2)
 
 	payload, _ := json.Marshal(map[string]any{
-		"name": "sapp", "code": `def main(i): return stream.from_list([1])`,
+		"name": "sapp", "sections": []map[string]any{{"id": "main", "code": `def main(i): return stream.from_list([1])`}},
 		"output_schema": nil,
 	})
 	code, m, _ := e.req("POST", "/api/v1/applications", string(payload), csrf, cookies)

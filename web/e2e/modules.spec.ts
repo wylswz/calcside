@@ -29,7 +29,10 @@ test('module create → source edit → debug run → publish → instance use',
   await expect(page.getByTestId('module-editor')).toBeVisible()
   await expect(page.getByTestId('debug-script')).toBeVisible()
   await expect(page.getByTestId('debug-result')).toBeVisible()
+  // The debug environment lives on the Settings tab now.
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click()
   await expect(page.getByText('Extensions & runtime')).toBeVisible()
+  await page.getByRole('tab', { name: 'Source', exact: true }).click()
 
   // Edit source via CodeMirror to a recognisable marker, save.
   const fillCM = async (testid: string, text: string) => {

@@ -39,7 +39,7 @@ func appDTO(v *application.View) gen.Application {
 	}
 	d := gen.Application{
 		Id: a.ID, WorkspaceId: a.WorkspaceID, UserId: a.UserID,
-		Name: a.Name, Code: a.Code,
+		Name:                  a.Name,
 		Spec:                  gen.RawJSON(spec),
 		SpecJson:              strPtr(string(a.Spec)),
 		Version:               a.Version,
@@ -66,24 +66,19 @@ func appDTO(v *application.View) gen.Application {
 	if v.ErrorCode != "" {
 		d.ErrorCode = &v.ErrorCode
 	}
-	if a.Sections != nil {
-		secs := make([]gen.ApplicationSection, 0, len(a.Sections))
-		for _, s := range a.Sections {
-			secs = append(secs, gen.ApplicationSection{Id: s.ID, Code: s.Code})
-		}
-		d.Sections = &secs
+	secs := make([]gen.ApplicationSection, 0, len(a.Sections))
+	for _, s := range a.Sections {
+		secs = append(secs, gen.ApplicationSection{Id: s.ID, Code: s.Code})
 	}
+	d.Sections = secs
 	return d
 }
 
 // appDetailDTO is appDTO plus the saved-draft notebook analysis —
-// dependency graph and static entry hints — computed only on detail
-// responses and only for notebook applications.
+// dependency graph and static entry hints — computed on detail
+// responses.
 func appDetailDTO(v *application.View) gen.Application {
 	d := appDTO(v)
-	if v.Application.Sections == nil {
-		return d
-	}
 	g, entries := application.DraftNotebook(v.Application)
 	strs := func(s []string) []string {
 		if s == nil {
@@ -387,8 +382,15 @@ func (s *strictImpl) CreateApplication(ctx context.Context, req gen.CreateApplic
 	if b.Spec != nil {
 		spec = json.RawMessage(*b.Spec)
 	}
+	var createSecs []store.ApplicationSection
+	if b.Sections != nil {
+		createSecs = make([]store.ApplicationSection, 0, len(*b.Sections))
+		for _, s := range *b.Sections {
+			createSecs = append(createSecs, store.ApplicationSection{ID: s.Id, Code: s.Code})
+		}
+	}
 	v, err := s.d.Application.Create(ctx, a, application.CreateRequest{
-		Name: name, Code: b.Code, Notebook: b.Notebook != nil && *b.Notebook, Spec: spec,
+		Name: name, Sections: createSecs, Spec: spec,
 		InputSchema: schemaSide(b.InputSchema), OutputSchema: schemaSide(b.OutputSchema),
 	})
 	if err != nil {
@@ -426,15 +428,12 @@ func (s *strictImpl) UpdateApplication(ctx context.Context, req gen.UpdateApplic
 	if b.Spec != nil {
 		spec = json.RawMessage(*b.Spec)
 	}
-	var sections []store.ApplicationSection
-	if b.Sections != nil {
-		sections = make([]store.ApplicationSection, 0, len(*b.Sections))
-		for _, s := range *b.Sections {
-			sections = append(sections, store.ApplicationSection{ID: s.Id, Code: s.Code})
-		}
+	sections := make([]store.ApplicationSection, 0, len(b.Sections))
+	for _, s := range b.Sections {
+		sections = append(sections, store.ApplicationSection{ID: s.Id, Code: s.Code})
 	}
 	v, err := s.d.Application.Update(ctx, actorOf(p), req.Id, application.UpdateRequest{
-		Version: b.Version, Name: b.Name, Code: b.Code, Sections: sections, Spec: spec,
+		Version: b.Version, Name: b.Name, Sections: sections, Spec: spec,
 		InputSchema: schemaSide(b.InputSchema), OutputSchema: schemaSide(b.OutputSchema),
 	})
 	if err != nil {
@@ -519,13 +518,15 @@ func (s *strictImpl) TestApplication(ctx context.Context, req gen.TestApplicatio
 	if req.Body == nil {
 		return testApplicationResp{rawJSON: appFail(service.BadRequest("body required"))}, nil
 	}
-	var input json.RawMessage
-	if req.Body.Input != nil {
-		input = json.RawMessage(*req.Body.Input)
+	// Non-pointer RawJSON: absent stays nil, explicit null stays literal.
+	input := json.RawMessage(req.Body.Input)
+	var entry string
+	if req.Body.Entry != nil {
+		entry = *req.Body.Entry
 	}
 	d := s.d
 	return testApplicationResp{deferred: &appRunResp{ctx: ctx, call: func(cctx context.Context) (*application.RunView, error) {
-		return d.Application.Test(cctx, actorOf(p), req.Id, req.Body.Version, input)
+		return d.Application.Test(cctx, actorOf(p), req.Id, req.Body.Version, input, entry)
 	}}}, nil
 }
 

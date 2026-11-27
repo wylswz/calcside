@@ -731,8 +731,6 @@ type APIKey struct {
 
 // Application defines model for Application.
 type Application struct {
-	// Code main.star source
-	Code                  string    `json:"code"`
 	CreatedAt             time.Time `json:"created_at"`
 	ErrorCode             *string   `json:"error_code,omitempty"`
 	HasUnpublishedChanges bool      `json:"has_unpublished_changes"`
@@ -752,8 +750,8 @@ type Application struct {
 	PublishedVersion     int64   `json:"published_version"`
 	ReleaseId            *string `json:"release_id,omitempty"`
 
-	// Sections notebook program sections; absent = script application
-	Sections *[]ApplicationSection `json:"sections,omitempty"`
+	// Sections notebook program sections
+	Sections []ApplicationSection `json:"sections"`
 
 	// Spec raw JSON preserved byte-for-byte; never re-parsed by the API tier
 	Spec RawJSON `json:"spec"`
@@ -769,16 +767,14 @@ type Application struct {
 
 // ApplicationCreateRequest defines model for ApplicationCreateRequest.
 type ApplicationCreateRequest struct {
-	// Code omitted/null = scaffold
-	Code        *string `json:"code,omitempty"`
 	InputSchema *string `json:"input_schema,omitempty"`
 	Name        *string `json:"name,omitempty"`
 
-	// Notebook Create a notebook application with a main section instead of a script.
-	Notebook *bool `json:"notebook,omitempty"`
-
 	// OutputSchema omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema
 	OutputSchema *string `json:"output_schema,omitempty"`
+
+	// Sections notebook program sections; omitted/null = scaffold a single main section
+	Sections *[]ApplicationSection `json:"sections,omitempty"`
 
 	// Spec raw JSON preserved byte-for-byte; never re-parsed by the API tier
 	Spec *RawJSON `json:"spec,omitempty"`
@@ -826,22 +822,24 @@ type ApplicationStatus string
 
 // ApplicationTestRequest defines model for ApplicationTestRequest.
 type ApplicationTestRequest struct {
+	// Entry entry function to run. Omitted or "main" runs main(input) with the input schema as a recorded test run. Any other top-level one-argument function runs as a debug call: the input is any bounded JSON value passed verbatim (no input schema, no handler-context object), the output is bounded and secret-redacted but not validated against the output schema, and no run is recorded — interrupt.* ops are unavailable. Debug entries exist only on this endpoint; public invoke always runs main.
+	Entry *string `json:"entry,omitempty"`
+
 	// Input raw JSON preserved byte-for-byte; never re-parsed by the API tier
-	Input   *RawJSON `json:"input,omitempty"`
-	Version int64    `json:"version"`
+	Input   RawJSON `json:"input,omitempty"`
+	Version int64   `json:"version"`
 }
 
 // ApplicationUpdateRequest defines model for ApplicationUpdateRequest.
 type ApplicationUpdateRequest struct {
-	Code        string  `json:"code"`
 	InputSchema *string `json:"input_schema,omitempty"`
 	Name        string  `json:"name"`
 
 	// OutputSchema omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema
 	OutputSchema *string `json:"output_schema,omitempty"`
 
-	// Sections notebook program sections; must be absent for script applications
-	Sections *[]ApplicationSection `json:"sections,omitempty"`
+	// Sections notebook program sections
+	Sections []ApplicationSection `json:"sections"`
 
 	// Spec raw JSON preserved byte-for-byte; never re-parsed by the API tier
 	Spec    *RawJSON `json:"spec,omitempty"`

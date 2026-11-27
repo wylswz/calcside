@@ -138,11 +138,11 @@ func seedServing(t *testing.T, st store.Store) (*store.User, *store.PersistentIn
 	prog := runtime.ProgramBundle{
 		Sources: map[string][]byte{"main.star": []byte(`counter = [0]
 def main(input):
-    counter[0] += 1
+    n = counter[0] + 1
     seed = fs.read("seed.txt")
     seen = fs.exists("scratch.txt")
     fs.write("scratch.txt", "x")
-    return {"n": counter[0], "seed": seed, "scratch_seen": seen}`)},
+    return {"n": n, "seed": seed, "scratch_seen": seen}`)},
 		Assets:       map[string][]byte{"seed.txt": []byte("seed")},
 		InputSchema:  json.RawMessage(`{"type":"object"}`),
 		OutputSchema: json.RawMessage(`{"type":"object","required":["n","seed","scratch_seen"]}`),

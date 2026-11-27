@@ -182,7 +182,7 @@ export default function InstanceDetail() {
 
   return (
     <div className="instance-detail detail-workbench">
-      <DetailWorkbenchHeader backTo="/" backLabel="← Instances" title={name} id={inst.id}
+      <DetailWorkbenchHeader backTo="/" backLabel="Instances" title={name} id={inst.id}
         description={description}
         status={<>
           <InstanceStatus inst={inst} />

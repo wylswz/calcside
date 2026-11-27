@@ -195,8 +195,6 @@ func (m *Manager) Prepare(ctx context.Context, req *runtime.PrepareRequest) (*ru
 	deps.Context = callCtx
 	deps.Observer = sink
 	cfg := engine.ProgramConfig{
-		Entrypoint:   req.Program.Entrypoint,
-		Notebook:     req.Program.Notebook,
 		Sources:      req.Program.Sources,
 		Assets:       req.Program.Assets,
 		InputSchema:  req.Program.InputSchema,
@@ -325,6 +323,7 @@ func (m *Manager) Invoke(ctx context.Context, req *runtime.InvokeRequest) (*runt
 		ActorEmail: actor.Email,
 		Timeout:    dur,
 		Entry:      req.Entry,
+		Debug:      req.Debug,
 		RunID:      req.RunID,
 		Step:       req.Step,
 		Interrupts: slots,

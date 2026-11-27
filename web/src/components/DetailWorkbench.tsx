@@ -2,8 +2,8 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import './detailWorkbench.css'
 
-// Shared IDE-style detail frame: the instance and application routes
-// paint the same compact identity header and view tab strip above
+// Shared IDE-style detail frame: one compact identity row (crumb ·
+// title · id · status · actions) and a view tab strip above
 // viewport-filling panes that own their scrollers.
 
 export function DetailWorkbenchHeader({ backTo, backLabel, title, id, description, status, actions }: {
@@ -17,14 +17,12 @@ export function DetailWorkbenchHeader({ backTo, backLabel, title, id, descriptio
 }) {
   return (
     <header className="detail-head">
-      <div className="detail-id min-w-0 flex-1">
-        <div className="detail-crumb text-xs text-sec"><Link to={backTo} className="transition-colors hover:text-accent">{backLabel}</Link></div>
-        <h1 className="break-words font-semibold text-ink" title={title}>{title}</h1>
-        {title !== id && <div className="mt-1 truncate font-mono text-xs text-mute" title={id}>{id}</div>}
-        {description && <p className="detail-desc text-sm text-sec" title={description}>{description}</p>}
-        <div className="detail-header-status mt-2 flex items-center gap-3">{status}</div>
-      </div>
-      {actions && <div className="detail-actions ml-auto flex items-center gap-2">{actions}</div>}
+      <Link to={backTo} className="detail-crumb">{backLabel}</Link>
+      <h1 className="detail-title" title={title}>{title}</h1>
+      {title !== id && <code className="detail-id" title={id}>{id}</code>}
+      {description && <span className="detail-desc" title={description}>{description}</span>}
+      <div className="detail-header-status">{status}</div>
+      {actions && <div className="detail-actions">{actions}</div>}
     </header>
   )
 }

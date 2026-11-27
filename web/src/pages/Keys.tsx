@@ -60,7 +60,7 @@ export default function Keys({ bare }: { bare?: boolean }) {
 
   return (
     <div>
-      {bare && <div className="mb-4 flex items-center justify-between"><p className="text-xs text-sec" /><Button variant="primary" onClick={startNew}>New key</Button></div>}
+      {bare && <div className="ws-pane-bar"><span className="ws-pane-title">API keys</span><span className="ws-pane-actions"><Button variant="primary" onClick={startNew}>New key</Button></span></div>}
 {!bare && <PageHeader title="API keys"
         actions={<Button variant="primary" onClick={startNew}>New key</Button>} />}
       <div className="tbl-wrap">

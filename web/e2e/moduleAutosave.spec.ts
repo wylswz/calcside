@@ -71,6 +71,7 @@ test('autosave: dep-only add publishes without debug creds', async ({ page }) =>
   })
   const id = (await cr.json()).module.id
   await page.goto(`${rt.viteURL}/modules/${id}`)
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click()
   await expect(page.getByTestId('module-deps')).toBeVisible()
   await page.getByTestId('module-deps').getByRole('button', { name: 'Add needkey 0.1.0' }).click()
   await expect.poll(async () => {
@@ -110,6 +111,7 @@ test('autosave: dep remove publishes the deletion', async ({ page }) => {
   })
   const id = (await cr.json()).module.id
   await page.goto(`${rt.viteURL}/modules/${id}`)
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click()
   await page.getByTestId('module-deps').getByRole('button', { name: 'Add probe 0.1.0' }).click()
   await expect.poll(async () => {
     const g = await rt.client.get(`/api/v1/modules/${id}`)
@@ -153,6 +155,7 @@ test('dep remove: cancel keeps row order, confirm drops only the dep (C2/C3/F2)'
   })
   const id = (await cr.json()).module.id
   await page.goto(`${rt.viteURL}/modules/${id}`)
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click()
   const deps = page.getByTestId('module-deps')
   // Two fixed deps plus a non-dep capability (Files) so the summary
   // mixes managed and unmanaged rows.

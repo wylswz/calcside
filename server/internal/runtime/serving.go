@@ -21,14 +21,10 @@ import (
 // client-tunable JSON limit field. This is not yet a full
 // content-hashed, spec-pinned release record.
 type ProgramBundle struct {
-	Entrypoint string `json:"entrypoint,omitempty"`
-	// Notebook marks the bundle as an EP-0025 notebook program: every
-	// source is an ordinary section and entry points are uniquely
-	// bound top-level functions. Notebook and Entrypoint are mutually
-	// exclusive; a notebook bundle carries no entrypoint.
-	Notebook bool              `json:"notebook,omitempty"`
-	Sources  map[string][]byte `json:"sources"`
-	Assets   map[string][]byte `json:"assets,omitempty"`
+	// Every source is an ordinary notebook section (<id>.star); entry
+	// points are uniquely bound top-level functions.
+	Sources map[string][]byte `json:"sources"`
+	Assets  map[string][]byte `json:"assets,omitempty"`
 	// The two contract schemas are publish-time release metadata, not
 	// declared inside the Starlark sources.
 	InputSchema  json.RawMessage `json:"input_schema"`
@@ -130,6 +126,11 @@ type InvokeRequest struct {
 	// function) and Input is the full handler-context JSON object built
 	// by the API.
 	Entry string `json:"entry,omitempty"`
+	// Debug marks a Test-endpoint debug call on a non-main entry: the
+	// input is passed verbatim without a handler-context object and the
+	// output skips schema validation. Debug carries no run identity or
+	// interrupt slots and is never set by public invoke.
+	Debug bool `json:"debug,omitempty"`
 	// RunID, Step and Interrupts carry the run's identity and the
 	// pre-reserved interrupt slots interrupt.new may claim this step.
 	RunID      string          `json:"run_id,omitempty"`
@@ -151,15 +152,13 @@ type InvokeResponse struct {
 
 // String renders bundle metadata only.
 func (b ProgramBundle) String() string {
-	return fmt.Sprintf("program{entrypoint=%s sources=%d source_bytes=%d assets=%d asset_bytes=%d}",
-		b.Entrypoint, len(b.Sources), byteLen(b.Sources), len(b.Assets), byteLen(b.Assets))
+	return fmt.Sprintf("program{sources=%d source_bytes=%d assets=%d asset_bytes=%d}",
+		len(b.Sources), byteLen(b.Sources), len(b.Assets), byteLen(b.Assets))
 }
 
 // LogValue renders bundle metadata only.
 func (b ProgramBundle) LogValue() slog.Value {
 	return slog.GroupValue(
-		slog.String("entrypoint", b.Entrypoint),
-		slog.Bool("notebook", b.Notebook),
 		slog.Int("sources", len(b.Sources)),
 		slog.Int("source_bytes", byteLen(b.Sources)),
 		slog.Int("assets", len(b.Assets)),
@@ -194,7 +193,6 @@ func (r PrepareRequest) LogValue() slog.Value {
 		slog.String("user_id", r.Owner.UserID),
 		slog.Int("secrets", len(r.Secrets)),
 		slog.Group("program",
-			slog.String("entrypoint", r.Program.Entrypoint),
 			slog.Int("sources", len(r.Program.Sources)),
 			slog.Int("source_bytes", byteLen(r.Program.Sources)),
 			slog.Int("assets", len(r.Program.Assets)),
@@ -205,9 +203,9 @@ func (r PrepareRequest) LogValue() slog.Value {
 // String renders invoke metadata only -- never the input body,
 // handler context or interrupt tokens.
 func (r InvokeRequest) String() string {
-	return fmt.Sprintf("invoke{instance=%s invoke=%s release=%s gen=%d epoch=%d owner=%s actor=%s input_bytes=%d entry=%s run_id=%s step=%d interrupts=%d}",
+	return fmt.Sprintf("invoke{instance=%s invoke=%s release=%s gen=%d epoch=%d owner=%s actor=%s input_bytes=%d entry=%s debug=%t run_id=%s step=%d interrupts=%d}",
 		r.InstanceID, r.InvokeID, r.ReleaseID, r.Generation, r.Epoch, r.Owner.UserID, r.Actor.UserID, len(r.Input),
-		r.Entry, r.RunID, r.Step, len(r.Interrupts))
+		r.Entry, r.Debug, r.RunID, r.Step, len(r.Interrupts))
 }
 
 // LogValue renders invoke metadata only.
@@ -222,6 +220,7 @@ func (r InvokeRequest) LogValue() slog.Value {
 		slog.String("actor_id", r.Actor.UserID),
 		slog.Int("input_bytes", len(r.Input)),
 		slog.String("entry", r.Entry),
+		slog.Bool("debug", r.Debug),
 		slog.String("run_id", r.RunID),
 		slog.Int("step", r.Step),
 		slog.Int("interrupts", len(r.Interrupts)),

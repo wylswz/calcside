@@ -6,7 +6,7 @@ import { CreateGuide } from '../components/CreateGuide'
 import { SpecForm, type SpecFormHandle } from '../components/SpecForm'
 import { KeyValueRows } from '../components/SpecSections'
 import { sameRows, type InstanceDraft, type DraftError, type InstanceSpec } from '../instanceDraft'
-import { Button, Field, inputCls, Loading, Notice, PageHeader, SwapLabel } from '../components/ui'
+import { Button, Field, inputCls, Loading, Notice, SwapLabel } from '../components/ui'
 import './create-flow.css'
 
 type Step = 'basics' | 'config'
@@ -23,7 +23,6 @@ export default function NewApplication() {
   const step: Step = params.get('step') === 'config' ? 'config' : 'basics'
   const [configMounted, setConfigMounted] = useState(step === 'config')
   const [name, setName] = useState('')
-  const [notebook, setNotebook] = useState(true)
   const [description, setDescription] = useState('')
   const [labels, setLabels] = useState<{ k: string; v: string }[]>([])
   // A basics edit made while the hidden configuration is mounted must
@@ -91,7 +90,7 @@ export default function NewApplication() {
     setBusy(true)
     try {
       const r = await api.postRawJson<{ application: Application }>(`/api/v1/applications?workspace=${encodeURIComponent(dest.id)}`,
-        `{"name":${JSON.stringify(name)},"spec":${specJSON ?? JSON.stringify(spec ?? {})}${notebook ? ',"notebook":true' : ''}}`)
+        `{"name":${JSON.stringify(name)},"spec":${specJSON ?? JSON.stringify(spec ?? {})}}`)
       qc.invalidateQueries({ queryKey: ['applications'] })
       nav(`/applications/${r.application.id}`)
     } catch (x: any) { setErr(x.message); setBusy(false) }
@@ -99,23 +98,23 @@ export default function NewApplication() {
 
   return (
     <div className="instance-builder">
-      <PageHeader title="New application">
+      <div className="list-toolbar create-toolbar">
+        <h1 className="list-title">New application</h1>
         {step === 'config' && (name.trim() || description.trim()) && (
-          <span>{name.trim() || 'Untitled application'}{description.trim() ? ` — ${description.trim()}` : ''}</span>
+          <span className="create-toolbar-name">{name.trim() || 'Untitled application'}{description.trim() ? ` — ${description.trim()}` : ''}</span>
         )}
-      </PageHeader>
-
-      <nav className="create-steps" aria-label="Create steps">
-        <button type="button" className="create-step" data-state={step === 'basics' ? 'current' : 'done'}
-          aria-current={step === 'basics' ? 'step' : undefined} onClick={() => { if (step === 'config') goBasics() }}>
-          <span className="create-step-num">1</span> Basics
-        </button>
-        <span className="create-step-line" aria-hidden="true" />
-        <button type="button" className="create-step" data-state={step === 'config' ? 'current' : 'todo'}
-          aria-current={step === 'config' ? 'step' : undefined} onClick={() => { if (step === 'basics') goConfig() }}>
-          <span className="create-step-num">2</span> Configuration
-        </button>
-      </nav>
+        <nav className="create-steps" aria-label="Create steps">
+          <button type="button" className="create-step" data-state={step === 'basics' ? 'current' : 'done'}
+            aria-current={step === 'basics' ? 'step' : undefined} onClick={() => { if (step === 'config') goBasics() }}>
+            <span className="create-step-num">1</span> Basics
+          </button>
+          <span className="create-step-line" aria-hidden="true" />
+          <button type="button" className="create-step" data-state={step === 'config' ? 'current' : 'todo'}
+            aria-current={step === 'config' ? 'step' : undefined} onClick={() => { if (step === 'basics') goConfig() }}>
+            <span className="create-step-num">2</span> Configuration
+          </button>
+        </nav>
+      </div>
 
       {step === 'basics' && (
         <div className="create-basics-layout">
@@ -132,13 +131,6 @@ export default function NewApplication() {
                 <Field label="Description">
                   <input id="basics-description" className={inputCls} value={description} maxLength={280}
                     placeholder="What does it do?" onChange={(e) => { basicsPending.current = true; setDescription(e.target.value) }} />
-                </Field>
-                <Field label="Source format">
-                  <select id="basics-source-format" className={inputCls} value={notebook ? 'notebook' : 'script'}
-                    onChange={(e) => setNotebook(e.target.value === 'notebook')}>
-                    <option value="notebook">Notebook</option>
-                    <option value="script">Script</option>
-                  </select>
                 </Field>
               </div>
               <div>

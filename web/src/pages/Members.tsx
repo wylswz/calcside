@@ -40,6 +40,7 @@ export default function Members({ ws }: { ws: Workspace }) {
 
   return (
     <div>
+      <div className="ws-pane-bar"><span className="ws-pane-title">Members</span></div>
       {err && <Notice tone="warning">{err.message}</Notice>}
       {membersQ.isLoading && <Loading />}
       <table className="mb-4 w-full text-left text-sm">

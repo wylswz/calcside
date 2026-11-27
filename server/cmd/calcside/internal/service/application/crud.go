@@ -87,8 +87,7 @@ type RunView struct {
 
 type CreateRequest struct {
 	Name         string
-	Code         *string
-	Notebook     bool
+	Sections     []store.ApplicationSection
 	Spec         json.RawMessage
 	InputSchema  json.RawMessage
 	OutputSchema json.RawMessage
@@ -97,7 +96,6 @@ type CreateRequest struct {
 type UpdateRequest struct {
 	Version      int64
 	Name         string
-	Code         string
 	Sections     []store.ApplicationSection
 	Spec         json.RawMessage
 	InputSchema  json.RawMessage
@@ -139,16 +137,6 @@ func (s *Service) Create(ctx context.Context, a service.Actor, r CreateRequest) 
 	if err := s.o.Access.Workspace(ctx, a, a.WorkspaceID, access.Configure); err != nil {
 		return nil, err
 	}
-	code := scaffold
-	if r.Code != nil {
-		code = *r.Code
-	}
-	if r.Notebook {
-		if r.Code != nil && *r.Code != "" {
-			return nil, service.BadRequest("notebook application cannot include script code")
-		}
-		code = ""
-	}
 	name := strings.TrimSpace(r.Name)
 	if name == "" {
 		name = "Untitled application"
@@ -161,12 +149,13 @@ func (s *Service) Create(ctx context.Context, a service.Actor, r CreateRequest) 
 		return nil, fail(err)
 	}
 	spec = applicationDraftSpec(specOr(r.Spec), spec)
-	app, err := store.NewApplication(a.WorkspaceID, a.UserID, name, code, spec, r.InputSchema, r.OutputSchema, s.o.Now())
+	sections := r.Sections
+	if len(sections) == 0 {
+		sections = []store.ApplicationSection{{ID: "main", Code: scaffold}}
+	}
+	app, err := store.NewApplication(a.WorkspaceID, a.UserID, name, sections, spec, r.InputSchema, r.OutputSchema, s.o.Now())
 	if err != nil {
 		return nil, fail(err)
-	}
-	if r.Notebook {
-		app.Sections = []store.ApplicationSection{{ID: "main", Code: scaffold}}
 	}
 	// Quota + create must be atomic under the workspace lock.
 	var quotaErr error
@@ -201,9 +190,6 @@ func (s *Service) Update(ctx context.Context, a service.Actor, id string, r Upda
 	if r.Version < 1 {
 		return nil, service.BadRequest("version required")
 	}
-	if (app.Sections == nil) != (r.Sections == nil) {
-		return nil, service.BadRequest("application source mode cannot change")
-	}
 	name := strings.TrimSpace(r.Name)
 	if name == "" {
 		name = app.Name
@@ -219,7 +205,7 @@ func (s *Service) Update(ctx context.Context, a service.Actor, id string, r Upda
 	norm = applicationDraftSpec(spec, norm)
 	next := &store.Application{
 		ID: app.ID, WorkspaceID: app.WorkspaceID, UserID: app.UserID,
-		Name: name, Code: r.Code, Sections: r.Sections, Spec: norm,
+		Name: name, Sections: r.Sections, Spec: norm,
 		InputSchema: r.InputSchema, OutputSchema: r.OutputSchema,
 		UpdatedAt: s.o.Now().UTC(),
 	}

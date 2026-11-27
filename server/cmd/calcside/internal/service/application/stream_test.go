@@ -74,7 +74,8 @@ func TestNewReleaseDefaultOutputSchema(t *testing.T) {
 	now := time.Now()
 	app := &store.Application{
 		ID: "app_d", WorkspaceID: "ws_1", UserID: "u_1",
-		Code: "def main(i): return i", Spec: json.RawMessage(`{}`),
+		Sections: []store.ApplicationSection{{ID: "main", Code: "def main(i): return i"}},
+		Spec:     json.RawMessage(`{}`),
 	}
 	b := &sandbox.Boundary{Spec: json.RawMessage(`{}`)}
 	rel, err := newRelease(app, b, now)

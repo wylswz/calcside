@@ -9,13 +9,13 @@
    Never wraps on desktop; the strip is a hairline band, not a card. */
 .instance-detail .next-action {
   flex: none;
-  display: flex; flex-wrap: nowrap; align-items: center; gap: 10px;
-  height: 44px; box-sizing: border-box;
-  background: var(--detail-work); padding: 5px 20px; margin: 0;
+  display: flex; flex-wrap: nowrap; align-items: center; gap: 8px;
+  height: 28px; box-sizing: border-box;
+  background: var(--detail-work); padding: 0 16px; margin: 0;
   border-block: 1px solid var(--detail-edge);
 }
 .instance-detail .next-signal {
-  width: 22px; height: 22px; flex-shrink: 0;
+  width: 18px; height: 18px; flex-shrink: 0;
   border-radius: var(--detail-radius-control); display: grid; place-items: center;
 }
 .instance-detail .next-signal.denied { background: rgb(var(--danger) / 0.08); color: rgb(var(--danger)); }
@@ -138,7 +138,7 @@
 .instance-detail .tbl tbody tr:hover { background: rgb(var(--surface) / 0.4); }
 .instance-detail .tbl tbody tr.row-open { background: rgb(var(--surface)); }
 .instance-detail .tbl-wrap {
-  border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-control);
+  border: 0; border-top: 1px solid var(--detail-edge); border-radius: 0;
   overflow-x: auto; overflow-y: hidden; background: var(--detail-work);
 }
 .instance-detail .tbl .num, .instance-detail .tbl td[data-num] { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
@@ -157,7 +157,7 @@
 .instance-detail .seg-filters:not(.nb-view-toggle) button[aria-pressed='true'] { color: rgb(var(--ink)); }
 
 /* buttons — compact size here; material comes from material.css */
-.instance-detail [data-ui='button'] { font-size: 13px; height: 32px; min-height: 32px; padding: 0 12px; }
+.instance-detail [data-ui='button'] { font-size: 13px; height: 28px; min-height: 28px; padding: 0 10px; }
 
 /* inputs — slightly inset, same geometry */
 .instance-detail .input, .instance-detail input:not([type='checkbox']):not([type='radio']),

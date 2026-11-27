@@ -2,6 +2,28 @@ import { useState } from 'react'
 import { Button, SwapLabel } from './ui'
 import { claudeCodeSnippet, cursorSnippet, devinSnippet, headerSnippet, mcpURL, opencodeSnippet } from '../mcpSnippets'
 
+// CopyButton is the standalone copy control — for surfaces that place
+// the action in a toolbar/pane head next to content they already own.
+export function CopyButton({ text, size }: { text: string; size?: 'sm' | 'xs' }) {
+  const [copiedText, setCopiedText] = useState<string | null>(null)
+  const [error, setError] = useState('')
+  const copy = async () => {
+    setError('')
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedText(text)
+    } catch {
+      setError('Copy failed. Select the text to copy.')
+    }
+  }
+  return (
+    <span className="inline-flex min-w-0 items-center gap-2">
+      <Button variant="ghost" size={size} onClick={copy}><SwapLabel show={copiedText === text ? 'Copied' : 'Copy'} options={['Copy', 'Copied']} /></Button>
+      <span className="sr-only" role="status">{error}</span>
+    </span>
+  )
+}
+
 // CopyBlock renders copyable text (secret or client snippet) with a
 // copy button — one component for every "copy this once" surface.
 export function CopyBlock({ text, mono, preClassName = '' }: { text: string; mono?: boolean; preClassName?: string }) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"time"
 
 	"calcside/cmd/calcside/internal/service"
@@ -110,19 +111,15 @@ func newRelease(app *store.Application, b *sandbox.Boundary, at time.Time) (*sto
 	if out == nil {
 		out = json.RawMessage(`{}`)
 	}
-	sources := map[string][]byte{"main.star": []byte(app.Code)}
-	if app.Sections != nil {
-		// Notebook release: every section compiles as an ordinary
-		// section whose path is <id>.star.
-		sources = make(map[string][]byte, len(app.Sections))
-		for _, sec := range app.Sections {
-			sources[sec.ID+".star"] = []byte(sec.Code)
-		}
+	// Notebook release: every section compiles as an ordinary
+	// section whose path is <id>.star.
+	sources := make(map[string][]byte, len(app.Sections))
+	for _, sec := range app.Sections {
+		sources[sec.ID+".star"] = []byte(sec.Code)
 	}
 	return store.NewServingReleaseWithModules(app.WorkspaceID, app.UserID, b.Spec, b.Policies,
 		runtime.ProgramBundle{
 			Sources:      sources,
-			Notebook:     app.Sections != nil,
 			InputSchema:  in,
 			OutputSchema: out,
 		}, b.Modules, at)
@@ -181,10 +178,20 @@ func (s *Service) Publish(ctx context.Context, a service.Actor, id string, versi
 	return s.view(ctx, cur), nil
 }
 
+// entryPattern is the public entry-name shape: a Starlark identifier.
+var entryPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,63}$`)
+
 // Test runs a draft ephemerally — prepare + one invoke, nothing
 // persisted. The semaphore bounds concurrent admissions; a failed
 // prepare still returns the engine result so the UI shows the error.
-func (s *Service) Test(ctx context.Context, a service.Actor, id string, version int64, input json.RawMessage) (*RunView, error) {
+// An entry other than "" / "main" is a debug run: the input is passed
+// verbatim (no input schema, no handler-context object), the output
+// skips schema validation, and no run is recorded — interrupt.* ops
+// report that interrupts are only available in application runs.
+func (s *Service) Test(ctx context.Context, a service.Actor, id string, version int64, input json.RawMessage, entry string) (*RunView, error) {
+	if entry != "" && !entryPattern.MatchString(entry) {
+		return nil, service.BadRequest("invalid entry name")
+	}
 	app, err := s.o.Access.Application(ctx, a, id, access.Configure)
 	if err != nil {
 		return nil, err
@@ -227,9 +234,11 @@ func (s *Service) Test(ctx context.Context, a service.Actor, id string, version 
 		return &RunView{Result: prep.Result}, nil
 	}
 	// Durable run: pin the release so later handler steps can load it,
-	// then record + invoke + complete the first step.
+	// then record + invoke + complete the first step. Debug entries
+	// skip all run bookkeeping — the invoke carries no run identity.
+	debug := entry != "" && entry != "main"
 	var st *runsvc.Started
-	if s.o.Runs != nil {
+	if s.o.Runs != nil && !debug {
 		if err := s.o.Store.CreateServingRelease(ctx, rel); err != nil &&
 			!errors.Is(err, store.ErrConflict) {
 			return nil, fail(err)
@@ -250,6 +259,7 @@ func (s *Service) Test(ctx context.Context, a service.Actor, id string, version 
 		Actor:     runtime.Owner{UserID: a.UserID, Email: a.Email},
 		ReleaseID: rel.ID, Generation: 1, Epoch: prep.Epoch,
 		InvokeID: invokeID, Input: input,
+		Entry: entry, Debug: debug,
 		RunID: runID, Step: 0, Interrupts: slots,
 	})
 	if out != nil {

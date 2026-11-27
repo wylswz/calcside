@@ -23,7 +23,7 @@ func TestApplicationIsolation(t *testing.T) {
 
 	for _, tc := range []struct{ name, method, path, body string }{
 		{"get", "GET", "/api/v1/applications/" + appID, ""},
-		{"update", "PUT", "/api/v1/applications/" + appID, `{"version":1,"name":"x","code":"y"}`},
+		{"update", "PUT", "/api/v1/applications/" + appID, `{"version":1,"name":"x","sections":[{"id":"main","code":"y"}]}`},
 		{"delete", "DELETE", "/api/v1/applications/" + appID + "?version=1", ""},
 		{"publish", "POST", "/api/v1/applications/" + appID + "/publish", `{"version":1,"expected_base":"","candidate":"rel_0000000000000000000000000000000000000000000000000000000000000000"}`},
 		{"test", "POST", "/api/v1/applications/" + appID + "/test", `{"version":1,"input":{}}`},
@@ -41,7 +41,7 @@ func TestApplicationIsolation(t *testing.T) {
 		{"list", "GET", "/api/v1/applications", ""},
 		{"create", "POST", "/api/v1/applications", `{"name":"x"}`},
 		{"get", "GET", "/api/v1/applications/" + appID, ""},
-		{"update", "PUT", "/api/v1/applications/" + appID, `{"version":1,"name":"x","code":"y"}`},
+		{"update", "PUT", "/api/v1/applications/" + appID, `{"version":1,"name":"x","sections":[{"id":"main","code":"y"}]}`},
 		{"delete", "DELETE", "/api/v1/applications/" + appID + "?version=1", ""},
 		{"publish", "POST", "/api/v1/applications/" + appID + "/publish", `{"version":1,"expected_base":"","candidate":"rel_0000000000000000000000000000000000000000000000000000000000000000"}`},
 		{"test", "POST", "/api/v1/applications/" + appID + "/test", `{"version":1,"input":{}}`},
@@ -57,7 +57,7 @@ func TestApplicationIsolation(t *testing.T) {
 	// session mutations without CSRF
 	for _, tc := range []struct{ name, method, path, body string }{
 		{"create", "POST", "/api/v1/applications", `{"name":"x"}`},
-		{"update", "PUT", "/api/v1/applications/" + appID, `{"version":1,"name":"x","code":"y"}`},
+		{"update", "PUT", "/api/v1/applications/" + appID, `{"version":1,"name":"x","sections":[{"id":"main","code":"y"}]}`},
 		{"delete", "DELETE", "/api/v1/applications/" + appID + "?version=1", ""},
 		{"publish", "POST", "/api/v1/applications/" + appID + "/publish", `{"version":1,"expected_base":"","candidate":"rel_0000000000000000000000000000000000000000000000000000000000000000"}`},
 		{"test", "POST", "/api/v1/applications/" + appID + "/test", `{"version":1,"input":{}}`},
@@ -94,7 +94,7 @@ func TestApplicationKeyCeiling(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("view-only get: %d", code)
 	}
-	code, _, _ = e.req("PUT", "/api/v1/applications/"+appID, `{"version":1,"name":"x","code":"y"}`, voBearer, nil)
+	code, _, _ = e.req("PUT", "/api/v1/applications/"+appID, `{"version":1,"name":"x","sections":[{"id":"main","code":"y"}]}`, voBearer, nil)
 	if code != 403 {
 		t.Fatalf("view-only update: %d", code)
 	}
@@ -168,7 +168,7 @@ func TestApplicationBoundKey(t *testing.T) {
 	if code != 503 {
 		t.Fatalf("bound invoke: %d", code)
 	}
-	code, _, _ = e.req("PUT", "/api/v1/applications/"+appID, `{"version":1,"name":"x","code":"y"}`, bearer, nil)
+	code, _, _ = e.req("PUT", "/api/v1/applications/"+appID, `{"version":1,"name":"x","sections":[{"id":"main","code":"y"}]}`, bearer, nil)
 	if code != 403 {
 		t.Fatalf("bound update: %d", code)
 	}
@@ -235,14 +235,14 @@ func TestApplicationContracts(t *testing.T) {
 
 	// $ref schema is rejected at write
 	code, m, _ := e.req("PUT", "/api/v1/applications/"+appID,
-		`{"version":1,"name":"x","code":"def main(i): return i","spec":{},"input_schema":"{\"$ref\":\"x\"}"}`, csrf, cookies)
+		`{"version":1,"name":"x","sections":[{"id":"main","code":"def main(i): return i"}],"spec":{},"input_schema":"{\"$ref\":\"x\"}"}`, csrf, cookies)
 	if code != 400 {
 		t.Fatalf("$ref schema: %d %v", code, m)
 	}
 
 	// echo program so the input number appears in the output verbatim
 	code, m, _ = e.req("PUT", "/api/v1/applications/"+appID,
-		`{"version":1,"name":"x","code":"def main(i): return i","spec":{}}`, csrf, cookies)
+		`{"version":1,"name":"x","sections":[{"id":"main","code":"def main(i): return i"}],"spec":{}}`, csrf, cookies)
 	if code != 200 {
 		t.Fatalf("echo update: %d %v", code, m)
 	}
@@ -309,7 +309,7 @@ func TestApplicationSessionViewer(t *testing.T) {
 		t.Fatalf("viewer get: %d", code)
 	}
 	for _, tc := range []struct{ name, method, path, body string }{
-		{"update", "PUT", "/api/v1/applications/" + appID, `{"version":1,"name":"x","code":"y"}`},
+		{"update", "PUT", "/api/v1/applications/" + appID, `{"version":1,"name":"x","sections":[{"id":"main","code":"y"}]}`},
 		{"delete", "DELETE", "/api/v1/applications/" + appID + "?version=1", ""},
 		{"publish", "POST", "/api/v1/applications/" + appID + "/publish", `{"version":1,"expected_base":"","candidate":"rel_0000000000000000000000000000000000000000000000000000000000000000"}`},
 		{"test", "POST", "/api/v1/applications/" + appID + "/test", `{"version":1,"input":{}}`},
@@ -330,7 +330,7 @@ func TestApplicationReviewedPublish(t *testing.T) {
 	cookies := login(e, "a@x.com")
 	csrf := map[string]string{"X-Requested-With": "calcside"}
 	_, m, _ := e.req("POST", "/api/v1/applications",
-		`{"name":"svc","code":"def main(i): return i"}`, csrf, cookies)
+		`{"name":"svc","sections":[{"id":"main","code":"def main(i): return i"}]}`, csrf, cookies)
 	appID := m["application"].(map[string]any)["id"].(string)
 
 	// Old-shape request is now a 400.
@@ -383,4 +383,45 @@ func repeat0(n int) string {
 		b[i] = '0'
 	}
 	return string(b)
+}
+
+// POST /test accepts an optional entry: a non-main entry is a debug
+// run (verbatim bounded input, no run record); a bad name is 400.
+func TestApplicationDebugEntry(t *testing.T) {
+	e := newEnv(t)
+	cookies := login(e, "dbg@x.com")
+	csrf := map[string]string{"X-Requested-With": "calcside"}
+	code, m, _ := e.req("POST", "/api/v1/applications", `{"name":"dbg","sections":[{"id":"main","code":"def double(x):\n    return x * 2\ndef echo(x):\n    return x == None\ndef main(i):\n    return {\"echo\": i}\n"}]}`, csrf, cookies)
+	if code != 200 && code != 201 {
+		t.Fatalf("create: %d %v", code, m)
+	}
+	appID := m["application"].(map[string]any)["id"].(string)
+
+	code, m, _ = e.req("POST", "/api/v1/applications/"+appID+"/test",
+		`{"version":1,"input":21,"entry":"double"}`, csrf, cookies)
+	if code != 200 {
+		t.Fatalf("debug test: %d %v", code, m)
+	}
+	if out, _ := m["output_json"].(string); out != "42" {
+		t.Fatalf("debug output: %v", m)
+	}
+	if rid, _ := m["run_id"].(string); rid != "" {
+		t.Fatalf("debug run recorded: %v", m)
+	}
+
+	// Explicit JSON null is a real debug input, not an absent field.
+	code, m, _ = e.req("POST", "/api/v1/applications/"+appID+"/test",
+		`{"version":1,"input":null,"entry":"echo"}`, csrf, cookies)
+	if code != 200 {
+		t.Fatalf("null debug test: %d %v", code, m)
+	}
+	if out, _ := m["output_json"].(string); out != "true" {
+		t.Fatalf("null debug output: %v", m)
+	}
+
+	code, _, _ = e.req("POST", "/api/v1/applications/"+appID+"/test",
+		`{"version":1,"input":{},"entry":"_private"}`, csrf, cookies)
+	if code != 400 {
+		t.Fatalf("bad entry: %d", code)
+	}
 }

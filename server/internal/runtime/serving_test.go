@@ -38,7 +38,6 @@ func servingFixture() *PrepareRequest {
 		PrepareID:  "prep-11",
 		TimeoutMs:  4000,
 		Program: ProgramBundle{
-			Entrypoint:   "main.star",
 			Sources:      map[string][]byte{"main.star": []byte("def main(input):\n    return {}")},
 			Assets:       map[string][]byte{"d.bin": {0x00, 0xff, 0x10, 0x80}},
 			InputSchema:  json.RawMessage(`{"type":"object","properties":{"n":{"type":"integer"}}}`),

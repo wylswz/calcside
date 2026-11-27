@@ -1,12 +1,22 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getRun, cancelRun, retryRun, Interrupt, currentWorkspace } from '../api'
+import { api, getRun, cancelRun, retryRun, Interrupt, currentWorkspace, Application } from '../api'
 import { Button, Confirm, Loading, Notice, TimeLeft } from '../components/ui'
 import { DetailWorkbenchHeader } from '../components/DetailWorkbench'
-import { ApplicationWorkView, ApplicationWorkSection } from '../components/ApplicationWorkView'
+import { StatusCell, WorkView, WorkPane, WorkStatusbar } from '../components/ApplicationWorkView'
 import { ResumeForm } from '../components/ResumeForm'
-import { deadlineOf, interruptTitle, resolverLabel, runPhase } from '../interrupts'
+import { InterruptContext } from '../components/InterruptContext'
+import { deadlineOf, fmtDateTime, resolverLabel, runPhase } from '../interrupts'
+
+// runDuration is wall time created→ended (or →last update while live).
+function runDuration(run: { created_at?: string; updated_at?: string; ended_at?: string }): string {
+	const a = run.created_at ? new Date(run.created_at).getTime() : NaN
+	const b = run.ended_at ? new Date(run.ended_at).getTime() : run.updated_at ? new Date(run.updated_at).getTime() : NaN
+	if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return '—'
+	const ms = b - a
+	return ms < 1000 ? `${ms}ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
+}
 
 // One durable run (EP-0016): status header with deadline, Cancel/Retry
 // actions behind named Confirms (F2), the pending interrupt with a
@@ -27,6 +37,13 @@ export default function RunDetail() {
 		refetchInterval: (q) => (q.state.data && runPhase(q.state.data).phase === 'running' ? 1000 : 5000),
 		enabled: runId != null,
 	})
+	const appQ = useQuery({
+		queryKey: ['application', appId],
+		queryFn: () => api.get<{ application: Application }>(`/api/v1/applications/${appId}`).then((r) => r.application),
+		enabled: appId != null,
+		retry: false,
+	})
+	const appName = appQ.data?.name ?? ''
 	const run = q.data?.run
 	const steps = q.data?.steps ?? []
 	const intrs = q.data?.interrupts ?? []
@@ -62,85 +79,100 @@ export default function RunDetail() {
 	const reserved = phase?.phase === 'running' && remembered != null && remembered.runId === runId ? remembered.height : undefined
 
 	return (
-		// inner .detail-workbench is not .console-content's direct child, so
-		// the shell keeps its normal outer scroll — the frame supplies the
-		// shared header and typography only
-		<div className="app-page app-run-page">
-		<div className="detail-workbench">
+		// a real workbench route: the frame fills the console canvas and
+		// the pane column owns the scroll, like the application detail
+		<div className="app-page detail-workbench">
 			<DetailWorkbenchHeader
 				backTo={`/applications/${appId}?view=activity`}
-				backLabel="← Application activity"
+				backLabel={appName ? `${appName} · Activity` : 'Application activity'}
 				title="Run"
 				id={run.id}
 				status={<>
-					<span className={`app-status app-status-${run.status}`}>{run.status}</span>
+					<StatusCell status={run.status} />
 					{deadline && <TimeLeft expiresAt={deadline} />}
 				</>}
 				actions={<>
 					{cancellable && <Button variant="danger" size="sm" onClick={() => setConfirm('cancel')}>Cancel run</Button>}
 					{retryable && <Button size="sm" onClick={() => setConfirm('retry')}>Retry step</Button>}
 				</>} />
+			<dl className="kv-strip">
+				<div><dt>Application</dt><dd>{appName || appId}</dd></div>
+				<div><dt>Trigger</dt><dd>{run.trigger}</dd></div>
+				<div><dt>Release</dt><dd><code>{run.release_id}</code></dd></div>
+				<div><dt>Started</dt><dd>{run.created_at ? fmtDateTime(run.created_at) : '—'}</dd></div>
+				<div><dt>Duration</dt><dd>{runDuration(run)}</dd></div>
+				<div><dt>Steps</dt><dd>{steps.length || run.steps}</dd></div>
+			</dl>
 			{err !== '' && <div className="detail-error"><Notice tone="warning">{err}</Notice></div>}
 
-			<ApplicationWorkView>
+			<WorkView scroll>
+			{run.status === 'failed' && run.error_code && (
+				<div className="wb-pane-notice"><Notice tone="warning">Run failed — {run.error_code}</Notice></div>
+			)}
 			{run.streaming && (
-				<ApplicationWorkSection title="Output">
-					<p className="app-dim">Stream not retained · {run.stream_items ?? 0} item{(run.stream_items ?? 0) === 1 ? '' : 's'} · {run.stream_bytes ?? 0} bytes</p>
-				</ApplicationWorkSection>
+				<WorkPane title="Output">
+					<p className="app-dim wb-note-pad">Stream not retained · {run.stream_items ?? 0} item{(run.stream_items ?? 0) === 1 ? '' : 's'} · {run.stream_bytes ?? 0} bytes</p>
+				</WorkPane>
 			)}
 			{run.status === 'succeeded' && run.output_json && (
-				<ApplicationWorkSection title="Output">
-					<pre className="app-out-pre">{run.output_json}</pre>
-				</ApplicationWorkSection>
-			)}
-			{run.status === 'failed' && run.error_code && (
-				<Notice tone="warning">Run failed — {run.error_code}</Notice>
+				<WorkPane title="Output">
+					<pre className="wb-code wb-cap">{run.output_json}</pre>
+				</WorkPane>
 			)}
 
 			{(pending || phase?.phase === 'running') && (
-				<ApplicationWorkSection data-testid="run-progress" ref={progressRef}
+				<WorkPane data-testid="run-progress" ref={progressRef}
 					style={reserved === undefined ? undefined : { minHeight: reserved }}
-					title={pending ? `Waiting on — ${interruptTitle(pending)}` : `Running — ${runningHandler ?? 'handler'}`}>
-					{pending?.context_json && <pre className="app-out-pre">{pending.context_json}</pre>}
-					{pending?.resume_url && <p className="text-xs text-sec"><span className="app-mono">POST {pending.resume_url}</span></p>}
-					{pending ? (
-						pending.can_resume ? (
-							<ResumeForm interrupt={pending}
-								scope={{ userId: me?.user.id ?? '', workspaceId: ws }}
-								onResumed={() => qc.invalidateQueries({ queryKey: ['run', runId] })} />
+					title={pending
+						? <>Waiting · <code className="wb-pane-mono">{pending.handler ?? 'interrupt'}</code></>
+						: <>Running · <code className="wb-pane-mono">{runningHandler ?? 'handler'}</code></>}>
+					<div className="wb-note-pad grid gap-2">
+						{pending && <InterruptContext interrupt={pending} />}
+						{pending ? (
+							pending.can_resume ? (
+								<ResumeForm key={pending.id} interrupt={pending}
+									scope={{ userId: me?.user.id ?? '', workspaceId: ws }}
+									onResumed={() => qc.invalidateQueries({ queryKey: ['run', runId] })} />
+							) : (
+								<p className="text-sm text-body">Waiting to be resumed.</p>
+							)
 						) : (
-							<p className="text-sm text-body">Waiting to be resumed.</p>
-						)
-					) : (
-						// S3: the card keeps its box while the handler runs.
-						<p className="text-sm text-body" aria-live="polite">Running {runningHandler ?? 'handler'}…</p>
-					)}
-				</ApplicationWorkSection>
+							// S3: the pane keeps its box while the handler runs.
+							<p className="text-sm text-body" aria-live="polite">Running {runningHandler ?? 'handler'}…</p>
+						)}
+					</div>
+				</WorkPane>
 			)}
 
-			<ApplicationWorkSection title="Steps">
-				<div className="app-work-table" role="region" aria-label="Steps table" tabIndex={0}>
-					<table className="tbl app-step-table" role="table">
+			<WorkPane title="Steps">
+				<div role="region" aria-label="Steps table" tabIndex={0}>
+					<table className="tbl wb-table app-step-table" role="table">
 						<thead role="rowgroup">
-							<tr role="row"><th role="columnheader">Seq</th><th role="columnheader">Attempt</th><th role="columnheader">Entry</th><th role="columnheader">Status</th><th role="columnheader">Duration</th><th role="columnheader">Resolver</th></tr>
+							<tr role="row"><th role="columnheader" className="wb-col-num">Seq</th><th role="columnheader" className="wb-col-num">Attempt</th><th role="columnheader">Entry</th><th role="columnheader">Status</th><th role="columnheader" className="wb-col-num">Duration</th><th role="columnheader">Resolver</th><th role="columnheader">Error</th></tr>
 						</thead>
 						<tbody role="rowgroup">
 							{steps.map((s) => (
 								<tr role="row" key={`${s.seq}/${s.attempt}`}>
-									<td role="cell" className="text-xs" data-label="Seq">{s.seq}</td>
-									<td role="cell" className="text-xs" data-label="Attempt">{s.attempt}</td>
+									<td role="cell" className="text-xs wb-col-num" data-label="Seq">{s.seq}</td>
+									<td role="cell" className="text-xs wb-col-num" data-label="Attempt">{s.attempt}</td>
 									<td role="cell" className="text-xs" data-label="Entry">{s.entry}</td>
-									<td role="cell" data-label="Status"><span><span className={`app-status app-status-${s.status}`}>{s.status}</span>{s.error_code ? ` · ${s.error_code}` : ''}</span></td>
-									<td role="cell" className="text-xs text-sec" data-label="Duration">{s.duration_ms}ms</td>
-									<td role="cell" className="text-xs text-sec" data-label="Resolver">{s.interrupt_id ? (intrs.find((i: Interrupt) => i.id === s.interrupt_id)?.resolved_by ? resolverLabel(intrs.find((i) => i.id === s.interrupt_id)!) : s.interrupt_id) : '—'}</td>
+									<td role="cell" data-label="Status"><StatusCell status={s.status} /></td>
+									<td role="cell" className="text-xs text-sec wb-col-num" data-label="Duration">{s.duration_ms}ms</td>
+									<td role="cell" className="text-xs text-sec wb-mono" data-label="Resolver">{s.interrupt_id ? (intrs.find((i: Interrupt) => i.id === s.interrupt_id)?.resolved_by ? resolverLabel(intrs.find((i) => i.id === s.interrupt_id)!) : s.interrupt_id) : '—'}</td>
+									<td role="cell" className="text-xs text-sec wb-mono" data-label="Error">{s.error_code ?? '—'}</td>
 								</tr>
 							))}
 						</tbody>
 					</table>
 				</div>
-			</ApplicationWorkSection>
-			</ApplicationWorkView>
-		</div>
+			</WorkPane>
+			</WorkView>
+			<WorkStatusbar>
+				<StatusCell status={run.status} />
+				<span className="wb-status-num">{steps.length} step{steps.length === 1 ? '' : 's'}</span>
+				<span className="wb-grow" />
+				<span className="text-sec">{run.created_at ? fmtDateTime(run.created_at) : ''}</span>
+			</WorkStatusbar>
 
 			{confirm === 'cancel' && (
 				<Confirm tone="danger" title={`Cancel run ${run.id}?`} confirm="Cancel run" pending="Cancelling…"

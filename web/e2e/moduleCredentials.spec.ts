@@ -73,9 +73,11 @@ test('module debug executes ext with vault-injected credentials', async ({ page 
   expect(put0.status(), await put0.text()).toBe(200)
 
   await page.goto(`${viteURL}/modules/${mod.id}`)
-  // Workbench: all surfaces present at once.
+  // Workbench: source surfaces on the Source tab, the debug environment
+  // on Settings — both mounted, one visible at a time.
   await expect(page.getByTestId('module-editor')).toBeVisible()
   await expect(page.getByTestId('debug-script')).toBeVisible()
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click()
   await expect(page.getByText('Extensions & runtime')).toBeVisible()
   // No binding/default terminology and no manual identity fields.
   await expect(page.getByText(/binding/i)).toHaveCount(0)
@@ -108,8 +110,10 @@ test('module debug executes ext with vault-injected credentials', async ({ page 
   })
   expect(putSt.status(), await putSt.text()).toBe(200)
   await page.reload()
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click()
   await page.getByRole('button', { name: 'Configure credentials' }).click()
 
+  await page.getByRole('tab', { name: 'Source', exact: true }).click()
   await page.getByTestId('debug-run').click()
   const result = page.getByTestId('debug-result')
   await expect(result).toContainText('key_ok', { timeout: 90_000 })
@@ -123,6 +127,7 @@ test('module debug executes ext with vault-injected credentials', async ({ page 
   expect(out).not.toContain('TEST_CLIENT_SECRET_VALUE')
 
   // Selects show the stored refs; rotate api_key via select.
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click()
   await expect(page.getByLabel('credentials api_key')).toHaveValue('TEST_API_KEY')
   const dbg1 = await client.get(`/api/v1/modules/${mod.id}/debug`)
   const dbgSpec = JSON.stringify(await dbg1.json())
@@ -134,6 +139,7 @@ test('module debug executes ext with vault-injected credentials', async ({ page 
   await page.getByLabel('credentials api_key').selectOption('TEST_ROTATED_KEY')
   await expect(page.getByLabel('credentials api_key')).toHaveValue('TEST_ROTATED_KEY')
   expectedKey = 'ROTATED_VALUE'
+  await page.getByRole('tab', { name: 'Source', exact: true }).click()
   const runResp = page.waitForResponse((r) => r.url().includes('/debug/run') && r.request().method() === 'POST', { timeout: 90_000 })
   await page.getByTestId('debug-run').click()
   await runResp
@@ -151,12 +157,15 @@ test('module debug executes ext with vault-injected credentials', async ({ page 
   expect(dbg2Spec).not.toContain('ROTATED_VALUE')
 
   // Editing config marks the displayed result outdated.
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click()
   await page.getByLabel('credentials api_key').selectOption('TEST_API_KEY')
+  await page.getByRole('tab', { name: 'Source', exact: true }).click()
   await expect(page.getByText(/outdated/)).toBeVisible()
   expectedKey = 'TEST_API_KEY_VALUE'
 
   // Advanced JSON escape: a raw spec edit round-trips as an OBJECT
   // (proves the raw-fragment save path, never quote-wrapped JSON).
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click()
   await page.getByRole('button', { name: 'Advanced JSON' }).click()
   const raw = page.getByLabel('Debug spec JSON')
   const rawText = await raw.inputValue()

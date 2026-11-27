@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { useParams, useNavigate, Navigate, NavLink } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { workspaces, currentWorkspace, setWorkspace, Workspace } from '../api'
-import { PageHeader, Loading, Notice } from '../components/ui'
+import { Loading, Notice } from '../components/ui'
 import Members from './Members'
 import Policies from './Policies'
 import Secrets from './Secrets'
@@ -17,8 +17,8 @@ const tabs = [
   { to: 'keys', label: 'API keys' },
 ] as const
 
-// Workspace settings for the current workspace: members, policies,
-// secrets, LLM providers, keys.
+// Workspace settings for the current workspace: a left settings nav
+// (VS Code settings style) over the active sub-page's ListPage toolbar.
 export default function WorkspaceTabs() {
   const { tab = 'members' } = useParams()
   const { data } = useQuery({ queryKey: ['workspaces'], queryFn: workspaces })
@@ -26,23 +26,29 @@ export default function WorkspaceTabs() {
   const ws: Workspace | undefined = (data ?? []).find((w) => w.id === cur) ?? (data ?? []).find((w) => w.personal)
   if (!ws) return <Loading />
   return (
-    <div>
-      <PageHeader title={ws.name}>
-        <code className="font-mono text-ink">{ws.id}</code>
-      </PageHeader>
-      <nav className="workspace-tabs" aria-label="Workspace settings">
-        {tabs.map((t) => (
-          <NavLink key={t.to} to={`/workspace/${t.to}`}>
-            {t.label}
-          </NavLink>
-        ))}
-      </nav>
-      {tab === 'members' && <Members ws={ws} />}
-      {tab === 'policies' && <Policies bare />}
-      {tab === 'secrets' && <Secrets bare />}
-      {tab === 'providers' && <Providers bare />}
-      {tab === 'keys' && <Keys bare />}
-      {!tabs.find((t) => t.to === tab) && <Navigate to="/workspace/members" replace />}
+    <div className="ws-settings">
+      <div className="ws-settings-head">
+        <span className="ws-settings-name truncate">{ws.name}</span>
+        <code className="ws-settings-id">{ws.id}</code>
+      </div>
+      <div className="ws-settings-body">
+        <nav className="ws-settings-nav" aria-label="Workspace settings">
+          {tabs.map((t) => (
+            <NavLink key={t.to} to={`/workspace/${t.to}`}
+              className={({ isActive }) => 'ws-settings-link' + (isActive ? ' is-active' : '')}>
+              {t.label}
+            </NavLink>
+          ))}
+        </nav>
+        <div className="ws-settings-content">
+          {tab === 'members' && <Members ws={ws} />}
+          {tab === 'policies' && <Policies bare />}
+          {tab === 'secrets' && <Secrets bare />}
+          {tab === 'providers' && <Providers bare />}
+          {tab === 'keys' && <Keys bare />}
+          {!tabs.find((t) => t.to === tab) && <Navigate to="/workspace/members" replace />}
+        </div>
+      </div>
     </div>
   )
 }

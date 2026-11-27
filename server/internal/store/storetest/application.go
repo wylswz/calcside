@@ -25,12 +25,15 @@ func RunApplications(t *testing.T, s store.Store) {
 		t.Fatal(err)
 	}
 	spec := json.RawMessage(`{"ttl_seconds":300}`)
+	secs := func(code string) []store.ApplicationSection {
+		return []store.ApplicationSection{{ID: "main", Code: code}}
+	}
 	prog := runtime.ProgramBundle{Sources: map[string][]byte{"main.star": []byte("def main(input): return input")},
 		InputSchema:  json.RawMessage(`{"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}`),
 		OutputSchema: json.RawMessage(`{"type":"object"}`)}
 
 	t.Run("create_get_list", func(t *testing.T) {
-		a, err := store.NewApplication("ws_1", u.ID, "svc", "def main(i): return i", spec, nil, nil, time.Now())
+		a, err := store.NewApplication("ws_1", u.ID, "svc", secs("def main(i): return i"), spec, nil, nil, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -59,7 +62,7 @@ func RunApplications(t *testing.T, s store.Store) {
 	})
 
 	t.Run("cross_workspace_isolation", func(t *testing.T) {
-		a, _ := store.NewApplication("ws_2", u.ID, "svc2", "", spec, nil, nil, time.Now())
+		a, _ := store.NewApplication("ws_2", u.ID, "svc2", secs(""), spec, nil, nil, time.Now())
 		if err := s.CreateApplication(ctx, a); err != nil {
 			t.Fatal(err)
 		}
@@ -75,41 +78,41 @@ func RunApplications(t *testing.T, s store.Store) {
 	})
 
 	t.Run("draft_cas", func(t *testing.T) {
-		a, _ := store.NewApplication("ws_1", u.ID, "cas", "v1", spec, nil, nil, time.Now())
+		a, _ := store.NewApplication("ws_1", u.ID, "cas", secs("v1"), spec, nil, nil, time.Now())
 		s.CreateApplication(ctx, a)
-		a.Code = "v2"
+		a.Sections[0].Code = "v2"
 		ok, err := s.UpdateApplicationDraft(ctx, a, 1)
 		if err != nil || !ok {
 			t.Fatalf("cas ok: %v %v", ok, err)
 		}
 		got, _ := s.GetApplication(ctx, a.ID)
-		if got.Version != 2 || got.Code != "v2" {
+		if got.Version != 2 || got.Sections[0].Code != "v2" {
 			t.Fatalf("version: %+v", got)
 		}
 		// Stale version is rejected without writing.
-		a.Code = "v3"
+		a.Sections[0].Code = "v3"
 		ok, _ = s.UpdateApplicationDraft(ctx, a, 1)
 		if ok {
 			t.Fatal("stale CAS accepted")
 		}
 		got, _ = s.GetApplication(ctx, a.ID)
-		if got.Code != "v2" {
+		if got.Sections[0].Code != "v2" {
 			t.Fatal("stale write leaked")
 		}
 	})
 
 	t.Run("schema_validation", func(t *testing.T) {
 		// $ref is rejected at the constructor and at the store layer.
-		if _, err := store.NewApplication("ws_1", u.ID, "bad", "", spec,
+		if _, err := store.NewApplication("ws_1", u.ID, "bad", secs(""), spec,
 			json.RawMessage(`{"$ref":"x"}`), nil, time.Now()); err == nil {
 			t.Fatal("$ref schema accepted at constructor")
 		}
 		bad := &store.Application{WorkspaceID: "ws_1", UserID: u.ID, Name: "bad",
-			Spec: spec, InputSchema: json.RawMessage(`{"$ref":"x"}`)}
+			Sections: secs(""), Spec: spec, InputSchema: json.RawMessage(`{"$ref":"x"}`)}
 		if err := s.CreateApplication(ctx, bad); err == nil {
 			t.Fatal("$ref schema accepted at store")
 		}
-		big, _ := store.NewApplication("ws_1", u.ID, "big", "", spec,
+		big, _ := store.NewApplication("ws_1", u.ID, "big", secs(""), spec,
 			json.RawMessage(`{"type":"object","minimum":9007199254740993}`), nil, time.Now())
 		if err := s.CreateApplication(ctx, big); err != nil {
 			t.Fatalf("bigint schema rejected: %v", err)
@@ -122,7 +125,7 @@ func RunApplications(t *testing.T, s store.Store) {
 
 	t.Run("reviewed_publish", func(t *testing.T) { applicationReviewedSuite(t, s) })
 	t.Run("publish_and_delete", func(t *testing.T) {
-		a, _ := store.NewApplication("ws_1", u.ID, "pub", "def main(i): return i", spec, nil, nil, time.Now())
+		a, _ := store.NewApplication("ws_1", u.ID, "pub", secs("def main(i): return i"), spec, nil, nil, time.Now())
 		if err := s.CreateApplication(ctx, a); err != nil {
 			t.Fatal(err)
 		}
@@ -179,7 +182,7 @@ func RunApplications(t *testing.T, s store.Store) {
 		}
 		leaseBefore := persisted.LeaseUntil
 		// Draft update bumps version, then publish records it.
-		a.Code = "v2"
+		a.Sections[0].Code = "v2"
 		if ok, err := s.UpdateApplicationDraft(ctx, a, 1); err != nil || !ok {
 			t.Fatalf("draft update: %v, %v", ok, err)
 		}
@@ -227,7 +230,7 @@ func RunApplications(t *testing.T, s store.Store) {
 	})
 
 	t.Run("notebook_sections_round_trip", func(t *testing.T) {
-		a, err := store.NewApplication("ws_1", u.ID, "nb", "", spec, nil, nil, time.Now())
+		a, err := store.NewApplication("ws_1", u.ID, "nb", secs(""), spec, nil, nil, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -263,17 +266,8 @@ func RunApplications(t *testing.T, s store.Store) {
 			!strings.Contains(got.Sections[1].Code, "yo ") {
 			t.Fatalf("sections after update: %+v", got.Sections)
 		}
-		// Legacy rows keep nil sections.
-		list, err := s.ListApplications(ctx, store.ApplicationFilter{WorkspaceID: "ws_1"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, l := range list {
-			if l.ID != a.ID && l.Sections != nil {
-				t.Fatalf("legacy app %s gained sections", l.ID)
-			}
-		}
 	})
+
 }
 
 func jsonBytesContain(r json.RawMessage, sub string) bool {
@@ -289,6 +283,9 @@ func applicationReviewedSuite(t *testing.T, s store.Store) {
 		t.Fatal(err)
 	}
 	seedWS(t, s, "other")
+	secs := func(code string) []store.ApplicationSection {
+		return []store.ApplicationSection{{ID: "main", Code: code}}
+	}
 	mkRel := func(code string) *store.ServingRelease {
 		prog := runtime.ProgramBundle{Sources: map[string][]byte{"main.star": []byte(code)},
 			InputSchema: json.RawMessage(`{"type":"object"}`), OutputSchema: json.RawMessage(`{"type":"object"}`)}
@@ -299,7 +296,7 @@ func applicationReviewedSuite(t *testing.T, s store.Store) {
 		}
 		return r
 	}
-	a, err := store.NewApplication("ws_1", u.ID, "svc", "", json.RawMessage(`{"ttl_seconds":300}`), nil, nil, time.Now())
+	a, err := store.NewApplication("ws_1", u.ID, "svc", secs(""), json.RawMessage(`{"ttl_seconds":300}`), nil, nil, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +375,7 @@ func applicationReviewedSuite(t *testing.T, s store.Store) {
 	// the persistent instance is disabled by delete + republish.
 	// (DeleteApplication soft-deletes the app too, so re-create an app
 	// publishing the same release, then soft-delete it.)
-	a2, err := store.NewApplication("ws_1", u.ID, "svc2", "", json.RawMessage(`{"ttl_seconds":300}`), nil, nil, time.Now())
+	a2, err := store.NewApplication("ws_1", u.ID, "svc2", secs(""), json.RawMessage(`{"ttl_seconds":300}`), nil, nil, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

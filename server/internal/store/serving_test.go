@@ -39,15 +39,6 @@ func TestNewServingReleaseStable(t *testing.T) {
 	if a.ID != b.ID {
 		t.Fatal("identical content must dedup to one id")
 	}
-	// Empty entrypoint defaults to main.star and hashes like the
-	// explicit form.
-	prog := tBundle()
-	c := mkRel(t, tSpec(), prog)
-	prog.Entrypoint = "main.star"
-	d := mkRel(t, tSpec(), prog)
-	if c.ID != d.ID {
-		t.Fatal("default entrypoint must equal explicit")
-	}
 }
 
 func TestNewServingReleaseRoleBoundary(t *testing.T) {
@@ -140,16 +131,9 @@ func TestNewServingReleaseValidation(t *testing.T) {
 			_, err := NewServingRelease("ws_1", "u", tSpec(), runtime.PolicyBundle{}, p, tNow)
 			return err
 		},
-		"missing_entrypoint": func() error {
-			p := tBundle()
-			p.Entrypoint = "nope.star"
-			_, err := NewServingRelease("ws_1", "u", tSpec(), runtime.PolicyBundle{}, p, tNow)
-			return err
-		},
 		"benign_dotdot_name": func() error {
 			p := tBundle()
 			p.Sources = map[string][]byte{"main.star": []byte("x"), "foo..bar": []byte("y")}
-			p.Entrypoint = "main.star"
 			_, err := NewServingRelease("ws_1", "u", tSpec(), runtime.PolicyBundle{}, p, tNow)
 			return err
 		},
@@ -187,35 +171,5 @@ func TestNewServingReleaseClones(t *testing.T) {
 	}
 	if r.ID != r2.ID || string(r.Spec) != string(r2.Spec) || r.Policies.Global["g"] != "x" {
 		t.Fatal("caller mutation leaked")
-	}
-}
-
-func TestNewServingReleaseNotebook(t *testing.T) {
-	legacy := mkRel(t, tSpec(), tBundle())
-
-	nb := tBundle()
-	nb.Notebook = true
-	r, err := NewServingRelease("ws_1", "usr_1", tSpec(), runtime.PolicyBundle{}, nb, tNow)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Same bytes, different shape: the flag feeds the digest.
-	if r.ID == legacy.ID {
-		t.Fatal("notebook release must hash differently from script")
-	}
-	// A notebook release carries no entrypoint and the clone keeps
-	// the flag.
-	if r.Program.Entrypoint != "" {
-		t.Fatalf("notebook entrypoint = %q", r.Program.Entrypoint)
-	}
-	if !r.Program.Notebook {
-		t.Fatal("notebook flag not preserved")
-	}
-	// Notebook and an explicit entrypoint are mutually exclusive.
-	bad := tBundle()
-	bad.Notebook = true
-	bad.Entrypoint = "main.star"
-	if _, err := NewServingRelease("ws_1", "usr_1", tSpec(), runtime.PolicyBundle{}, bad, tNow); !errors.Is(err, ErrInvalidServingRecord) {
-		t.Fatalf("notebook + entrypoint: %v", err)
 	}
 }

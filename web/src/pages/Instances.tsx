@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, SharedInstance, Instance, wsPath } from '../api'
 import { useRole } from '../workspace'
-import { Button, Confirm, Loading, PageHeader, InstanceStatus, RevealNew } from '../components/ui'
+import { Button, Confirm, ListPage, Loading, InstanceStatus, RevealNew } from '../components/ui'
 import { attentionText, expiringSoon } from '../nextStep'
 import { allowedSummary, instanceDescription, instanceTitle } from '../activity'
 import { fmtTime, relTime } from '../format'
@@ -51,22 +51,21 @@ export default function Instances() {
   const groups: [string, Instance[]][] = fresh.map(([label]) => [label, held.rows.filter((r) => r.slot === label).map((r) => r.item.i)])
 
   return (
-    <div>
-      <PageHeader title="Instances"
-        actions={<>
-          <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />
-          {role != null && role !== 'viewer' && <Button variant="primary" onClick={() => nav('/instances/new')}>New instance</Button>}
-        </>} />
+    <ListPage title="Instances" count={all.length}
+      actions={<>
+        <RevealNew count={held.arrived} moved={held.moved} onClick={held.reveal} />
+        {role != null && role !== 'viewer' && <Button variant="primary" onClick={() => nav('/instances/new')}>New instance</Button>}
+      </>}>
       {isLoading && <Loading />}
       {data && all.length === 0 && (
-        <div className="rounded-xl border border-line bg-surface px-6 py-10 text-center">
-          <p className="mb-4 text-sm text-sec">No instances yet.</p>
+        <div className="flex h-full flex-col items-center justify-center gap-3 py-16">
+          <p className="text-sm text-sec">No instances yet.</p>
           {role != null && role !== 'viewer' && <Button variant="primary" onClick={() => nav('/instances/new')}>New instance</Button>}
         </div>
       )}
       {all.length > 0 && groups.filter(([, g]) => g.length).map(([label, g]) => (
-        <div key={label} className="mb-8">
-          <h2 className="mb-3 text-base font-semibold text-ink">{label}</h2>
+        <section key={label}>
+          <div className="list-group-head">{label} · {g.length}</div>
           <div className="tbl-wrap">
             <table className="tbl">
               <thead>
@@ -98,11 +97,11 @@ export default function Instances() {
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
       ))}
             {(shared?.instances.length ?? 0) > 0 && (
-        <div className="mt-8">
-          <h2 className="mb-3 text-base font-semibold text-ink">Shared with you</h2>
+        <section>
+          <div className="list-group-head">Shared with you · {shared!.instances.length}</div>
           <div className="tbl-wrap">
             <table className="tbl">
               <thead><tr><th>Name</th><th>Workspace</th><th>Role</th><th>Status</th></tr></thead>
@@ -118,7 +117,7 @@ export default function Instances() {
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
       )}
       {ending && (
         <Confirm tone="danger" title={`End ${instanceTitle(ending)}?`} confirm="End" pending="Ending…"
@@ -130,6 +129,6 @@ export default function Instances() {
           <p className="text-sm text-body">Running code stops; files and variables are discarded.</p>
         </Confirm>
       )}
-    </div>
+    </ListPage>
   )
 }

@@ -1,0 +1,87 @@
+/* Inbox: mail-client split — dense held-order list left, selected
+   interrupt detail right. Both panes own their scrollers; the shell's
+   .console-main stays still (same :has opt-out as detail-workbench). */
+.console-content:has(> .inbox-split) {
+  height: 100%; min-height: 0; display: flex; padding: 0;
+}
+.inbox-split {
+  flex: 1; min-width: 0; min-height: 0;
+  display: grid; grid-template-columns: 360px minmax(0, 1fr);
+}
+.inbox-list {
+  min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  border-right: 1px solid rgb(var(--line)); background: rgb(var(--paper));
+  display: flex; flex-direction: column;
+}
+.inbox-list-bar {
+  flex: none; display: flex; align-items: center; gap: 8px; height: 40px;
+  padding: 0 12px; border-bottom: 1px solid rgb(var(--line));
+}
+.inbox-list-title { font-size: 14px; font-weight: 600; color: rgb(var(--ink)); }
+.inbox-list-count { font-size: 12px; color: rgb(var(--sec)); font-variant-numeric: tabular-nums; }
+.inbox-list-bar .swap-label, .inbox-list-bar button { margin-left: auto; }
+.inbox-items { flex: 1; min-height: 0; }
+.inbox-empty { margin: 24px 16px; font-size: 13px; color: rgb(var(--sec)); }
+.inbox-detail-empty { margin: auto; }
+
+/* dense 2-line rows — held order is the API's order (S5) */
+.inbox-item {
+  display: flex; flex-direction: column; gap: 2px; width: 100%;
+  padding: 8px 12px 8px 14px; text-align: left; cursor: pointer;
+  border-bottom: 1px solid rgb(var(--line) / 0.6);
+  transition: background-color 120ms ease;
+}
+.inbox-item:hover { background: rgb(var(--ink) / 0.03); }
+.inbox-item[aria-current='true'] {
+  background: rgb(var(--accent) / 0.06);
+  box-shadow: inset 2px 0 0 rgb(var(--accent));
+}
+.inbox-item-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.inbox-item-title {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 13px; font-weight: 500; color: rgb(var(--ink));
+}
+.inbox-item-time { flex: none; font-size: 11px; color: rgb(var(--sec)); }
+.inbox-item-sub {
+  font-size: 12px; color: rgb(var(--sec));
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.inbox-item-run { font-family: var(--font-mono); font-size: 11px; color: rgb(var(--mute)); }
+.inbox-item-gone { cursor: default; color: rgb(var(--sec)); }
+.inbox-item-gone:hover { background: transparent; }
+
+/* detail pane */
+.inbox-detail {
+  min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  background: rgb(var(--paper)); display: flex; flex-direction: column;
+}
+.inbox-back { display: none; }
+.inbox-detail-head {
+  flex: none; display: flex; align-items: baseline; gap: 10px;
+  padding: 10px 16px 8px; border-bottom: 1px solid rgb(var(--line));
+}
+.inbox-detail-title { font-size: 15px; font-weight: 600; color: rgb(var(--ink)); }
+.inbox-detail-id {
+  font-family: var(--font-mono); font-size: 12px; color: rgb(var(--mute));
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px;
+}
+.inbox-resume {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  padding: 0;
+}
+/* the form sizes to its bounded textarea — the detail pane scrolls */
+.inbox-resume .resume-form { height: auto; padding: 8px 16px 16px; }
+.inbox-resolved { padding: 16px; font-size: 13px; color: rgb(var(--body)); }
+
+@media (max-width: 900px) {
+  .inbox-split { grid-template-columns: minmax(0, 1fr); }
+  .inbox-split.has-sel .inbox-list { display: none; }
+  .inbox-split:not(.has-sel) .inbox-detail { display: none; }
+  .inbox-back {
+    display: inline-flex; align-items: center; height: 32px; flex: none;
+    padding: 0 16px; font-size: 13px; color: rgb(var(--sec));
+    border-bottom: 1px solid rgb(var(--line));
+  }
+  .inbox-back:hover { color: rgb(var(--ink)); }
+  .inbox-item { min-height: 44px; justify-content: center; }
+}

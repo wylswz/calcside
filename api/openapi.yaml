@@ -3175,20 +3175,19 @@ components:
         code: { type: string }
     Application:
       type: object
-      required: [id, workspace_id, user_id, name, code, spec, version, published_version,
+      required: [id, workspace_id, user_id, name, sections, spec, version, published_version,
                  status, has_unpublished_changes, created_at, updated_at]
       properties:
         id: { type: string }
         workspace_id: { type: string }
         user_id: { type: string }
         name: { type: string }
-        code: { type: string, description: 'main.star source' }
         sections:
           type: array
           minItems: 1
           maxItems: 64
           items: { $ref: '#/components/schemas/ApplicationSection' }
-          description: notebook program sections; absent = script application
+          description: notebook program sections
         notebook_graph:
           $ref: '#/components/schemas/NotebookGraph'
           description: saved-draft dependency graph, detail responses only
@@ -3235,15 +3234,14 @@ components:
       type: object
       properties:
         name: { type: string, maxLength: 128 }
-        code:
-          type: string
-          nullable: true
-          description: omitted/null = scaffold
+        sections:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items: { $ref: '#/components/schemas/ApplicationSection' }
+          description: notebook program sections; omitted/null = scaffold a single main section
         spec:
           $ref: '#/components/schemas/RawJSON'
-        notebook:
-          type: boolean
-          description: 'Create a notebook application with a main section instead of a script.'
         input_schema:
           type: string
           nullable: true
@@ -3253,17 +3251,16 @@ components:
           description: omitted/null = any bounded JSON value; streamed outputs validate each item against an explicitly supplied schema
     ApplicationUpdateRequest:
       type: object
-      required: [version, name, code]
+      required: [version, name, sections]
       properties:
         version: { type: integer, format: int64, minimum: 1 }
         name: { type: string, maxLength: 128 }
-        code: { type: string }
         sections:
           type: array
           minItems: 1
           maxItems: 64
           items: { $ref: '#/components/schemas/ApplicationSection' }
-          description: notebook program sections; must be absent for script applications
+          description: notebook program sections
         spec:
           $ref: '#/components/schemas/RawJSON'
         input_schema:
@@ -3299,7 +3296,21 @@ components:
         version: { type: integer, format: int64, minimum: 1 }
         input:
           $ref: '#/components/schemas/RawJSON'
-          description: raw JSON input for main(input)
+          x-go-type-skip-optional-pointer: true
+          description: raw JSON input for main(input); explicit null stays literal bytes
+        entry:
+          type: string
+          pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'
+          description: >-
+            entry function to run. Omitted or "main" runs main(input)
+            with the input schema as a recorded test run. Any other
+            top-level one-argument function runs as a debug call: the
+            input is any bounded JSON value passed verbatim (no input
+            schema, no handler-context object), the output is bounded
+            and secret-redacted but not validated against the output
+            schema, and no run is recorded — interrupt.* ops are
+            unavailable. Debug entries exist only on this endpoint;
+            public invoke always runs main.
     ApplicationRunResponse:
       type: object
       required: [result]

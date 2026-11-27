@@ -43,7 +43,9 @@
   flex: none; padding: 8px 8px 6px;
   border-bottom: 1px solid var(--detail-edge);
 }
-.nb-outline-title {
+/* .nb-scoped so the workbench h2 type scale (an element selector)
+   can never override the component title's metrics. */
+.nb .nb-outline-title {
   margin: 0 0 6px; font-size: 11px; font-weight: 600;
   letter-spacing: 0.05em; text-transform: uppercase; color: rgb(var(--mute));
 }
@@ -199,16 +201,17 @@
   .nb-memory-limit { display: none; }
 }
 
-/* ---- cells: flat bordered blocks, 40px gutter + body ---- */
+/* ---- cells: flush blocks separated by hairlines (VS Code notebook);
+   the focused cell gets an accent left bar, never a box change (S1) ---- */
 .nb-cards { display: grid; }
 .nb-card {
   display: grid; grid-template-columns: 40px minmax(0, 1fr);
-  border: 1px solid var(--detail-edge); border-radius: var(--detail-radius-inset);
+  border: 0; border-top: 1px solid var(--detail-edge); border-radius: 0;
   background: var(--detail-work);
 }
+.nb-card:first-child { border-top: 0; }
 .nb-card:focus-within {
-  border-color: rgb(var(--accent) / 0.35);
-  box-shadow: 0 0 0 3px rgb(var(--accent) / 0.07);
+  box-shadow: inset 2px 0 0 rgb(var(--accent));
 }
 .nb-gutter {
   /* flex-start: the run control keeps its own height at the top of the
@@ -317,9 +320,9 @@
 .nb-output-tag { color: rgb(var(--warn-text)); }
 .nb-output-meta { color: rgb(var(--mute)); font-variant-numeric: tabular-nums; }
 .nb .nb-output-pre {
-  margin: 4px 0 0; padding: 8px 10px;
-  background: rgb(var(--code)); border: 1px solid var(--detail-edge);
-  border-radius: var(--detail-radius-inset);
+  margin: 4px 0 0; padding: 8px 10px 8px 12px;
+  background: rgb(var(--code));
+  border: 0; border-left: 1px solid var(--detail-edge); border-radius: 0;
   font-family: var(--font-mono); font-size: 12px; line-height: 18px;
   color: rgb(var(--body)); white-space: pre-wrap; overflow-wrap: anywhere;
   max-height: 240px; overflow: auto;

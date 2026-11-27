@@ -1,7 +1,9 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import CodeMirror from '@uiw/react-codemirror'
-import type { Extension } from '@codemirror/state'
+import { Prec, RangeSet, type Extension } from '@codemirror/state'
+import { EditorView, GutterMarker, gutter } from '@codemirror/view'
+import { entryFunctions } from '../entryFunctions'
 import type { Application, NotebookSectionMeta } from '../api'
 import { cmTheme } from './codemirror'
 import { NotebookGraph } from './NotebookGraph'
@@ -29,10 +31,12 @@ interface Props {
   /** '' while idle; 'run'/'publish'/… while a guarded op is in flight */
   busy: string
   canRun: boolean
-  onRun: () => void
+  onRunEntry: (name: string) => void
   onPublish: () => void
   onChange: (update: (sections: Section[]) => Section[]) => void
   test: ReactNode
+  /** controls rendered in the utility head row (Entry select, note, Run) */
+  testControls?: ReactNode
   saveStatus: ReactNode
   /** this view is the one on screen — the code scroller can't be
       targeted while its Tabs panel is hidden (C2). */
@@ -73,6 +77,57 @@ interface CardHandlers {
   onDragCancel: (e: ReactPointerEvent<HTMLElement>) => void
 }
 
+// EntryMarker is the ▶ button a gutter paints on a top-level
+// one-argument function's def line. Paint-only hover (S-rules); the
+// click reports the entry name, never a line number.
+class EntryMarker extends GutterMarker {
+  constructor(readonly name: string, readonly onRun: (name: string) => void) { super() }
+  override toDOM() {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.className = 'appnb-entry-run'
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    svg.setAttribute('viewBox', '0 0 10 10')
+    svg.setAttribute('aria-hidden', 'true')
+    svg.setAttribute('focusable', 'false')
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    path.setAttribute('d', 'M2.5 1.5v7l6-3.5z')
+    svg.appendChild(path)
+    b.appendChild(svg)
+    b.setAttribute('aria-label', `Run ${this.name}`)
+    b.title = `Run ${this.name}(input)`
+    b.addEventListener('click', (e) => { e.preventDefault(); this.onRun(this.name) })
+    return b
+  }
+  override eq(other: EntryMarker) { return other.name === this.name }
+}
+
+// Empty-gutter spacer keeps the gutter column a fixed width whether or
+// not a line carries a marker.
+const entrySpacer = new class extends GutterMarker {
+  override toDOM() { const s = document.createElement('div'); s.className = 'appnb-entry-run-spacer'; return s }
+  override eq() { return true }
+}()
+
+// entryRunGutter recomputes entry markers from the live doc on every
+// update; the callback goes through a ref so the extension identity —
+// and the editor's configuration — stays stable per card. `enabled`
+// gates marker rendering: viewers/read-only editors get no buttons.
+// Prec.highest places the gutter before the basic-setup line numbers.
+function entryRunGutter(onRun: { current: (name: string) => void }, enabled: { current: boolean }): Extension {
+  return Prec.highest(gutter({
+    class: 'appnb-entry-gutter',
+    markers: (view: EditorView) => {
+      if (!enabled.current) return RangeSet.empty
+      const doc = view.state.doc
+      return RangeSet.of(entryFunctions(doc.toString())
+        .filter((e) => e.line <= doc.lines)
+        .map((e) => new EntryMarker(e.name, (n) => onRun.current(n)).range(doc.line(e.line).from)))
+    },
+    initialSpacer: () => entrySpacer,
+  }))
+}
+
 function DragIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 10 16" fill="currentColor">
@@ -83,7 +138,7 @@ function DragIcon() {
   )
 }
 
-function AppSectionCard({ sec, index, count, ids, movable, canDelete, canAdd, extensions, readOnly, entryLabel, dropEdge, focusOnMount, onOpenTest, handlers }: {
+function AppSectionCard({ sec, index, count, ids, movable, canDelete, canAdd, extensions, readOnly, canRun, entryLabel, dropEdge, focusOnMount, onRunEntry, handlers }: {
   sec: Section
   index: number
   count: number
@@ -93,14 +148,21 @@ function AppSectionCard({ sec, index, count, ids, movable, canDelete, canAdd, ex
   canAdd: boolean
   extensions: Extension[]
   readOnly: boolean
+  canRun: boolean
   entryLabel?: string
   dropEdge?: 'before' | 'after' | null
   focusOnMount?: () => boolean
-  /** Pinned main only: gutter shortcut that opens the Test panel —
-      navigation only, never an execution. */
-  onOpenTest?: () => void
+  onRunEntry: (name: string) => void
   handlers: CardHandlers
 }) {
+  // The gutter extension is stable per card; only the callback ref
+  // tracks the latest handler.
+  const runRef = useRef(onRunEntry)
+  runRef.current = onRunEntry
+  const runEnabled = useRef(canRun && !readOnly)
+  runEnabled.current = canRun && !readOnly
+  const runGutter = useMemo(() => entryRunGutter(runRef, runEnabled), [canRun, readOnly])
+  const cardExtensions = useMemo(() => [runGutter, ...extensions], [runGutter, extensions])
   const [open, setOpen] = useState(true)
   const [renaming, setRenaming] = useState(false)
   const [renText, setRenText] = useState('')
@@ -118,13 +180,8 @@ function AppSectionCard({ sec, index, count, ids, movable, canDelete, canAdd, ex
   const cls = 'nb-card' + (dropEdge ? ` appnb-drop-${dropEdge}` : '')
   return (
     <div className={cls} id={`section-${sec.id}`}>
-      <div className="nb-gutter" aria-hidden={!movable && !onOpenTest || undefined}>
-        {onOpenTest ? (
-          <Button variant="ghost" size="xs" className="nb-icon-btn appnb-test-entry"
-            aria-label="Open Test main" title="Open Test main" onClick={onOpenTest}>
-            <Icon name="play" />
-          </Button>
-        ) : movable && (
+      <div className="nb-gutter" aria-hidden={!movable || undefined}>
+        {movable && (
           <Button variant="ghost" size="xs" className="nb-icon-btn appnb-drag"
             aria-label={`Drag section ${sec.id}`}
             onPointerDown={(e) => handlers.onDragDown(e, sec.id)}
@@ -177,7 +234,7 @@ function AppSectionCard({ sec, index, count, ids, movable, canDelete, canAdd, ex
         <div className="nb-editor" hidden={!open}>
           <div role="group" aria-label={`Application section ${sec.id}`}>
             <CodeMirror value={sec.code} minHeight="44px" maxHeight="420px"
-              extensions={extensions} theme={cmTheme}
+              extensions={cardExtensions} theme={cmTheme}
               basicSetup={{ autocompletion: false }}
               editable={!readOnly} readOnly={readOnly}
               onChange={(code) => handlers.onPatch(sec.id, code)}
@@ -189,7 +246,7 @@ function AppSectionCard({ sec, index, count, ids, movable, canDelete, canAdd, ex
   )
 }
 
-export function ApplicationNotebook({ sections, saved, extensions, readOnly, busy, canRun, onRun, onPublish, onChange, test, saveStatus, settings, visible }: Props) {
+export function ApplicationNotebook({ sections, saved, extensions, readOnly, busy, canRun, onRunEntry, onPublish, onChange, test, testControls, saveStatus, settings, visible }: Props) {
   const [params, setParams] = useSearchParams()
   const view = params.get('nbview') === 'graph' ? 'graph' : 'code'
   const selected = params.get('section') ?? ''
@@ -215,13 +272,17 @@ export function ApplicationNotebook({ sections, saved, extensions, readOnly, bus
     setSettingsOpen(false)
     settingsButton.current?.focus({ preventScroll: true })
   }, [])
-  // Gutter run on pinned main is navigation only — the Test panel opens,
-  // execution still waits for the explicit Test main button.
-  const openTest = useCallback(() => {
+  // A gutter ▶ runs that entry: the Test panel opens (Code view, no
+  // Settings) and the run fires with the panel's current input.
+  const runEntry = useCallback((name: string) => {
+    if (!canRun || readOnly) return
     setSettingsOpen(false)
     setTestOpen(true)
+    if (view === 'graph') goView('code')
     requestAnimationFrame(() => testHead.current?.focus({ preventScroll: true }))
-  }, [])
+    onRunEntry(name)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, onRunEntry, canRun, readOnly])
   const [dirFilter, setDirFilter] = useState('')
   const codeRef = useRef<HTMLDivElement | null>(null)
   const focusNext = useRef('')
@@ -575,7 +636,7 @@ export function ApplicationNotebook({ sections, saved, extensions, readOnly, bus
           </div>
           <div className="nb-toolbar-side">
             <NotebookViewToggle view={view} onChange={(v) => { setSettingsOpen(false); goView(v) }} />
-            <Button variant="primary" size="xs" onClick={onPublish} disabled={readOnly || !canRun}>
+            <Button variant="primary" size="xs" data-testid="app-publish" onClick={onPublish} disabled={readOnly || !canRun}>
               <SwapLabel show={busy === 'publish' ? 'Publishing…' : 'Publish…'} options={['Publish…', 'Publishing…']} />
             </Button>
           </div>
@@ -672,7 +733,8 @@ export function ApplicationNotebook({ sections, saved, extensions, readOnly, bus
               <AppSectionCard sec={sec} index={i} count={ordered.length - (mainId ? 1 : 0)}
                 ids={orderedIds}
                 movable={!readOnly && sec.id !== mainId}
-                onOpenTest={sec.id === mainId ? openTest : undefined}
+                onRunEntry={runEntry}
+                canRun={canRun}
                 canDelete={ordered.length > 1}
                 canAdd={sections.length < MAX_SECTIONS}
                 extensions={extensions} readOnly={readOnly}
@@ -710,12 +772,9 @@ export function ApplicationNotebook({ sections, saved, extensions, readOnly, bus
 
       <div className="appnb-utility" hidden={!testVisible}>
         <section className="appnb-utility-panel" aria-label="Test notebook" hidden={!testVisible}>
-          <div className="appnb-utility-head">
+          <div className="appnb-utility-head wb-pane-head">
             <h2 className="nb-outline-title" tabIndex={-1} ref={testHead}>Test</h2>
-            <Button variant="primary" size="sm" onClick={onRun} disabled={!canRun}
-              aria-busy={busy === 'run'} data-testid="app-run">
-              <SwapLabel show={busy === 'run' ? 'Testing…' : 'Test main'} options={['Test main', 'Testing…']} />
-            </Button>
+            {testControls}
           </div>
           {test}
         </section>

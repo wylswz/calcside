@@ -887,10 +887,7 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
         {dockedModules}
         {dockedPolicies}
         <header className="appnb-settings-header">
-          <div>
-            <h2>Settings</h2>
-            <p>Changes apply to the draft. Publish to update the live application.</p>
-          </div>
+          <h2 className="appnb-settings-title">Settings</h2>
           <div className="appnb-settings-actions">
             <div className="seg-filters appnb-settings-mode" role="group" aria-label="Settings editor">
               <button type="button" aria-pressed={!advanced}
@@ -907,11 +904,11 @@ export const SpecForm = forwardRef<SpecFormHandle, Props>(function SpecForm({
           </div>
         </header>
         <Tabs.Root value={notebookPage} onValueChange={(v) => setNotebookPage(v as NotebookSettingsPage)}>
-          <Tabs.List className="segmented appnb-settings-nav" aria-label="Settings categories">
-            <Tabs.Trigger value="general" disabled={advanced}>General</Tabs.Trigger>
-            <Tabs.Trigger value="runtime" disabled={advanced}>Runtime</Tabs.Trigger>
-            <Tabs.Trigger value="dependencies" disabled={advanced}>Dependencies</Tabs.Trigger>
-            <Tabs.Trigger value="contract" disabled={advanced}>Contract</Tabs.Trigger>
+          <Tabs.List className="view-tabs appnb-settings-nav" aria-label="Settings categories">
+            <Tabs.Trigger className="view-tab" value="general" disabled={advanced}>General</Tabs.Trigger>
+            <Tabs.Trigger className="view-tab" value="runtime" disabled={advanced}>Runtime</Tabs.Trigger>
+            <Tabs.Trigger className="view-tab" value="dependencies" disabled={advanced}>Dependencies</Tabs.Trigger>
+            <Tabs.Trigger className="view-tab" value="contract" disabled={advanced}>Contract</Tabs.Trigger>
           </Tabs.List>
           <div className="appnb-settings-json" hidden={!advanced}>
             <textarea aria-label="Application spec JSON" className={inputCls + ' min-h-[420px] font-mono text-xs'} value={json} spellCheck={false} onChange={(e) => setJSON(e.target.value)} />

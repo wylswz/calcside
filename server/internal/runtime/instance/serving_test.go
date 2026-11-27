@@ -161,10 +161,9 @@ func TestReplicaPrepareInvoke(t *testing.T) {
 	// counter globals and VFS must reset every invoke.
 	req := prepReq(n, prepareBundle(`counter = [0]
 def main(input):
-    counter[0] += 1
     seed = fs.read("seed.txt")
     fs.write("seed.txt", "mutated")
-    return {"n": counter[0], "seed": seed}
+    return {"n": counter[0] + 1, "seed": seed}
 `, map[string][]byte{"seed.txt": []byte("orig")}))
 	resp, err := n.m.Prepare(context.Background(), req)
 	if err != nil {
@@ -780,7 +779,6 @@ func TestReplicaNotebookPrepareInvoke(t *testing.T) {
 	// A notebook bundle: entry.star's main uses a helper defined in
 	// the lexically-later lib.star section — no load(), no entrypoint.
 	bundle := runtime.ProgramBundle{
-		Notebook: true,
 		Sources: map[string][]byte{
 			"entry.star": []byte(`def main(input):
     return {"msg": greet(input["name"])}

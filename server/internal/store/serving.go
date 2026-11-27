@@ -148,8 +148,7 @@ func NewServingReleaseWithModules(workspaceID, userID string, spec json.RawMessa
 		}
 		canonSchema[name] = canon
 	}
-	// File bounds mirror the engine prepare contract; entrypoint must
-	// name a real, portable source path.
+	// File bounds mirror the engine prepare contract.
 	if len(program.Sources) == 0 {
 		return nil, fmt.Errorf("%w: sources required", ErrInvalidServingRecord)
 	}
@@ -179,23 +178,6 @@ func NewServingReleaseWithModules(workspaceID, userID string, spec json.RawMessa
 		return nil, fmt.Errorf("%w: aggregate size out of bounds", ErrInvalidServingRecord)
 	}
 	prog := cloneProgram(program)
-	if prog.Notebook {
-		// Notebook releases are graphs of ordinary sections; entry
-		// points are function names, never a file.
-		if prog.Entrypoint != "" {
-			return nil, fmt.Errorf("%w: notebook release cannot set entrypoint", ErrInvalidServingRecord)
-		}
-	} else {
-		if prog.Entrypoint == "" {
-			prog.Entrypoint = "main.star"
-		}
-		if err := portablePath(prog.Entrypoint); err != nil {
-			return nil, fmt.Errorf("%w: entrypoint path", ErrInvalidServingRecord)
-		}
-		if _, ok := prog.Sources[prog.Entrypoint]; !ok {
-			return nil, fmt.Errorf("%w: entrypoint not in sources", ErrInvalidServingRecord)
-		}
-	}
 	normSpec, err := json.Marshal(specObj)
 	if err != nil {
 		return nil, fmt.Errorf("%w: spec", ErrInvalidServingRecord)
@@ -207,7 +189,6 @@ func NewServingReleaseWithModules(workspaceID, userID string, spec json.RawMessa
 		Format: releaseFrameFormat, WorkspaceID: workspaceID, UserID: userID,
 		Spec: json.RawMessage(normSpec), Policies: pol,
 		Program: runtime.ProgramBundle{
-			Entrypoint: prog.Entrypoint, Notebook: prog.Notebook,
 			Sources: prog.Sources, Assets: prog.Assets,
 			InputSchema: canonSchema["input_schema"], OutputSchema: canonSchema["output_schema"],
 		},
@@ -294,8 +275,6 @@ func portablePath(p string) error {
 
 func cloneProgram(p runtime.ProgramBundle) runtime.ProgramBundle {
 	out := runtime.ProgramBundle{
-		Entrypoint:   p.Entrypoint,
-		Notebook:     p.Notebook,
 		InputSchema:  append(json.RawMessage(nil), p.InputSchema...),
 		OutputSchema: append(json.RawMessage(nil), p.OutputSchema...),
 		Sources:      map[string][]byte{},

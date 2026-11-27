@@ -187,28 +187,17 @@ Every invariant has an owner mechanism, in order of preference:
 
 `/applications/:id` is covered by `e2e/application.spec.ts` against a
 live Vite dev server (React StrictMode) proxying a scratch dev API. The
-page has three addressable views (P6): Develop (workbench and Settings),
-Invoke (published-version calls), and Activity (Runs). Shared Radix tabs
+page has three addressable views (P6): Notebook (the shared notebook
+workbench and Settings), Invoke (published-version calls), and Activity
+(Runs). Shared Radix tabs
 hide inactive panels without unmounting their editors or inputs (C2/C3).
 - `applicationWorkbench.spec.ts` verifies CodeMirror DOM identity,
   draft/call input and invalid Settings JSON survive view switches,
   browser Back restores the selected view, and hidden controls are absent
   from the accessibility tree.
-- Develop has a directory-style Resources pane to the left of the editor.
-  It lists configured extension aliases with operation documentation and
-  mounted module aliases with nested `.star` files. Module files come
-  from the referenced published version, never the mutable library draft;
-  mismatched pins and unavailable versions show errors instead of falling
-  back (F3). Reference browsing never inserts or executes code, changes the
-  spec, or renders credentials. Native disclosures keep expansion state
-  across view and viewport changes; mobile stacks the pane above code.
-  Module files and extension operations open read-only references in the
-  main editor frame; the sidebar contains navigation only. The draft
-  editor remains mounted, and Run always executes main.star (C2/F3).
-  The resource/frame top and bottom edges are measured by the workbench
-  browser test; both panels scroll internally above the separate test area.
-- Develop's title bar holds its actions — Run and Publish (primary),
-  with `SwapLabel` Run/Running… and Publish/Publishing… (S4). There is
+- The notebook toolbar holds its actions — Publish (primary), with
+  `SwapLabel` Publish/Publishing… (S4); the Test utility panel's
+  Test main runs the draft (`SwapLabel` Test main/Testing…). There is
   no Save button: edits autosave 1200 ms after the last change (only
   shapes the PUT would accept) and Cmd/Ctrl+S saves immediately, both
   through the same snapshot pipeline as Run/Publish. The page header
@@ -220,7 +209,7 @@ hide inactive panels without unmounting their editors or inputs (C2/C3).
   "Changed while saving"; a conflicting save offers a reload Confirm
   instead of overwriting.
 - The Invoke card is a separate call layer: its own input and output,
-  not shared with Develop's test fields. Its Invoke button is always
+  not shared with the Test panel's fields. Its Invoke button is always
   rendered and merely disables until the app is ready, so its
   appearance never moves neighboring controls. "Create API key" in its
   title bar mints an application-bound key in a `Modal`.
@@ -234,8 +223,8 @@ hide inactive panels without unmounting their editors or inputs (C2/C3).
   `application-ui-{desktop,mobile}.png`.
 - Coverage is the browser suite plus static/unit geometry checks, not
   frame-level measurement.
-- Notebook-format applications (`?nbview=…`) replace that Develop card
-  with the shared notebook workbench (C2/C4): every section is a
+- Applications are notebook-only — the first view is the shared
+  notebook workbench (C2/C4): every section is a
   persistent stacked cell with its own CodeMirror, the entry-point owner
   stays pinned last, and cells reorder via a left-gutter drag handle
   (pointer capture; commit on release only, ArrowUp/ArrowDown and menu
@@ -266,9 +255,7 @@ hide inactive panels without unmounting their editors or inputs (C2/C3).
   header has a persistent Form | JSON mode switch with identical
   geometry in both modes plus an explicit close that returns focus to
   the toolbar toggle, and the page-level Extensions error offers a
-  Configure-extension jump straight to the failing card. The legacy
-  script app keeps
-  the Develop card described above.
+  Configure-extension jump straight to the failing card.
 - Both detail routes share the IDE-style `DetailWorkbench` frame: the
   same compact identity header (crumb, title, id, status, actions),
   `view-tabs` strip, and a viewport-filling `.work-surface` where each
@@ -350,18 +337,18 @@ dedicated field rather than a user label row.
 
 ### Interrupts (EP-0016)
 
-- **S3/S4**: the application Develop/Invoke output region gains streaming
+- **S3/S4**: the application Test/Invoke output region gains streaming
   affordances inside fixed geometry: the output pre is a fixed 180px box,
   the status slot is a reserved constrained-width tabular-nums flex slot, and the `Confirm`-gated
   Stop button occupies a constant slot (hidden via visibility, never
   unmounted). e2e `applicationStream.spec.ts` measures head/pre/Stop/meta
-  bounding boxes across initial, prefix and completed phases. Develop's
+  bounding boxes across initial, prefix and completed phases. the Test panel's
   input and output live inside the editor frame, with an icon-only Run
   pinned to the editor toolbar's right edge. The resource column shares
   the frame's top and bottom in initial, running and terminal states.
   The same e2e checks aligned fields, square Run hit targets, stacked
   resources at 820px and mobile overflow.
-- **S3/S4**: the nav inbox badge is a reserved-width tabular-figures slot that renders empty at zero (`InboxBadge`); the Develop/Invoke progress area (`RunProgress`/`useRunProgress`: waiting → running → terminal, `runPhase`) occupies the same output region as the result and the run page keeps its Waiting card box through the running phase — `RunDetail` measures the section while an interrupt is pending (layout effect + `ResizeObserver`, recorded per run id so a route change never carries another run's height) and applies it as `minHeight` only during the running phase; a row resumed since the last reveal keeps its box as an inert "Resolved by … · View run" placeholder (`keepGone` in `useHeldOrder`/`reconcile`, single-interrupt fetch fills the resolver label, "No longer waiting · View run" while it lands) until the reveal affordance — which appears whenever placeholders exist even with zero arrivals — clears it. e2e `interrupts.spec.ts` pins the run GET to the real waiting snapshot until the resume POST is accepted, then serves a synthetic running phase so the `run-progress` box is measured within 1px on desktop and 390px mobile without racing the terminal state, releases the route to verify the real succeeded output, and measures a resumed row's box across polling.
+- **S3/S4**: the nav inbox badge is a reserved-width tabular-figures slot that renders empty at zero (`InboxBadge`); the Test/Invoke progress area (`RunProgress`/`useRunProgress`: waiting → running → terminal, `runPhase`) occupies the same output region as the result and the run page keeps its Waiting card box through the running phase — `RunDetail` measures the section while an interrupt is pending (layout effect + `ResizeObserver`, recorded per run id so a route change never carries another run's height) and applies it as `minHeight` only during the running phase; a row resumed since the last reveal keeps its box as an inert "Resolved by … · View run" placeholder (`keepGone` in `useHeldOrder`/`reconcile`, single-interrupt fetch fills the resolver label, "No longer waiting · View run" while it lands) until the reveal affordance — which appears whenever placeholders exist even with zero arrivals — clears it. e2e `interrupts.spec.ts` pins the run GET to the real waiting snapshot until the resume POST is accepted, then serves a synthetic running phase so the `run-progress` box is measured within 1px on desktop and 390px mobile without racing the terminal state, releases the route to verify the real succeeded output, and measures a resumed row's box across polling.
 - **S5/C3**: inbox and application Runs tables use `useHeldOrder` + `RevealNew`; selections live in `?interrupt=` so polling can't drop them (C4 deep links fetch by id outside the page).
 - **C2**: ResumeForm drafts (event text) are keyed by user+workspace+interrupt (`resumeDraftKey`) and survive polling/refetch/navigation; confirms never discard input.
 - **P1/S4**: SwapLabel Resume/Resuming…/Resumed — running handler…; inputs disable while a resume is in flight and stay disabled while the handler runs.

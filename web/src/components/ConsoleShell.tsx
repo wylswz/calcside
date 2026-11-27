@@ -1,8 +1,8 @@
-// ConsoleShell: one header + hamburger drawer at every width (shared
-// Modal, left placement). `.console-main` is the page scroller —
-// children get `.console-content`'s centered max width; a workbench
-// route (instance detail) opts out via :has and scrolls its own panes.
-// One Primary nav landmark.
+// ConsoleShell: a persistent 48px activity bar on desktop (≥900px), a
+// hamburger drawer below that. `.console-main` is the page scroller —
+// children fill the canvas; a workbench route (instance detail) opts out
+// via :has and scrolls its own panes. One Primary nav landmark (the
+// activity bar on desktop, the drawer on mobile).
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -15,18 +15,20 @@ type User = { username?: string; email?: string }
 
 const GROUPS: { label: string; items: { to: string; label: string; icon: JSX.Element }[] }[] = [
   { label: 'Build & run', items: [
-    { to: '/', label: 'Instances', icon: <path d="M4 6h16M4 12h16M4 18h10" /> },
-    { to: '/applications', label: 'Applications', icon: <rect x="4" y="4" width="16" height="16" rx="3" /> },
-    { to: '/modules', label: 'Modules', icon: <path d="M8 4l8 8-8 8" /> },
+    { to: '/', label: 'Instances', icon: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 9l3 3-3 3M12 15h5" /></> },
+    { to: '/applications', label: 'Applications', icon: <><rect x="4" y="4" width="16" height="16" rx="3" /><path d="M10.5 9.5l4.5 2.5-4.5 2.5z" /></> },
+    { to: '/modules', label: 'Modules', icon: <><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" /><path d="M4 7.5l8 4.5 8-4.5M12 12v9" /></> },
   ] },
   { label: 'Observe', items: [
-    { to: '/inbox', label: 'Inbox', icon: <path d="M4 6h16v12H4zM4 12h6l2 2h4l2-2h2" /> },
-    { to: '/audit', label: 'Audit', icon: <path d="M6 4h12v16H6zM9 9h6M9 13h6" /> },
+    { to: '/inbox', label: 'Inbox', icon: <><path d="M4 6h16v12H4z" /><path d="M4 13h5l2 2.5h2L15 13h5" /></> },
+    { to: '/audit', label: 'Audit', icon: <><path d="M12 3l7 2.8v5.4c0 4.6-3.2 8.2-7 9.8-3.8-1.6-7-5.2-7-9.8V5.8L12 3z" /><path d="M9.5 12l1.8 1.8 3.4-3.6" /></> },
   ] },
   { label: 'Manage', items: [
-    { to: '/workspace', label: 'Workspace', icon: <path d="M4 8h16M8 8v10M4 8l3-4h10l3 4M4 8v10h16V8" /> },
+    { to: '/workspace', label: 'Workspace', icon: <><path d="M4 21h16" /><path d="M6 21V10l6-6 6 6v11" /><path d="M10 21v-5h4v5" /></> },
   ] },
 ]
+
+const ALL_ITEMS = GROUPS.flatMap((g) => g.items)
 
 function InboxBadge() {
   const ws = currentWorkspace() ?? ''
@@ -36,7 +38,11 @@ function InboxBadge() {
     refetchInterval: 5000,
   })
   const n = q.data?.interrupts?.length ?? 0
-  return <span className="inbox-count" aria-live="off">{n > 0 ? n : ''}</span>
+  // paint nothing at zero — the activity-bar badge is absolutely
+  // positioned and the drawer badge is the row's last item, so an
+  // empty badge can unmount without shifting anything (S4)
+  if (n === 0) return null
+  return <span className="inbox-count" aria-live="off">{n}</span>
 }
 
 const isActive = (pathname: string, to: string) =>
@@ -60,6 +66,24 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
             </Link>
           ))}
         </div>
+      ))}
+    </nav>
+  )
+}
+
+// ActivityBar: the desktop Primary nav — icon-only 40px buttons with
+// tooltips; the Inbox badge keeps its reserved box (S4).
+function ActivityBar() {
+  const { pathname } = useLocation()
+  return (
+    <nav className="shell-activity" aria-label="Primary">
+      {ALL_ITEMS.map((it) => (
+        <Link key={it.to} to={it.to} className="shell-activity-link"
+          title={it.label} aria-label={it.label}
+          aria-current={isActive(pathname, it.to) ? 'page' : undefined}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>{it.icon}</svg>
+          {it.to === '/inbox' && <InboxBadge />}
+        </Link>
       ))}
     </nav>
   )
@@ -97,26 +121,25 @@ export function ConsoleShell({ user, dev, onLogout, children }: {
   return (
     <div className="console-shell">
       <div className="shell-canvas">
-        <header className="console-header z-40 border-b border-line bg-paper/95 backdrop-blur">
-          <div className="console-header-inner flex h-14 items-center gap-3 px-4">
-            <button type="button" className="shell-hamburger" aria-label="Open navigation"
-              aria-haspopup="dialog" aria-expanded={drawer} onClick={() => setDrawer(true)}>
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-            </button>
-            {/* the pending-interrupt count must stay visible with the
-                drawer closed — it mirrors the Inbox link's badge (S4) */}
-            <Link to="/inbox" className="shell-inbox" aria-label="Inbox">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden><path d="M4 6h16v12H4zM4 12h6l2 2h4l2-2h2" /></svg>
-              <InboxBadge />
-            </Link>
-            <Link to="/" className="shell-wordmark text-[15px] font-semibold text-ink">calcside</Link>
-            <div className="min-w-0 flex-1"><WorkspaceSwitcher /></div>
-            <AccountMenu user={user} dev={dev} onLogout={onLogout} />
-          </div>
-        </header>
-        <main ref={mainRef} tabIndex={-1} className="console-main focus:outline-none">
-          <div className="console-content mx-auto w-full max-w-7xl px-4 py-10 sm:px-6">{children}</div>
-        </main>
+        {/* while the drawer is open it is the only Primary nav — the
+            activity bar unmounts so the landmark stays singular */}
+        {!drawer && <ActivityBar />}
+        <div className="shell-body">
+          <header className="console-header z-40 border-b border-line">
+            <div className="console-header-inner flex h-9 items-center gap-3 px-4">
+              <button type="button" className="shell-hamburger" aria-label="Open navigation"
+                aria-haspopup="dialog" aria-expanded={drawer} onClick={() => setDrawer(true)}>
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+              </button>
+              <Link to="/" className="shell-wordmark text-[15px] font-semibold text-ink">calcside</Link>
+              <div className="min-w-0 flex-1"><WorkspaceSwitcher /></div>
+              <AccountMenu user={user} dev={dev} onLogout={onLogout} />
+            </div>
+          </header>
+          <main ref={mainRef} tabIndex={-1} className="console-main focus:outline-none">
+            <div className="console-content">{children}</div>
+          </main>
+        </div>
       </div>
       {drawer && (
         <Modal title="Navigation" placement="left" dirty={false} onClose={() => setDrawer(false)}>

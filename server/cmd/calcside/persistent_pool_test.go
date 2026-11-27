@@ -219,7 +219,7 @@ func TestPersistentPoolScalesAcrossWorkers(t *testing.T) {
     return {"status": r["status"]}`
 	spec := fmt.Sprintf(`{"capabilities":{"net":{"allow_hosts":[%q],"timeout_ms":30000}}}`, stubAuthority)
 	created := request(t, appA.Server.Handler, "POST", "/api/v1/applications",
-		fmt.Sprintf(`{"name":"pool","code":%q,"spec":%s}`, code, spec), http.StatusOK)
+		fmt.Sprintf(`{"name":"pool","sections":[{"id":"main","code":%q}],"spec":%s}`, code, spec), http.StatusOK)
 	app := created["application"].(map[string]any)
 	appID := app["id"].(string)
 
@@ -356,7 +356,7 @@ func TestPersistentPoolScalesAcrossWorkers(t *testing.T) {
     r = net.get(input["url"])
     return {"status": r["status"], "v": 2}`
 	upd := request(t, appA.Server.Handler, "PUT", "/api/v1/applications/"+appID,
-		fmt.Sprintf(`{"version":1,"name":"pool","code":%q,"spec":%s}`, code2, spec), http.StatusOK)
+		fmt.Sprintf(`{"version":1,"name":"pool","sections":[{"id":"main","code":%q}],"spec":%s}`, code2, spec), http.StatusOK)
 	newVer := upd["application"].(map[string]any)["version"].(float64)
 	prev := request(t, appA.Server.Handler, "POST",
 		fmt.Sprintf("/api/v1/applications/%s/publish/preview", appID),

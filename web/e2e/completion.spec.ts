@@ -186,7 +186,7 @@ test('chart parameter completion in the application editor', async ({ page }) =>
   )
   await page.goto(`${viteURL}/applications/${app.id}`)
   await catReady
-  const editor = page.locator('.app-cm .cm-content').first()
+  const editor = page.locator('[aria-label="Application section main"] .cm-content').first()
   await expect(editor).toBeVisible()
   await page.waitForTimeout(400)
 

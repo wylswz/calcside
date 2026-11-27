@@ -134,7 +134,7 @@ func TestApplicationKeysAndWorkspaceIsolation(t *testing.T) {
 	// The object's workspace, not the request's currently selected workspace,
 	// determines both authorization and the boundary used for draft tests.
 	actor.WorkspaceID = store.PersonalWorkspaceID(foreign.ID)
-	if result, err := s.Test(ctx, actor, v.Application.ID, 1, json.RawMessage(`{}`)); err != nil ||
+	if result, err := s.Test(ctx, actor, v.Application.ID, 1, json.RawMessage(`{}`), ""); err != nil ||
 		result.Result.Error != nil {
 		t.Fatalf("app workspace did not override unrelated request workspace: %+v, %v", result, err)
 	}

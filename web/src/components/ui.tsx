@@ -136,9 +136,10 @@ export function RevealNew({ count, moved, onClick }: { count: number; moved: boo
 // position against it and return focus to it.
 export const Button = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'danger' | 'ghost'; size?: 'sm' | 'xs' }>(
   function Button({ variant, size, className, ...rest }, ref) {
-    // Material (fill, edge, shadow, motion) comes from material.css.
-    const base = 'inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium disabled:pointer-events-none '
-    const sz = size === 'sm' ? 'h-7 px-2.5 text-xs' : size === 'xs' ? '' : 'h-8 px-3.5 text-sm'
+    // Material (fill, edge, border, motion) comes from material.css;
+    // these classes only set the IDE control metrics.
+    const base = 'inline-flex items-center justify-center gap-1.5 whitespace-nowrap font-medium disabled:pointer-events-none '
+    const sz = size === 'sm' ? 'h-6 px-2.5 text-xs' : size === 'xs' ? '' : 'h-7 px-3 text-[13px]'
     return <button ref={ref} data-ui="button" data-variant={variant ?? 'default'} data-size={size ?? 'md'} className={base + sz + (className ? ' ' + className : '')} {...rest} />
   },
 )
@@ -168,6 +169,32 @@ export function PageHeader({ title, children, actions }: {
         {children && <p className="mt-3 max-w-3xl text-sm leading-[22px] text-sec">{children}</p>}
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
+    </div>
+  )
+}
+
+// ListPage is the one frame for list/settings surfaces: a 40px toolbar
+// (title, count, inline filters, primary action right) over full-bleed
+// content and an optional 28px status bar. Tables inside drop their
+// outer card and read as flush hairline rows.
+export function ListPage({ title, count, actions, toolbar, children, status }: {
+  title: React.ReactNode
+  count?: React.ReactNode
+  actions?: React.ReactNode
+  toolbar?: React.ReactNode
+  children: React.ReactNode
+  status?: React.ReactNode
+}) {
+  return (
+    <div className="list-page">
+      <div className="list-toolbar">
+        <h1 className="list-title">{title}</h1>
+        {count != null && count !== '' && <span className="list-count">{count}</span>}
+        {toolbar}
+        {actions && <div className="list-actions">{actions}</div>}
+      </div>
+      <div className="list-body">{children}</div>
+      {status && <div className="list-status">{status}</div>}
     </div>
   )
 }

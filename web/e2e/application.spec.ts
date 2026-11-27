@@ -35,13 +35,26 @@ async function waitReady(id: string, timeoutMs = 90_000) {
 async function startApplication(page: Page, name?: string) {
   await page.goto(`${viteURL}/applications/new`)
   if (name) await page.locator('#basics-name').fill(name)
-  await page.getByLabel('Source format').selectOption('script')
   await page.getByRole('button', { name: 'Continue to configuration' }).click()
 }
 
 
 // Publishing now routes through the review dialog: header Publish…
 // saves the draft then opens it; the dialog's own Publish commits.
+// The notebook workbench runs the draft through its Test panel: the
+// the toolbar Test button opens the panel, then Run executes.
+async function openTest(page: Page) {
+  const panel = page.getByRole('region', { name: 'Test notebook' })
+  if (!(await panel.isVisible())) {
+    await page.getByRole('button', { name: 'Test', exact: true }).click()
+  }
+}
+
+async function runMain(page: Page) {
+  await openTest(page)
+  await page.getByTestId('app-run').click()
+}
+
 async function publishViaDialog(page: Page) {
   await page.getByRole('button', { name: 'Publish…' }).click()
   await page.getByTestId('review-publish').click()
@@ -52,9 +65,9 @@ test('a) create -> scaffold -> test -> publish -> ready -> live invoke', async (
   await page.getByRole('button', { name: 'Create application' }).click()
   await page.waitForURL(/\/applications\/app_/)
   const id = page.url().split('/').pop()!
-  await expect(page.locator('.app-cm')).toContainText('def main(input)')
+  await expect(page.locator('[aria-label="Application section main"]')).toContainText('def main(input)')
 
-  await page.getByRole('button', { name: 'Run' }).click()
+  await runMain(page)
   await expect(page.locator('.app-out-pre:not(.app-call-out)')).toContainText('Hello, world', { timeout: 30_000 })
 
   await publishViaDialog(page)
@@ -62,8 +75,8 @@ test('a) create -> scaffold -> test -> publish -> ready -> live invoke', async (
   // the Invoke button is always rendered; it enables once ready
   await page.getByRole('tablist', { name: 'Application views' }).getByRole('tab', { name: 'Invoke' }).click()
   const invokeCard = page.getByRole('tabpanel', { name: 'Invoke', exact: true })
-  await expect(invokeCard.getByRole('button', { name: 'Invoke' })).toBeEnabled({ timeout: 10_000 })
-  await invokeCard.getByRole('button', { name: 'Invoke' }).click()
+  await expect(invokeCard.getByRole('button', { name: 'Send' })).toBeEnabled({ timeout: 10_000 })
+  await invokeCard.getByRole('button', { name: 'Send' }).click()
   await expect(page.locator('.app-call-out')).toContainText('Hello, world', { timeout: 30_000 })
 })
 
@@ -85,14 +98,14 @@ test('b) draft change stays unpublished until republish', async ({ page }) => {
   expect(String(out0)).toContain('Hello, a')
 
   // change the draft — published output must not move yet
-  const code = await page.locator('.app-cm .cm-content').first()
+  const code = await page.locator('[aria-label="Application section main"] .cm-content').first()
   await code.click()
   await page.keyboard.press('Meta+A')
   await page.keyboard.type('def main(input): return {"message": "v2"}')
   await page.keyboard.press('ControlOrMeta+s')
   await expect.poll(async () => {
     const r0 = await client.get(`/api/v1/applications/${id}`)
-    return (await r0.json()).application.code
+    return (await r0.json()).application.sections.find((s: any) => s.id === 'main')?.code
   }, { timeout: 15_000 }).toContain('"v2"')
   const inv1 = await client.post(`/api/v1/applications/${id}/invoke`, {
     headers: { 'Content-Type': 'application/json' },
@@ -125,7 +138,7 @@ test('c) mid-save edits abort the chained publish', async ({ page }) => {
     }
     await route.continue()
   })
-  const cm = page.locator('.app-cm .cm-content').first()
+  const cm = page.locator('[aria-label="Application section main"] .cm-content').first()
   await cm.click()
   await page.keyboard.press('Meta+A')
   await page.keyboard.type('def main(input): return {"first":1}')
@@ -144,10 +157,10 @@ test('c) mid-save edits abort the chained publish', async ({ page }) => {
   const app = (await r.json()).application
   expect(app.published_version).toBe(0)
   // the latest code is preserved in the editor, and autosave persists it
-  await expect(page.locator('.app-cm')).toContainText('"second":2')
+  await expect(page.locator('[aria-label="Application section main"]')).toContainText('"second":2')
   await expect.poll(async () => {
     const rr = await client.get(`/api/v1/applications/${id}`)
-    return (await rr.json()).application.code
+    return (await rr.json()).application.sections.find((s: any) => s.id === 'main')?.code
   }, { timeout: 15_000 }).toContain('"second":2')
   // then publish + invoke actually serves the SECOND code
   await publishViaDialog(page)
@@ -162,18 +175,18 @@ test('c2) input-only mid-save change aborts and keeps the input', async ({ page 
   const r = await client.post('/api/v1/applications', { data: { name: 'InOnly' } })
   const id = (await r.json()).application.id
   await page.goto(`${viteURL}/applications/${id}`)
-  await expect(page.locator('.app-status')).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('.detail-header-status .wb-status-cell')).toBeVisible({ timeout: 10_000 })
   await page.route('**/api/v1/applications/*', async (route) => {
     if (route.request().method() === 'PUT') {
       await new Promise((rr) => setTimeout(rr, 400))
     }
     await route.continue()
   })
-  const cm = page.locator('.app-cm .cm-content').first()
+  const cm = page.locator('[aria-label="Application section main"] .cm-content').first()
   await cm.click()
   await page.keyboard.press('Meta+A')
   await page.keyboard.type('def main(input): return {"c":1}')
-  const saveP = page.getByRole('button', { name: 'Run' }).click()
+  const saveP = runMain(page)
   await page.waitForTimeout(80)
   await page.locator('#app-input').fill('{"changed":true}')
   await saveP
@@ -182,7 +195,7 @@ test('c2) input-only mid-save change aborts and keeps the input', async ({ page 
   expect(app.published_version).toBe(0)
   await expect(page.locator('#app-input')).toHaveValue('{"changed":true}')
   // a follow-up Run works on the saved baseline
-  await page.getByRole('button', { name: 'Run' }).click()
+  await runMain(page)
   await expect(page.locator('.app-out-pre:not(.app-call-out)')).toContainText('"c":1', { timeout: 30_000 })
 })
 
@@ -199,23 +212,26 @@ test('d) SPA navigation resets scope; B never receives A draft', async ({ page }
     }, pid)
 
   await page.goto(`${viteURL}/applications/${id1}`)
-  const cm = page.locator('.app-cm .cm-content').first()
+  const cm = page.locator('[aria-label="Application section main"] .cm-content').first()
   await cm.click()
   await page.keyboard.press('Meta+A')
   await page.keyboard.type('def main(input): return {"from_a":1}')
+  await openTest(page)
   await page.locator('#app-input').fill('{"name":"scoped-one"}')
   // same-component navigation — the keyed remount must reset the draft
   await spa(id2)
+  await openTest(page)
   await expect(page.locator('#app-input')).toHaveValue(/\{\s*"name": "world"/, { timeout: 10_000 })
-  await expect(page.locator('.app-cm')).toContainText('def main(input)')
-  await expect(page.locator('.app-cm')).not.toContainText('from_a')
+  await expect(page.locator('[aria-label="Application section main"]')).toContainText('def main(input)')
+  await expect(page.locator('[aria-label="Application section main"]')).not.toContainText('from_a')
   // saving B writes B's own code, never A's
   await page.keyboard.press('ControlOrMeta+s')
   const b = (await (await client.get(`/api/v1/applications/${id2}`)).json()).application
-  expect(b.code).not.toContain('from_a')
+  expect(b.sections.find((s: any) => s.id === 'main')?.code).not.toContain('from_a')
   // back to A — its edits were scoped and restored
   await spa(id1)
-  await expect(page.locator('.app-cm')).toContainText('from_a', { timeout: 10_000 })
+  await expect(page.locator('[aria-label="Application section main"]')).toContainText('from_a', { timeout: 10_000 })
+  await openTest(page)
   await expect(page.locator('#app-input')).toHaveValue('{"name":"scoped-one"}')
 })
 
@@ -224,28 +240,28 @@ test('e) external write + my save -> 409, edits retained, reload offered', async
   const id = (await r.json()).application.id
   await page.goto(`${viteURL}/applications/${id}`)
   // wait until the page has actually loaded the app (version 1 base)
-  await expect(page.locator('.app-status')).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('.detail-header-status .wb-status-cell')).toBeVisible({ timeout: 10_000 })
   // another session bumps the draft server-side
   const app0 = (await (await client.get(`/api/v1/applications/${id}`)).json()).application
   await client.put(`/api/v1/applications/${id}`, {
-    data: { version: app0.version, name: 'Race', code: 'def main(i): return {"remote":true}', spec: app0.spec },
+    data: { version: app0.version, name: 'Race', sections: [{ id: 'main', code: 'def main(i): return {"remote":true}' }], spec: app0.spec },
   })
   // my editor still holds version 1 — its save must conflict
-  const cm = page.locator('.app-cm .cm-content').first()
+  const cm = page.locator('[aria-label="Application section main"] .cm-content').first()
   await cm.click()
   await page.keyboard.press('Meta+A')
   await page.keyboard.type('def main(input): return {"mine":1}')
   await page.keyboard.press('ControlOrMeta+s')
   await expect(page.getByText('Saved elsewhere')).toBeVisible({ timeout: 15_000 })
   // edits must not be silently replaced; Cancel keeps them
-  await expect(page.locator('.app-cm')).toContainText('"mine":1')
+  await expect(page.locator('[aria-label="Application section main"]')).toContainText('"mine":1')
   await page.getByRole('button', { name: 'Cancel' }).click()
-  await expect(page.locator('.app-cm')).toContainText('"mine":1')
+  await expect(page.locator('[aria-label="Application section main"]')).toContainText('"mine":1')
   // save again -> conflict again -> Confirm reload replaces explicitly
   await page.keyboard.press('ControlOrMeta+s')
   await expect(page.getByText('Saved elsewhere')).toBeVisible({ timeout: 15_000 })
   await page.getByRole('button', { name: 'Reload' }).click()
-  await expect(page.locator('.app-cm')).toContainText('remote', { timeout: 10_000 })
+  await expect(page.locator('[aria-label="Application section main"]')).toContainText('remote', { timeout: 10_000 })
 })
 
 test('f) instance creation still works via the UI', async ({ page }) => {
@@ -260,7 +276,7 @@ test('g) mobile populated layout, no horizontal overflow', async ({ page }) => {
   // populate output via the page itself, then resize — a viewport
   // change does not remount, so the populated state is preserved
   await page.goto(`${viteURL}/applications/${id}`)
-  await page.getByRole('button', { name: 'Run' }).click()
+  await runMain(page)
   await expect(page.locator('.app-out-pre:not(.app-call-out)')).toContainText('Hello, world', { timeout: 30_000 })
   await page.setViewportSize({ width: 390, height: 844 })
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
@@ -340,7 +356,7 @@ test('k) failed save shows "Couldn\'t save" + Retry and keeps the draft', async 
   const r = await client.post('/api/v1/applications', { data: { name: 'Flaky' } })
   const id = (await r.json()).application.id
   await page.goto(`${viteURL}/applications/${id}`)
-  await expect(page.locator('.app-cm')).toContainText('def main(input)', { timeout: 15_000 })
+  await expect(page.locator('[aria-label="Application section main"]')).toContainText('def main(input)', { timeout: 15_000 })
   // fail every PUT — the autosave after this edit surfaces the failure
   await page.route('**/api/v1/applications/*', async (route) => {
     if (route.request().method() === 'PUT') {
@@ -348,20 +364,20 @@ test('k) failed save shows "Couldn\'t save" + Retry and keeps the draft', async 
     }
     return route.continue()
   })
-  const cm = page.locator('.app-cm .cm-content').first()
+  const cm = page.locator('[aria-label="Application section main"] .cm-content').first()
   await cm.click()
   await page.keyboard.press('Meta+A')
   await page.keyboard.type('def main(input): return {"kept":1}')
-  const saved = () => page.locator('.swap-label > span[data-on="true"]', { hasText: 'Saved' })
-  await expect(page.locator('.swap-label > span[data-on="true"]', { hasText: "Couldn't save" })).toBeVisible({ timeout: 15_000 })
+  const saved = () => page.locator('.detail-head .swap-label > span[data-on="true"]', { hasText: 'Saved' })
+  await expect(page.locator('.detail-head .swap-label > span[data-on="true"]', { hasText: "Couldn't save" })).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible()
-  await expect(page.locator('.app-cm')).toContainText('"kept":1')
+  await expect(page.locator('[aria-label="Application section main"]')).toContainText('"kept":1')
   await page.unroute('**/api/v1/applications/*')
   await page.getByRole('button', { name: 'Retry' }).click()
   await expect(saved()).toBeVisible({ timeout: 10_000 })
   await expect.poll(async () => {
     const rr = await client.get(`/api/v1/applications/${id}`)
-    return (await rr.json()).application.code
+    return (await rr.json()).application.sections.find((s: any) => s.id === 'main')?.code
   }, { timeout: 10_000 }).toContain('"kept":1')
 })
 
@@ -383,23 +399,33 @@ test('l) work views: Invoke layout, Activity -> Run detail, narrow safe', async 
   const inv = await client.post(`/api/v1/applications/${id}/invoke`, { data: {} })
   expect(inv.status()).toBe(200)
 
-  // Invoke: input/output column sits left of the examples column.
+  // Invoke: Postman split — request pane (Body|Code|Auth tabs) left of
+  // the response pane; the panes are side by side.
   await page.goto(`${viteURL}/applications/${id}?view=invoke`)
   const invokePanel = page.getByRole('tabpanel', { name: 'Invoke', exact: true })
-  await expect(invokePanel.getByRole('button', { name: 'Invoke' })).toBeEnabled({ timeout: 15_000 })
+  await expect(invokePanel.getByRole('button', { name: 'Send' })).toBeEnabled({ timeout: 15_000 })
   const io = await invokePanel.locator('.app-invoke-io').boundingBox()
-  const ex = await invokePanel.locator('.app-invoke-examples').boundingBox()
-  expect(io).not.toBeNull(); expect(ex).not.toBeNull()
-  expect(io!.y).toBeLessThanOrEqual(ex!.y + 2)
-  expect(io!.x + io!.width).toBeLessThanOrEqual(ex!.x + 2)
-  expect(invokePanel.getByRole('heading', { name: 'Request examples' })).toBeVisible()
+  const req = await invokePanel.locator('.app-invoke-request').boundingBox()
+  const output = await invokePanel.locator('.app-invoke-output').boundingBox()
+  expect(io).not.toBeNull(); expect(req).not.toBeNull(); expect(output).not.toBeNull()
+  expect(req!.x + req!.width).toBeLessThanOrEqual(output!.x + 2)
+  expect(Math.abs(req!.y - output!.y)).toBeLessThanOrEqual(2)
+  // Body tab carries the input; Code tab hosts the request examples.
+  const bodyTab = invokePanel.getByRole('tab', { name: 'Body' })
+  await expect(bodyTab).toHaveAttribute('aria-selected', 'true')
+  await expect(invokePanel.locator('#app-call-input')).toBeVisible()
+  await invokePanel.getByRole('tab', { name: 'Code' }).click()
+  const examples = invokePanel.locator('.app-examples-embedded')
+  await expect(examples).toBeVisible()
+  await expect(examples.getByRole('tablist', { name: 'Example language' })).toBeVisible()
+  await invokePanel.getByRole('tab', { name: 'Body' }).click()
   await page.screenshot({ path: testInfo.outputPath('invoke-desktop.png'), fullPage: true })
 
   // stacked at 390px, no horizontal document overflow
   await page.setViewportSize({ width: 390, height: 844 })
-  const ioN = await invokePanel.locator('.app-invoke-io').boundingBox()
-  const exN = await invokePanel.locator('.app-invoke-examples').boundingBox()
-  expect(ioN!.y + ioN!.height).toBeLessThanOrEqual(exN!.y + 2)
+  const reqN = await invokePanel.locator('.app-invoke-request').boundingBox()
+  const outputN = await invokePanel.locator('.app-invoke-output').boundingBox()
+  expect(reqN!.y + reqN!.height).toBeLessThanOrEqual(outputN!.y + 2)
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false)
 
   // Activity: the run row links to the shared run detail.
@@ -409,7 +435,7 @@ test('l) work views: Invoke layout, Activity -> Run detail, narrow safe', async 
   await runsRegion.getByRole('link', { name: 'succeeded' }).first().click()
   await page.waitForURL(/\/applications\/app_[^/]+\/runs\/run_/)
   await expect(page.getByRole('heading', { name: 'Run', exact: true })).toBeVisible()
-  await expect(page.getByRole('link', { name: '← Application activity' })).toBeVisible()
+  await expect(page.getByRole('link', { name: /Activity/ })).toBeVisible()
   const steps = page.getByRole('region', { name: 'Steps table' })
   await expect(steps).toBeVisible()
   // the steps table scrolls inside its own region, never the document
@@ -427,7 +453,7 @@ test('l) work views: Invoke layout, Activity -> Run detail, narrow safe', async 
   await expect(steps.locator('td[data-label="Resolver"]').first()).toBeInViewport()
   await page.screenshot({ path: testInfo.outputPath('run-detail-mobile.png'), fullPage: true })
   // the crumb returns to the application's Activity view
-  await page.getByRole('link', { name: '← Application activity' }).click()
+  await page.getByRole('link', { name: /Activity/ }).click()
   await page.waitForURL(/\/applications\/app_[^/]+\?view=activity/)
   await expect(runsRegion).toBeVisible()
 })
