@@ -22,6 +22,12 @@ import { fmtDateTime, type RunPhase } from '../interrupts'
 import { ApplicationNotebook } from '../components/ApplicationNotebook'
 import { entryFunctions } from '../entryFunctions'
 
+const appSections = [
+  { value: 'develop', label: 'Editor', key: '1', icon: 'm5.5 4.5-3.5 3.5 3.5 3.5m5-7 3.5 3.5-3.5 3.5' },
+  { value: 'invoke', label: 'Invoke', key: '2', icon: 'm2.5 2 11 6-11 6 2-6-2-6Zm2 6H9' },
+  { value: 'activity', label: 'Activity', key: '3', icon: 'M1.5 8h3l2-4 3 8 2-4h3' },
+] as const
+
 type Draft = {
   name: string
   sections: NonNullable<Application['sections']>
@@ -180,7 +186,8 @@ function Editor({ app, role, userID, qc }: Props) {
   const [params, setParams] = useSearchParams()
   const activeView = params.get('view') === 'invoke' ? 'invoke' : params.get('view') === 'activity' ? 'activity' : 'develop'
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const goToView = (value: string) => {
+  const sectionTabs = useRef<HTMLDivElement>(null)
+  const goToView = useCallback((value: string) => {
     const next = new URLSearchParams(params)
     if (value === 'develop') {
       next.delete('view')
@@ -190,7 +197,21 @@ function Editor({ app, role, userID, qc }: Props) {
       next.set('view', value)
     }
     if (next.toString() !== params.toString()) setParams(next)
-  }
+  }, [params, setParams])
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey ||
+        document.querySelector('[role="dialog"], [role="alertdialog"]')) return
+      const section = appSections.find(({ key }) => e.code === `Digit${key}`)
+      if (!section) return
+      e.preventDefault()
+      if (e.repeat) return
+      goToView(section.value)
+      requestAnimationFrame(() => sectionTabs.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus())
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [goToView])
   const notebookSpecRef = useRef<SpecFormHandle>(null)
   // SpecForm remount key: bumped on reset so a corrupt stored spec is
   // re-parsed, never remounted while the user is editing.
@@ -695,16 +716,17 @@ function Editor({ app, role, userID, qc }: Props) {
 
       <Tabs.Root className="app-detail-views" value={activeView} onValueChange={goToView}>
       <DetailWorkbenchViews>
-        <Tabs.List className="view-tabs app-section-tabs" aria-label="Application views">
-          <Tabs.Trigger className="view-tab" value="develop"
-            onClick={() => { if (activeView === 'develop') goToView('develop') }}>
-            <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m5.5 4.5-3.5 3.5 3.5 3.5m5-7 3.5 3.5-3.5 3.5" />
-            </svg>
-            Editor
-          </Tabs.Trigger>
-          <Tabs.Trigger className="view-tab" value="invoke">Invoke</Tabs.Trigger>
-          <Tabs.Trigger className="view-tab" value="activity">Activity</Tabs.Trigger>
+        <Tabs.List ref={sectionTabs} className="view-tabs app-section-tabs" aria-label="Application views">
+          {appSections.map(({ value, label, key, icon }) => (
+            <Tabs.Trigger key={value} className="view-tab" value={value} title={`${label} (Alt+${key})`}
+              aria-keyshortcuts={`Alt+${key}`}
+              onClick={value === 'develop' ? () => { if (activeView === 'develop') goToView(value) } : undefined}>
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d={icon} />
+              </svg>
+              {label}
+            </Tabs.Trigger>
+          ))}
         </Tabs.List>
       </DetailWorkbenchViews>
       {/* C2/C3: switching views hides panels, never remounts their editors. */}
@@ -853,11 +875,15 @@ function InvokeTabs({ appId, input, canEdit, onCreateKey, body }: {
   body: React.ReactNode
 }) {
   const [tab, setTab] = useState<'body' | 'code' | 'auth'>('body')
+  const [pointerFocus, setPointerFocus] = useState(false)
   return (
     <Tabs.Root className="app-invoke-tabs" value={tab} onValueChange={(v) => setTab(v as 'body' | 'code' | 'auth')}>
       <header className="wb-pane-head">
         <h3 className="wb-pane-title">Request</h3>
-        <Tabs.List className="wb-head-tabs" aria-label="Request">
+        <Tabs.List className="wb-head-tabs" aria-label="Request" data-pointer-focus={pointerFocus || undefined}
+          onPointerDown={() => setPointerFocus(true)}
+          onKeyDownCapture={() => setPointerFocus(false)}
+          onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setPointerFocus(false) }}>
           <Tabs.Trigger value="body" className="wb-head-tab">Body</Tabs.Trigger>
           <Tabs.Trigger value="code" className="wb-head-tab">Code</Tabs.Trigger>
           <Tabs.Trigger value="auth" className="wb-head-tab">Auth</Tabs.Trigger>

@@ -72,6 +72,35 @@ test('notebook workbench retains section editor, test input and call input acros
   expect(errors).toEqual([])
 })
 
+test('section shortcuts switch views and Request focus is keyboard-only', async ({ page }) => {
+  const created = await rt.client.post('/api/v1/applications', { data: { name: 'Section shortcuts' } })
+  expect(created.ok()).toBeTruthy()
+  const id = (await created.json()).application.id
+  await page.goto(`${rt.viteURL}/applications/${id}`)
+  const views = page.getByRole('tablist', { name: 'Application views' })
+  const editor = views.getByRole('tab', { name: 'Editor', exact: true })
+  await expect(editor).toBeVisible()
+
+  for (const [name, key] of [['Invoke', '2'], ['Activity', '3'], ['Editor', '1']]) {
+    const tab = views.getByRole('tab', { name, exact: true })
+    await expect(tab).toHaveAttribute('title', `${name} (Alt+${key})`)
+    await expect(tab).toHaveAttribute('aria-keyshortcuts', `Alt+${key}`)
+    await page.keyboard.press(`Alt+${key}`)
+    await expect(tab).toHaveAttribute('aria-selected', 'true')
+    await expect(tab).toBeFocused()
+  }
+
+  await page.keyboard.press('Alt+2')
+  const request = page.getByRole('tablist', { name: 'Request' })
+  const auth = request.getByRole('tab', { name: 'Auth' })
+  await auth.click()
+  await expect(auth).toHaveCSS('outline-style', 'none')
+  await page.keyboard.press('ArrowLeft')
+  await page.keyboard.press('ArrowRight')
+  await expect(auth).toBeFocused()
+  await expect(auth).toHaveCSS('outline-style', 'solid')
+})
+
 test('view routing: unknown view falls back to the notebook tab and params survive (C4)', async ({ page }) => {
   const ar = await rt.client.post('/api/v1/applications', { data: { name: 'Routes' } })
   expect(ar.ok()).toBeTruthy()

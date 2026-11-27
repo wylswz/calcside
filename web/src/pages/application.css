@@ -16,18 +16,24 @@
 }
 /* Shared detail-workbench frame: the views strip + panels own the viewport. */
 .detail-workbench .app-view-panel[hidden] { display: none; }
-.detail-workbench .app-section-tabs { display: flex; align-items: center; gap: 4px; padding-block: 3px; }
+.detail-workbench .detail-views .view-tabs.app-section-tabs {
+  flex: 0 1 auto; display: flex; align-items: center; gap: 2px;
+  margin-block: 4px; padding: 2px; border: 1px solid var(--detail-edge);
+  background: rgb(var(--surface)); border-radius: var(--radius-control);
+}
 .detail-workbench .app-section-tabs .view-tab {
   display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
   margin: 0; border: 0; border-radius: var(--radius-control); font-weight: 600;
 }
 .detail-workbench .app-section-tabs .view-tab svg { width: 14px; height: 14px; }
-.detail-workbench .app-section-tabs .view-tab:hover { background: rgb(var(--surface)); color: rgb(var(--ink)); }
+.detail-workbench .app-section-tabs .view-tab:hover { background: rgb(var(--accent) / 0.1); color: rgb(var(--ink)); }
 .detail-workbench .app-section-tabs .view-tab[data-state='active'] {
-  background: rgb(var(--accent) / 0.1); color: rgb(var(--accent));
-  box-shadow: inset 0 0 0 1px rgb(var(--accent) / 0.24);
+  background: rgb(var(--accent)); color: rgb(var(--paper));
 }
-.detail-workbench .app-section-tabs .view-tab:focus-visible { outline-offset: -2px; }
+.detail-workbench .app-section-tabs .view-tab:focus-visible { outline-offset: 1px; }
+.detail-workbench .app-section-tabs .view-tab[data-state='active']:focus-visible {
+  outline: 1px solid rgb(var(--paper)); outline-offset: -3px;
+}
 
 .detail-workbench .app-run-location {
   display: flex; align-items: center; gap: 6px; min-width: 0;
@@ -78,6 +84,14 @@
 .detail-workbench .app-invoke-tabs { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .detail-workbench .app-invoke-tabs > .wb-pane-body { flex: 1; min-height: 0; }
 .detail-workbench .app-invoke-tabs .wb-pane-head { gap: 12px; }
+.detail-workbench .app-invoke-tabs .wb-head-tab {
+  padding-inline: 7px; font-size: 11px; border-bottom-width: 1px;
+}
+.detail-workbench .app-invoke-tabs .wb-head-tab[data-state='active'] { border-bottom-color: rgb(var(--accent) / 0.65); }
+.detail-workbench .app-invoke-tabs .wb-head-tab:focus { outline: none; }
+.detail-workbench .app-invoke-tabs .wb-head-tabs:not([data-pointer-focus]) .wb-head-tab:focus-visible {
+  outline: 1px solid rgb(var(--accent)); outline-offset: -2px;
+}
 .detail-workbench .app-invoke-request [role='tabpanel'] { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .detail-workbench .app-invoke-request [role='tabpanel'][data-state='inactive'] { display: none; }
 .detail-workbench .app-invoke-request [role='tabpanel'] > .wb-grow { flex: 1; min-height: 0; }
