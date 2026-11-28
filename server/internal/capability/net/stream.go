@@ -63,6 +63,9 @@ func (c *client) openRequest(ctx context.Context, method, rawURL, body string, h
 func (c *client) streamMethod(gate *capability.Gate) starlark.Value {
 	return starlark.NewBuiltin("net.stream",
 		func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			if val, ok, err := capability.CallMonkeyPatch(thread, b.Name(), args, kwargs); ok {
+				return val, err
+			}
 			var method, rawURL, body string
 			var hdrs starlark.Value
 			if err := starlark.UnpackArgs("net.stream", args, kwargs, "method", &method, "url", &rawURL, "body?", &body, "headers?", &hdrs); err != nil {

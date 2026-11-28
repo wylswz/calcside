@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	starjson "go.starlark.net/lib/json"
 	"go.starlark.net/starlark"
 	"go.starlark.net/starlarkstruct"
 
@@ -14,6 +13,7 @@ import (
 	capfs "calcside/internal/capability/fs"
 	capio "calcside/internal/capability/io"
 	"calcside/internal/secrets"
+	"calcside/internal/stdlib"
 	"calcside/internal/types"
 )
 
@@ -46,12 +46,10 @@ func newSession(t *testing.T, hooks []capability.Hook, fsQuota int64) (*Session,
 	}
 	buf := capio.NewBuffer(fsQuota)
 	disp := capio.NewDisplays()
-	pre := starlark.StringDict{
-		"fs":    fsv,
-		"json":  starjson.Module,
-		"io":    ioModule(buf, disp, gate),
-		"print": capio.PrintBuiltin(buf, gate),
-	}
+	pre := stdlib.Modules()
+	pre["fs"] = fsv
+	pre["io"] = ioModule(buf, disp, gate)
+	pre["print"] = capio.PrintBuiltin(buf, gate)
 	s := &Session{
 		Gate: gate, Predeclared: pre, Globals: starlark.StringDict{},
 		InstanceID: "ins_t", UserID: "u", UserEmail: "u@x",

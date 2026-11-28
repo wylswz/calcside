@@ -2,6 +2,7 @@ package capability
 
 import (
 	"context"
+	"errors"
 
 	"calcside/internal/types"
 
@@ -26,6 +27,9 @@ func Bind(name types.CapabilityName, gate *Gate, methods map[types.Op]Method) st
 	for mname, m := range methods {
 		mname, m := mname, m
 		members[string(mname)] = starlark.NewBuiltin(string(name)+"."+string(mname), func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			if val, ok, err := CallMonkeyPatch(thread, b.Name(), args, kwargs); ok {
+				return val, err
+			}
 			callArgs, body, err := m(args, kwargs)
 			if err != nil {
 				return nil, err
@@ -42,6 +46,33 @@ func Bind(name types.CapabilityName, gate *Gate, methods map[types.Op]Method) st
 // ContextKey is the thread-local under which the engine stores the exec
 // context so hooks see cancellation.
 const ContextKey = "calcside.ctx"
+
+const monkeyPatchPrefix = "calcside.monkey_patch."
+
+// SetMonkeyPatch registers a per-thread override for a builtin name.
+func SetMonkeyPatch(thread *starlark.Thread, name string, fn starlark.Callable) {
+	if thread == nil {
+		return
+	}
+	thread.SetLocal(monkeyPatchPrefix+name, fn)
+}
+
+// CallMonkeyPatch invokes the per-thread monkey patch for name if one is set.
+func CallMonkeyPatch(thread *starlark.Thread, name string, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, bool, error) {
+	if thread == nil {
+		return nil, false, nil
+	}
+	v := thread.Local(monkeyPatchPrefix + name)
+	if v == nil {
+		return nil, false, nil
+	}
+	callable, ok := v.(starlark.Callable)
+	if !ok {
+		return nil, true, errors.New("got non callable")
+	}
+	val, err := starlark.Call(thread, callable, args, kwargs)
+	return val, true, err
+}
 
 // ThreadContext extracts the exec context the engine stored on the thread.
 func ThreadContext(thread *starlark.Thread) context.Context { return threadContext(thread) }

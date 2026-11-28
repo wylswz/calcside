@@ -118,6 +118,8 @@ var functions = []function{
 	{"chart.vconcat", []string{"*specs", "title"}, "Combine spec dicts vertically; child $schema/config are stripped.", chartCompose("vconcat")},
 	{"chart.validate", []string{"spec"}, "Validate a spec dict; returns the canonical dict or an error naming the JSON path.", chartValidate},
 	{"chart.summary", []string{"spec"}, "One-line summary of a spec dict: mark, row count, x/y ranges.", chartSummary},
+
+	{"test.monkey_patch", []string{"*target", "*handler"}, "Monkey patch local functions with user provided ones. Useful in testing", monkeyPatch},
 }
 
 // mathModule wraps go.starlark.net/lib/math in a fresh module so the
@@ -164,7 +166,14 @@ func Modules() starlark.StringDict {
 					err = fmt.Errorf("%s: internal numeric failure", b.Name())
 				}
 			}()
-			value, err := f.call(t, b, args, kwargs)
+
+			var value starlark.Value
+			if patched, ok, perr := capability.CallMonkeyPatch(t, b.Name(), args, kwargs); ok {
+				value, err = patched, perr
+			} else {
+				value, err = f.call(t, b, args, kwargs)
+			}
+
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", b.Name(), err)
 			}
@@ -199,7 +208,7 @@ func checkpoint(t *starlark.Thread) error { return capability.ThreadContext(t).E
 
 func unpack(b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple, pairs ...any) error {
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs, pairs...); err != nil {
-		return errors.New("invalid arguments")
+		return fmt.Errorf("invalid arguments: %w", err)
 	}
 	return nil
 }
