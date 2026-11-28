@@ -45,22 +45,23 @@ func (s *strictImpl) CheckApplicationRelease(ctx context.Context, req gen.CheckA
 		}
 		findings = append(findings, gf)
 	}
-	dto := gen.ApplicationReleaseCheckResponse{
-		HasDrift: res.HasDrift,
-		Status:   gen.ApplicationReleaseCheckResponseStatus(res.Status),
-		Findings: findings,
+	dto := map[string]any{
+		"has_drift":       res.HasDrift,
+		"status":          res.Status,
+		"findings":        findings,
+		"test_case_count": res.TestCaseCount,
 	}
 	if res.Candidate != "" {
-		c := res.Candidate
-		dto.Candidate = &c
+		dto["candidate"] = res.Candidate
 	}
 	if res.LiveDigest != "" {
-		ld := res.LiveDigest
-		dto.LiveDigest = &ld
+		dto["live_digest"] = res.LiveDigest
 	}
 	if res.LiveSeq > 0 {
-		ls := res.LiveSeq
-		dto.LiveSeq = &ls
+		dto["live_seq"] = res.LiveSeq
+	}
+	if res.LatestTestRun != nil {
+		dto["latest_test_run"] = res.LatestTestRun
 	}
 	return checkApplicationReleaseResp{rawJSON{http.StatusOK, dto}}, nil
 }

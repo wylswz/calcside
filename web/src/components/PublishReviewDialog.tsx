@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api, wsPath, ApiError } from '../api'
 import { Button, Loading, Notice, SwapLabel, Modal, inputCls } from './ui'
-import { DigestChip, StatusIndicator } from '../ui/core'
+import { DigestChip, Disclosure, StatusIndicator } from '../ui/core'
 import { FindingList, type Finding } from '../ui/FindingList'
 import { GrantDiffCard } from '../ui/GrantDiffCard'
+import { TestChecksPanel, type TestSuiteRun } from './TestChecksPanel'
 
 import type { components } from '../api/schema'
 type PublishReview = components['schemas']['PublishReview']
@@ -13,13 +14,14 @@ type ReleaseCheck = components['schemas']['ApplicationReleaseCheckResponse']
 // Shared review dialog for modules and applications:
 // - Modules: EP-0018 digest-bound semantic + @codemirror/merge diff review.
 // - Applications: EP-0026 production-readiness flow — Check findings,
-//   semantic/code Diff, and digest-bound Publish.
+//   GitHub CI-style test suite checks, semantic/code Diff, and digest-bound Publish.
 export function PublishReviewDialog({
   resource,
   id,
   version,
   onJumpSection,
   onOpenSettings,
+  onOpenTests,
   onClose,
   onPublished,
 }: {
@@ -28,12 +30,15 @@ export function PublishReviewDialog({
   version: number
   onJumpSection?: (section: string) => void
   onOpenSettings?: () => void
+  onOpenTests?: (caseId?: string) => void
   onClose: () => void
   onPublished: () => void
 }) {
   const qc = useQueryClient()
   const [rev, setRev] = useState<PublishReview | null>(null)
   const [check, setCheck] = useState<ReleaseCheck | null>(null)
+  const [suiteRun, setSuiteRun] = useState<TestSuiteRun | null>(null)
+  const [runningTests, setRunningTests] = useState(false)
   const [curVer, setCurVer] = useState(version)
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(false)
@@ -43,10 +48,26 @@ export function PublishReviewDialog({
 
   const bodyKey = resource === 'modules' ? 'draft_version' : 'version'
 
+  const runSuiteChecks = async (v: number) => {
+    setRunningTests(true)
+    setErr('')
+    try {
+      const suite = await api.post<TestSuiteRun>(wsPath(`/api/v1/applications/${id}/test-cases/run`), { version: v })
+      setSuiteRun(suite)
+      void qc.invalidateQueries({ queryKey: ['app-test-cases', id] })
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) setConflict(true)
+      setErr((e as Error).message)
+    } finally {
+      setRunningTests(false)
+    }
+  }
+
   const loadPreviewAndCheck = async (fresh: boolean) => {
     if (publishing) return
     setRev(null)
     setCheck(null)
+    setSuiteRun(null)
     setLoading(true)
     setErr('')
     setConflict(false)
@@ -66,9 +87,15 @@ export function PublishReviewDialog({
       if (resource === 'applications') {
         const ck = await api.post<ReleaseCheck>(wsPath(`/api/v1/applications/${id}/release/check`), { version: v })
         setCheck(ck)
+        setSuiteRun(ck.latest_test_run ?? null)
         if (ck.candidate) {
           const pv = await api.post<PublishReview>(wsPath(`/api/v1/applications/${id}/publish/preview`), { version: v })
           setRev(pv)
+        }
+        // Auto-run GitHub CI checks when test cases exist and this candidate
+        // has no passing suite run yet (and static readiness isn't blocked).
+        if (ck.test_case_count > 0 && ck.status !== 'blocked' && ck.latest_test_run?.status !== 'passed') {
+          void runSuiteChecks(v)
         }
       } else {
         setRev(await api.post<PublishReview>(wsPath(`/api/v1/${resource}/${id}/publish/preview`), { [bodyKey]: v }))
@@ -106,6 +133,9 @@ export function PublishReviewDialog({
     }
   }
 
+  const candDigest = rev?.candidate?.digest ?? check?.candidate ?? ''
+  const testCaseCount = resource === 'applications' ? (check?.test_case_count ?? 0) : 0
+  const testsPassed = testCaseCount === 0 || (suiteRun != null && suiteRun.candidate === candDigest && suiteRun.status === 'passed')
   const blocked = resource === 'applications' && check?.status === 'blocked'
   const findings: Finding[] = (check?.findings ?? []).map((f) => ({
     code: f.code,
@@ -126,26 +156,28 @@ export function PublishReviewDialog({
     }
   }
 
-  const candDigest = rev?.candidate?.digest ?? check?.candidate ?? ''
+  const footerNote = blocked
+    ? 'Resolve blocking readiness issues before publishing.'
+    : runningTests
+      ? 'Running test checks against this candidate…'
+      : !testsPassed
+        ? 'All test checks must pass before publishing.'
+        : rev?.identical
+          ? 'No changes to publish.'
+          : candDigest
+            ? 'Digest-bound publish — reviewed candidate only.'
+            : ''
 
   return (
-    <Modal title="Review & publish" wide onClose={() => { if (!publishing) onClose() }} dirty={note !== ''}
+    <Modal title="Review & publish" wide onClose={() => { if (!publishing && !runningTests) onClose() }} dirty={note !== ''}
       footer={<>
-        <div className="mr-auto text-xs text-mute">
-          {blocked
-            ? 'Resolve blocking readiness issues before publishing.'
-            : rev?.identical
-              ? 'No changes to publish.'
-              : candDigest
-                ? 'Digest-bound publish — reviewed candidate only.'
-                : ''}
-        </div>
+        <div className="mr-auto text-xs text-mute">{footerNote}</div>
         {(conflict || (err && !rev && !check)) && (
-          <Button onClick={() => void loadPreviewAndCheck(true)} disabled={loading}>Refresh preview</Button>
+          <Button onClick={() => void loadPreviewAndCheck(true)} disabled={loading || runningTests}>Refresh preview</Button>
         )}
         <Button variant="primary"
-          disabled={publishing || loading || conflict || blocked || !rev?.candidate || rev.identical}
-          title={rev?.identical ? 'Candidate is identical to the published base' : blocked ? 'Blocked by readiness check' : undefined}
+          disabled={publishing || runningTests || loading || conflict || blocked || !testsPassed || !rev?.candidate || rev.identical}
+          title={rev?.identical ? 'Candidate is identical to the published base' : blocked ? 'Blocked by readiness check' : !testsPassed ? 'Waiting for test checks to pass' : undefined}
           onClick={() => void publish()} data-testid="review-publish">
           <SwapLabel show={publishing ? 'Publishing…' : 'Publish'} options={['Publish', 'Publishing…'] as const} />
         </Button>
@@ -179,7 +211,22 @@ export function PublishReviewDialog({
             )}
             <div className="ml-auto">
               <StatusIndicator
-                status={blocked ? 'blocked' : rev?.identical ? 'identical' : check?.status ?? 'ready'}
+                status={
+                  blocked
+                    ? 'blocked'
+                    : rev?.identical
+                      ? 'identical'
+                      : !testsPassed
+                        ? (suiteRun?.status === 'failed' ? 'checks failed' : 'checks pending')
+                        : check?.status ?? 'ready'
+                }
+                tone={
+                  blocked || (!testsPassed && suiteRun?.status === 'failed')
+                    ? 'err'
+                    : !testsPassed
+                      ? 'warn'
+                      : 'ok'
+                }
                 pill
               />
             </div>
@@ -193,10 +240,30 @@ export function PublishReviewDialog({
             </section>
           )}
 
-          {/* 3. Semantic & section diffs */}
+          {/* 3. GitHub CI-style Test Checks (applications) */}
+          {resource === 'applications' && testCaseCount > 0 && (
+            <TestChecksPanel
+              totalCases={testCaseCount}
+              suiteRun={suiteRun}
+              running={runningTests}
+              disabled={blocked || publishing}
+              onRun={() => void runSuiteChecks(curVer)}
+              onOpenTests={onOpenTests ? (cid) => { onClose(); onOpenTests(cid) } : undefined}
+            />
+          )}
+          {resource === 'applications' && testCaseCount === 0 && onOpenTests && (
+            <div className="flex items-center justify-between rounded-[3px] border border-line bg-surface/50 px-3 py-2 text-sec">
+              <span>No test cases configured for this application.</span>
+              <button type="button" className="link" onClick={() => { onClose(); onOpenTests() }}>
+                Add test cases
+              </button>
+            </div>
+          )}
+
+          {/* 4. Semantic & section diffs */}
           {(rev?.changes?.length ?? 0) > 0 && <GrantDiffCard changes={rev!.changes} />}
 
-          {/* 4. Publish note */}
+          {/* 5. Publish note */}
           <div>
             <label htmlFor="review-note" className="mb-1 block text-xs font-medium text-sec">
               Release note <span className="font-normal text-mute">(optional, max 500 chars)</span>
@@ -206,9 +273,8 @@ export function PublishReviewDialog({
           </div>
 
           {rev?.candidate && (
-            <details className="rounded-[3px] border border-line bg-surface/40 px-3 py-2">
-              <summary className="cursor-pointer text-mute hover:text-ink">Raw resolved snapshots</summary>
-              <div className="mt-2 space-y-2">
+            <Disclosure variant="card" summary="Raw resolved snapshots">
+              <div className="space-y-2">
                 {rev.base && (
                   <div>
                     <div className="mb-1 font-medium text-sec">Base</div>
@@ -220,7 +286,7 @@ export function PublishReviewDialog({
                   <pre className="max-h-48 overflow-auto rounded border border-line bg-code p-2 font-mono text-[11px]">{JSON.stringify(rev.candidate, null, 2)}</pre>
                 </div>
               </div>
-            </details>
+            </Disclosure>
           )}
         </div>
       )}

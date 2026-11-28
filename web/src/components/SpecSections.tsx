@@ -1,6 +1,7 @@
 import type { Secret } from '../api'
 import type { InstanceDraft } from '../instanceDraft'
 import { Field, inputCls } from './ui'
+import { Select } from '../ui/core'
 
 type Patch = (patch: Partial<InstanceDraft>) => void
 
@@ -69,7 +70,17 @@ export function InputsSection({ draft, set, keyMode, hideLabels = false, vault, 
         return <div key={index} className="configuration-card space-y-3">
           <div className="flex justify-between gap-3"><h5 className="font-semibold text-ink">{secret.name || 'New secret'}</h5><button type="button" className="text-btn" aria-label={`Remove secret ${index + 1}`} onClick={() => set({ secrets: draft.secrets.filter((_, i) => i !== index) })}>Remove</button></div>
           <Field label={`Secret name ${index + 1}`}><input className={inputCls} value={secret.name} onChange={(e) => patch({ name: e.target.value })} /></Field>
-          <Field label={`Secret source ${index + 1}`}><select className={inputCls} value={secret.kind} onChange={(e) => patch({ kind: e.target.value === 'vault' ? 'vault' : 'inline', value: '', needsReplacement: false })}><option value="vault">Vault reference</option>{!keyMode && <option value="inline">Inline value</option>}</select></Field>
+          <Field label={`Secret source ${index + 1}`}>
+            <Select
+              ariaLabel={`Secret source ${index + 1}`}
+              className="w-full"
+              value={secret.kind}
+              onChange={(v) => patch({ kind: v === 'vault' ? 'vault' : 'inline', value: '', needsReplacement: false })}
+              options={keyMode
+                ? [{ value: 'vault', label: 'Vault reference' }]
+                : [{ value: 'vault', label: 'Vault reference' }, { value: 'inline', label: 'Inline value' }]}
+            />
+          </Field>
           {secret.kind === 'vault'
             ? <Field label={`Vault reference ${index + 1}`}><input className={inputCls} list={listId} value={secret.ref} onChange={(e) => patch({ ref: e.target.value })} /></Field>
             : <Field label={`Secret value ${index + 1}`}><input type="password" className={inputCls} autoComplete="new-password" value={secret.value} onChange={(e) => patch({ value: e.target.value, needsReplacement: false })} /></Field>}

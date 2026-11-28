@@ -314,6 +314,8 @@ func fail(err error) error {
 		return service.Conflict("application draft changed")
 	case errors.Is(err, store.ErrApplicationBaseConflict):
 		return service.Conflict("published base changed")
+	case errors.Is(err, store.ErrTestSuiteNotPassed):
+		return service.BadRequest("all test cases must pass for this candidate before publishing")
 	case errors.Is(err, store.ErrConflict):
 		return service.Conflict("application changed")
 	case err == nil:

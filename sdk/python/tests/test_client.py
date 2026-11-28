@@ -264,3 +264,19 @@ def test_application_release_lifecycle(server):
 
         restored = c.restore_release(app_id, 1, 2)
         assert restored["version"] == 3
+
+        # Test cases + publish gate
+        tc = c.create_test_case(
+            app_id,
+            {
+                "name": "Greet hex",
+                "input": {"who": "hex"},
+                "expected_output": {"greet": "hex"},
+            },
+        )
+        listed = c.list_test_cases(app_id)
+        assert len(listed["test_cases"]) == 1
+        suite = c.run_test_cases(app_id, 3)
+        assert suite["status"] == "passed"
+        assert suite["passed"] == 1
+        c.delete_test_case(app_id, tc["id"])

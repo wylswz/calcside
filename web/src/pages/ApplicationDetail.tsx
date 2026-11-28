@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import * as Tabs from '@radix-ui/react-tabs'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity as ActivityIcon, Code2, History as HistoryIcon, Send } from 'lucide-react'
+import { Activity as ActivityIcon, Code2, FlaskConical, History as HistoryIcon, Send } from 'lucide-react'
 import { api, ApiError, Application, Run, postApplication, workspaces, wsPath } from '../api'
 import type { components } from '../api/schema'
 import { applicationDescription } from '../activity'
@@ -11,6 +11,7 @@ import { DetailWorkbenchHeader, DetailWorkbenchViews } from '../components/Detai
 import { StatusCell, WorkView, WorkStatusbar } from '../components/ApplicationWorkView'
 import { PublishReviewDialog } from '../components/PublishReviewDialog'
 import { ReleaseHistory } from '../components/ReleaseHistory'
+import { ApplicationTests } from '../components/ApplicationTests'
 import { useApplicationEditor } from '../components/editor'
 import { useRunProgress, WaitHead } from '../components/RunProgress'
 import { ResumeForm } from '../components/ResumeForm'
@@ -25,12 +26,14 @@ import { fmtDateTime, type RunPhase } from '../interrupts'
 import { ApplicationNotebook } from '../components/ApplicationNotebook'
 import { entryFunctions } from '../entryFunctions'
 import { JsonEditor, formatJson, validateJson } from '../ui/JsonEditor'
+import { Checkbox, Select } from '../ui/core'
 
 const appSections = [
   { value: 'develop', label: 'Editor', key: '1', Icon: Code2 },
-  { value: 'invoke', label: 'Invoke', key: '2', Icon: Send },
-  { value: 'activity', label: 'Activity', key: '3', Icon: ActivityIcon },
-  { value: 'history', label: 'History', key: '4', Icon: HistoryIcon },
+  { value: 'tests', label: 'Tests', key: '2', Icon: FlaskConical },
+  { value: 'invoke', label: 'Invoke', key: '3', Icon: Send },
+  { value: 'activity', label: 'Activity', key: '4', Icon: ActivityIcon },
+  { value: 'history', label: 'History', key: '5', Icon: HistoryIcon },
 ] as const
 
 type ReleaseList = components['schemas']['ApplicationReleaseListResponse']
@@ -192,7 +195,8 @@ function Editor({ app, role, userID, qc }: Props) {
   const [reloadOpen, setReloadOpen] = useState<Application | null>(null)
   const [params, setParams] = useSearchParams()
   const rawView = params.get('view')
-  const activeView = rawView === 'invoke' || rawView === 'activity' || rawView === 'history' ? rawView : 'develop'
+  const activeView = rawView === 'tests' || rawView === 'invoke' || rawView === 'activity' || rawView === 'history' ? rawView : 'develop'
+  const [focusTestCaseId, setFocusTestCaseId] = useState<string | null>(null)
   const relQ = useQuery({
     queryKey: ['app-releases', app.id],
     queryFn: () => api.get<ReleaseList>(wsPath(`/api/v1/applications/${encodeURIComponent(app.id)}/releases`)),
@@ -613,10 +617,16 @@ function Editor({ app, role, userID, qc }: Props) {
   const testControls = (
     <div className="app-io-toolbar app-test-controls">
       <label className="wb-pane-note app-entry-label" htmlFor="app-entry">Entry</label>
-      <select id="app-entry" className={inputCls + ' app-entry-select'} value={selEntry} disabled={!canRun}
-        onChange={(e) => setEntry(e.target.value)}>
-        {entries.map((n) => <option key={n} value={n}>{n}</option>)}
-      </select>
+      <Select
+        id="app-entry"
+        ariaLabel="Entry"
+        size="sm"
+        className="app-entry-select"
+        value={selEntry}
+        disabled={!canRun}
+        onChange={setEntry}
+        options={entries.map((n) => ({ value: n, label: n }))}
+      />
       <span className="wb-pane-note app-entry-note">{selEntry === 'main' ? 'JSON object · main(input)' : `any JSON · ${selEntry}(input) · debug run, not recorded`}</span>
       <span className="wb-pane-actions">
         <Button variant="primary" size="sm" onClick={() => onRun(selEntry)} disabled={!canRun}
@@ -666,15 +676,17 @@ function Editor({ app, role, userID, qc }: Props) {
   const schemaFields = (['in', 'out'] as const).map((side) => (
     <div key={side} className="app-schema">
       <label className="app-check">
-        <input type="checkbox" checked={side === 'in' ? draft.inOn : draft.outOn} disabled={view === 'view'}
-          onChange={(e) => {
-            const on = e.target.checked
+        <Checkbox
+          checked={side === 'in' ? draft.inOn : draft.outOn}
+          disabled={view === 'view'}
+          onCheckedChange={(on) => {
             // an enabled-but-empty schema must not silently fall
             // back to the default: seed the open-object contract
             const seed = '{"type":"object","additionalProperties":true}'
             edit(side === 'in' ? { inOn: on, inText: on && !draft.inText.trim() ? seed : draft.inText }
                               : { outOn: on, outText: on && !draft.outText.trim() ? seed : draft.outText })
-          }} />
+          }}
+        />
         Custom {side === 'in' ? 'input' : 'output'} schema
       </label>
       {(side === 'in' ? draft.inOn : draft.outOn) && (
@@ -714,6 +726,10 @@ function Editor({ app, role, userID, qc }: Props) {
             next.delete('view')
             setSettingsOpen(true)
             setParams(next)
+          }}
+          onOpenTests={(caseId) => {
+            setFocusTestCaseId(caseId ?? null)
+            goToView('tests')
           }}
           onClose={() => setReviewOpen(false)}
           onPublished={() => {
@@ -822,11 +838,21 @@ function Editor({ app, role, userID, qc }: Props) {
               }} />
           )}
         />
-        <div className="app-result appnb-result" role="status" aria-live="polite"
-          hidden={specErrs.length === 0 && !published && !reviewOpen}>
-          {resultNotices}
-        </div>
       </>
+      </Tabs.Content>
+
+      <Tabs.Content value="tests" forceMount hidden={activeView !== 'tests'} className="work-panel app-view-panel">
+        <ApplicationTests
+          appId={app.id}
+          draftVersion={base.version}
+          canEdit={view === 'edit' && !corrupt}
+          handlerSuggestions={entries.filter((e) => e !== 'main')}
+          focusCaseId={focusTestCaseId}
+          onSaveDraftBeforeRun={async () => {
+            const s = await attemptSave()
+            return s ? s.app2.version : null
+          }}
+        />
       </Tabs.Content>
 
       <Tabs.Content value="invoke" forceMount hidden={activeView !== 'invoke'} className="work-panel app-view-panel app-invoke-panel">
@@ -912,6 +938,10 @@ function Editor({ app, role, userID, qc }: Props) {
         )}
       </Tabs.Content>
       </Tabs.Root>
+      <div className="app-result appnb-result" role="status" aria-live="polite"
+        hidden={specErrs.length === 0 && !published && !reviewOpen}>
+        {resultNotices}
+      </div>
 
 
       {stopKind && (

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ExtensionInfo, LLMProvider, Secret, wsPath } from '../api'
 import { Button, Confirm, EmptyRow, Field, Modal, Notice, PageHeader, SwapLabel, Tag, inputCls } from '../components/ui'
+import { Select } from '../ui/core'
 import { fmtTime } from '../format'
 import { useRole } from '../workspace'
 
@@ -93,18 +94,20 @@ function ProviderForm({ provider, entries, secrets, onClose }: {
             <input className={inputCls + ' font-mono'} value={name} onChange={(e) => setName(e.target.value)} placeholder="my-openai" />
           </Field>
           <Field label="Provider extension">
-            <select className={inputCls} value={source} onChange={(e) => pickSource(e.target.value)}>
-              <option value="">Choose a provider</option>
-              {groupExtensions(entries).map((f) => (
-                <optgroup key={f.family} label={f.name}>
-                  {f.versions.map((v) => (
-                    <option key={v.source} value={v.source}>
-                      {v.source}{v === f.latest ? ' (latest)' : ''}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
+            <Select
+              ariaLabel="Provider extension"
+              className="w-full"
+              value={source}
+              onChange={pickSource}
+              options={[{ value: '', label: 'Choose a provider' }]}
+              groups={groupExtensions(entries).map((f) => ({
+                label: f.name,
+                options: f.versions.map((v) => ({
+                  value: v.source,
+                  label: `${v.source}${v === f.latest ? ' (latest)' : ''}`,
+                })),
+              }))}
+            />
           </Field>
         </div>
         <Field label="Models (one per line or comma separated; defaults come from provider metadata)">
@@ -116,19 +119,33 @@ function ProviderForm({ provider, entries, secrets, onClose }: {
             const picked = typeof v === 'string' ? v.match(SECRET_RE)?.[1] ?? '' : ''
             return (
               <Field key={f.name} label={`${f.name}${f.doc ? ` — ${f.doc}` : ''}`}>
-                <select className={inputCls} value={picked} onChange={(e) => setField(f.name, e.target.value ? `{{secrets.${e.target.value}}}` : '')}>
-                  <option value="">{f.default ? 'Choose a secret' : 'None'}</option>
-                  {secrets.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
-                </select>
+                <Select
+                  ariaLabel={f.name}
+                  className="w-full"
+                  value={picked}
+                  onChange={(val) => setField(f.name, val ? `{{secrets.${val}}}` : '')}
+                  options={[
+                    { value: '', label: f.default ? 'Choose a secret' : 'None' },
+                    ...secrets.map((s) => ({ value: s.name, label: s.name })),
+                  ]}
+                />
               </Field>
             )
           }
           if (f.type === 'bool') {
             return (
               <Field key={f.name} label={`${f.name}${f.doc ? ` — ${f.doc}` : ''}`}>
-                <select className={inputCls} value={v === undefined ? '' : String(v)} onChange={(e) => setField(f.name, e.target.value === '' ? undefined : e.target.value === 'true')}>
-                  <option value="">Default</option><option value="true">true</option><option value="false">false</option>
-                </select>
+                <Select
+                  ariaLabel={f.name}
+                  className="w-full"
+                  value={v === undefined ? '' : String(v)}
+                  onChange={(val) => setField(f.name, val === '' ? undefined : val === 'true')}
+                  options={[
+                    { value: '', label: 'Default' },
+                    { value: 'true', label: 'true' },
+                    { value: 'false', label: 'false' },
+                  ]}
+                />
               </Field>
             )
           }

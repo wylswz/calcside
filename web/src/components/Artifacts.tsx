@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api, saveArtifact, ApiError, type ArtifactConfig, type FileEntry } from '../api'
 import { Button, Confirm, Icon, Loading, Notice, SwapLabel } from './ui'
+import { Checkbox, Disclosure } from '../ui/core'
 import { fmtBytes } from '../format'
 
 const MAX_UPLOAD_BYTES = 1 << 20
@@ -173,7 +174,7 @@ export function ArtifactBrowser({ id, running, busy }: { id: string; running: bo
         const href = `/instances/${encodeURIComponent(id)}/preview?path=${encodeURIComponent(entry.path)}`
         const kind = entry.is_dir ? 'Folder' : entry.name.includes('.') ? entry.name.split('.').pop()!.toUpperCase() : 'Text'
         return <li key={entry.path} className={`group flex items-center gap-2 border-b border-line px-1 py-2 last:border-b-0 hover:bg-surface ${selected.has(entry.path) ? 'bg-accent/5' : ''}`}>
-          <label className="inline-flex h-8 w-5 shrink-0 items-center justify-center"><input type="checkbox" aria-label={`Select ${entry.name}`} checked={selected.has(entry.path)} className="h-3.5 w-3.5 shrink-0" disabled={disabled || !selected.has(entry.path) && selected.size >= (config?.max_files ?? 100)} onChange={() => toggle(entry.path)} /></label>
+          <label className="inline-flex h-8 w-5 shrink-0 items-center justify-center"><Checkbox ariaLabel={`Select ${entry.name}`} checked={selected.has(entry.path)} disabled={disabled || !selected.has(entry.path) && selected.size >= (config?.max_files ?? 100)} onCheckedChange={() => toggle(entry.path)} /></label>
           <Icon name={entry.is_dir ? 'folder' : 'file'} className={entry.is_dir ? 'text-accent' : 'text-mute'} />
           <div className="min-w-0 flex-1">
             {entry.is_dir ? <button className="block w-full truncate text-left font-mono text-xs text-ink hover:text-accent" title={entry.name} disabled={disabled} onClick={() => navigate(entry.path)}>{entry.name}/</button> :
@@ -198,7 +199,7 @@ export function ArtifactBrowser({ id, running, busy }: { id: string; running: bo
       </div>
     </div>
     {notice && <p role="status" className="text-xs text-sec">{notice}</p>}
-    {config && <details className="text-xs text-sec"><summary className="w-fit cursor-pointer hover:text-ink">Export limits</summary><p className="mt-2 leading-relaxed">Text files only. {fmtBytes(config.max_file_bytes)} per file; {fmtBytes(config.max_total_bytes)} / {config.max_files} files per export. ZIP export fails as a whole if any file is denied or unsupported.</p></details>}
+    {config && <Disclosure summary="Export limits"><p className="text-xs leading-relaxed text-sec">Text files only. {fmtBytes(config.max_file_bytes)} per file; {fmtBytes(config.max_total_bytes)} / {config.max_files} files per export. ZIP export fails as a whole if any file is denied or unsupported.</p></Disclosure>}
     {replacing && <Confirm
       title="Replace existing file?"
       confirm="Replace"

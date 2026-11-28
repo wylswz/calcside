@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api'
 import { Button, Confirm, Field, Modal, inputCls } from './ui'
+import { Select } from '../ui/core'
 
 interface Share { user_id: string; email?: string; name?: string; role: string }
 interface Member { user_id: string; email: string; name?: string; role: string }
@@ -52,9 +53,16 @@ export default function ShareDialog({ instanceId, workspaceId, onClose }: { inst
         <Field label="Share with (email)">
           <div className="flex items-center gap-2">
             <input className={inputCls + ' min-w-0 flex-1'} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="user@example.com" />
-            <select aria-label="Role" className={inputCls + ' w-24 shrink-0'} value={role} onChange={(e) => setRole(e.target.value)}>
-              <option value="viewer">viewer</option><option value="editor">editor</option>
-            </select>
+            <Select
+              ariaLabel="Role"
+              className="w-24 shrink-0"
+              value={role}
+              onChange={setRole}
+              options={[
+                { value: 'viewer', label: 'viewer' },
+                { value: 'editor', label: 'editor' },
+              ]}
+            />
             <Button size="sm" onClick={() => put.mutate()} disabled={!email.trim() || put.isPending}>Share</Button>
           </div>
         </Field>

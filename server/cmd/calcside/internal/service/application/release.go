@@ -41,12 +41,14 @@ type ReleaseFinding struct {
 
 // ReleaseCheckResult summarizes whether the current draft can be published.
 type ReleaseCheckResult struct {
-	Candidate  string           `json:"candidate,omitempty"`
-	LiveSeq    int64            `json:"live_seq,omitempty"`
-	LiveDigest string           `json:"live_digest,omitempty"`
-	HasDrift   bool             `json:"has_drift"`
-	Status     string           `json:"status"` // "ready" | "warnings" | "blocked"
-	Findings   []ReleaseFinding `json:"findings"`
+	Candidate     string                         `json:"candidate,omitempty"`
+	LiveSeq       int64                          `json:"live_seq,omitempty"`
+	LiveDigest    string                         `json:"live_digest,omitempty"`
+	HasDrift      bool                           `json:"has_drift"`
+	Status        string                         `json:"status"` // "ready" | "warnings" | "blocked"
+	Findings      []ReleaseFinding               `json:"findings"`
+	TestCaseCount int                            `json:"test_case_count"`
+	LatestTestRun *store.ApplicationTestSuiteRun `json:"latest_test_run,omitempty"`
 }
 
 // ReleaseEntry is one row in the release history timeline.
@@ -362,6 +364,9 @@ func (s *Service) CheckRelease(ctx context.Context, a service.Actor, id string, 
 		}
 		findings := staticReadiness(cur)
 		out := &ReleaseCheckResult{Findings: findings}
+		if tcs, terr := tx.ListApplicationTestCases(ctx, cur.WorkspaceID, cur.ID); terr == nil {
+			out.TestCaseCount = len(tcs)
+		}
 
 		if cur.PersistentInstanceID != "" {
 			if pin, perr := tx.GetPersistentInstance(ctx, cur.WorkspaceID, cur.PersistentInstanceID); perr == nil && pin != nil {
@@ -404,6 +409,11 @@ func (s *Service) CheckRelease(ctx context.Context, a service.Actor, id string, 
 						Category: "candidate",
 						Message:  "Draft source is unchanged, but workspace policies or pinned dependencies drifted since the live release.",
 					})
+				}
+				if out.TestCaseCount > 0 {
+					if tr, trerr := tx.GetApplicationTestSuiteRun(ctx, cur.WorkspaceID, cur.ID, cand.ID); trerr == nil && tr != nil {
+						out.LatestTestRun = tr
+					}
 				}
 			}
 		}

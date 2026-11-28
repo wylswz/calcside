@@ -435,4 +435,55 @@ func applicationReviewedSuite(t *testing.T, s store.Store) {
 		t.Fatalf("rollback: pin=%+v hist=%+v err=%v", rbPin, rbHist, err)
 	}
 
+	// Test case CRUD + suite run publish gate.
+	tc := &store.ApplicationTestCase{
+		ApplicationID: a3.ID, WorkspaceID: "ws_1",
+		Name:           "happy path",
+		Input:          json.RawMessage(`{"x":1}`),
+		ExpectStatus:   "succeeded",
+		ExpectedOutput: json.RawMessage(`{"y":2}`),
+		Interrupts: []store.ApplicationTestInterrupt{{
+			ExpectHandler: "on_approve",
+			ExpectContext: json.RawMessage(`{"ask":true}`),
+			Resolution:    "resolved",
+			Event:         json.RawMessage(`{"ok":true}`),
+		}},
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := s.CreateApplicationTestCase(ctx, tc); err != nil {
+		t.Fatalf("create test case: %v", err)
+	}
+	list, err := s.ListApplicationTestCases(ctx, "ws_1", a3.ID)
+	if err != nil || len(list) != 1 || list[0].Name != "happy path" || len(list[0].Interrupts) != 1 {
+		t.Fatalf("list test cases: %+v err=%v", list, err)
+	}
+	// Publishing a new candidate without passing suite run must fail.
+	relC := mkRel("def main(i): return 'c'")
+	if _, _, err := s.PublishReviewedApplication(ctx, "ws_1", a3.ID, 1, relA.ID, relC, u.ID, "c", time.Now()); !errors.Is(err, store.ErrTestSuiteNotPassed) {
+		t.Fatalf("expected ErrTestSuiteNotPassed, got %v", err)
+	}
+	// Record passing run for relC -> publish succeeds.
+	if err := s.SaveApplicationTestSuiteRun(ctx, &store.ApplicationTestSuiteRun{
+		ApplicationID: a3.ID, WorkspaceID: "ws_1", Candidate: relC.ID,
+		Status: "passed", Total: 1, Passed: 1, Failed: 0, DurationMs: 5,
+		Results: []store.ApplicationTestCaseResult{{CaseID: tc.ID, CaseName: tc.Name, Status: "passed"}},
+		RunBy:   u.ID, RunAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("save suite run: %v", err)
+	}
+	if _, hC, err := s.PublishReviewedApplication(ctx, "ws_1", a3.ID, 1, relA.ID, relC, u.ID, "c", time.Now()); err != nil || hC == nil || hC.Seq != 4 {
+		t.Fatalf("publish after passing suite: %+v err=%v", hC, err)
+	}
+	// Updating a test case invalidates stored suite runs.
+	tc.Name = "happy path v2"
+	tc.UpdatedAt = time.Now()
+	if ok, err := s.UpdateApplicationTestCase(ctx, tc); err != nil || !ok {
+		t.Fatalf("update test case: %v %v", ok, err)
+	}
+	if _, err := s.GetApplicationTestSuiteRun(ctx, "ws_1", a3.ID, relC.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected suite run invalidated after test case update, got %v", err)
+	}
+	if ok, err := s.DeleteApplicationTestCase(ctx, "ws_1", a3.ID, tc.ID); err != nil || !ok {
+		t.Fatalf("delete test case: %v %v", ok, err)
+	}
 }

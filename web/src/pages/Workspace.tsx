@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, workspaces, ApiError } from '../api'
 import { ListPage, SectionTitle, Button, Confirm, inputCls, Loading, EmptyRow, MenuItem, Notice } from '../components/ui'
-import { RowActionsMenu } from '../ui/core'
+import { RowActionsMenu, Select } from '../ui/core'
 
 interface Member { user_id: string; email: string; name?: string; role: string }
 interface Change { id: string; by_user_id: string; change: string; user_id?: string; instance_id?: string; role?: string; created_at: string }
@@ -86,10 +86,18 @@ export default function WorkspacePage() {
                     <td className="text-ink">{m.name || m.email}{m.name ? ` · ${m.email}` : ''}</td>
                     <td>
                       {isOwner && m.user_id !== myID ? (
-                        <select className="input w-28" value={m.role}
-                          onChange={(e) => setRoleM.mutate({ uid: m.user_id, role: e.target.value })}>
-                          {['owner', 'editor', 'viewer'].map((r) => <option key={r} value={r}>{r}</option>)}
-                        </select>
+                        <Select
+                          ariaLabel={`Role for ${m.name || m.email}`}
+                          size="sm"
+                          className="w-28"
+                          value={m.role}
+                          onChange={(r) => setRoleM.mutate({ uid: m.user_id, role: r })}
+                          options={[
+                            { value: 'owner', label: 'owner' },
+                            { value: 'editor', label: 'editor' },
+                            { value: 'viewer', label: 'viewer' },
+                          ]}
+                        />
                       ) : <span className="text-xs text-sec">{m.role}</span>}
                     </td>
                     <td className="text-right">
@@ -111,9 +119,17 @@ export default function WorkspacePage() {
             <div className="flex max-w-lg gap-2">
               <input className={inputCls} placeholder="Member email (must have signed in once)"
                 value={email} onChange={(e) => setEmail(e.target.value)} />
-              <select className="input w-28" value={role} onChange={(e) => setRole(e.target.value)}>
-                <option value="viewer">viewer</option><option value="editor">editor</option><option value="owner">owner</option>
-              </select>
+              <Select
+                ariaLabel="Role"
+                className="w-28 shrink-0"
+                value={role}
+                onChange={setRole}
+                options={[
+                  { value: 'viewer', label: 'viewer' },
+                  { value: 'editor', label: 'editor' },
+                  { value: 'owner', label: 'owner' },
+                ]}
+              />
               <Button size="sm" variant="primary" onClick={() => add.mutate()} disabled={!email.trim() || add.isPending}>Add</Button>
             </div>
           )}

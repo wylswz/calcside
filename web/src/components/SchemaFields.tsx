@@ -3,6 +3,7 @@ import {
   SchemaNode, patchSchema, toggleRequired, toggleNullable,
 } from '../buildDraft'
 import { inputCls } from './ui'
+import { Checkbox, Select } from '../ui/core'
 
 // SchemaFields renders a precision-safe JSON schema as an editable
 // field tree. Paths are arrays of real JSON-object keys — '__proto__',
@@ -64,15 +65,16 @@ function NodeFields({ node, root, path, depth, onPatch }: {
       {/* additionalProperties: only a boolean toggle when boolean/absent;
           a schema-valued setting is JSON-only. */}
       {depth === 0 && (
-        <label className="dim">
-          <input type="checkbox"
+        <label className="dim inline-flex items-center gap-1.5">
+          <Checkbox
             checked={ap !== false}
             disabled={ap !== undefined && typeof ap !== 'boolean'}
-            onChange={(e) => onPatch(patchSchema(root, path,
-              (n) => ({ ...n, additionalProperties: e.target.checked })))} />
+            onCheckedChange={(checked) => onPatch(patchSchema(root, path,
+              (n) => ({ ...n, additionalProperties: checked })))}
+          />
           {ap !== undefined && typeof ap !== 'boolean'
             ? 'additionalProperties is a schema (edit JSON)'
-            : ' Allow additional fields'}
+            : 'Allow additional fields'}
         </label>
       )}
     </div>
@@ -101,40 +103,39 @@ function FieldRow({ name, node, required, root, path, parentPath, depth, onPatch
         {isUnion || base === 'union' ? (
           <span className="dim">Edit union in JSON</span>
         ) : hasType ? (
-          <select
-            aria-label={label(path, 'Type')}
-            className={inputCls}
+          <Select
+            ariaLabel={label(path, 'Type')}
             value={base}
-            onChange={(e) => {
-              // Type change edits ONLY `type`; enum/const/nested data
-              // and unknown keywords all survive.
+            onChange={(t) => {
               onPatch(patchSchema(root, path, (n) => {
                 const next = { ...n }
-                const t = e.target.value
                 next.type = nullable && t !== 'null' ? [t, 'null'] : t
                 return next
               }))
             }}
-          >
-            {!TYPES.includes(base as any) && <option value={base}>{base || 'Any'}</option>}
-            {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
+            options={[
+              ...(!TYPES.includes(base as any) ? [{ value: base, label: base || 'Any' }] : []),
+              ...TYPES.map((t) => ({ value: t, label: t })),
+            ]}
+          />
         ) : (
           <span className="dim">Any (edit JSON)</span>
         )}
-        <label>
-          <input type="checkbox"
-            aria-label={label(path, 'Required')}
+        <label className="inline-flex items-center gap-1.5">
+          <Checkbox
+            ariaLabel={label(path, 'Required')}
             checked={required}
-            onChange={(e) => onPatch(toggleRequired(root, parentPath, name, e.target.checked))} />
+            onCheckedChange={(checked) => onPatch(toggleRequired(root, parentPath, name, checked))}
+          />
           Required
         </label>
-        <label title={hasType ? '' : 'Set a base type first'}>
-          <input type="checkbox"
-            aria-label={label(path, 'Nullable')}
+        <label className="inline-flex items-center gap-1.5" title={hasType ? '' : 'Set a base type first'}>
+          <Checkbox
+            ariaLabel={label(path, 'Nullable')}
             checked={nullable}
             disabled={!hasType || baseTypes.length === 0 || base === 'union' || isUnion}
-            onChange={(e) => onPatch(toggleNullable(root, path, e.target.checked))} />
+            onCheckedChange={(checked) => onPatch(toggleNullable(root, path, checked))}
+          />
           Nullable
         </label>
       </div>
@@ -174,11 +175,14 @@ function ItemFields({ node, root, path, onPatch }: {
 }) {
   const type = typeof node.type === 'string' ? node.type : ''
   return (
-    <select className={inputCls} value={type}
-      aria-label={label(path, 'Type')}
-      onChange={(e) => onPatch(patchSchema(root, path, (n) => ({ ...n, type: e.target.value })))}>
-      <option value="">—</option>
-      {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-    </select>
+    <Select
+      ariaLabel={label(path, 'Type')}
+      value={type}
+      onChange={(t) => onPatch(patchSchema(root, path, (n) => ({ ...n, type: t })))}
+      options={[
+        { value: '', label: '—' },
+        ...TYPES.map((t) => ({ value: t, label: t })),
+      ]}
+    />
   )
 }

@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api, saveArtifact, type ArtifactConfig, type ArtifactPreview } from '../api'
-import { Button, Icon, Loading, Notice, SignalMark, SwapLabel } from '../components/ui'
+import { Button, Icon, Loading, Modal, Notice, SignalMark, SwapLabel } from '../components/ui'
+import { Checkbox } from '../ui/core'
 import { fmtBytes, fmtTime } from '../format'
 
 export default function ArtifactPreviewPage({ dev }: { dev: boolean }) {
@@ -16,7 +17,6 @@ function Preview({ id, path, dev }: { id: string; path: string; dev: boolean }) 
   const [view, setView] = useState<'preview' | 'source'>('preview')
   const [scripts, setScripts] = useState(false)
   const [confirmScripts, setConfirmScripts] = useState(false)
-  const confirmation = useRef<HTMLDialogElement>(null)
   const [mobile, setMobile] = useState(false)
   const [firstRowHeader, setFirstRowHeader] = useState(false)
   const [revision, setRevision] = useState(0)
@@ -44,12 +44,6 @@ function Preview({ id, path, dev }: { id: string; path: string; dev: boolean }) 
   const back = `/instances/${encodeURIComponent(id)}`
   const refresh = () => { if (config.isError) void config.refetch(); else setRevision((value) => value + 1) }
 
-  useEffect(() => {
-    const dialog = confirmation.current
-    if (confirmScripts) dialog?.showModal()
-    else dialog?.close()
-    return () => dialog?.close()
-  }, [confirmScripts])
   useEffect(() => {
     const previous = document.title
     document.title = `${filename} · calcside`
@@ -100,15 +94,26 @@ function Preview({ id, path, dev }: { id: string; path: string; dev: boolean }) 
           </div>
           {config.data?.interactive_enabled && <Button size="sm" disabled={preparing} onClick={() => scripts ? setScripts(false) : setConfirmScripts(true)}><Icon name={scripts ? 'stop' : 'play'} className="!h-3 !w-3" /><SwapLabel show={scripts ? 'Stop JavaScript' : 'Enable JavaScript'} options={['Enable JavaScript', 'Stop JavaScript']} /></Button>}
         </>}
-        {csv && showPreview && <label className="flex items-center gap-2 text-xs text-sec"><input type="checkbox" checked={firstRowHeader} disabled={!preview?.csv_rows?.length} onChange={(event) => setFirstRowHeader(event.target.checked)} />First row is header</label>}
+        {csv && showPreview && <label className="flex items-center gap-2 text-xs text-sec"><Checkbox checked={firstRowHeader} disabled={!preview?.csv_rows?.length} onCheckedChange={setFirstRowHeader} />First row is header</label>}
       </div>
     </div>
 
-    <dialog ref={confirmation} aria-labelledby="script-confirmation-title" onClose={() => { if (!confirmation.current?.open) setConfirmScripts(false) }} className="m-auto w-[min(28rem,calc(100vw-2rem))] border border-ink bg-paper p-0 text-body backdrop:bg-black/40">
-      <div className="flex items-center gap-3 border-b border-line bg-warn/10 px-5 py-4"><SignalMark signal="failed" /><h2 id="script-confirmation-title" className="text-base font-semibold text-ink">Run this report’s JavaScript?</h2></div>
-      <p className="px-5 py-5 text-sm leading-relaxed">Runs on an isolated origin; network restrictions are not a complete firewall.</p>
-      <div className="flex justify-end gap-2 border-t border-line px-5 py-4"><Button onClick={() => setConfirmScripts(false)}>Cancel</Button><Button variant="primary" onClick={() => { setScripts(true); setConfirmScripts(false) }}>Run interactive preview</Button></div>
-    </dialog>
+    {confirmScripts && (
+      <Modal
+        title="Run this report’s JavaScript?"
+        dirty={false}
+        onClose={() => setConfirmScripts(false)}
+        footer={<>
+          <Button onClick={() => setConfirmScripts(false)}>Cancel</Button>
+          <Button variant="primary" onClick={() => { setScripts(true); setConfirmScripts(false) }}>Run interactive preview</Button>
+        </>}
+      >
+        <div className="flex items-start gap-2.5 text-sm leading-relaxed text-body">
+          <SignalMark signal="failed" />
+          <p>Runs on an isolated origin; network restrictions are not a complete firewall.</p>
+        </div>
+      </Modal>
+    )}
     {downloadError && <div role="alert" className="shrink-0"><Notice tone="warning">{downloadError}</Notice></div>}
     {html && config.isSuccess && !config.data.html_enabled && <Notice>HTML rendering is not configured.</Notice>}
     {preview?.redacted && <Notice>Secrets were redacted.</Notice>}
