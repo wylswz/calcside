@@ -521,6 +521,24 @@ func (d *sqlDB) publishReviewedLocked(ctx context.Context, workspaceID, id strin
 		if curReleaseID != expectedBase {
 			return store.ErrApplicationBaseConflict
 		}
+		// If the application has test cases, require a passing full-suite
+		// run against this exact candidate digest before moving live.
+		var tcCount int64
+		if err := tx.Model(&applicationTestCaseRow{}).
+			Where("application_id = ? AND workspace_id = ?", id, workspaceID).
+			Count(&tcCount).Error; err != nil {
+			return err
+		}
+		if tcCount > 0 {
+			tr, terr := gorm.G[applicationTestRunRow](tx).
+				Where("application_id = ? AND workspace_id = ? AND candidate = ?", id, workspaceID, check.ID).Take(ctx)
+			if errors.Is(terr, gorm.ErrRecordNotFound) || (terr == nil && tr.Status != "passed") {
+				return store.ErrTestSuiteNotPassed
+			}
+			if terr != nil {
+				return terr
+			}
+		}
 		var changed bool
 		var perr error
 		pin, changed, perr = d.publishLocked(ctx, tx, &row, check, now)

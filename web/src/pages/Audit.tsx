@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api, AuditEvent, Instance, wsPath } from '../api'
 import { callOutcome } from '../activity'
 import { Button, ListPage, inputCls } from '../components/ui'
+import { Select } from '../ui/core'
 import { CallRows } from '../components/CallTable'
 
 const PAGE = 50
@@ -54,11 +55,18 @@ export default function Audit() {
       toolbar={<>
         <input className={inputCls + ' !h-[26px] !w-56 !py-0 font-mono'} value={instFilter} onChange={(e) => { setInstFilter(e.target.value); setPage(0); setCursors([undefined]) }} placeholder="Instance ID ins_…" aria-label="Instance ID" />
         <input className={inputCls + ' !h-[26px] !w-56 !py-0 font-mono'} value={execFilter} onChange={(e) => { setExecFilter(e.target.value); setPage(0); setCursors([undefined]) }} placeholder="Exec ID exe_…" aria-label="Exec ID" />
-        <select className={inputCls + ' !h-[26px] !w-32 !py-0'} value={outcome} onChange={(e) => setOutcome(e.target.value as OutcomeFilter)} aria-label="Outcome">
-          <option value="all">All outcomes</option>
-          <option value="denied">Denied</option>
-          <option value="failed">Failed</option>
-        </select>
+        <Select
+          ariaLabel="Outcome"
+          size="sm"
+          className="w-32"
+          value={outcome}
+          onChange={setOutcome}
+          options={[
+            { value: 'all', label: 'All outcomes' },
+            { value: 'denied', label: 'Denied' },
+            { value: 'failed', label: 'Failed' },
+          ]}
+        />
       </>}
       status={<>
         <Button size="xs" onClick={prev} disabled={page === 0}>← Prev</Button>

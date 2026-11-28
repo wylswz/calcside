@@ -64,6 +64,7 @@
   border-bottom: 1px solid var(--detail-edge);
   background: var(--detail-work);
 }
+.detail-workbench .detail-views > :first-child { flex: 1; min-width: 0; }
 .detail-workbench .detail-views .view-tabs { flex: 1; min-width: 0; border-bottom: 0; }
 
 /* view tabs — underline style, addressable via ?view= (C4). Plain

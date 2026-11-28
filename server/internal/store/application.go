@@ -189,6 +189,8 @@ type ApplicationStore interface {
 
 	// EP-0026: atomic live-pointer rollback to an existing immutable release.
 	RollbackApplicationRelease(ctx context.Context, workspaceID, appID string, targetSeq int64, expectedBase, publishedBy, note string, now time.Time) (*PersistentInstance, *ApplicationRelease, error)
+
+	ApplicationTestCaseStore
 }
 
 // ApplicationRelease is one immutable reviewed-publish history entry:

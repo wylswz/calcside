@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
 import { api, Policy, wsPath } from '../api'
 import { Button, EmptyRow, Field, Confirm, Modal, PageHeader, SwapLabel, inputCls, Tag } from '../components/ui'
+import { Select } from '../ui/core'
 import { fmtTime } from '../format'
 import { cmTheme } from '../components/codemirror'
 import { useRegoEditor } from '../components/editor'
@@ -116,16 +117,33 @@ function PolicyEditor({ policy, onClose }: { policy: Policy | null; onClose: () 
           <div className="mb-2 text-xs font-medium text-sec">Completion context</div>
           <div className="mb-2 grid grid-cols-2 gap-2">
             <Field label="Capability">
-              <select className={inputCls} value={capability} onChange={(e) => { setCapability(e.target.value); setOp('') }}>
-                <option value="">Select capability</option>
-                {(editor.metadata?.capabilities ?? []).map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-              </select>
+              <Select
+                ariaLabel="Capability"
+                className="w-full"
+                value={capability}
+                onChange={(v) => { setCapability(v); setOp('') }}
+                options={[
+                  { value: '', label: 'Select capability' },
+                  ...(editor.metadata?.capabilities ?? [])
+                    .filter((c): c is typeof c & { name: string } => !!c.name)
+                    .map((c) => ({ value: c.name, label: c.name })),
+                ]}
+              />
             </Field>
             <Field label="Operation">
-              <select className={inputCls} value={op} onChange={(e) => setOp(e.target.value)} disabled={!operations.length}>
-                <option value="">Select operation</option>
-                {operations.map((o) => <option key={o.name} value={o.name}>{o.name}</option>)}
-              </select>
+              <Select
+                ariaLabel="Operation"
+                className="w-full"
+                value={op}
+                onChange={setOp}
+                disabled={!operations.length}
+                options={[
+                  { value: '', label: 'Select operation' },
+                  ...operations
+                    .filter((o): o is typeof o & { name: string } => !!o.name)
+                    .map((o) => ({ value: o.name, label: o.name })),
+                ]}
+              />
             </Field>
           </div>
           <div className="mb-2 text-xs font-medium text-sec">Input schema</div>

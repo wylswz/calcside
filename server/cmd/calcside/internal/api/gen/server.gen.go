@@ -150,6 +150,171 @@ func (e ApplicationStatus) Valid() bool {
 	}
 }
 
+// Defines values for ApplicationTestCaseExpectStatus.
+const (
+	ApplicationTestCaseExpectStatusError     ApplicationTestCaseExpectStatus = "error"
+	ApplicationTestCaseExpectStatusSucceeded ApplicationTestCaseExpectStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the ApplicationTestCaseExpectStatus enum.
+func (e ApplicationTestCaseExpectStatus) Valid() bool {
+	switch e {
+	case ApplicationTestCaseExpectStatusError:
+		return true
+	case ApplicationTestCaseExpectStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApplicationTestCaseOutputMatchMode.
+const (
+	ApplicationTestCaseOutputMatchModeExact  ApplicationTestCaseOutputMatchMode = "exact"
+	ApplicationTestCaseOutputMatchModeSubset ApplicationTestCaseOutputMatchMode = "subset"
+)
+
+// Valid indicates whether the value is a known member of the ApplicationTestCaseOutputMatchMode enum.
+func (e ApplicationTestCaseOutputMatchMode) Valid() bool {
+	switch e {
+	case ApplicationTestCaseOutputMatchModeExact:
+		return true
+	case ApplicationTestCaseOutputMatchModeSubset:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApplicationTestCaseRequestExpectStatus.
+const (
+	ApplicationTestCaseRequestExpectStatusError     ApplicationTestCaseRequestExpectStatus = "error"
+	ApplicationTestCaseRequestExpectStatusSucceeded ApplicationTestCaseRequestExpectStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the ApplicationTestCaseRequestExpectStatus enum.
+func (e ApplicationTestCaseRequestExpectStatus) Valid() bool {
+	switch e {
+	case ApplicationTestCaseRequestExpectStatusError:
+		return true
+	case ApplicationTestCaseRequestExpectStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApplicationTestCaseRequestOutputMatchMode.
+const (
+	ApplicationTestCaseRequestOutputMatchModeExact  ApplicationTestCaseRequestOutputMatchMode = "exact"
+	ApplicationTestCaseRequestOutputMatchModeSubset ApplicationTestCaseRequestOutputMatchMode = "subset"
+)
+
+// Valid indicates whether the value is a known member of the ApplicationTestCaseRequestOutputMatchMode enum.
+func (e ApplicationTestCaseRequestOutputMatchMode) Valid() bool {
+	switch e {
+	case ApplicationTestCaseRequestOutputMatchModeExact:
+		return true
+	case ApplicationTestCaseRequestOutputMatchModeSubset:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApplicationTestCaseResultStatus.
+const (
+	ApplicationTestCaseResultStatusFailed ApplicationTestCaseResultStatus = "failed"
+	ApplicationTestCaseResultStatusPassed ApplicationTestCaseResultStatus = "passed"
+)
+
+// Valid indicates whether the value is a known member of the ApplicationTestCaseResultStatus enum.
+func (e ApplicationTestCaseResultStatus) Valid() bool {
+	switch e {
+	case ApplicationTestCaseResultStatusFailed:
+		return true
+	case ApplicationTestCaseResultStatusPassed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApplicationTestInterruptContextMatchMode.
+const (
+	ApplicationTestInterruptContextMatchModeExact  ApplicationTestInterruptContextMatchMode = "exact"
+	ApplicationTestInterruptContextMatchModeSubset ApplicationTestInterruptContextMatchMode = "subset"
+)
+
+// Valid indicates whether the value is a known member of the ApplicationTestInterruptContextMatchMode enum.
+func (e ApplicationTestInterruptContextMatchMode) Valid() bool {
+	switch e {
+	case ApplicationTestInterruptContextMatchModeExact:
+		return true
+	case ApplicationTestInterruptContextMatchModeSubset:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApplicationTestInterruptResolution.
+const (
+	ApplicationTestInterruptResolutionExpired  ApplicationTestInterruptResolution = "expired"
+	ApplicationTestInterruptResolutionResolved ApplicationTestInterruptResolution = "resolved"
+)
+
+// Valid indicates whether the value is a known member of the ApplicationTestInterruptResolution enum.
+func (e ApplicationTestInterruptResolution) Valid() bool {
+	switch e {
+	case ApplicationTestInterruptResolutionExpired:
+		return true
+	case ApplicationTestInterruptResolutionResolved:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApplicationTestSuiteRunStatus.
+const (
+	ApplicationTestSuiteRunStatusFailed ApplicationTestSuiteRunStatus = "failed"
+	ApplicationTestSuiteRunStatusPassed ApplicationTestSuiteRunStatus = "passed"
+)
+
+// Valid indicates whether the value is a known member of the ApplicationTestSuiteRunStatus enum.
+func (e ApplicationTestSuiteRunStatus) Valid() bool {
+	switch e {
+	case ApplicationTestSuiteRunStatusFailed:
+		return true
+	case ApplicationTestSuiteRunStatusPassed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApplicationTestTurnResultStatus.
+const (
+	ApplicationTestTurnResultStatusFailed              ApplicationTestTurnResultStatus = "failed"
+	ApplicationTestTurnResultStatusPassed              ApplicationTestTurnResultStatus = "passed"
+	ApplicationTestTurnResultStatusUnexpectedInterrupt ApplicationTestTurnResultStatus = "unexpected_interrupt"
+)
+
+// Valid indicates whether the value is a known member of the ApplicationTestTurnResultStatus enum.
+func (e ApplicationTestTurnResultStatus) Valid() bool {
+	switch e {
+	case ApplicationTestTurnResultStatusFailed:
+		return true
+	case ApplicationTestTurnResultStatusPassed:
+		return true
+	case ApplicationTestTurnResultStatusUnexpectedInterrupt:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ArtifactPreviewKind.
 const (
 	Csv  ArtifactPreviewKind = "csv"
@@ -377,22 +542,22 @@ func (e FieldType) Valid() bool {
 
 // Defines values for InstanceStatus.
 const (
-	Deleted InstanceStatus = "deleted"
-	Expired InstanceStatus = "expired"
-	Lost    InstanceStatus = "lost"
-	Running InstanceStatus = "running"
+	InstanceStatusDeleted InstanceStatus = "deleted"
+	InstanceStatusExpired InstanceStatus = "expired"
+	InstanceStatusLost    InstanceStatus = "lost"
+	InstanceStatusRunning InstanceStatus = "running"
 )
 
 // Valid indicates whether the value is a known member of the InstanceStatus enum.
 func (e InstanceStatus) Valid() bool {
 	switch e {
-	case Deleted:
+	case InstanceStatusDeleted:
 		return true
-	case Expired:
+	case InstanceStatusExpired:
 		return true
-	case Lost:
+	case InstanceStatusLost:
 		return true
-	case Running:
+	case InstanceStatusRunning:
 		return true
 	default:
 		return false
@@ -845,12 +1010,14 @@ type ApplicationReleaseCheckRequest struct {
 
 // ApplicationReleaseCheckResponse defines model for ApplicationReleaseCheckResponse.
 type ApplicationReleaseCheckResponse struct {
-	Candidate  *string                               `json:"candidate,omitempty"`
-	Findings   []ReleaseFinding                      `json:"findings"`
-	HasDrift   bool                                  `json:"has_drift"`
-	LiveDigest *string                               `json:"live_digest,omitempty"`
-	LiveSeq    *int64                                `json:"live_seq,omitempty"`
-	Status     ApplicationReleaseCheckResponseStatus `json:"status"`
+	Candidate     *string                               `json:"candidate,omitempty"`
+	Findings      []ReleaseFinding                      `json:"findings"`
+	HasDrift      bool                                  `json:"has_drift"`
+	LatestTestRun *ApplicationTestSuiteRun              `json:"latest_test_run,omitempty"`
+	LiveDigest    *string                               `json:"live_digest,omitempty"`
+	LiveSeq       *int64                                `json:"live_seq,omitempty"`
+	Status        ApplicationReleaseCheckResponseStatus `json:"status"`
+	TestCaseCount int                                   `json:"test_case_count"`
 }
 
 // ApplicationReleaseCheckResponseStatus defines model for ApplicationReleaseCheckResponse.Status.
@@ -911,6 +1078,109 @@ type ApplicationSection struct {
 // ApplicationStatus defines model for ApplicationStatus.
 type ApplicationStatus string
 
+// ApplicationTestCase defines model for ApplicationTestCase.
+type ApplicationTestCase struct {
+	ApplicationId     string                          `json:"application_id"`
+	CreatedAt         time.Time                       `json:"created_at"`
+	Description       *string                         `json:"description,omitempty"`
+	ExpectStatus      ApplicationTestCaseExpectStatus `json:"expect_status"`
+	ExpectedErrorCode *string                         `json:"expected_error_code,omitempty"`
+
+	// ExpectedOutput raw JSON preserved byte-for-byte; never re-parsed by the API tier
+	ExpectedOutput *RawJSON `json:"expected_output,omitempty"`
+	Id             string   `json:"id"`
+
+	// Input raw JSON preserved byte-for-byte; never re-parsed by the API tier
+	Input           RawJSON                            `json:"input"`
+	Interrupts      []ApplicationTestInterrupt         `json:"interrupts"`
+	Name            string                             `json:"name"`
+	OutputMatchMode ApplicationTestCaseOutputMatchMode `json:"output_match_mode"`
+	UpdatedAt       time.Time                          `json:"updated_at"`
+	WorkspaceId     string                             `json:"workspace_id"`
+}
+
+// ApplicationTestCaseExpectStatus defines model for ApplicationTestCase.ExpectStatus.
+type ApplicationTestCaseExpectStatus string
+
+// ApplicationTestCaseOutputMatchMode defines model for ApplicationTestCase.OutputMatchMode.
+type ApplicationTestCaseOutputMatchMode string
+
+// ApplicationTestCaseListResponse defines model for ApplicationTestCaseListResponse.
+type ApplicationTestCaseListResponse struct {
+	LatestRun *ApplicationTestSuiteRun `json:"latest_run,omitempty"`
+	TestCases []ApplicationTestCase    `json:"test_cases"`
+}
+
+// ApplicationTestCaseRequest defines model for ApplicationTestCaseRequest.
+type ApplicationTestCaseRequest struct {
+	Description       *string                                 `json:"description,omitempty"`
+	ExpectStatus      *ApplicationTestCaseRequestExpectStatus `json:"expect_status,omitempty"`
+	ExpectedErrorCode *string                                 `json:"expected_error_code,omitempty"`
+
+	// ExpectedOutput raw JSON preserved byte-for-byte; never re-parsed by the API tier
+	ExpectedOutput *RawJSON `json:"expected_output,omitempty"`
+
+	// Input raw JSON preserved byte-for-byte; never re-parsed by the API tier
+	Input           *RawJSON                                   `json:"input,omitempty"`
+	Interrupts      *[]ApplicationTestInterrupt                `json:"interrupts,omitempty"`
+	Name            string                                     `json:"name"`
+	OutputMatchMode *ApplicationTestCaseRequestOutputMatchMode `json:"output_match_mode,omitempty"`
+}
+
+// ApplicationTestCaseRequestExpectStatus defines model for ApplicationTestCaseRequest.ExpectStatus.
+type ApplicationTestCaseRequestExpectStatus string
+
+// ApplicationTestCaseRequestOutputMatchMode defines model for ApplicationTestCaseRequest.OutputMatchMode.
+type ApplicationTestCaseRequestOutputMatchMode string
+
+// ApplicationTestCaseResponse defines model for ApplicationTestCaseResponse.
+type ApplicationTestCaseResponse struct {
+	TestCase ApplicationTestCase `json:"test_case"`
+}
+
+// ApplicationTestCaseResult defines model for ApplicationTestCaseResult.
+type ApplicationTestCaseResult struct {
+	ActualOutput      *string                         `json:"actual_output,omitempty"`
+	CaseId            string                          `json:"case_id"`
+	CaseName          string                          `json:"case_name"`
+	DurationMs        int64                           `json:"duration_ms"`
+	ErrorCode         *string                         `json:"error_code,omitempty"`
+	ErrorMessage      *string                         `json:"error_message,omitempty"`
+	ExpectedErrorCode *string                         `json:"expected_error_code,omitempty"`
+	ExpectedOutput    *string                         `json:"expected_output,omitempty"`
+	Status            ApplicationTestCaseResultStatus `json:"status"`
+	Steps             int64                           `json:"steps"`
+	Turns             []ApplicationTestTurnResult     `json:"turns"`
+}
+
+// ApplicationTestCaseResultStatus defines model for ApplicationTestCaseResult.Status.
+type ApplicationTestCaseResultStatus string
+
+// ApplicationTestCaseRunRequest defines model for ApplicationTestCaseRunRequest.
+type ApplicationTestCaseRunRequest struct {
+	CaseIds *[]string `json:"case_ids,omitempty"`
+	Version int64     `json:"version"`
+}
+
+// ApplicationTestInterrupt defines model for ApplicationTestInterrupt.
+type ApplicationTestInterrupt struct {
+	ContextMatchMode *ApplicationTestInterruptContextMatchMode `json:"context_match_mode,omitempty"`
+
+	// Event raw JSON preserved byte-for-byte; never re-parsed by the API tier
+	Event *RawJSON `json:"event,omitempty"`
+
+	// ExpectContext raw JSON preserved byte-for-byte; never re-parsed by the API tier
+	ExpectContext *RawJSON                            `json:"expect_context,omitempty"`
+	ExpectHandler *string                             `json:"expect_handler,omitempty"`
+	Resolution    *ApplicationTestInterruptResolution `json:"resolution,omitempty"`
+}
+
+// ApplicationTestInterruptContextMatchMode defines model for ApplicationTestInterrupt.ContextMatchMode.
+type ApplicationTestInterruptContextMatchMode string
+
+// ApplicationTestInterruptResolution defines model for ApplicationTestInterrupt.Resolution.
+type ApplicationTestInterruptResolution string
+
 // ApplicationTestRequest defines model for ApplicationTestRequest.
 type ApplicationTestRequest struct {
 	// Entry entry function to run. Omitted or "main" runs main(input) with the input schema as a recorded test run. Any other top-level one-argument function runs as a debug call: the input is any bounded JSON value passed verbatim (no input schema, no handler-context object), the output is bounded and secret-redacted but not validated against the output schema, and no run is recorded — interrupt.* ops are unavailable. Debug entries exist only on this endpoint; public invoke always runs main.
@@ -920,6 +1190,44 @@ type ApplicationTestRequest struct {
 	Input   RawJSON `json:"input,omitempty"`
 	Version int64   `json:"version"`
 }
+
+// ApplicationTestSuiteRun defines model for ApplicationTestSuiteRun.
+type ApplicationTestSuiteRun struct {
+	ApplicationId string                        `json:"application_id"`
+	Candidate     string                        `json:"candidate"`
+	DurationMs    int64                         `json:"duration_ms"`
+	Failed        int                           `json:"failed"`
+	Passed        int                           `json:"passed"`
+	Results       []ApplicationTestCaseResult   `json:"results"`
+	RunAt         time.Time                     `json:"run_at"`
+	RunBy         string                        `json:"run_by"`
+	Status        ApplicationTestSuiteRunStatus `json:"status"`
+	Total         int                           `json:"total"`
+	WorkspaceId   string                        `json:"workspace_id"`
+}
+
+// ApplicationTestSuiteRunStatus defines model for ApplicationTestSuiteRun.Status.
+type ApplicationTestSuiteRunStatus string
+
+// ApplicationTestTurnResult defines model for ApplicationTestTurnResult.
+type ApplicationTestTurnResult struct {
+	ActualContext   *string                         `json:"actual_context,omitempty"`
+	ActualHandler   *string                         `json:"actual_handler,omitempty"`
+	ActualOnExpire  *string                         `json:"actual_on_expire,omitempty"`
+	DurationMs      int64                           `json:"duration_ms"`
+	Entry           string                          `json:"entry"`
+	ErrorMessage    *string                         `json:"error_message,omitempty"`
+	EventJson       *string                         `json:"event_json,omitempty"`
+	ExpectedContext *string                         `json:"expected_context,omitempty"`
+	ExpectedHandler *string                         `json:"expected_handler,omitempty"`
+	Resolution      *string                         `json:"resolution,omitempty"`
+	Status          ApplicationTestTurnResultStatus `json:"status"`
+	Steps           int64                           `json:"steps"`
+	Turn            int                             `json:"turn"`
+}
+
+// ApplicationTestTurnResultStatus defines model for ApplicationTestTurnResult.Status.
+type ApplicationTestTurnResultStatus string
 
 // ApplicationUpdateRequest defines model for ApplicationUpdateRequest.
 type ApplicationUpdateRequest struct {
@@ -2592,6 +2900,15 @@ type RollbackApplicationReleaseJSONRequestBody = ApplicationReleaseRollbackReque
 // TestApplicationJSONRequestBody defines body for TestApplication for application/json ContentType.
 type TestApplicationJSONRequestBody = ApplicationTestRequest
 
+// CreateApplicationTestCaseJSONRequestBody defines body for CreateApplicationTestCase for application/json ContentType.
+type CreateApplicationTestCaseJSONRequestBody = ApplicationTestCaseRequest
+
+// RunApplicationTestCasesJSONRequestBody defines body for RunApplicationTestCases for application/json ContentType.
+type RunApplicationTestCasesJSONRequestBody = ApplicationTestCaseRunRequest
+
+// UpdateApplicationTestCaseJSONRequestBody defines body for UpdateApplicationTestCase for application/json ContentType.
+type UpdateApplicationTestCaseJSONRequestBody = ApplicationTestCaseRequest
+
 // InferContractJSONRequestBody defines body for InferContract for application/json ContentType.
 type InferContractJSONRequestBody = InferContractRequest
 
@@ -2820,6 +3137,21 @@ type ServerInterface interface {
 
 	// (POST /api/v1/applications/{id}/test)
 	TestApplication(c *gin.Context, id IdPath)
+
+	// (GET /api/v1/applications/{id}/test-cases)
+	ListApplicationTestCases(c *gin.Context, id IdPath)
+
+	// (POST /api/v1/applications/{id}/test-cases)
+	CreateApplicationTestCase(c *gin.Context, id IdPath)
+
+	// (POST /api/v1/applications/{id}/test-cases/run)
+	RunApplicationTestCases(c *gin.Context, id IdPath)
+
+	// (DELETE /api/v1/applications/{id}/test-cases/{caseId})
+	DeleteApplicationTestCase(c *gin.Context, id IdPath, caseId string)
+
+	// (PUT /api/v1/applications/{id}/test-cases/{caseId})
+	UpdateApplicationTestCase(c *gin.Context, id IdPath, caseId string)
 
 	// (GET /api/v1/artifacts/config)
 	ArtifactConfig(c *gin.Context)
@@ -3540,6 +3872,149 @@ func (siw *ServerInterfaceWrapper) TestApplication(c *gin.Context) {
 	}
 
 	siw.Handler.TestApplication(c, id)
+}
+
+// ListApplicationTestCases operation middleware
+func (siw *ServerInterfaceWrapper) ListApplicationTestCases(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListApplicationTestCases(c, id)
+}
+
+// CreateApplicationTestCase operation middleware
+func (siw *ServerInterfaceWrapper) CreateApplicationTestCase(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CreateApplicationTestCase(c, id)
+}
+
+// RunApplicationTestCases operation middleware
+func (siw *ServerInterfaceWrapper) RunApplicationTestCases(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RunApplicationTestCases(c, id)
+}
+
+// DeleteApplicationTestCase operation middleware
+func (siw *ServerInterfaceWrapper) DeleteApplicationTestCase(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "caseId" -------------
+	var caseId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "caseId", c.Param("caseId"), &caseId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter caseId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteApplicationTestCase(c, id, caseId)
+}
+
+// UpdateApplicationTestCase operation middleware
+func (siw *ServerInterfaceWrapper) UpdateApplicationTestCase(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id IdPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "caseId" -------------
+	var caseId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "caseId", c.Param("caseId"), &caseId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter caseId: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.UpdateApplicationTestCase(c, id, caseId)
 }
 
 // ArtifactConfig operation middleware
@@ -5832,6 +6307,11 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/applications/:id/releases/compare", wrapper.CompareApplicationReleases)
 	router.POST(options.BaseURL+"/api/v1/applications/:id/releases/:seq/restore", wrapper.RestoreApplicationRelease)
 	router.POST(options.BaseURL+"/api/v1/applications/:id/releases/:seq/rollback", wrapper.RollbackApplicationRelease)
+	router.GET(options.BaseURL+"/api/v1/applications/:id/test-cases", wrapper.ListApplicationTestCases)
+	router.POST(options.BaseURL+"/api/v1/applications/:id/test-cases", wrapper.CreateApplicationTestCase)
+	router.DELETE(options.BaseURL+"/api/v1/applications/:id/test-cases/:caseId", wrapper.DeleteApplicationTestCase)
+	router.PUT(options.BaseURL+"/api/v1/applications/:id/test-cases/:caseId", wrapper.UpdateApplicationTestCase)
+	router.POST(options.BaseURL+"/api/v1/applications/:id/test-cases/run", wrapper.RunApplicationTestCases)
 	router.POST(options.BaseURL+"/api/v1/applications/:id/test", wrapper.TestApplication)
 	router.POST(options.BaseURL+"/api/v1/applications/:id/invoke", wrapper.InvokeApplication)
 	router.GET(options.BaseURL+"/api/v1/modules", wrapper.ListModules)
@@ -7094,6 +7574,387 @@ func (response TestApplication429JSONResponse) VisitTestApplicationResponse(w ht
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListApplicationTestCasesRequestObject struct {
+	Id IdPath `json:"id"`
+}
+
+type ListApplicationTestCasesResponseObject interface {
+	VisitListApplicationTestCasesResponse(w http.ResponseWriter) error
+}
+
+type ListApplicationTestCases200JSONResponse ApplicationTestCaseListResponse
+
+func (response ListApplicationTestCases200JSONResponse) VisitListApplicationTestCasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListApplicationTestCases401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListApplicationTestCases401JSONResponse) VisitListApplicationTestCasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListApplicationTestCases404JSONResponse ErrorEnvelope
+
+func (response ListApplicationTestCases404JSONResponse) VisitListApplicationTestCasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateApplicationTestCaseRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *CreateApplicationTestCaseJSONRequestBody
+}
+
+type CreateApplicationTestCaseResponseObject interface {
+	VisitCreateApplicationTestCaseResponse(w http.ResponseWriter) error
+}
+
+type CreateApplicationTestCase201JSONResponse ApplicationTestCaseResponse
+
+func (response CreateApplicationTestCase201JSONResponse) VisitCreateApplicationTestCaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateApplicationTestCase400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateApplicationTestCase400JSONResponse) VisitCreateApplicationTestCaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateApplicationTestCase401JSONResponse ErrorEnvelope
+
+func (response CreateApplicationTestCase401JSONResponse) VisitCreateApplicationTestCaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateApplicationTestCase403JSONResponse ErrorEnvelope
+
+func (response CreateApplicationTestCase403JSONResponse) VisitCreateApplicationTestCaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateApplicationTestCase404JSONResponse ErrorEnvelope
+
+func (response CreateApplicationTestCase404JSONResponse) VisitCreateApplicationTestCaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunApplicationTestCasesRequestObject struct {
+	Id   IdPath `json:"id"`
+	Body *RunApplicationTestCasesJSONRequestBody
+}
+
+type RunApplicationTestCasesResponseObject interface {
+	VisitRunApplicationTestCasesResponse(w http.ResponseWriter) error
+}
+
+type RunApplicationTestCases200JSONResponse ApplicationTestSuiteRun
+
+func (response RunApplicationTestCases200JSONResponse) VisitRunApplicationTestCasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunApplicationTestCases400JSONResponse struct{ ErrorJSONResponse }
+
+func (response RunApplicationTestCases400JSONResponse) VisitRunApplicationTestCasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunApplicationTestCases401JSONResponse ErrorEnvelope
+
+func (response RunApplicationTestCases401JSONResponse) VisitRunApplicationTestCasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunApplicationTestCases403JSONResponse ErrorEnvelope
+
+func (response RunApplicationTestCases403JSONResponse) VisitRunApplicationTestCasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunApplicationTestCases404JSONResponse ErrorEnvelope
+
+func (response RunApplicationTestCases404JSONResponse) VisitRunApplicationTestCasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunApplicationTestCases409JSONResponse ErrorEnvelope
+
+func (response RunApplicationTestCases409JSONResponse) VisitRunApplicationTestCasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunApplicationTestCases429JSONResponse ErrorEnvelope
+
+func (response RunApplicationTestCases429JSONResponse) VisitRunApplicationTestCasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteApplicationTestCaseRequestObject struct {
+	Id     IdPath `json:"id"`
+	CaseId string `json:"caseId"`
+}
+
+type DeleteApplicationTestCaseResponseObject interface {
+	VisitDeleteApplicationTestCaseResponse(w http.ResponseWriter) error
+}
+
+type DeleteApplicationTestCase200JSONResponse OkResponse
+
+func (response DeleteApplicationTestCase200JSONResponse) VisitDeleteApplicationTestCaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteApplicationTestCase401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteApplicationTestCase401JSONResponse) VisitDeleteApplicationTestCaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteApplicationTestCase403JSONResponse ErrorEnvelope
+
+func (response DeleteApplicationTestCase403JSONResponse) VisitDeleteApplicationTestCaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteApplicationTestCase404JSONResponse ErrorEnvelope
+
+func (response DeleteApplicationTestCase404JSONResponse) VisitDeleteApplicationTestCaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateApplicationTestCaseRequestObject struct {
+	Id     IdPath `json:"id"`
+	CaseId string `json:"caseId"`
+	Body   *UpdateApplicationTestCaseJSONRequestBody
+}
+
+type UpdateApplicationTestCaseResponseObject interface {
+	VisitUpdateApplicationTestCaseResponse(w http.ResponseWriter) error
+}
+
+type UpdateApplicationTestCase200JSONResponse ApplicationTestCaseResponse
+
+func (response UpdateApplicationTestCase200JSONResponse) VisitUpdateApplicationTestCaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateApplicationTestCase400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateApplicationTestCase400JSONResponse) VisitUpdateApplicationTestCaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateApplicationTestCase401JSONResponse ErrorEnvelope
+
+func (response UpdateApplicationTestCase401JSONResponse) VisitUpdateApplicationTestCaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateApplicationTestCase403JSONResponse ErrorEnvelope
+
+func (response UpdateApplicationTestCase403JSONResponse) VisitUpdateApplicationTestCaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateApplicationTestCase404JSONResponse ErrorEnvelope
+
+func (response UpdateApplicationTestCase404JSONResponse) VisitUpdateApplicationTestCaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -12835,6 +13696,21 @@ type StrictServerInterface interface {
 	// (POST /api/v1/applications/{id}/test)
 	TestApplication(ctx context.Context, request TestApplicationRequestObject) (TestApplicationResponseObject, error)
 
+	// (GET /api/v1/applications/{id}/test-cases)
+	ListApplicationTestCases(ctx context.Context, request ListApplicationTestCasesRequestObject) (ListApplicationTestCasesResponseObject, error)
+
+	// (POST /api/v1/applications/{id}/test-cases)
+	CreateApplicationTestCase(ctx context.Context, request CreateApplicationTestCaseRequestObject) (CreateApplicationTestCaseResponseObject, error)
+
+	// (POST /api/v1/applications/{id}/test-cases/run)
+	RunApplicationTestCases(ctx context.Context, request RunApplicationTestCasesRequestObject) (RunApplicationTestCasesResponseObject, error)
+
+	// (DELETE /api/v1/applications/{id}/test-cases/{caseId})
+	DeleteApplicationTestCase(ctx context.Context, request DeleteApplicationTestCaseRequestObject) (DeleteApplicationTestCaseResponseObject, error)
+
+	// (PUT /api/v1/applications/{id}/test-cases/{caseId})
+	UpdateApplicationTestCase(ctx context.Context, request UpdateApplicationTestCaseRequestObject) (UpdateApplicationTestCaseResponseObject, error)
+
 	// (GET /api/v1/artifacts/config)
 	ArtifactConfig(ctx context.Context, request ArtifactConfigRequestObject) (ArtifactConfigResponseObject, error)
 
@@ -13593,6 +14469,159 @@ func (sh *strictHandler) TestApplication(ctx *gin.Context, id IdPath) {
 		sh.options.HandlerErrorFunc(ctx, err)
 	} else if validResponse, ok := response.(TestApplicationResponseObject); ok {
 		if err := validResponse.VisitTestApplicationResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListApplicationTestCases operation middleware
+func (sh *strictHandler) ListApplicationTestCases(ctx *gin.Context, id IdPath) {
+	var request ListApplicationTestCasesRequestObject
+
+	request.Id = id
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.ListApplicationTestCases(ctx, request.(ListApplicationTestCasesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListApplicationTestCases")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(ListApplicationTestCasesResponseObject); ok {
+		if err := validResponse.VisitListApplicationTestCasesResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateApplicationTestCase operation middleware
+func (sh *strictHandler) CreateApplicationTestCase(ctx *gin.Context, id IdPath) {
+	var request CreateApplicationTestCaseRequestObject
+
+	request.Id = id
+
+	var body CreateApplicationTestCaseJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateApplicationTestCase(ctx, request.(CreateApplicationTestCaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateApplicationTestCase")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(CreateApplicationTestCaseResponseObject); ok {
+		if err := validResponse.VisitCreateApplicationTestCaseResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RunApplicationTestCases operation middleware
+func (sh *strictHandler) RunApplicationTestCases(ctx *gin.Context, id IdPath) {
+	var request RunApplicationTestCasesRequestObject
+
+	request.Id = id
+
+	var body RunApplicationTestCasesJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.RunApplicationTestCases(ctx, request.(RunApplicationTestCasesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RunApplicationTestCases")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(RunApplicationTestCasesResponseObject); ok {
+		if err := validResponse.VisitRunApplicationTestCasesResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteApplicationTestCase operation middleware
+func (sh *strictHandler) DeleteApplicationTestCase(ctx *gin.Context, id IdPath, caseId string) {
+	var request DeleteApplicationTestCaseRequestObject
+
+	request.Id = id
+	request.CaseId = caseId
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteApplicationTestCase(ctx, request.(DeleteApplicationTestCaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteApplicationTestCase")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(DeleteApplicationTestCaseResponseObject); ok {
+		if err := validResponse.VisitDeleteApplicationTestCaseResponse(ctx.Writer); err != nil {
+			sh.options.ResponseErrorHandlerFunc(ctx, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(ctx, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateApplicationTestCase operation middleware
+func (sh *strictHandler) UpdateApplicationTestCase(ctx *gin.Context, id IdPath, caseId string) {
+	var request UpdateApplicationTestCaseRequestObject
+
+	request.Id = id
+	request.CaseId = caseId
+
+	var body UpdateApplicationTestCaseJSONRequestBody
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(ctx, err)
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx *gin.Context, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateApplicationTestCase(ctx, request.(UpdateApplicationTestCaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateApplicationTestCase")
+	}
+
+	response, err := handler(ctx, request)
+
+	if err != nil {
+		sh.options.HandlerErrorFunc(ctx, err)
+	} else if validResponse, ok := response.(UpdateApplicationTestCaseResponseObject); ok {
+		if err := validResponse.VisitUpdateApplicationTestCaseResponse(ctx.Writer); err != nil {
 			sh.options.ResponseErrorHandlerFunc(ctx, err)
 		}
 	} else if response != nil {

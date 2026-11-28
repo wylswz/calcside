@@ -624,6 +624,55 @@ class Client:
             json=body,
         ).json()["application"]
 
+    # -- application test cases ----------------------------------------------
+
+    def list_test_cases(self, app_id: str) -> dict[str, Any]:
+        """List saved test cases and latest candidate suite run."""
+        return self._req(
+            "GET", f"/api/v1/applications/{quote(app_id, safe='')}/test-cases"
+        ).json()
+
+    def create_test_case(self, app_id: str, case: dict[str, Any]) -> dict[str, Any]:
+        """Create a saved application test case."""
+        return self._req(
+            "POST",
+            f"/api/v1/applications/{quote(app_id, safe='')}/test-cases",
+            json=case,
+        ).json()["test_case"]
+
+    def update_test_case(
+        self, app_id: str, case_id: str, case: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Update a saved application test case."""
+        return self._req(
+            "PUT",
+            f"/api/v1/applications/{quote(app_id, safe='')}/test-cases/{quote(case_id, safe='')}",
+            json=case,
+        ).json()["test_case"]
+
+    def delete_test_case(self, app_id: str, case_id: str) -> None:
+        """Delete a saved application test case."""
+        self._req(
+            "DELETE",
+            f"/api/v1/applications/{quote(app_id, safe='')}/test-cases/{quote(case_id, safe='')}",
+        )
+
+    def run_test_cases(
+        self,
+        app_id: str,
+        version: int,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Run application test cases against the current draft candidate."""
+        body: dict[str, Any] = {"version": version}
+        if case_ids is not None:
+            body["case_ids"] = case_ids
+        return self._req(
+            "POST",
+            f"/api/v1/applications/{quote(app_id, safe='')}/test-cases/run",
+            json=body,
+        ).json()
+
 
 class AsyncClient:
     """Async calcside API client (same surface as ``Client``)."""
@@ -980,3 +1029,57 @@ class AsyncClient:
                 json=body,
             )
         ).json()["application"]
+
+    # -- application test cases ----------------------------------------------
+
+    async def list_test_cases(self, app_id: str) -> dict[str, Any]:
+        return (
+            await self._req(
+                "GET", f"/api/v1/applications/{quote(app_id, safe='')}/test-cases"
+            )
+        ).json()
+
+    async def create_test_case(
+        self, app_id: str, case: dict[str, Any]
+    ) -> dict[str, Any]:
+        return (
+            await self._req(
+                "POST",
+                f"/api/v1/applications/{quote(app_id, safe='')}/test-cases",
+                json=case,
+            )
+        ).json()["test_case"]
+
+    async def update_test_case(
+        self, app_id: str, case_id: str, case: dict[str, Any]
+    ) -> dict[str, Any]:
+        return (
+            await self._req(
+                "PUT",
+                f"/api/v1/applications/{quote(app_id, safe='')}/test-cases/{quote(case_id, safe='')}",
+                json=case,
+            )
+        ).json()["test_case"]
+
+    async def delete_test_case(self, app_id: str, case_id: str) -> None:
+        await self._req(
+            "DELETE",
+            f"/api/v1/applications/{quote(app_id, safe='')}/test-cases/{quote(case_id, safe='')}",
+        )
+
+    async def run_test_cases(
+        self,
+        app_id: str,
+        version: int,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"version": version}
+        if case_ids is not None:
+            body["case_ids"] = case_ids
+        return (
+            await self._req(
+                "POST",
+                f"/api/v1/applications/{quote(app_id, safe='')}/test-cases/run",
+                json=body,
+            )
+        ).json()

@@ -157,6 +157,12 @@ function tsxViolations(code: string, file = 'inline.tsx'): string[] {
     }
     if (ts.isCallExpression(n) && windowDialogs.has(n.expression.getText())) out.push(`${at(n)} P2 ${n.expression.getText()}() (use Modal/Confirm)`)
     if (ts.isJsxOpeningElement(n) || ts.isJsxSelfClosingElement(n)) {
+      const tag = n.tagName.getText()
+      if (tag === 'select') out.push(`${at(n)} P2 raw <select> (use Select from ui/core)`)
+      if (tag === 'details') out.push(`${at(n)} P2 raw <details> (use Disclosure from ui/core)`)
+      if (tag === 'dialog') out.push(`${at(n)} P2 raw <dialog> (use Modal from components/ui)`)
+      if (tag === 'input' && attr(n, 'type').includes('checkbox')) out.push(`${at(n)} P2 raw checkbox <input> (use Checkbox from ui/core)`)
+      if (tag === 'input' && attr(n, 'type').includes('radio')) out.push(`${at(n)} P2 raw radio <input> (use RadioGroup/RadioItem from ui/core)`)
       const handler = attr(n, 'onClick') + ' ' + attr(n, 'onSelect')
       for (const [, name] of handler.matchAll(/(\w+)\.mutate(?:Async)?\(/g)) {
         if (!attr(n, 'disabled').includes(`${name}.isPending`)) out.push(`${at(n)} P1 ${name}.mutate without disabled={… ${name}.isPending}`)
@@ -212,6 +218,7 @@ test('the checks catch what they guard against', () => {
   assert.deepEqual(tsxViolations('const a = <Button disabled={!email || add.isPending} onClick={() => add.mutate()}>Add</Button>'), [])
   // P2
   assert.equal(tsxViolations('if (!window.confirm("End?")) return; alert("x")').length, 2)
+  assert.equal(tsxViolations('const a = <select><option>x</option></select>; const b = <input type="checkbox" />; const c = <input type="radio" />; const d = <details><summary>x</summary></details>; const e = <dialog />').length, 5)
   // F2
   assert.equal(tsxViolations('const a = <Button disabled={del.isPending} onClick={() => del.mutate(id)}>Delete</Button>').length, 1)
   assert.equal(tsxViolations('const a = <MenuItem onSelect={() => api.del(u)}>End instance</MenuItem>').length, 1)

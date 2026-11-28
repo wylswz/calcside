@@ -581,7 +581,7 @@ test('notebook: gutter run on a non-main entry is a debug run', async ({ page })
 	await expect(testPanel).toBeVisible()
 	await page.locator('#app-input').fill('21')
 	await page.locator('button[aria-label="Run double"]').click()
-	await expect(testPanel.locator('#app-entry')).toHaveValue('double')
+	await expect(testPanel.locator('#app-entry')).toContainText('double')
 	await expect(testPanel.locator('.app-out-pre')).toContainText('42', { timeout: 30_000 })
 	await expect(testPanel).toContainText('debug run, not recorded')
 
@@ -590,7 +590,8 @@ test('notebook: gutter run on a non-main entry is a debug run', async ({ page })
 	expect(runs.runs ?? []).toHaveLength(0)
 
 	// Selecting main and running uses the contract path as before.
-	await testPanel.locator('#app-entry').selectOption('main')
+	await testPanel.locator('#app-entry').click()
+	await page.getByRole('option', { name: 'main', exact: true }).click()
 	await page.locator('#app-input').fill('{"name":"ui"}')
 	await page.getByTestId('app-run').click()
 	await expect(testPanel.locator('.app-out-pre')).toContainText('"echo"', { timeout: 30_000 })

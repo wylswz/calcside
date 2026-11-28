@@ -1227,6 +1227,111 @@ paths:
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
+  /api/v1/applications/{id}/test-cases:
+    get:
+      operationId: listApplicationTestCases
+      tags: [applications]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      responses:
+        '200':
+          description: saved test cases and latest candidate suite run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationTestCaseListResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    post:
+      operationId: createApplicationTestCase
+      tags: [applications]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplicationTestCaseRequest'
+      responses:
+        '201':
+          description: created test case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationTestCaseResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/applications/{id}/test-cases/{caseId}:
+    put:
+      operationId: updateApplicationTestCase
+      tags: [applications]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: caseId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplicationTestCaseRequest'
+      responses:
+        '200':
+          description: updated test case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationTestCaseResponse'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      operationId: deleteApplicationTestCase
+      tags: [applications]
+      parameters:
+        - { $ref: '#/components/parameters/IdPath' }
+        - name: caseId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: deleted test case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/applications/{id}/test-cases/run:
+    post:
+      operationId: runApplicationTestCases
+      tags: [applications]
+      parameters: [{ $ref: '#/components/parameters/IdPath' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplicationTestCaseRunRequest'
+      responses:
+        '200':
+          description: test suite execution results against the current draft candidate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationTestSuiteRun'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
   /api/v1/applications/{id}/test:
     post:
       operationId: testApplication
@@ -3857,7 +3962,7 @@ components:
         fix: { type: string }
     ApplicationReleaseCheckResponse:
       type: object
-      required: [has_drift, status, findings]
+      required: [has_drift, status, findings, test_case_count]
       properties:
         candidate: { type: string }
         live_seq: { type: integer, format: int64 }
@@ -3869,6 +3974,140 @@ components:
         findings:
           type: array
           items: { $ref: '#/components/schemas/ReleaseFinding' }
+        test_case_count: { type: integer }
+        latest_test_run: { $ref: '#/components/schemas/ApplicationTestSuiteRun' }
+    ApplicationTestInterrupt:
+      type: object
+      properties:
+        expect_handler: { type: string, maxLength: 64 }
+        expect_context: { $ref: '#/components/schemas/RawJSON' }
+        context_match_mode:
+          type: string
+          enum: [exact, subset]
+        resolution:
+          type: string
+          enum: [resolved, expired]
+        event: { $ref: '#/components/schemas/RawJSON' }
+    ApplicationTestCase:
+      type: object
+      required: [id, application_id, workspace_id, name, input, interrupts, expect_status, output_match_mode, created_at, updated_at]
+      properties:
+        id: { type: string }
+        application_id: { type: string }
+        workspace_id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        input: { $ref: '#/components/schemas/RawJSON' }
+        interrupts:
+          type: array
+          items: { $ref: '#/components/schemas/ApplicationTestInterrupt' }
+        expect_status:
+          type: string
+          enum: [succeeded, error]
+        expected_output: { $ref: '#/components/schemas/RawJSON' }
+        output_match_mode:
+          type: string
+          enum: [exact, subset]
+        expected_error_code: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ApplicationTestCaseRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 128 }
+        description: { type: string, maxLength: 500 }
+        input: { $ref: '#/components/schemas/RawJSON' }
+        interrupts:
+          type: array
+          maxItems: 16
+          items: { $ref: '#/components/schemas/ApplicationTestInterrupt' }
+        expect_status:
+          type: string
+          enum: [succeeded, error]
+        expected_output: { $ref: '#/components/schemas/RawJSON' }
+        output_match_mode:
+          type: string
+          enum: [exact, subset]
+        expected_error_code: { type: string, maxLength: 64 }
+    ApplicationTestCaseResponse:
+      type: object
+      required: [test_case]
+      properties:
+        test_case: { $ref: '#/components/schemas/ApplicationTestCase' }
+    ApplicationTestTurnResult:
+      type: object
+      required: [turn, entry, status, duration_ms, steps]
+      properties:
+        turn: { type: integer }
+        entry: { type: string }
+        status:
+          type: string
+          enum: [passed, failed, unexpected_interrupt]
+        duration_ms: { type: integer, format: int64 }
+        steps: { type: integer, format: int64 }
+        actual_handler: { type: string }
+        actual_on_expire: { type: string }
+        expected_handler: { type: string }
+        expected_context: { type: string }
+        actual_context: { type: string }
+        resolution: { type: string }
+        event_json: { type: string }
+        error_message: { type: string }
+    ApplicationTestCaseResult:
+      type: object
+      required: [case_id, case_name, status, duration_ms, steps, turns]
+      properties:
+        case_id: { type: string }
+        case_name: { type: string }
+        status:
+          type: string
+          enum: [passed, failed]
+        duration_ms: { type: integer, format: int64 }
+        steps: { type: integer, format: int64 }
+        error_message: { type: string }
+        error_code: { type: string }
+        expected_output: { type: string }
+        actual_output: { type: string }
+        expected_error_code: { type: string }
+        turns:
+          type: array
+          items: { $ref: '#/components/schemas/ApplicationTestTurnResult' }
+    ApplicationTestSuiteRun:
+      type: object
+      required: [application_id, workspace_id, candidate, status, total, passed, failed, duration_ms, results, run_by, run_at]
+      properties:
+        application_id: { type: string }
+        workspace_id: { type: string }
+        candidate: { type: string }
+        status:
+          type: string
+          enum: [passed, failed]
+        total: { type: integer }
+        passed: { type: integer }
+        failed: { type: integer }
+        duration_ms: { type: integer, format: int64 }
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/ApplicationTestCaseResult' }
+        run_by: { type: string }
+        run_at: { type: string, format: date-time }
+    ApplicationTestCaseListResponse:
+      type: object
+      required: [test_cases]
+      properties:
+        test_cases:
+          type: array
+          items: { $ref: '#/components/schemas/ApplicationTestCase' }
+        latest_run: { $ref: '#/components/schemas/ApplicationTestSuiteRun' }
+    ApplicationTestCaseRunRequest:
+      type: object
+      required: [version]
+      properties:
+        version: { type: integer, format: int64, minimum: 1 }
+        case_ids:
+          type: array
+          items: { type: string }
     ApplicationReleaseEntry:
       type: object
       required: [seq, release_id, draft_version, published_by, note, is_live, published_at]

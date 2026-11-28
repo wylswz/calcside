@@ -725,6 +725,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/applications/{id}/test-cases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listApplicationTestCases"];
+        put?: never;
+        post: operations["createApplicationTestCase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/applications/{id}/test-cases/{caseId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["updateApplicationTestCase"];
+        post?: never;
+        delete: operations["deleteApplicationTestCase"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/applications/{id}/test-cases/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["runApplicationTestCases"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/applications/{id}/test": {
         parameters: {
             query?: never;
@@ -2570,6 +2618,110 @@ export interface components {
             /** @enum {string} */
             status: "ready" | "warnings" | "blocked";
             findings: components["schemas"]["ReleaseFinding"][];
+            test_case_count: number;
+            latest_test_run?: components["schemas"]["ApplicationTestSuiteRun"];
+        };
+        ApplicationTestInterrupt: {
+            expect_handler?: string;
+            expect_context?: components["schemas"]["RawJSON"];
+            /** @enum {string} */
+            context_match_mode?: "exact" | "subset";
+            /** @enum {string} */
+            resolution?: "resolved" | "expired";
+            event?: components["schemas"]["RawJSON"];
+        };
+        ApplicationTestCase: {
+            id: string;
+            application_id: string;
+            workspace_id: string;
+            name: string;
+            description?: string;
+            input: components["schemas"]["RawJSON"];
+            interrupts: components["schemas"]["ApplicationTestInterrupt"][];
+            /** @enum {string} */
+            expect_status: "succeeded" | "error";
+            expected_output?: components["schemas"]["RawJSON"];
+            /** @enum {string} */
+            output_match_mode: "exact" | "subset";
+            expected_error_code?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ApplicationTestCaseRequest: {
+            name: string;
+            description?: string;
+            input?: components["schemas"]["RawJSON"];
+            interrupts?: components["schemas"]["ApplicationTestInterrupt"][];
+            /** @enum {string} */
+            expect_status?: "succeeded" | "error";
+            expected_output?: components["schemas"]["RawJSON"];
+            /** @enum {string} */
+            output_match_mode?: "exact" | "subset";
+            expected_error_code?: string;
+        };
+        ApplicationTestCaseResponse: {
+            test_case: components["schemas"]["ApplicationTestCase"];
+        };
+        ApplicationTestTurnResult: {
+            turn: number;
+            entry: string;
+            /** @enum {string} */
+            status: "passed" | "failed" | "unexpected_interrupt";
+            /** Format: int64 */
+            duration_ms: number;
+            /** Format: int64 */
+            steps: number;
+            actual_handler?: string;
+            actual_on_expire?: string;
+            expected_handler?: string;
+            expected_context?: string;
+            actual_context?: string;
+            resolution?: string;
+            event_json?: string;
+            error_message?: string;
+        };
+        ApplicationTestCaseResult: {
+            case_id: string;
+            case_name: string;
+            /** @enum {string} */
+            status: "passed" | "failed";
+            /** Format: int64 */
+            duration_ms: number;
+            /** Format: int64 */
+            steps: number;
+            error_message?: string;
+            error_code?: string;
+            expected_output?: string;
+            actual_output?: string;
+            expected_error_code?: string;
+            turns: components["schemas"]["ApplicationTestTurnResult"][];
+        };
+        ApplicationTestSuiteRun: {
+            application_id: string;
+            workspace_id: string;
+            candidate: string;
+            /** @enum {string} */
+            status: "passed" | "failed";
+            total: number;
+            passed: number;
+            failed: number;
+            /** Format: int64 */
+            duration_ms: number;
+            results: components["schemas"]["ApplicationTestCaseResult"][];
+            run_by: string;
+            /** Format: date-time */
+            run_at: string;
+        };
+        ApplicationTestCaseListResponse: {
+            test_cases: components["schemas"]["ApplicationTestCase"][];
+            latest_run?: components["schemas"]["ApplicationTestSuiteRun"];
+        };
+        ApplicationTestCaseRunRequest: {
+            /** Format: int64 */
+            version: number;
+            case_ids?: string[];
         };
         ApplicationReleaseEntry: {
             /** Format: int64 */
@@ -4222,6 +4374,149 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
+    listApplicationTestCases: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description saved test cases and latest candidate suite run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationTestCaseListResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    createApplicationTestCase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationTestCaseRequest"];
+            };
+        };
+        responses: {
+            /** @description created test case */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationTestCaseResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateApplicationTestCase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+                caseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationTestCaseRequest"];
+            };
+        };
+        responses: {
+            /** @description updated test case */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationTestCaseResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteApplicationTestCase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+                caseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description deleted test case */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    runApplicationTestCases: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["IdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationTestCaseRunRequest"];
+            };
+        };
+        responses: {
+            /** @description test suite execution results against the current draft candidate */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationTestSuiteRun"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+        };
+    };
     testApplication: {
         parameters: {
             query?: never;
@@ -5453,3 +5748,12 @@ export const reviewChangeKindValues: ReadonlyArray<FlattenedDeepRequired<compone
 export const reviewChangeDirectionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ReviewChange"]["direction"]> = ["widening", "narrowing", "changed"];
 export const releaseFindingSeverityValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ReleaseFinding"]["severity"]> = ["blocker", "warning", "info"];
 export const applicationReleaseCheckResponseStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ApplicationReleaseCheckResponse"]["status"]> = ["ready", "warnings", "blocked"];
+export const applicationTestInterruptContext_match_modeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ApplicationTestInterrupt"]["context_match_mode"]> = ["exact", "subset"];
+export const applicationTestInterruptResolutionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ApplicationTestInterrupt"]["resolution"]> = ["resolved", "expired"];
+export const applicationTestCaseExpect_statusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ApplicationTestCase"]["expect_status"]> = ["succeeded", "error"];
+export const applicationTestCaseOutput_match_modeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ApplicationTestCase"]["output_match_mode"]> = ["exact", "subset"];
+export const applicationTestCaseRequestExpect_statusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ApplicationTestCaseRequest"]["expect_status"]> = ["succeeded", "error"];
+export const applicationTestCaseRequestOutput_match_modeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ApplicationTestCaseRequest"]["output_match_mode"]> = ["exact", "subset"];
+export const applicationTestTurnResultStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ApplicationTestTurnResult"]["status"]> = ["passed", "failed", "unexpected_interrupt"];
+export const applicationTestCaseResultStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ApplicationTestCaseResult"]["status"]> = ["passed", "failed"];
+export const applicationTestSuiteRunStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ApplicationTestSuiteRun"]["status"]> = ["passed", "failed"];

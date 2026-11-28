@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import * as Tabs from '@radix-ui/react-tabs'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Circle, Clock, Link2, XCircle } from 'lucide-react'
 import { api, Instance, Execution, APIKey, SharedInstance, workspaces, InstanceInspect } from '../api'
@@ -293,14 +294,15 @@ export default function InstanceDetail() {
           </svg>
         </button>
       }>
-        <div className="view-tabs flex gap-1" role="tablist" aria-label="Instance views">
-          {(['notebook', 'activity'] as const).map((v) => (
-            <button key={v} role="tab" aria-selected={view === v} data-on={view === v}
-              className="view-tab" onClick={() => setView(v)}>
-              {v === 'notebook' ? 'Notebook' : 'Activity'}
-            </button>
-          ))}
-        </div>
+        <Tabs.Root className="min-w-0 flex-1" value={view} onValueChange={(v) => setView(v as 'notebook' | 'activity')}>
+          <Tabs.List className="view-tabs flex gap-1" aria-label="Instance views">
+            {(['notebook', 'activity'] as const).map((v) => (
+              <Tabs.Trigger key={v} value={v} data-on={view === v} className="view-tab">
+                {v === 'notebook' ? 'Notebook' : 'Activity'}
+              </Tabs.Trigger>
+            ))}
+          </Tabs.List>
+        </Tabs.Root>
       </DetailWorkbenchViews>
 
       <div className="detail-grid">
@@ -343,10 +345,12 @@ export default function InstanceDetail() {
                 browser's directory and selection survive switches (C2/C3). */}
             {inst.spec?.capabilities?.fs != null ? (
               <section aria-label="Live state">
-                <div className="state-tabs" role="tablist" aria-label="Live state">
-                  <button role="tab" aria-selected={stateTab === 'state'} data-on={stateTab === 'state'} className="view-tab" onClick={() => setStateTab('state')}>State</button>
-                  <button role="tab" aria-selected={stateTab === 'files'} data-on={stateTab === 'files'} className="view-tab" onClick={() => setStateTab('files')}>Files</button>
-                </div>
+                <Tabs.Root value={stateTab} onValueChange={(v) => setStateTab(v as 'state' | 'files')}>
+                  <Tabs.List className="state-tabs" aria-label="Live state">
+                    <Tabs.Trigger value="state" data-on={stateTab === 'state'} className="view-tab">State</Tabs.Trigger>
+                    <Tabs.Trigger value="files" data-on={stateTab === 'files'} className="view-tab">Files</Tabs.Trigger>
+                  </Tabs.List>
+                </Tabs.Root>
                 <div hidden={stateTab !== 'state'}>
                   <StatePanel key={`state-${id}`} data={inspect.data} error={inspect.error} running={live} capNames={Object.keys(inst.spec?.capabilities ?? {})} heading={false} />
                 </div>

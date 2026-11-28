@@ -3,6 +3,7 @@ import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, APIKey, CreateKeyRequest, wsPath } from '../api'
 import { Button, Confirm, EmptyRow, Field, Modal, Notice, PageHeader, inputCls } from '../components/ui'
+import { RadioGroup, RadioItem } from '../ui/core'
 import { SpecForm, type SpecFormHandle } from '../components/SpecForm'
 import { CopyBlock, MCPGuide } from '../components/MCP'
 import { fmtTime } from '../format'
@@ -107,10 +108,10 @@ export default function Keys({ bare }: { bare?: boolean }) {
                 <Field label="Expires in (days; 0 = never)"><input type="number" className={inputCls} value={days} onChange={(e) => setDays(Number(e.target.value))} /></Field>
               </div>
               <Field label="Access">
-                <div className="flex gap-3">
+                <RadioGroup value={access} onValueChange={setAccess} ariaLabel="Access" className="flex gap-3">
                   {(['restricted', 'full', 'view'] as const).map((a) => (
-                    <label key={a} className={`flex flex-1 items-start gap-2 rounded-md border px-3 py-2 text-xs ${access === a ? 'border-accent bg-accent/5' : 'border-line'}`}>
-                      <input type="radio" className="mt-0.5" checked={access === a} onChange={() => setAccess(a)} />
+                    <label key={a} htmlFor={`key-access-${a}`} className={`flex flex-1 cursor-pointer items-start gap-2 rounded-[3px] border px-3 py-2 text-xs ${access === a ? 'border-accent bg-accent/5' : 'border-line'}`}>
+                      <RadioItem id={`key-access-${a}`} value={a} className="mt-0.5" />
                       <span>
                         <span className="block font-medium text-ink">
                           {a === 'restricted' ? 'Restricted' : a === 'full' ? 'Full access' : 'View only'}
@@ -125,7 +126,7 @@ export default function Keys({ bare }: { bare?: boolean }) {
                       </span>
                     </label>
                   ))}
-                </div>
+                </RadioGroup>
               </Field>
               {access === 'restricted' && (
                 <>

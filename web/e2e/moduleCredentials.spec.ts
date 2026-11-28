@@ -87,7 +87,8 @@ test('module debug executes ext with vault-injected credentials', async ({ page 
   await page.getByRole('button', { name: 'Configure credentials' }).click()
   await page.getByLabel('credentials endpoint').fill(`http://127.0.0.1:${echoPort}/echo`)
   const pick = async (field: string, ref: string) => {
-    await page.getByLabel(`credentials ${field}`).selectOption(ref)
+    await page.getByRole('combobox', { name: `credentials ${field}` }).click()
+    await page.getByRole('option', { name: ref, exact: true }).click()
   }
   await pick('api_key', 'TEST_API_KEY')
   await pick('client_secret', 'TEST_CLIENT_SECRET')
@@ -128,7 +129,7 @@ test('module debug executes ext with vault-injected credentials', async ({ page 
 
   // Selects show the stored refs; rotate api_key via select.
   await page.getByRole('tab', { name: 'Settings', exact: true }).click()
-  await expect(page.getByLabel('credentials api_key')).toHaveValue('TEST_API_KEY')
+  await expect(page.getByRole('combobox', { name: 'credentials api_key' })).toContainText('TEST_API_KEY')
   const dbg1 = await client.get(`/api/v1/modules/${mod.id}/debug`)
   const dbgSpec = JSON.stringify(await dbg1.json())
   expect(dbgSpec).not.toContain('EXT_BIND_')
@@ -136,8 +137,8 @@ test('module debug executes ext with vault-injected credentials', async ({ page 
   expect(dbgSpec).toContain('TEST_STAGE_KEY')
   expect(dbgSpec).not.toContain('TEST_API_KEY_VALUE')
 
-  await page.getByLabel('credentials api_key').selectOption('TEST_ROTATED_KEY')
-  await expect(page.getByLabel('credentials api_key')).toHaveValue('TEST_ROTATED_KEY')
+  await pick('api_key', 'TEST_ROTATED_KEY')
+  await expect(page.getByRole('combobox', { name: 'credentials api_key' })).toContainText('TEST_ROTATED_KEY')
   expectedKey = 'ROTATED_VALUE'
   await page.getByRole('tab', { name: 'Source', exact: true }).click()
   const runResp = page.waitForResponse((r) => r.url().includes('/debug/run') && r.request().method() === 'POST', { timeout: 90_000 })
@@ -158,7 +159,7 @@ test('module debug executes ext with vault-injected credentials', async ({ page 
 
   // Editing config marks the displayed result outdated.
   await page.getByRole('tab', { name: 'Settings', exact: true }).click()
-  await page.getByLabel('credentials api_key').selectOption('TEST_API_KEY')
+  await pick('api_key', 'TEST_API_KEY')
   await page.getByRole('tab', { name: 'Source', exact: true }).click()
   await expect(page.getByText(/outdated/)).toBeVisible()
   expectedKey = 'TEST_API_KEY_VALUE'

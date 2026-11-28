@@ -7,6 +7,7 @@ import { callOutcome, groupCalls, runBy, runOutcome } from '../activity'
 import { fmtMs, fmtTime, relTime } from '../format'
 import { CallRows } from './CallTable'
 import { EmptyRow, Loading, Notice, OutcomeBadge, RevealNew, RunByBadge, SectionTitle } from './ui'
+import { Disclosure } from '../ui/core'
 import { cmTheme } from './codemirror'
 import { useHeldOrder } from '../stableList'
 import { chartReservedBox } from '../chartBox'
@@ -83,10 +84,9 @@ function RunDetail({ execId }: { execId: string }) {
           <div className={`error-head mb-1 text-xs font-medium ${denied ? 'text-danger' : 'text-warn-text'}`}>Error · {d.error.type}</div>
           <pre className="pre">{d.error.message}</pre>
           {d.error.backtrace && (
-            <details className="run-backtrace mt-3 text-xs text-sec">
-              <summary className="cursor-pointer">Stack trace</summary>
-              <pre className="pre mt-2">{d.error.backtrace}</pre>
-            </details>
+            <Disclosure summary="Stack trace" className="run-backtrace mt-3">
+              <pre className="pre">{d.error.backtrace}</pre>
+            </Disclosure>
           )}
         </div>
       )}

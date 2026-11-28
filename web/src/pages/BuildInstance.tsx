@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Instance, User } from '../api'
 import { instanceTitle } from '../activity'
 import { Button, Notice, PageHeader, SectionTitle, SwapLabel, Icon, Confirm, inputCls } from '../components/ui'
+import { Select } from '../ui/core'
 import ContractEditor from '../components/ContractEditor'
 import {
   BuildDraft, FileEntry, FileRole, draftKey, emptyDraft, applyPick,
@@ -245,16 +246,20 @@ function BuildDraftEditor({ scopeKey, inst }: {
                       <Icon name="folder" /> {f.name}
                     </button>
                   ) : (
-                    <label className="build-file-row">
+                    <div className="build-file-row">
                       <span className="font-mono" title={f.name}>{f.name}</span>
-                      <select aria-label={`Include ${f.name} as`}
+                      <Select
+                        ariaLabel={`Include ${f.name} as`}
+                        size="xs"
                         value={rel != null ? roleOf(rel) : 'none'}
-                        onChange={(e) => pick(f, e.target.value as FileRole)}>
-                        <option value="none">not included</option>
-                        {f.name.endsWith('.star') && <option value="source">source</option>}
-                        <option value="asset">asset</option>
-                      </select>
-                    </label>
+                        onChange={(v) => pick(f, v as FileRole)}
+                        options={[
+                          { value: 'none', label: 'not included' },
+                          ...(f.name.endsWith('.star') ? [{ value: 'source', label: 'source' }] : []),
+                          { value: 'asset', label: 'asset' },
+                        ]}
+                      />
+                    </div>
                   )}
                 </li>
               )
@@ -265,16 +270,19 @@ function BuildDraftEditor({ scopeKey, inst }: {
             <input className={inputCls} value={draft.name}
               onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
           </label>
-          <label className="build-label">Entrypoint
-            <select className={inputCls} value={draft.entrypoint}
-              onChange={(e) => setDraft({ ...draft, entrypoint: e.target.value })}>
-              {draft.sources.map((f) => <option key={f.path} value={f.path}>{f.path}</option>)}
-              {!entryInSources && draft.entrypoint && (
-                <option value={draft.entrypoint} disabled>{draft.entrypoint} (not selected)</option>
-              )}
-              {!draft.entrypoint && <option value="">—</option>}
-            </select>
-          </label>
+          <div className="build-label">Entrypoint
+            <Select
+              ariaLabel="Entrypoint"
+              className="w-full"
+              value={draft.entrypoint}
+              onChange={(v) => setDraft({ ...draft, entrypoint: v })}
+              options={[
+                ...draft.sources.map((f) => ({ value: f.path, label: f.path })),
+                ...(!entryInSources && draft.entrypoint ? [{ value: draft.entrypoint, label: `${draft.entrypoint} (not selected)`, disabled: true }] : []),
+                ...(!draft.entrypoint ? [{ value: '', label: '—' }] : []),
+              ]}
+            />
+          </div>
           {!entryInSources && draft.sources.length > 0 && (
             <Notice tone="warning">Entrypoint is not among the selected sources.</Notice>
           )}

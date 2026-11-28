@@ -33,6 +33,11 @@ var ErrApplicationDraftConflict = errors.New("store: application draft changed")
 // reviewer compared against.
 var ErrApplicationBaseConflict = errors.New("store: application published base changed")
 
+// ErrTestSuiteNotPassed is returned when publishing a candidate for an
+// application that defines test cases without a passing suite run for
+// that exact candidate digest.
+var ErrTestSuiteNotPassed = errors.New("store: test suite has not passed for this candidate")
+
 // IDPrefix is the fixed string identifying the entity kind in an ID.
 type IDPrefix string
 
