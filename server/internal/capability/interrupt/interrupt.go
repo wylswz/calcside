@@ -158,6 +158,9 @@ func errNoRun(op string) error {
 func Binding(h *Host, gate *capability.Gate) starlark.Value {
 	members := starlark.StringDict{
 		"run_id": starlark.NewBuiltin("interrupt.run_id", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			if val, ok, err := capability.CallMonkeyPatch(thread, b.Name(), args, kwargs); ok {
+				return val, err
+			}
 			if err := starlark.UnpackPositionalArgs("run_id", args, kwargs, 0); err != nil {
 				return nil, err
 			}
@@ -170,6 +173,9 @@ func Binding(h *Host, gate *capability.Gate) starlark.Value {
 				})
 		}),
 		"new": starlark.NewBuiltin("interrupt.new", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			if val, ok, err := capability.CallMonkeyPatch(thread, b.Name(), args, kwargs); ok {
+				return val, err
+			}
 			var expiresInS starlark.Value
 			if err := starlark.UnpackArgs("new", args, kwargs, "expires_in_s?", &expiresInS); err != nil {
 				return nil, err
@@ -180,6 +186,9 @@ func Binding(h *Host, gate *capability.Gate) starlark.Value {
 				})
 		}),
 		"wait": starlark.NewBuiltin("interrupt.wait", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			if val, ok, err := capability.CallMonkeyPatch(thread, b.Name(), args, kwargs); ok {
+				return val, err
+			}
 			var id string
 			var handler string
 			var onExpire string

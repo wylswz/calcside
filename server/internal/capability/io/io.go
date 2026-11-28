@@ -236,6 +236,9 @@ func (d *Displays) Append(title string, spec json.RawMessage) error {
 // "print", writing through the same gate/buffer.
 func PrintBuiltin(buf *Buffer, gate *capability.Gate) *starlark.Builtin {
 	return starlark.NewBuiltin("print", func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		if val, ok, err := capability.CallMonkeyPatch(thread, b.Name(), args, kwargs); ok {
+			return val, err
+		}
 		s := joinArgs(args) + "\n"
 		return gate.Invoke(capability.ThreadContext(thread), types.CapIO, OpPrint, map[string]any{"bytes": len(s)},
 			func(ctx context.Context, _ map[string]any) (starlark.Value, map[string]any, error) {

@@ -633,6 +633,9 @@ func opBuiltin(alias string, op OpSpec, fn starlark.Value, ac aliasCfg, gate *ca
 	opName := types.Op(alias + "." + op.Name)
 	return starlark.NewBuiltin("ext."+alias+"."+op.Name,
 		func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			if val, ok, err := capability.CallMonkeyPatch(thread, b.Name(), args, kwargs); ok {
+				return val, err
+			}
 			cargs := callArgs(op, args, kwargs)
 			// The open phase cannot know the stream id yet; a
 			// correlation id is reserved from the execution scope while

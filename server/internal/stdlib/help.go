@@ -30,6 +30,7 @@ var moduleDocs = map[string]string{
 	"linalg":   "matrix matmul, solve, lstsq, inv, det",
 	"stream":   "Pull-based, single-execution streams; iteration consumes values and exec end closes unclosed streams.",
 	"chart":    "Vega-Lite spec constructors and validation for io.display (chart types live in the contrib/charts extension)",
+	"test":     "Test helpers such as test.monkey_patch for overriding stdlib and capability functions",
 }
 
 // helpIndex is the per-instance documentation catalog: stdlib modules
